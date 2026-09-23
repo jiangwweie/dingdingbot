@@ -25,6 +25,9 @@ from src.trading_kernel.application.coordinate_selection_materialization import 
     MaterializationDisposition,
     coordinate_selection_materialization_once,
 )
+from src.trading_kernel.application.ingest_signal import (
+    resolve_selection_entry_authority,
+)
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
@@ -139,6 +142,19 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
     snapshot = compute_generic_selection(source)
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+        installed = await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=source.spec.event_spec_id,
+            runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",exchange_instrument_ids=source.spec.candidate_ids[:1],
+            installed_at_ms=CUTOFF-1))
+    assert installed.universe is not None
+    uid = installed.universe.universe_version_id
+    # Existing active Static scope is a migration/runtime prerequisite, not a
+    # claim that the new Selector activated it.
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":CUTOFF})
+        await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,warm_closed_bar_time_ms=:now,warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"),
+            {"uid":uid,"now":CUTOFF,"valid":snapshot.expires_at_ms,"digest":installed.universe.semantic_digest})
+        await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),
+            {"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":CUTOFF})
     await enable_epoch(database,group)
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="empty-coordinator")
     results = []
@@ -147,6 +163,34 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
             request=request,clock_ms=lambda tick=tick:snapshot.effective_from_ms+tick+1))
     assert results[-1].disposition == MaterializationDisposition.VALID_EMPTY
     assert results[-1].selection_authority_id == results[-2].selection_authority_id
+    async with database.connect() as conn:
+        scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":uid})
+    class NoMarket:
+        async def fetch_closed_candles(self, request):
+            raise AssertionError("VALID_EMPTY must reject before market reads")
+    observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),NoMarket(),
+        ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+            trigger_candle_close_time_ms=snapshot.effective_from_ms,attempted_at_ms=snapshot.effective_from_ms+10))
+    assert observed.status == ObservationStatus.INVALID
+    assert observed.detector_reason == "selection_owner_or_policy_blocked"
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+    observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),NoMarket(),
+        ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+            trigger_candle_close_time_ms=snapshot.effective_from_ms,attempted_at_ms=snapshot.effective_from_ms+11))
+    assert observed.status == ObservationStatus.INVALID
+    assert observed.detector_reason == "selection_valid_empty"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        rejected = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=None,observed_close_time_ms=snapshot.effective_from_ms,
+            now_ms=snapshot.effective_from_ms+12,allow_current_as_birth=False,lock_current=True)
+        assert not rejected.allowed and rejected.reason_code == "selection_valid_empty"
+        expired = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=None,observed_close_time_ms=snapshot.expires_at_ms,
+            now_ms=snapshot.expires_at_ms,allow_current_as_birth=False,lock_current=True)
+        assert not expired.allowed and expired.reason_code == "selection_authority_missing_or_expired"
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id)
         assert current is not None and current.authority.blocks_new_entry

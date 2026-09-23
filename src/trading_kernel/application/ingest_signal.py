@@ -311,6 +311,10 @@ async def resolve_selection_entry_authority(
 ) -> SelectionEntryAuthorityDecision:
     """Read exact bounded PostgreSQL facts and apply the shared pure evaluator."""
 
+    # Generic commits lock Owner before Selection Control. Keep action-time
+    # checks in the same order; current-pointer locking happens after Vacuum.
+    if lock_current and runtime_scope.strategy_group_id != "SOR-001":
+        await uow.owner_controls.get_strategy_control(runtime_scope.strategy_group_id,for_update=True)
     control = await uow.instrument_selection.get_selection_control(
         runtime_scope.strategy_group_id,
         for_update=lock_current,
@@ -335,6 +339,10 @@ async def resolve_selection_entry_authority(
             now_ms=now_ms,
             allow_current_as_birth=allow_current_as_birth,
         )
+
+    if control.strategy_group_id != "SOR-001":
+        return await _resolve_generic_selection_authority(uow,control=control,runtime_scope=runtime_scope,
+            birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current)
 
     current = await uow.instrument_selection.get_current_authority(
         control.selection_spec_id,
@@ -460,6 +468,46 @@ class IngestSignalResult(BaseModel):
 
     status: IngestSignalStatus
     signal_event_id: str | None
+
+
+async def _resolve_generic_selection_authority(
+    uow: KernelUnitOfWork, *, control: SelectionControl, runtime_scope: RuntimeScopeSnapshot,
+    birth_selection_authority_id: str | None, now_ms: int, lock_current: bool,
+) -> SelectionEntryAuthorityDecision:
+    """Generic negative gates; positive grants require the full Event-set verifier."""
+    current_id: str | None = None
+
+    def decision(status: SelectionEntryAuthorityStatus, reason: str) -> SelectionEntryAuthorityDecision:
+        return SelectionEntryAuthorityDecision(status=status,selection_authority_id=None,
+            current_selection_authority_id=current_id,reason_code=reason)
+
+    if control.selection_mode is SelectionMode.DISABLED:
+        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_control_disabled")
+    owner = await uow.owner_controls.get_strategy_control(control.strategy_group_id,for_update=lock_current)
+    policy = await uow.entry_admission.get_owner_policy(runtime_scope.owner_policy_id)
+    if owner is None or owner.entry_state.value != "enabled" or policy is None or not (
+        policy.enabled and policy.new_entry_submit_enabled and policy.scope is not None
+        and policy.scope.authorizes(event_spec_id=runtime_scope.event_spec_id,runtime_profile_id=runtime_scope.runtime_profile_id)
+    ):
+        return decision(SelectionEntryAuthorityStatus.OWNER_OR_POLICY_BLOCKED,"selection_owner_or_policy_blocked")
+    vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=control.strategy_group_id,
+        selection_spec_id=control.selection_spec_id,for_update=lock_current)
+    if vacuum is not None and vacuum.blocks_new_entry:
+        return decision(SelectionEntryAuthorityStatus.VACUUM_OPEN,"selection_entry_vacuum_open")
+    current = await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id,for_update=lock_current)
+    authority = None if current is None else current.authority
+    current_id = None if authority is None else authority.selection_authority_id
+    if authority is not None and authority.effective_from_ms <= now_ms < authority.expires_at_ms:
+        if authority.selection_epoch_id != control.selection_epoch_id or authority.selection_control_version != control.control_version:
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_control_changed")
+        if authority.blocks_new_entry:
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_valid_empty")
+        # Normal trading proof verification is not installed yet. Never let an
+        # unverified Generic positive row fall through the Static or SOR path.
+        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"generic_positive_authority_verification_required")
+    if control.selection_mode is SelectionMode.STATIC_BASELINE and birth_selection_authority_id is None:
+        return decision(SelectionEntryAuthorityStatus.VALID,"static_baseline")
+    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_missing_or_expired")
 
 
 async def ingest_signal(
