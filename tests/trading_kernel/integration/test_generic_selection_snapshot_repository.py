@@ -78,6 +78,7 @@ from src.trading_kernel.domain.selection_authority import (
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+    PostgresInstrumentSelectionRepository,
     SelectionJobConflict,
     generic_authority_from_storage,
     generic_authority_storage_values,
@@ -132,6 +133,32 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str) -> None:
+    source = inputs(group)
+    source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
+    snapshot = compute_generic_selection(source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+    await enable_epoch(database,group)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="empty-coordinator")
+    results = []
+    for tick in range(4):
+        results.append(await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda tick=tick:snapshot.effective_from_ms+tick+1))
+    assert results[-1].disposition == MaterializationDisposition.VALID_EMPTY
+    assert results[-1].selection_authority_id == results[-2].selection_authority_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id)
+        assert current is not None and current.authority.blocks_new_entry
+        assert current.projection_version == 1
+    async with database.connect() as conn:
+        for table in ("brc_strategy_universe_materialization_generations","brc_trade_tickets","brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+        assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current")) == "VALID_EMPTY"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 async def test_generic_empty_authority_persists_without_positive_grant(database: AsyncEngine, group: str) -> None:
     source = inputs(group)
     source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
@@ -164,6 +191,8 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
                 "expires_at_ms":nonempty.expires_at_ms,"effective_from_ms":nonempty.effective_from_ms+1,
                 "created_at_ms":nonempty.effective_from_ms+1}))
     await enable_epoch(database,group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
     vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:empty:"+group,strategy_group_id=group,
         selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=CUTOFF,source_generation_id=None,
         state="OPEN",fenced_at_ms=snapshot.effective_from_ms,drained_at_ms=None,resolved_at_ms=None,
@@ -207,6 +236,13 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 1
         assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current")) == "VALID_EMPTY"
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id,for_update=True)
+        assert current is not None and current.authority == authority and current.projection_version == 1
+    async with database.connect() as conn:
+        await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
+        readonly = await PostgresInstrumentSelectionRepository(conn).get_current_generic_authority(source.spec.selection_spec_id)
+        assert readonly == current
 
 
 @pytest.mark.asyncio

@@ -124,6 +124,7 @@ from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
     AuthorityGapScopeResult,
+    CurrentGenericSelectionAuthority,
     CurrentSelectionAuthority,
     GenericSelectionAuthority,
     MaterializationGeneration,
@@ -1521,6 +1522,8 @@ class SelectionJobRecord(BaseModel):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def get_current_generic_authority(self, selection_spec_id: str, *,
+        for_update: bool = False) -> CurrentGenericSelectionAuthority | None: ...
     async def get_comparison_universe_binding(self, event_spec_id: str, *, for_update: bool = False) -> ComparisonUniverseBinding | None: ...
 
     async def get_generic_materialization_generation(self, materialization_generation_id: str, *,

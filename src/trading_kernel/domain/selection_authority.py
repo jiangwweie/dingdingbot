@@ -899,6 +899,12 @@ class GenericSelectionAuthority(BaseModel):
         return self
 
 
+class CurrentGenericSelectionAuthority(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    authority: GenericSelectionAuthority
+    projection_version: int = Field(gt=0)
+
+
 class SelectionSessionAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

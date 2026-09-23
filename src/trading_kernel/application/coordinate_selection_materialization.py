@@ -31,10 +31,14 @@ from src.trading_kernel.application.install_strategy_universe import (
     install_strategy_universe,
 )
 from src.trading_kernel.application.ports import KernelUnitOfWork, UnitOfWorkFactory
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    build_generic_selection_period,
+)
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     MaterializationEventBaseline,
 )
+from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
     SOR_LONG_EVENT_SPEC_ID,
@@ -43,6 +47,7 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.selection_authority import (
+    AuthorityEventBinding,
     AuthorityEventGrantState,
     AuthorityGapAudit,
     AuthorityGapAuditKind,
@@ -53,6 +58,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
     ContinuitySourceKind,
     CurrentSelectionAuthority,
+    GenericSelectionAuthority,
     MaterializationGeneration,
     MaterializationGenerationClaimStatus,
     MaterializationGenerationState,
@@ -1137,13 +1143,13 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return _blocked("GENERIC_SNAPSHOT_PERIOD_EXPIRED")
             if now_ms < snapshot.committed_at_ms:
                 return _blocked("GENERIC_SNAPSHOT_COMMIT_IS_FUTURE")
+            if not snapshot.selected_members:
+                return await _coordinate_generic_empty(uow=uow,snapshot=snapshot,control=control,
+                    owner_control_version=owner.control_version,now_ms=now_ms)
             prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                 strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
             if prior_vacuum is not None:
                 return _blocked("GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION")
-            if not snapshot.selected_members:
-                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.VALID_EMPTY_INTENT,
-                    selection_snapshot_id=snapshot.selection_snapshot_id)
             spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
             current = await uow.strategy_universes.get_current(spec.event_spec_id)
             if current is None:
@@ -1170,6 +1176,52 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id)
     return await _coordinate_generic_generation(uow_factory=uow_factory,
         request=CoordinateGenericGenerationRequest(materialization_generation_id=generation_id,worker_id=request.worker_id),now_ms=now_ms)
+
+
+async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericSelectionSnapshotV1,
+    control: SelectionControl, owner_control_version: int, now_ms: int) -> CoordinateSelectionMaterializationResult:
+    current = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id,for_update=True)
+    if current is not None and current.authority.selection_snapshot_id == snapshot.selection_snapshot_id and current.authority.blocks_new_entry:
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.VALID_EMPTY,
+            selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=current.authority.selection_authority_id)
+    vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=snapshot.strategy_group_id,
+        selection_spec_id=snapshot.selection_spec_id,for_update=True)
+    vacuum_id = "vacuum:empty:"+snapshot.selection_snapshot_id
+    if vacuum is None:
+        vacuum = StrategyEntryVacuum(entry_vacuum_id=vacuum_id,strategy_group_id=snapshot.strategy_group_id,
+            selection_spec_id=snapshot.selection_spec_id,period_anchor_ms=snapshot.feature_cutoff_at_ms,
+            source_generation_id=None,state=StrategyEntryVacuumState.OPEN,fenced_at_ms=now_ms,
+            drained_at_ms=None,resolved_at_ms=None,first_blocker="NO_SELECTION_READY_MEMBERS",projection_version=1)
+        await uow.instrument_selection.open_valid_empty_intent_vacuum(vacuum,selection_snapshot_id=snapshot.selection_snapshot_id)
+    if vacuum.entry_vacuum_id != vacuum_id or vacuum.source_generation_id is not None:
+        return _blocked("GENERIC_EMPTY_REQUIRES_SUPERSESSION")
+    if vacuum.state is StrategyEntryVacuumState.OPEN:
+        await uow.instrument_selection.mark_entry_vacuum_draining(vacuum,started_at_ms=now_ms)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+            selection_snapshot_id=snapshot.selection_snapshot_id,entry_vacuum_id=vacuum_id)
+    if vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
+        return _blocked("GENERIC_EMPTY_VACUUM_STATE_CHANGED")
+    if await uow.instrument_selection.get_next_entry_vacuum_ticket(strategy_group_id=snapshot.strategy_group_id) is not None:
+        drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+            strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,now_ms=now_ms))
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+            entry_vacuum_id=vacuum_id,reason_code=drain.reason_code or drain.status.value)
+    if await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=snapshot.strategy_group_id):
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+            entry_vacuum_id=vacuum_id,reason_code="ENTRY_DRAIN_BLOCKED")
+    spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
+    sequence = 1 if current is None or current.authority.period.feature_cutoff_at_ms != snapshot.feature_cutoff_at_ms else current.authority.authority_sequence+1
+    authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
+        selection_spec_id=snapshot.selection_spec_id,strategy_group_id=snapshot.strategy_group_id,
+        selection_epoch_id=snapshot.selection_epoch_id,selection_snapshot_id=snapshot.selection_snapshot_id,
+        authority_sequence=sequence,owner_control_version=owner_control_version,selection_control_version=control.control_version,
+        period=build_generic_selection_period(feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms,cadence_hours=spec.cadence_hours),
+        authority_outcome="VALID_EMPTY",event_binding=AuthorityEventBinding.empty(event_spec_id=spec.event_spec_id,position_side=spec.position_side),
+        current_close_proof=None,membership_freshness=None,effective_from_ms=now_ms,created_at_ms=now_ms)
+    await uow.instrument_selection.commit_generic_valid_empty(authority,entry_vacuum_id=vacuum_id,
+        expected_vacuum_version=vacuum.projection_version,expected_current_version=None if current is None else current.projection_version)
+    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.VALID_EMPTY,
+        selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=authority.selection_authority_id,entry_vacuum_id=vacuum_id)
 
 
 async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,

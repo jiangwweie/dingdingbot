@@ -70,6 +70,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityGrantProofKind,
     AuthorityOutcome,
     ContinuitySourceKind,
+    CurrentGenericSelectionAuthority,
     CurrentSelectionAuthority,
     GenericSelectionAuthority,
     MaterializationGeneration,
@@ -3753,6 +3754,24 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionAuthorityVersionConflict(
                 "Selection Authority current pointer version changed"
             )
+
+    async def get_current_generic_authority(self, selection_spec_id: str, *,
+        for_update: bool = False) -> CurrentGenericSelectionAuthority | None:
+        spec = await self.get_generic_spec(selection_spec_id)
+        statement = sa.select(selection_session_authorities,
+            selection_authority_current.c.projection_version.label("current_projection_version")).join(
+                selection_authority_current,selection_authority_current.c.selection_authority_id == selection_session_authorities.c.selection_authority_id,
+            ).where(selection_authority_current.c.selection_spec_id == selection_spec_id).limit(1)
+        if for_update:
+            statement = statement.with_for_update(of=selection_authority_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        if row is None:
+            return None
+        bindings = tuple((await self._connection.execute(sa.select(selection_authority_event_bindings).where(
+            selection_authority_event_bindings.c.selection_authority_id == row["selection_authority_id"],
+        ).order_by(selection_authority_event_bindings.c.event_spec_id).limit(2))).mappings())
+        authority = generic_authority_from_storage(dict(row),spec=spec,event_bindings=tuple(dict(binding) for binding in bindings))
+        return CurrentGenericSelectionAuthority(authority=authority,projection_version=row["current_projection_version"])
 
     async def get_current_authority(
         self,
