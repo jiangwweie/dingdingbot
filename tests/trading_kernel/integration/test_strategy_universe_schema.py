@@ -78,7 +78,7 @@ async def test_postgres_enforces_strategy_universe_authority_constraints() -> No
                     installed_at_ms, activated_at_ms
                 ) VALUES (
                     'uni-current-digest-duplicate', 'sg-a', 'event-a',
-                    2, $1, 'active', 1002, 1003
+                    2, $1, 'staged', 1002, NULL
                 )
                 """,
                 DIGEST_A,

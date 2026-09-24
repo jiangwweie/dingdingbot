@@ -1,13 +1,37 @@
 import pytest
 
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     MaterializationEventBaseline,
+    generic_input_is_unchanged,
 )
 from src.trading_kernel.domain.generic_selection_core import compute_generic_selection
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
 from tests.trading_kernel.support.generic_selection import CUTOFF, HOUR, inputs
+
+
+@pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
+def test_identical_tradable_members_do_not_hide_comparison_transition(group: str) -> None:
+    source = inputs(group)
+    snapshot = compute_generic_selection(source)
+    # A static single-member set is enough to demonstrate equal tradable sets.
+    from tests.trading_kernel.support.generic_selection import qualify_window
+    selected = snapshot.selected_members[0]
+    source = source.model_copy(update={"member_windows":tuple(qualify_window(w,w.exchange_instrument_id==selected) for w in source.member_windows)})
+    snapshot = compute_generic_selection(source)
+    members = snapshot.selected_members
+    digest = canonical_digest({"exchange_instrument_ids":members})
+    static = ComparisonUniverseBinding(event_spec_id=source.spec.event_spec_id,comparison_universe_id="comparison:"+digest[7:],
+        member_set_digest=digest,exchange_instrument_ids=members,comparison_transition_revision=0,source_static_universe_version_id="static:1")
+    assert not generic_input_is_unchanged(snapshot,current_members=members,comparison=static)
+    panel_digest = canonical_digest({"exchange_instrument_ids":source.spec.candidate_ids})
+    dynamic = ComparisonUniverseBinding(event_spec_id=source.spec.event_spec_id,comparison_universe_id="comparison:"+panel_digest[7:],
+        member_set_digest=panel_digest,exchange_instrument_ids=source.spec.candidate_ids,comparison_transition_revision=1,source_static_universe_version_id=None)
+    assert generic_input_is_unchanged(snapshot,current_members=members,comparison=dynamic)
+    with pytest.raises(ValueError,match="comparison"):
+        generic_input_is_unchanged(snapshot,current_members=members,comparison=None)
 
 
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])

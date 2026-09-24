@@ -444,6 +444,7 @@ sa.Index(
     "uq_brc_strategy_universe_versions_current_digest",
     strategy_universe_versions.c.event_spec_id,
     strategy_universe_versions.c.semantic_digest,
+    (strategy_universe_versions.c.lifecycle_state == "active"),
     unique=True,
     postgresql_where=strategy_universe_versions.c.lifecycle_state.in_(
         ("warming", "staged", "active")

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
@@ -14,6 +15,23 @@ from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
     MaterializationGenerationState,
 )
+
+
+def generic_input_is_unchanged(snapshot: GenericSelectionSnapshotV1, *, current_members: tuple[str, ...],
+    comparison: ComparisonUniverseBinding | None) -> bool:
+    """Membership equality alone cannot prove comparative Detector input equality."""
+    snapshot = GenericSelectionSnapshotV1.model_validate(snapshot.model_dump())
+    spec = generic_selection_spec(snapshot.strategy_group_id)
+    if not current_members or tuple(sorted(set(current_members))) != current_members:
+        raise ValueError("current members must be complete and canonical")
+    if snapshot.strategy_group_id in {"MPG-001", "MI-001"}:
+        if comparison is None or comparison.event_spec_id != spec.event_spec_id:
+            raise ValueError("current comparison identity is missing or differs")
+        if comparison.exchange_instrument_ids != spec.candidate_ids:
+            return False
+    elif comparison is not None:
+        raise ValueError("non-comparative Event forbids comparison input")
+    return snapshot.selected_members == current_members
 
 
 class MaterializationEventBaseline(AuthorityEventBinding):

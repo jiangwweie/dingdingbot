@@ -39,6 +39,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     MaterializationEventBaseline,
+    generic_input_is_unchanged,
 )
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.instrument_selection import (
@@ -1160,13 +1161,13 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 universe_version_id=current.universe_version_id)
             if members is None or members.semantic_digest != current.semantic_digest:
                 return _blocked("GENERIC_PREVIOUS_UNIVERSE_CHANGED")
-            if members.exchange_instrument_ids == snapshot.selected_members:
-                return _blocked("GENERIC_NO_CHANGE_AUTHORITY_REQUIRED")
             comparison = None
             if snapshot.strategy_group_id in {"MPG-001", "MI-001"}:
                 comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
+            if generic_input_is_unchanged(snapshot,current_members=members.exchange_instrument_ids,comparison=comparison):
+                return _blocked("GENERIC_NO_CHANGE_AUTHORITY_REQUIRED")
             generation = GenericMaterializationGeneration.build(snapshot=snapshot,selection_control_version=control.control_version,
                 created_at_ms=now_ms,previous_events=(MaterializationEventBaseline(event_spec_id=spec.event_spec_id,
                     position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
@@ -1271,6 +1272,7 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         if claim.status is not MaterializationGenerationClaimStatus.CLAIMED or claim.generation is None:
             return _blocked("GENERIC_GENERATION_NOT_ACTIONABLE")
         generation = claim.generation
+        failed = False
         try:
             identity = {"materialization_generation_id":generation.materialization_generation_id,
                 "selection_snapshot_id":generation.selection_snapshot_id}
@@ -1333,9 +1335,15 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
                     reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
             return _blocked("GENERIC_ACTIVATION_REQUIRED")
+        except BaseException:
+            # The enclosing UoW rolls back the claim and all changes. Do not run
+            # more SQL in an aborted transaction and mask the original failure.
+            failed = True
+            raise
         finally:
-            await uow.instrument_selection.release_generic_materialization_generation_lease(
-                generation.materialization_generation_id,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
+            if not failed:
+                await uow.instrument_selection.release_generic_materialization_generation_lease(
+                    generation.materialization_generation_id,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
 
 
 class _AuthorityGrantWindowExpired(RuntimeError):

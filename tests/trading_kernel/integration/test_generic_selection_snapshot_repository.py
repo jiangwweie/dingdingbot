@@ -96,6 +96,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     selection_authority_event_bindings,
     selection_session_authorities,
     strategy_selection_control_current,
+    strategy_universe_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -824,10 +825,16 @@ async def test_control_cannot_point_at_another_strategys_selection_spec(database
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_generic_generation_schema_uses_one_exact_previous_event_without_fake_pair(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("group,comparison_only", [("CPM-RO-001",False), ("MPG-001",False), ("MI-001",False), ("BRF2-001",False), ("MPG-001",True), ("MI-001",True)])
+async def test_generic_generation_schema_uses_one_exact_previous_event_without_fake_pair(database: AsyncEngine, group: str, comparison_only: bool) -> None:
     source = inputs(group)
+    if comparison_only:
+        source = source.model_copy(update={"member_windows":tuple(qualify_window(
+            w.model_copy(update={"candles":source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0])
+            for w in source.member_windows)})
     snapshot = compute_generic_selection(source)
+    if comparison_only:
+        assert snapshot.selected_members == source.spec.candidate_ids[:1]
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
         installed = await install_strategy_universe(uow, UniverseInstallRequest(
@@ -1011,6 +1018,18 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(
             universe_version_id=occupying.universe.universe_version_id,reason_code="test_release_warming_slot",
             attempted_at_ms=generation.created_at_ms+5))
+    if comparison_only:
+        async with database.begin() as conn:
+            await conn.execute(sa.text("CREATE FUNCTION reject_target_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected target failure'; END; $$"))
+            await conn.execute(sa.text("CREATE TRIGGER reject_target_test BEFORE INSERT ON brc_strategy_universe_versions FOR EACH ROW WHEN (NEW.source_kind='dynamic_selection') EXECUTE FUNCTION reject_target_test()"))
+        with pytest.raises(sa.exc.DBAPIError,match="injected target failure"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=coordinator_request,clock_ms=lambda:generation.created_at_ms+5)
+        async with database.begin() as conn:
+            assert await conn.scalar(sa.text("SELECT lease_owner FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"),{"gid":generation.materialization_generation_id}) is None
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE source_kind='dynamic_selection'")) == 0
+            await conn.execute(sa.text("DROP TRIGGER reject_target_test ON brc_strategy_universe_versions"))
+            await conn.execute(sa.text("DROP FUNCTION reject_target_test()"))
     warming = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
         request=coordinator_request,clock_ms=lambda:generation.created_at_ms+5)
     assert warming.disposition.value == "TARGET_WARMING"
@@ -1149,6 +1168,14 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             assert saved.projection_version == 2
     else:
         await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id)
+    if comparison_only:
+        with pytest.raises(sa.exc.DBAPIError,match="uq_brc_strategy_universe_versions_current_digest"):
+            async with database.begin() as conn:
+                original = (await conn.execute(sa.select(strategy_universe_versions).where(
+                    strategy_universe_versions.c.universe_version_id == target.universe.universe_version_id))).mappings().one()
+                await conn.execute(sa.insert(strategy_universe_versions).values(**{
+                    **dict(original),"universe_version_id":"universe:duplicate-staged","universe_version":999,
+                    "source_kind":"manual","materialization_generation_id":None}))
     with pytest.raises(sa.exc.DBAPIError, match="Universe trusted member limit"):
         async with database.begin() as conn:
             await conn.execute(sa.text("INSERT INTO brc_strategy_universe_members(universe_version_id,exchange_instrument_id) VALUES(:uid,:member)"),

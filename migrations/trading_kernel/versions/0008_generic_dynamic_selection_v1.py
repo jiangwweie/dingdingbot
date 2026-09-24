@@ -49,6 +49,10 @@ def upgrade() -> None:
     _selection_job_epochs()
     _materialization_event_baselines(bind)
     _trusted_universe_member_limit()
+    op.drop_index("uq_brc_strategy_universe_versions_current_digest",table_name="brc_strategy_universe_versions")
+    op.execute(sa.text("CREATE UNIQUE INDEX uq_brc_strategy_universe_versions_current_digest "
+        "ON brc_strategy_universe_versions(event_spec_id,semantic_digest,(lifecycle_state='active')) "
+        "WHERE lifecycle_state IN ('warming','staged','active')"))
     _authority_snapshot_epoch()
 
 
