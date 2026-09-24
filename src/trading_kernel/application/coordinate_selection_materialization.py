@@ -1201,9 +1201,11 @@ async def prepare_generic_current_close_proof(uow: KernelUnitOfWork, *, selectio
     granted = await uow.instrument_selection.read_authority_clock_ms()
     if granted < started:
         raise ValueError("Generic current-close proof clock moved backwards")
-    return build_current_final_close_grant_proof(selection_snapshot_id=snapshot.selection_snapshot_id,
+    proof = build_current_final_close_grant_proof(selection_snapshot_id=snapshot.selection_snapshot_id,
         selection_committed_at_ms=snapshot.committed_at_ms,source_snapshot_cutoff_at_ms=snapshot.feature_cutoff_at_ms,
         period=period,current_final_close_time_ms=close,authority_granted_at_ms=granted,observation_cursors=cursors)
+    await uow.instrument_selection.require_generic_close_proof(proof)
+    return proof
 
 
 async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericSelectionSnapshotV1,

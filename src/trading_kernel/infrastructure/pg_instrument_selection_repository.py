@@ -21,6 +21,7 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
 from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
@@ -3754,6 +3755,14 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionAuthorityVersionConflict(
                 "Selection Authority current pointer version changed"
             )
+
+    async def require_generic_close_proof(self, proof: CurrentFinalCloseGrantProof) -> None:
+        proof = CurrentFinalCloseGrantProof.model_validate(proof.model_dump())
+        matches = await self._connection.scalar(sa.text(
+            "SELECT brc_generic_close_proof_matches(:snapshot,CAST(:proof AS jsonb),:granted)"),
+            {"snapshot":proof.selection_snapshot_id,"proof":proof.model_dump_json(),"granted":proof.authority_granted_at_ms})
+        if matches is not True:
+            raise SelectionJobConflict("Generic current-close proof differs from PostgreSQL facts")
 
     async def read_authority_clock_ms(self) -> int:
         # transaction_timestamp()/now() freeze at BEGIN and cannot catch an

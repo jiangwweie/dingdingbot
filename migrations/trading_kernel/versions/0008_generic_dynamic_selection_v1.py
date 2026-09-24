@@ -54,6 +54,48 @@ def upgrade() -> None:
         "ON brc_strategy_universe_versions(event_spec_id,semantic_digest,(lifecycle_state='active')) "
         "WHERE lifecycle_state IN ('warming','staged','active')"))
     _authority_snapshot_epoch()
+    _generic_close_proof_function()
+
+
+def _generic_close_proof_function() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_close_proof_matches(snapshot_id text, proof jsonb, granted_at bigint)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE s brc_instrument_selection_snapshots%ROWTYPE; cadence integer;
+        evt text; side text; c bigint; cursors jsonb; actual_count integer; consumed boolean;
+      BEGIN
+        SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=snapshot_id;
+        IF NOT FOUND OR s.selection_family<>'generic_dynamic_v1' OR s.selected_count<=0 OR granted_at IS NULL THEN RETURN false; END IF;
+        SELECT g.cadence_hours,e.event_spec_id,e.position_side INTO cadence,evt,side
+          FROM brc_generic_dynamic_selection_specs_v1 g JOIN brc_instrument_selection_spec_events e USING(selection_spec_id)
+          WHERE g.selection_spec_id=s.selection_spec_id;
+        IF cadence IS NULL OR evt IS NULL THEN RETURN false; END IF;
+        c := granted_at/3600000*3600000;
+        IF granted_at<=c OR c<s.eligibility_not_before_ms OR granted_at>=s.expires_at_ms OR s.created_at_ms>=c THEN RETURN false; END IF;
+        WITH selected AS (
+          SELECT m.exchange_instrument_id,
+            'episode-domain:' || encode(sha256(convert_to(
+              '{"event_spec_id":' || to_json(evt)::text || ',"exchange_instrument_id":' || to_json(m.exchange_instrument_id)::text ||
+              ',"position_side":' || to_json(side)::text || '}','UTF8')),'hex') AS domain_key
+          FROM brc_instrument_selection_member_decisions m
+          WHERE m.selection_snapshot_id=snapshot_id AND m.selected
+        )
+        SELECT count(*), jsonb_agg(jsonb_build_object(
+            'episode_domain_key',m.domain_key,'exchange_instrument_id',m.exchange_instrument_id,
+            'episode_version',coalesce(e.projection_version,0),
+            'comparison_checkpoint_version',coalesce(e.comparison_checkpoint_version,0),
+            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms)) ORDER BY m.exchange_instrument_id COLLATE "C"),
+            coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms)>=c),false)
+          INTO actual_count,cursors,consumed FROM selected m LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
+        IF actual_count<>s.selected_count OR consumed THEN RETURN false; END IF;
+        RETURN coalesce(proof=jsonb_build_object(
+          'selection_snapshot_id',snapshot_id,'selection_committed_at_ms',s.created_at_ms,
+          'source_snapshot_cutoff_at_ms',s.feature_cutoff_at_ms,
+          'period',jsonb_build_object('feature_cutoff_at_ms',s.feature_cutoff_at_ms,'cadence_hours',cadence,
+            'scheduled_effective_at_ms',s.eligibility_not_before_ms,'period_expires_at_ms',s.expires_at_ms),
+          'current_final_close_time_ms',c,'authority_granted_at_ms',granted_at,'observation_cursors',cursors),false);
+      END; $$
+    """))
 
 
 def _authority_snapshot_epoch() -> None:

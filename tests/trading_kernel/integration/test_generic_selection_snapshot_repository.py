@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -162,10 +163,26 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
         assert proof.authority_granted_at_ms >= now
         assert proof.current_final_close_time_ms == proof.authority_granted_at_ms//HOUR*HOUR
         assert tuple(c.exchange_instrument_id for c in proof.observation_cursors) == snapshot.selected_members
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
+                {"sid":snapshot.selection_snapshot_id,"proof":proof.model_dump_json(),"at":proof.authority_granted_at_ms}) is True
+            payload = proof.model_dump(mode="json")
+            for changes in ({"observation_cursors":[]}, {"selection_committed_at_ms":proof.selection_committed_at_ms+1},
+                            {"current_final_close_time_ms":proof.current_final_close_time_ms-HOUR},
+                            {"observation_cursors":[{**payload["observation_cursors"][0],"episode_version":99},*payload["observation_cursors"][1:]]},
+                            {"unexpected_field":True}):
+                assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
+                    {"sid":snapshot.selection_snapshot_id,"proof":json.dumps({**payload,**changes}),"at":proof.authority_granted_at_ms}) is False
         state = advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),current=None,
             detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=proof.current_final_close_time_ms,
             exchange_instrument_id=snapshot.selected_members[0]).current
         await uow.signals.save_exposure_episode(state,expected_version=0)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
+            {"sid":snapshot.selection_snapshot_id,"proof":proof.model_dump_json(),"at":proof.authority_granted_at_ms}) is False
+    with pytest.raises(SelectionJobConflict,match="PostgreSQL facts"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.require_generic_close_proof(proof)
     with pytest.raises(RuntimeError,match="already consumed"):
         async with PostgresKernelUnitOfWork(database) as uow:
             await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)

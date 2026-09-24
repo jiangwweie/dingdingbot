@@ -67,6 +67,9 @@ from src.trading_kernel.domain.comparison_universe import (
     ComparisonUniverseBinding,
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import (
@@ -1527,6 +1530,7 @@ class SelectionJobRecord(BaseModel):
 
 class InstrumentSelectionRepository(Protocol):
     async def read_authority_clock_ms(self) -> int: ...
+    async def require_generic_close_proof(self, proof: CurrentFinalCloseGrantProof) -> None: ...
     async def get_current_generic_authority(self, selection_spec_id: str, *,
         for_update: bool = False) -> CurrentGenericSelectionAuthority | None: ...
     async def get_comparison_universe_binding(self, event_spec_id: str, *, for_update: bool = False) -> ComparisonUniverseBinding | None: ...
