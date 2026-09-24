@@ -52,6 +52,7 @@ from src.trading_kernel.application.run_instrument_selection import (
 )
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.dynamic_selection_timing import (
+    build_dynamic_membership_freshness,
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
@@ -163,7 +164,15 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
         assert proof.authority_granted_at_ms >= now
         assert proof.current_final_close_time_ms == proof.authority_granted_at_ms//HOUR*HOUR
         assert tuple(c.exchange_instrument_id for c in proof.observation_cursors) == snapshot.selected_members
+        freshness = build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,
+            source_member_set_digest=snapshot.member_set_digest,period=proof.period)
         async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT brc_generic_freshness_matches(:sid,CAST(:fresh AS jsonb))"),
+                {"sid":snapshot.selection_snapshot_id,"fresh":freshness.model_dump_json()}) is True
+            for changes in ({"membership_valid_until_ms":freshness.membership_valid_until_ms+HOUR},
+                            {"source_member_set_digest":"sha256:"+"0"*64}, {"state":"GRACE","consecutive_missed_periods":1}):
+                assert await conn.scalar(sa.text("SELECT brc_generic_freshness_matches(:sid,CAST(:fresh AS jsonb))"),
+                    {"sid":snapshot.selection_snapshot_id,"fresh":json.dumps({**freshness.model_dump(mode="json"),**changes})}) is False
             assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
                 {"sid":snapshot.selection_snapshot_id,"proof":proof.model_dump_json(),"at":proof.authority_granted_at_ms}) is True
             payload = proof.model_dump(mode="json")

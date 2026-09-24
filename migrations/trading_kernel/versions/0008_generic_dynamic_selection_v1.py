@@ -59,6 +59,27 @@ def upgrade() -> None:
 
 def _generic_close_proof_function() -> None:
     op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_freshness_matches(snapshot_id text, freshness jsonb)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE s brc_instrument_selection_snapshots%ROWTYPE; cadence integer; member_digest text; actual_count integer;
+      BEGIN
+        SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=snapshot_id;
+        IF NOT FOUND OR s.selection_family<>'generic_dynamic_v1' OR s.selected_count<=0 THEN RETURN false; END IF;
+        SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=s.selection_spec_id;
+        IF cadence IS NULL THEN RETURN false; END IF;
+        SELECT count(*), 'sha256:' || encode(sha256(convert_to(
+          '{"selected_exchange_instrument_ids":[' || coalesce(string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id COLLATE "C"),'') || ']}','UTF8')),'hex')
+          INTO actual_count,member_digest FROM brc_instrument_selection_member_decisions
+          WHERE selection_snapshot_id=snapshot_id AND selected;
+        IF actual_count<>s.selected_count THEN RETURN false; END IF;
+        RETURN coalesce(freshness=jsonb_build_object(
+          'source_snapshot_id',snapshot_id,'source_member_set_digest',member_digest,
+          'source_snapshot_cutoff_at_ms',s.feature_cutoff_at_ms,'source_snapshot_effective_at_ms',s.eligibility_not_before_ms,
+          'cadence_hours',cadence,'membership_valid_until_ms',s.eligibility_not_before_ms+2*cadence*3600000::bigint,
+          'consecutive_missed_periods',0,'state','ACTIVE'),false);
+      END; $$
+    """))
+    op.execute(sa.text("""
       CREATE FUNCTION brc_generic_close_proof_matches(snapshot_id text, proof jsonb, granted_at bigint)
       RETURNS boolean LANGUAGE plpgsql STABLE AS $$
       DECLARE s brc_instrument_selection_snapshots%ROWTYPE; cadence integer;
