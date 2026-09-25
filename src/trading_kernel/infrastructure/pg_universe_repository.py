@@ -90,8 +90,6 @@ from src.trading_kernel.domain.strategy_universe import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
-    comparison_binding_current,
-    comparison_universe_definitions,
     event_product_compatibility,
     event_specs,
     generic_dynamic_selection_specs_v1,
@@ -2635,6 +2633,29 @@ class PostgresStrategyUniverseRepository:
         universe = (await self._connection.execute(statement)).mappings().one_or_none()
         if universe is None or universe["lifecycle_state"] not in {"warming","staged","active"}:
             raise ComparativeProjectionAuthorityChanged("comparative Universe scope is no longer eligible")
+        if universe["lifecycle_state"] == "active":
+            from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+                PostgresInstrumentSelectionRepository,
+            )
+            current = await self._connection.scalar(sa.select(strategy_universe_current.c.universe_version_id).where(
+                strategy_universe_current.c.event_spec_id == event_spec_id,
+                strategy_universe_current.c.universe_version_id == universe_version_id,
+                strategy_universe_current.c.semantic_digest == universe["semantic_digest"]))
+            if current is None:
+                raise ComparativeProjectionAuthorityChanged("comparative current Universe changed")
+            binding = await PostgresInstrumentSelectionRepository(self._connection).get_comparison_universe_binding(
+                event_spec_id,for_update=for_update)
+            if binding is not None:
+                if binding.source_static_universe_version_id not in {None,universe_version_id}:
+                    raise ComparativeProjectionAuthorityChanged("comparative current binding changed")
+                if member_set_digest is not None and member_set_digest != binding.member_set_digest:
+                    raise ComparativeProjectionAuthorityChanged("comparative member authority changed")
+                if comparison_transition_revision is not None and comparison_transition_revision != binding.comparison_transition_revision:
+                    raise ComparativeProjectionAuthorityChanged("comparative transition revision changed")
+                return ComparisonObservationSource(exchange_instrument_ids=binding.exchange_instrument_ids,
+                    comparison_transition_revision=binding.comparison_transition_revision)
+            if universe["source_kind"] == "dynamic_selection":
+                raise ComparativeProjectionAuthorityChanged("comparative Dynamic binding is missing")
         if universe["source_kind"]=="dynamic_selection":
             statement = sa.select(instrument_selection_spec_members.c.exchange_instrument_id).join(
                 instrument_selection_specs, instrument_selection_specs.c.selection_spec_id==instrument_selection_spec_members.c.selection_spec_id,
@@ -2658,23 +2679,6 @@ class PostgresStrategyUniverseRepository:
         if member_set_digest is not None and authoritative_digest!=member_set_digest:
             raise ComparativeProjectionAuthorityChanged("comparative member authority changed")
         revision = 0
-        if universe["lifecycle_state"]=="active":
-            binding_statement = sa.select(comparison_binding_current,
-                comparison_universe_definitions.c.member_set_digest).join(comparison_universe_definitions,
-                    comparison_universe_definitions.c.comparison_universe_id==comparison_binding_current.c.comparison_universe_id,
-                ).where(comparison_binding_current.c.event_spec_id==event_spec_id)
-            if for_update:
-                binding_statement = binding_statement.with_for_update(of=comparison_binding_current)
-            binding = (await self._connection.execute(binding_statement)).mappings().one_or_none()
-            if binding is None:
-                if universe["source_kind"]=="dynamic_selection":
-                    raise ComparativeProjectionAuthorityChanged("comparative Dynamic binding is missing")
-            elif binding["member_set_digest"]!=authoritative_digest or (
-                binding["source_static_universe_version_id"] is not None and binding["source_static_universe_version_id"]!=universe_version_id
-            ):
-                raise ComparativeProjectionAuthorityChanged("comparative current binding changed")
-            if binding is not None:
-                revision = binding["comparison_transition_revision"]
         if comparison_transition_revision is not None and comparison_transition_revision != revision:
             raise ComparativeProjectionAuthorityChanged("comparative transition revision changed")
         return ComparisonObservationSource(exchange_instrument_ids=members, comparison_transition_revision=revision)

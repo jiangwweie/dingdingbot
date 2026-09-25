@@ -28,6 +28,7 @@ from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
 )
+from src.trading_kernel.domain.strategy_universe import MAX_UNIVERSE_MEMBERS
 from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     strategy_universe_versions,
@@ -234,7 +235,7 @@ async def test_observation_selector_claims_one_from_real_70_scope_lifecycle(
 
 
 @pytest.mark.asyncio
-async def test_activation_member_and_scope_selects_are_all_limited_to_eleven(
+async def test_activation_member_and_scope_selects_use_exact_member_bound(
     query_bounds_engine: AsyncEngine,
 ) -> None:
     """No activation member or scope read may widen beyond the hard cap."""
@@ -298,7 +299,7 @@ async def test_activation_member_and_scope_selects_are_all_limited_to_eleven(
     ]
     assert member_or_scope_selects
     assert all(
-        "LIMIT" in statement.upper() and _contains_limit_eleven(parameters)
+        "LIMIT" in statement.upper() and _contains_member_bound(parameters)
         for statement, parameters in member_or_scope_selects
     )
 
@@ -504,9 +505,9 @@ def _walk_plan(plan: dict[str, object]) -> Iterator[dict[str, object]]:
             yield from _walk_plan(child)
 
 
-def _contains_limit_eleven(parameters: object) -> bool:
+def _contains_member_bound(parameters: object) -> bool:
     if isinstance(parameters, tuple):
-        return 11 in parameters
+        return MAX_UNIVERSE_MEMBERS + 1 in parameters
     if isinstance(parameters, dict):
-        return 11 in parameters.values()
+        return MAX_UNIVERSE_MEMBERS + 1 in parameters.values()
     return False

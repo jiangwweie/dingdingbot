@@ -101,6 +101,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_versions,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.pg_universe_repository import (
+    PostgresStrategyUniverseRepository,
+)
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
@@ -215,6 +218,17 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
                 assert generic_authority_from_storage(dict(row),spec=source.spec,event_bindings=tuple(dict(b) for b in bindings)) == authority
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
+            if cid:
+                async with PostgresKernelUnitOfWork(database) as read_uow:
+                    comparison_source = await read_uow.strategy_universes.get_comparative_source(
+                        event_spec_id=source.spec.event_spec_id,universe_version_id=uid)
+                    assert comparison_source.exchange_instrument_ids == source.spec.candidate_ids
+                    assert comparison_source.comparison_transition_revision == 1
+                with pytest.raises(ComparativeProjectionAuthorityChanged,match="current Universe"):
+                    async with database.begin() as conn:
+                        await conn.execute(sa.text("DELETE FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
+                        await PostgresStrategyUniverseRepository(conn).get_comparative_source(
+                            event_spec_id=source.spec.event_spec_id,universe_version_id=uid)
         async with database.connect() as conn:
             assert await conn.scalar(sa.text("SELECT brc_generic_freshness_matches(:sid,CAST(:fresh AS jsonb))"),
                 {"sid":snapshot.selection_snapshot_id,"fresh":freshness.model_dump_json()}) is True
