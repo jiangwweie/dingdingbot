@@ -23,6 +23,7 @@ class UniverseActivationStatus(StrEnum):
 
 class UniverseActivationOperation(StrEnum):
     AUTO = "auto"
+    CERTIFY_CURRENT = "certify_current"
     ACTIVATE_MANUAL = "activate_manual"
     STAGE_DYNAMIC = "stage_dynamic"
     ACTIVATE_DYNAMIC_PAIR = "activate_dynamic_pair"

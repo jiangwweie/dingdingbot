@@ -8,6 +8,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.trading_kernel.application.advance_strategy_universe import (
+    UniverseActivationOperation,
     UniverseActivationRequest,
     UniverseActivationStatus,
     advance_strategy_universe,
@@ -34,6 +35,34 @@ from tests.trading_kernel.integration.universe_activation_support import (
     prepare_retired_v2_active_and_v3_warming,
     save_complete_comparative_projection,
 )
+
+
+@pytest.mark.asyncio
+async def test_certify_current_never_activates_ready_replacement(activation_engine: AsyncEngine) -> None:
+    old_id,new_id = await prepare_active_and_warming(activation_engine)
+    await make_warming_ready(activation_engine,universe_version_id=new_id)
+    before = await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id)
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        rejected = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=new_id,
+            attempted_at_ms=NOW_MS,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+    assert rejected.status == UniverseActivationStatus.NOT_READY
+    assert rejected.reason_code == "CURRENT_UNIVERSE_REQUIRED"
+    assert await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id) == before
+    await make_warming_ready(activation_engine,universe_version_id=old_id)
+    before = await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id)
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        current = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=old_id,
+            attempted_at_ms=NOW_MS,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+    assert current.status == UniverseActivationStatus.ALREADY_ACTIVE
+    assert await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id) == before
+    async with activation_engine.begin() as conn:
+        await conn.execute(sa.update(instrument_certification_current).values(status="temporarily_unavailable",blocker_code="readonly_facts_unavailable"))
+    before = await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id)
+    async with PostgresKernelUnitOfWork(activation_engine) as uow:
+        unavailable = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=old_id,
+            attempted_at_ms=NOW_MS,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+    assert unavailable.reason_code == "CERTIFICATION_TEMPORARILY_UNAVAILABLE"
+    assert await activation_snapshot(activation_engine,event_spec_id=DIRECT_CONTRACT.event_spec_id) == before
 
 
 @pytest.mark.asyncio

@@ -628,6 +628,9 @@ class PostgresStrategyUniverseRepository:
         if target is None:
             raise UniverseInstallConflict("UNIVERSE_ACTIVATION_TARGET_NOT_FOUND")
 
+        if request.operation is UniverseActivationOperation.CERTIFY_CURRENT and target["lifecycle_state"] != "active":
+            return _not_ready_activation(target=target,current=None,reason_code="CURRENT_UNIVERSE_REQUIRED")
+
         if request.operation is UniverseActivationOperation.ACTIVATE_DYNAMIC_PAIR:
             return await self._activate_dynamic_pair(
                 request=request,
@@ -644,8 +647,9 @@ class PostgresStrategyUniverseRepository:
                 target=target,
             )
         if (
-            target["source_kind"] == "dynamic_selection"
-            or target["materialization_generation_id"] is not None
+            request.operation is not UniverseActivationOperation.CERTIFY_CURRENT
+            and (target["source_kind"] == "dynamic_selection"
+            or target["materialization_generation_id"] is not None)
         ):
             return _not_ready_activation(
                 target=target,
