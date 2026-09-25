@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -244,7 +245,25 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                             await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
                 assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
                 assert await uow._connection.scalar(sa.select(sa.func.count()).select_from(selection_session_authorities)) == 0
-                await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
+                @asynccontextmanager
+                async def borrowed_transaction():
+                    # Share the real transaction already holding coverage locks.
+                    yield uow
+                coordinator_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="no-change")
+                coordinated = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,
+                    request=coordinator_request,clock_ms=lambda:proof.authority_granted_at_ms)
+                assert coordinated.disposition == MaterializationDisposition.NO_CHANGE
+                current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                assert current is not None
+                authority = current.authority
+                repeated = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,
+                    request=coordinator_request,clock_ms=lambda:proof.authority_granted_at_ms+1)
+                assert repeated.selection_authority_id == coordinated.selection_authority_id
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=authority.expires_at_ms)):
+                    stale_retry = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,
+                        request=coordinator_request,clock_ms=lambda:proof.authority_granted_at_ms+2)
+                assert stale_retry.disposition == MaterializationDisposition.BLOCKED
+                assert stale_retry.reason_code == "GENERIC_NO_CHANGE_AUTHORITY_STALE"
                 await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
                 # Assert inside this transaction; it still owns the coverage locks.
                 current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)

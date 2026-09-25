@@ -34,6 +34,7 @@ from src.trading_kernel.application.ports import KernelUnitOfWork, UnitOfWorkFac
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
     build_current_final_close_grant_proof,
+    build_dynamic_membership_freshness,
     build_generic_selection_period,
 )
 from src.trading_kernel.domain.generic_materialization import (
@@ -1167,7 +1168,38 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
             if generic_input_is_unchanged(snapshot,current_members=members.exchange_instrument_ids,comparison=comparison):
-                return _blocked("GENERIC_NO_CHANGE_AUTHORITY_REQUIRED")
+                if control.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
+                    return _blocked("GENERIC_FIRST_ACTIVATION_REQUIRED")
+                prior = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id,for_update=True)
+                now = await uow.instrument_selection.read_authority_clock_ms()
+                if prior is not None and prior.authority.selection_snapshot_id == snapshot.selection_snapshot_id and prior.authority.authority_outcome == "NO_CHANGE":
+                    if not prior.authority.effective_from_ms <= now < prior.authority.expires_at_ms or (
+                        prior.authority.owner_control_version != owner.control_version
+                        or prior.authority.selection_control_version != control.control_version):
+                        return _blocked("GENERIC_NO_CHANGE_AUTHORITY_STALE")
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NO_CHANGE,
+                        selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=prior.authority.selection_authority_id)
+                certified = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=current.universe_version_id,
+                    attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+                if certified.status is not UniverseActivationStatus.ALREADY_ACTIVE:
+                    return _blocked(str(certified.reason_code))
+                proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                sequence = 1 if prior is None or prior.authority.period.feature_cutoff_at_ms != snapshot.feature_cutoff_at_ms else prior.authority.authority_sequence+1
+                authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
+                    selection_spec_id=snapshot.selection_spec_id,strategy_group_id=snapshot.strategy_group_id,
+                    selection_epoch_id=snapshot.selection_epoch_id,selection_snapshot_id=snapshot.selection_snapshot_id,
+                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version,
+                    period=proof.period,authority_outcome="NO_CHANGE",event_binding=AuthorityEventBinding(event_spec_id=spec.event_spec_id,
+                        position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
+                        member_set_digest=snapshot.member_set_digest),current_close_proof=proof,
+                    membership_freshness=build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,
+                        source_member_set_digest=snapshot.member_set_digest,period=proof.period),
+                    comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
+                    comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision,
+                    effective_from_ms=proof.authority_granted_at_ms,created_at_ms=proof.authority_granted_at_ms)
+                await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None if prior is None else prior.projection_version)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NO_CHANGE,
+                    selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=authority.selection_authority_id)
             generation = GenericMaterializationGeneration.build(snapshot=snapshot,selection_control_version=control.control_version,
                 created_at_ms=now_ms,previous_events=(MaterializationEventBaseline(event_spec_id=spec.event_spec_id,
                     position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
