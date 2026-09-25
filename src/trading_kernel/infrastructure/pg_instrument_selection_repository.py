@@ -23,6 +23,7 @@ from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBind
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
     build_generic_selection_period,
+    require_current_close_commit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
@@ -2835,6 +2836,107 @@ class PostgresInstrumentSelectionRepository:
         if len(rows) > limit:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
+
+    async def commit_generic_no_change(self, authority: GenericSelectionAuthority, *, expected_current_version: int | None) -> None:
+        from src.trading_kernel.application.advance_strategy_universe import (
+            UniverseActivationOperation,
+            UniverseActivationRequest,
+            UniverseActivationStatus,
+        )
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+        authority = GenericSelectionAuthority.model_validate(authority.model_dump())
+        if authority.authority_outcome != "NO_CHANGE" or authority.current_close_proof is None:
+            raise ValueError("NO_CHANGE commit requires normal proof without Generation")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id == authority.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(authority.strategy_group_id,for_update=True)
+        if owner is None or owner["entry_state"] != "enabled" or owner["control_version"] != authority.owner_control_version:
+            raise SelectionJobConflict("NO_CHANGE Owner control changed")
+        if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION or (
+            control.selection_spec_id != authority.selection_spec_id or control.selection_epoch_id != authority.selection_epoch_id
+            or control.control_version != authority.selection_control_version):
+            raise SelectionJobConflict("NO_CHANGE Selection control changed")
+        vacuum = await self.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,
+            selection_spec_id=authority.selection_spec_id,for_update=True)
+        if vacuum is not None:
+            raise SelectionJobConflict("NO_CHANGE cannot cross an open Vacuum")
+        current = await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+        now = await self.read_authority_clock_ms()
+        if current is not None and current.authority.selection_authority_id == authority.selection_authority_id:
+            if current.authority != authority:
+                raise SelectionJobConflict("NO_CHANGE idempotency identity differs")
+            return
+        if (None if current is None else current.projection_version) != expected_current_version:
+            raise SelectionJobConflict("NO_CHANGE current version changed")
+        sequence = 1
+        if current is not None:
+            if current.authority.blocks_new_entry or current.authority.expires_at_ms < authority.period.scheduled_effective_at_ms:
+                raise SelectionJobConflict("NO_CHANGE cannot recover an Authority gap")
+            if (current.authority.event_binding != authority.event_binding
+                or current.authority.comparison_universe_id != authority.comparison_universe_id
+                or current.authority.comparison_transition_revision != authority.comparison_transition_revision
+                or current.authority.selection_epoch_id != authority.selection_epoch_id
+                or current.authority.owner_control_version != authority.owner_control_version):
+                raise SelectionJobConflict("NO_CHANGE prior authority is not continuous")
+            if current.authority.period.feature_cutoff_at_ms > authority.period.feature_cutoff_at_ms:
+                raise SelectionJobConflict("NO_CHANGE period is stale")
+            if current.authority.period == authority.period:
+                sequence = current.authority.authority_sequence+1
+        if authority.authority_sequence != sequence:
+            raise SelectionJobConflict("NO_CHANGE sequence changed")
+        require_current_close_commit(authority.current_close_proof,committed_at_ms=now)
+        uid = authority.event_binding.universe_version_id
+        if uid is None:
+            raise ValueError("NO_CHANGE requires a current Universe")
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        ready = await universes.try_activate(UniverseActivationRequest(universe_version_id=uid,
+            attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+        if ready.status is not UniverseActivationStatus.ALREADY_ACTIVE:
+            raise SelectionJobConflict("NO_CHANGE readiness: "+str(ready.reason_code))
+        policies = (await self._connection.execute(sa.text(
+            "SELECT DISTINCT p.owner_policy_id,p.enabled,p.new_entry_submit_enabled FROM brc_owner_policy_current p "
+            "JOIN brc_runtime_scopes_current s ON s.owner_policy_id=p.owner_policy_id WHERE s.universe_version_id=:uid LIMIT 2"),{"uid":uid})).mappings().all()
+        if len(policies)!=1 or not policies[0]["enabled"] or not policies[0]["new_entry_submit_enabled"]:
+            raise SelectionJobConflict("NO_CHANGE Policy blocks ENTRY")
+        snapshot = await self.get_generic_snapshot(authority.selection_snapshot_id)
+        if snapshot.member_set_digest != authority.event_binding.member_set_digest or snapshot.selection_epoch_id != authority.selection_epoch_id:
+            raise SelectionJobConflict("NO_CHANGE Snapshot membership differs")
+        signals = PostgresSignalRepository(self._connection)
+        prior_universe = await universes.get_current(authority.event_binding.event_spec_id)
+        if prior_universe is None or prior_universe.universe_version_id != uid:
+            raise SelectionJobConflict("NO_CHANGE current Universe changed")
+        if await signals.selection_authority_was_interrupted(strategy_group_id=authority.strategy_group_id,
+            selection_spec_id=authority.selection_spec_id,owner_policy_id=policies[0]["owner_policy_id"],
+            after_ms=prior_universe.activated_at_ms if current is None else current.authority.created_at_ms,through_ms=now):
+            raise SelectionJobConflict("NO_CHANGE continuity was interrupted")
+        cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
+            exchange_instrument_ids=snapshot.selected_members,closed_at_ms=authority.current_close_proof.current_final_close_time_ms)
+        if cursors != authority.current_close_proof.observation_cursors:
+            raise SelectionJobConflict("NO_CHANGE cursor evidence changed")
+        await self.require_generic_close_proof(authority.current_close_proof)
+        if authority.comparison_universe_id is not None:
+            comparison = await self.get_comparison_universe_binding(authority.event_binding.event_spec_id,for_update=True)
+            if comparison is None or comparison.comparison_universe_id != authority.comparison_universe_id or comparison.comparison_transition_revision != authority.comparison_transition_revision:
+                raise SelectionJobConflict("NO_CHANGE comparison changed")
+        await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+        await self._connection.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
+            **authority.event_binding.model_dump(mode="json")))
+        if current is None:
+            updated = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=authority.selection_spec_id,
+                selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=authority.created_at_ms).on_conflict_do_nothing())
+        else:
+            updated = await self._connection.execute(sa.update(selection_authority_current).where(
+                selection_authority_current.c.selection_spec_id==authority.selection_spec_id,
+                selection_authority_current.c.projection_version==expected_current_version).values(selection_authority_id=authority.selection_authority_id,
+                    projection_version=current.projection_version+1,updated_at_ms=authority.created_at_ms))
+        if updated.rowcount!=1:
+            raise SelectionJobConflict("NO_CHANGE current CAS failed")
+        require_current_close_commit(authority.current_close_proof,committed_at_ms=await self.read_authority_clock_ms())
 
     async def commit_generic_valid_empty(self, authority: GenericSelectionAuthority, *,
         entry_vacuum_id: str, expected_vacuum_version: int, expected_current_version: int | None) -> None:

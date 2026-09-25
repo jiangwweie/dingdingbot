@@ -144,8 +144,8 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("normal_parent", [False,True])
-async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str, normal_parent: bool) -> None:
+@pytest.mark.parametrize("normal_parent", [False,True,"commit"])
+async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str, normal_parent: bool | str) -> None:
     source = inputs(group)
     async with PostgresKernelUnitOfWork(database) as uow:
         now = await uow.instrument_selection.read_authority_clock_ms()
@@ -210,15 +210,61 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                             **authority.event_binding.model_dump(mode="json")))
                         await conn.execute(sa.text("DELETE FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
                         await conn.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
-                await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
-                await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
-                    **authority.event_binding.model_dump(mode="json")))
+                if normal_parent != "commit":
+                    await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+                    await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
+                        **authority.event_binding.model_dump(mode="json")))
+            if normal_parent == "commit":
+                await enable_epoch(database,group)
+                authority = authority.model_copy(update={"selection_control_version":2})
+                async with database.begin() as conn:
+                    await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+                await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=proof.current_final_close_time_ms,
+                    valid_until_ms=proof.current_final_close_time_ms+HOUR)
+                if cid:
+                    template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+                    delta = proof.current_final_close_time_ms-template.trigger_candle_close_time_ms
+                    candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+                    cache = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=uid,
+                        strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=proof.current_final_close_time_ms,
+                        lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
+                    await uow.strategy_universes.save_comparative_projection(cache.model_copy(update={"comparison_transition_revision":1}))
+                with pytest.raises(SelectionJobConflict,match="current version"):
+                    await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=99)
+                with pytest.raises(SelectionJobConflict,match="Owner control"):
+                    await uow.instrument_selection.commit_generic_no_change(authority.model_copy(update={"owner_control_version":99}),expected_current_version=None)
+                # Test-only savepoint makes the final-clock rollback observable
+                # without releasing the outer proof's per-Episode locks.
+                assert uow._connection is not None
+                with pytest.raises(ValueError,match="boundary"):
+                    async with uow._connection.begin_nested():
+                        with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[
+                            proof.authority_granted_at_ms,proof.period.period_expires_at_ms])):
+                            await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert await uow._connection.scalar(sa.select(sa.func.count()).select_from(selection_session_authorities)) == 0
+                await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
+                await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
+                # Assert inside this transaction; it still owns the coverage locks.
+                current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                assert current is not None and current.authority == authority and current.projection_version == 1
+                scope_id = await uow._connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":uid})
+                scope = await uow.signals.get_runtime_scope(scope_id)
+                assert scope is not None
+                allowed = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+                    birth_selection_authority_id=None,observed_close_time_ms=proof.current_final_close_time_ms,
+                    now_ms=await uow.instrument_selection.read_authority_clock_ms(),allow_current_as_birth=True,lock_current=True)
+                assert allowed.allowed and allowed.selection_authority_id == authority.selection_authority_id
+                assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+                assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
             async with database.connect() as conn:
-                row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
-                bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
-                assert generic_authority_from_storage(dict(row),spec=source.spec,event_bindings=tuple(dict(b) for b in bindings)) == authority
+                if normal_parent != "commit":
+                    row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
+                    bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
+                    assert generic_authority_from_storage(dict(row),spec=source.spec,event_bindings=tuple(dict(b) for b in bindings)) == authority
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
-            if cid:
+            if cid and normal_parent != "commit":
                 async with PostgresKernelUnitOfWork(database) as read_uow:
                     comparison_source = await read_uow.strategy_universes.get_comparative_source(
                         event_spec_id=source.spec.event_spec_id,universe_version_id=uid)

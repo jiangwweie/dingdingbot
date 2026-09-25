@@ -1801,6 +1801,8 @@ class InstrumentSelectionRepository(Protocol):
     async def commit_generic_valid_empty(self, authority: GenericSelectionAuthority, *,
         entry_vacuum_id: str, expected_vacuum_version: int, expected_current_version: int | None) -> None: ...
 
+    async def commit_generic_no_change(self, authority: GenericSelectionAuthority, *, expected_current_version: int | None) -> None: ...
+
     async def open_generation_entry_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
