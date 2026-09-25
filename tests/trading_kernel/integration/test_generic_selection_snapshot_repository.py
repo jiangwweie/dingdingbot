@@ -141,7 +141,8 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("normal_parent", [False,True])
+async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str, normal_parent: bool) -> None:
     source = inputs(group)
     async with PostgresKernelUnitOfWork(database) as uow:
         now = await uow.instrument_selection.read_authority_clock_ms()
@@ -151,9 +152,22 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
     source = source.model_copy(update={"feature_cutoff_at_ms":cutoff,"decision_at_ms":source.decision_at_ms+delta,
         "source_observed_at_ms":source.source_observed_at_ms+delta,"committed_at_ms":source.committed_at_ms+delta,
         "member_windows":tuple(shift_window(w,delta) for w in source.member_windows)})
+    if normal_parent:
+        chosen = compute_generic_selection(source).selected_members[0]
+        source = source.model_copy(update={"member_windows":tuple(qualify_window(w,w.exchange_instrument_id==chosen) for w in source.member_windows)})
     snapshot = compute_generic_selection(source)
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+        if normal_parent:
+            installed = await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=source.spec.event_spec_id,
+                runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",exchange_instrument_ids=snapshot.selected_members,installed_at_ms=cutoff))
+            assert installed.universe is not None
+    if normal_parent:
+        async with database.begin() as conn:
+            uid = installed.universe.universe_version_id
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":cutoff})
+            await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,warm_closed_bar_time_ms=:now,warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:expiry WHERE universe_version_id=:uid"),{"uid":uid,"now":cutoff,"digest":installed.universe.semantic_digest,"expiry":snapshot.expires_at_ms})
+            await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),{"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":cutoff})
     with pytest.raises(ValueError,match="latest-close"):
         async with PostgresKernelUnitOfWork(database) as uow:
             start = now//HOUR*HOUR+8_000
@@ -166,6 +180,41 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
         assert tuple(c.exchange_instrument_id for c in proof.observation_cursors) == snapshot.selected_members
         freshness = build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,
             source_member_set_digest=snapshot.member_set_digest,period=proof.period)
+        if normal_parent:
+            cid = "comparison:"+canonical_digest({"exchange_instrument_ids":source.spec.candidate_ids})[7:] if group in {"MPG-001","MI-001"} else None
+            authority = GenericSelectionAuthority(selection_authority_id="authority:normal:"+group,
+                selection_spec_id=source.spec.selection_spec_id,strategy_group_id=group,selection_epoch_id=snapshot.selection_epoch_id,
+                selection_snapshot_id=snapshot.selection_snapshot_id,authority_sequence=1,owner_control_version=1,selection_control_version=1,
+                period=proof.period,authority_outcome="NO_CHANGE",event_binding=AuthorityEventBinding(event_spec_id=source.spec.event_spec_id,
+                    position_side=source.spec.position_side,grant_state="ACTIVE",universe_version_id=installed.universe.universe_version_id,member_set_digest=snapshot.member_set_digest),
+                current_close_proof=proof,membership_freshness=freshness,comparison_universe_id=cid,
+                comparison_transition_revision=1 if cid else None,effective_from_ms=proof.authority_granted_at_ms,created_at_ms=proof.authority_granted_at_ms)
+            # Storage contract only; no current pointer or trading activation.
+            async with database.begin() as conn:
+                if cid:
+                    await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,1,NULL)"),{"event":source.spec.event_spec_id,"cid":cid})
+                for changes in ({"current_close_proof":{}}, {"membership_freshness":{}},
+                                {"first_eligible_close_time_ms":proof.current_final_close_time_ms-HOUR},
+                                {"grant_proof_kind":"AUDITED_AUTHORITY_GAP"}):
+                    with pytest.raises(sa.exc.DBAPIError):
+                        async with conn.begin_nested():
+                            await conn.execute(sa.insert(selection_session_authorities).values(**{
+                                **generic_authority_storage_values(authority),**changes}))
+                with pytest.raises(sa.exc.DBAPIError,match="Generic NO_CHANGE requires exact current active membership"):
+                    async with conn.begin_nested():
+                        await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+                        await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
+                            **authority.event_binding.model_dump(mode="json")))
+                        await conn.execute(sa.text("DELETE FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
+                        await conn.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
+                await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+                await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
+                    **authority.event_binding.model_dump(mode="json")))
+            async with database.connect() as conn:
+                row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
+                bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
+                assert generic_authority_from_storage(dict(row),spec=source.spec,event_bindings=tuple(dict(b) for b in bindings)) == authority
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
         async with database.connect() as conn:
             assert await conn.scalar(sa.text("SELECT brc_generic_freshness_matches(:sid,CAST(:fresh AS jsonb))"),
                 {"sid":snapshot.selection_snapshot_id,"fresh":freshness.model_dump_json()}) is True
@@ -315,7 +364,7 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
         current_close_proof=None,membership_freshness=None,effective_from_ms=snapshot.effective_from_ms+1,created_at_ms=snapshot.effective_from_ms+1)
     for changes, reason in (({"current_close_proof":{}},"Generic VALID_EMPTY"),
                             ({"expires_at_ms":authority.expires_at_ms+HOUR},"Generic Authority period"),
-                            ({"authority_outcome":"NO_CHANGE"},"Generic trading Authority proof contract"),
+                            ({"authority_outcome":"NO_CHANGE"},"Generic normal Authority proof"),
                             ({"selection_epoch_id":"wrong-epoch"},"Generic VALID_EMPTY")):
         with pytest.raises(sa.exc.DBAPIError,match=reason):
             async with database.begin() as conn:

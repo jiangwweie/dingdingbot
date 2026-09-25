@@ -55,6 +55,29 @@ def upgrade() -> None:
         "WHERE lifecycle_state IN ('warming','staged','active')"))
     _authority_snapshot_epoch()
     _generic_close_proof_function()
+    _generic_normal_binding_guard()
+
+
+def _generic_normal_binding_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_generic_normal_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE a brc_selection_session_authorities%ROWTYPE; matches integer;
+      BEGIN
+        SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
+        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome<>'NO_CHANGE' THEN RETURN NULL; END IF;
+        SELECT count(*) INTO matches FROM brc_selection_authority_event_bindings b
+          JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id
+          JOIN brc_strategy_universe_current c ON c.event_spec_id=b.event_spec_id AND c.universe_version_id=b.universe_version_id
+          WHERE b.selection_authority_id=a.selection_authority_id AND b.grant_state='ACTIVE' AND u.lifecycle_state='active'
+            AND c.lifecycle_state='active' AND c.semantic_digest=u.semantic_digest
+            AND b.member_set_digest=a.membership_freshness->>'source_member_set_digest';
+        IF matches<>1 THEN RAISE EXCEPTION 'Generic NO_CHANGE requires exact current active membership'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    for table in ("brc_selection_session_authorities", "brc_selection_authority_event_bindings"):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_generic_normal AFTER INSERT ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_generic_normal_binding()"))
 
 
 def _generic_close_proof_function() -> None:
@@ -151,6 +174,22 @@ def _authority_snapshot_epoch() -> None:
         "(selection_epoch_id<>'sor-v0' AND authority_sequence>0 AND owner_control_version>0 "
         "AND period_anchor_ms>0 AND decision_boundary_ms=period_anchor_ms+3600000 "
         "AND effective_from_ms>=decision_boundary_ms AND created_at_ms=effective_from_ms AND created_at_ms<expires_at_ms)")
+    constraints = {c["name"]:c["sqltext"] for c in sa.inspect(op.get_bind()).get_check_constraints(table)}
+    for suffix in ("proof_kind_valid","proof_shape","grant_shape"):
+        name = "ck_brc_selection_session_authorities_"+suffix
+        op.drop_constraint(name,table,type_="check")
+        op.create_check_constraint(name,table,f"selection_epoch_id<>'sor-v0' OR COALESCE(({constraints[name]}),false)")
+    op.create_check_constraint("ck_brc_generic_normal_grant_shape",table,
+        "selection_epoch_id='sor-v0' OR COALESCE(( "
+        "(authority_outcome='VALID_EMPTY' AND first_eligible_close_time_ms IS NULL AND grant_proof_kind IS NULL "
+        "AND grant_predecessor_authority_id IS NULL) OR "
+        "(authority_outcome='NO_CHANGE' AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
+        "AND materialization_generation_id IS NULL AND authority_gap_audit_id IS NULL AND continued_from_selection_authority_id IS NULL "
+        "AND continuity_source_kind='NONE' AND grant_predecessor_authority_id IS NULL "
+        "AND grant_proof_kind='PRECOMMITTED_SELECTION_CURRENT_CLOSE' AND first_eligible_close_time_ms IS NOT NULL "
+        "AND first_eligible_close_time_ms % 3600000=0 AND first_eligible_close_time_ms=created_at_ms/3600000*3600000 "
+        "AND first_eligible_close_time_ms>=decision_boundary_ms AND first_eligible_close_time_ms<created_at_ms "
+        "AND current_close_proof IS NOT NULL AND membership_freshness IS NOT NULL)),false)")
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_authority_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE kind text; cadence integer; snapshot brc_instrument_selection_snapshots%ROWTYPE;
@@ -166,7 +205,7 @@ def _authority_snapshot_epoch() -> None:
             RAISE EXCEPTION 'Generic Authority requires explicit epoch';
           END IF;
           IF kind='generic_dynamic_v1' THEN
-            IF NEW.authority_outcome<>'VALID_EMPTY' THEN
+            IF NEW.authority_outcome NOT IN ('VALID_EMPTY','NO_CHANGE') THEN
               RAISE EXCEPTION 'Generic trading Authority proof contract is not installed';
             END IF;
             SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
@@ -180,6 +219,26 @@ def _authority_snapshot_epoch() -> None:
                   OR snapshot.selected_count<>0 OR snapshot.period_anchor_ms<>NEW.period_anchor_ms OR snapshot.created_at_ms>NEW.created_at_ms
                   OR NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL THEN
                 RAISE EXCEPTION 'Generic VALID_EMPTY requires exact zero-member Snapshot and no trading proof';
+              END IF;
+            ELSE
+              SELECT * INTO snapshot FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.selection_snapshot_id;
+              IF NOT FOUND OR snapshot.selection_spec_id<>NEW.selection_spec_id OR snapshot.selection_epoch_id<>NEW.selection_epoch_id
+                  OR snapshot.period_anchor_ms<>NEW.period_anchor_ms
+                  OR NOT brc_generic_close_proof_matches(NEW.selection_snapshot_id,NEW.current_close_proof,NEW.created_at_ms)
+                  OR NOT brc_generic_freshness_matches(NEW.selection_snapshot_id,NEW.membership_freshness) THEN
+                RAISE EXCEPTION 'Generic normal Authority proof differs from Snapshot';
+              END IF;
+              IF snapshot.strategy_group_id IN ('MPG-001','MI-001') THEN
+                IF NOT EXISTS (SELECT 1 FROM brc_comparison_binding_current b
+                    JOIN brc_comparison_universe_definitions d USING(comparison_universe_id)
+                    JOIN brc_instrument_selection_spec_events e ON e.event_spec_id=b.event_spec_id
+                    WHERE e.selection_spec_id=NEW.selection_spec_id AND b.comparison_universe_id=NEW.comparison_universe_id
+                    AND b.comparison_transition_revision=NEW.comparison_transition_revision
+                    AND b.comparison_transition_revision>0 AND b.source_static_universe_version_id IS NULL AND d.member_count=24) THEN
+                  RAISE EXCEPTION 'Generic normal Authority comparison differs';
+                END IF;
+              ELSIF NEW.comparison_universe_id IS NOT NULL OR NEW.comparison_transition_revision IS NOT NULL THEN
+                RAISE EXCEPTION 'Generic non-comparative Authority forbids comparison';
               END IF;
             END IF;
           END IF;

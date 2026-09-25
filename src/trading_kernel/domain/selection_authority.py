@@ -877,6 +877,8 @@ class GenericSelectionAuthority(BaseModel):
             return self
         if self.event_binding.grant_state is not AuthorityEventGrantState.ACTIVE:
             raise ValueError("normal Generic Authority requires ACTIVE Event")
+        if self.authority_outcome == "NO_CHANGE" and self.materialization_generation_id is not None:
+            raise ValueError("NO_CHANGE forbids a materialization Generation")
         if self.authority_outcome == "ACTIVE_NEW" and (
             self.materialization_generation_id is None or not self.materialization_generation_id.strip()
             or len(self.materialization_generation_id)>160

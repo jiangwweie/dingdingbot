@@ -66,6 +66,7 @@ def test_generic_authority_binds_exact_event_period_and_precommitted_close(group
             GenericSelectionAuthority.model_validate({**authority.model_dump(),
                 "current_close_proof":{**proof.model_dump(),"observation_cursors":cursors}})
     for changes in ({"selection_snapshot_id":"snapshot:other"}, {"effective_from_ms":grant+1},
+                    {"authority_outcome":"NO_CHANGE"},
                     {"current_close_proof":None}, {"materialization_generation_id":None},
                     {"authority_outcome":"FALLBACK_PREVIOUS"},
                     {"membership_freshness":authority.membership_freshness.model_copy(update={"source_snapshot_id":"snapshot:old"})},
