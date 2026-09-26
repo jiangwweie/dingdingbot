@@ -64,7 +64,7 @@ def _generic_normal_binding_guard() -> None:
       DECLARE a brc_selection_session_authorities%ROWTYPE; matches integer;
       BEGIN
         SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
-        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome<>'NO_CHANGE' THEN RETURN NULL; END IF;
+        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome NOT IN ('NO_CHANGE','ACTIVE_NEW') THEN RETURN NULL; END IF;
         SELECT count(*) INTO matches FROM brc_selection_authority_event_bindings b
           JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id
           JOIN brc_strategy_universe_current c ON c.event_spec_id=b.event_spec_id AND c.universe_version_id=b.universe_version_id
@@ -72,6 +72,35 @@ def _generic_normal_binding_guard() -> None:
             AND c.lifecycle_state='active' AND c.semantic_digest=u.semantic_digest
             AND b.member_set_digest=a.membership_freshness->>'source_member_set_digest';
         IF matches<>1 THEN RAISE EXCEPTION 'Generic NO_CHANGE requires exact current active membership'; END IF;
+        IF a.comparison_universe_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_comparison_binding_current b JOIN brc_instrument_selection_spec_events e USING(event_spec_id)
+          WHERE e.selection_spec_id=a.selection_spec_id AND b.comparison_universe_id=a.comparison_universe_id
+            AND b.comparison_transition_revision=a.comparison_transition_revision) THEN
+          RAISE EXCEPTION 'Generic normal Authority comparison changed before commit';
+        END IF;
+        IF a.authority_outcome='ACTIVE_NEW' THEN
+          SELECT count(*) INTO matches FROM brc_strategy_universe_materialization_generations g
+            JOIN brc_strategy_universe_versions u ON u.materialization_generation_id=g.materialization_generation_id
+            JOIN brc_selection_authority_event_bindings b ON b.selection_authority_id=a.selection_authority_id AND b.universe_version_id=u.universe_version_id
+            JOIN brc_strategy_entry_vacuums_current v ON v.source_generation_id=g.materialization_generation_id
+            JOIN brc_selection_authority_current c ON c.selection_spec_id=a.selection_spec_id AND c.selection_authority_id=a.selection_authority_id
+            WHERE g.materialization_generation_id=a.materialization_generation_id AND g.lifecycle_state='ACTIVE'
+              AND g.selection_spec_id=a.selection_spec_id AND g.selection_snapshot_id=a.selection_snapshot_id
+              AND g.selection_epoch_id=a.selection_epoch_id AND g.selection_control_version=a.selection_control_version
+              AND g.activated_at_ms=a.effective_from_ms AND g.terminal_at_ms=a.effective_from_ms
+              AND u.lifecycle_state='active' AND u.activated_at_ms=a.effective_from_ms
+              AND v.state='RESOLVED_ACTIVE' AND v.resolved_at_ms=a.effective_from_ms
+              AND v.selection_spec_id=a.selection_spec_id AND v.strategy_group_id=g.strategy_group_id AND v.period_anchor_ms=a.period_anchor_ms
+              AND g.fenced_at_ms=v.fenced_at_ms AND g.fenced_at_ms IS NOT NULL
+              AND v.drained_at_ms IS NOT NULL AND v.drained_at_ms<=a.effective_from_ms;
+          IF matches<>1 THEN RAISE EXCEPTION 'Generic ACTIVE_NEW requires atomic Generation Vacuum and current activation'; END IF;
+          IF EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines b
+            JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id
+            WHERE b.materialization_generation_id=a.materialization_generation_id AND b.grant_state='ACTIVE'
+              AND u.lifecycle_state<>'retired') THEN
+            RAISE EXCEPTION 'Generic ACTIVE_NEW previous baseline must be retired atomically';
+          END IF;
+        END IF;
         RETURN NULL;
       END; $$
     """))
@@ -175,7 +204,7 @@ def _authority_snapshot_epoch() -> None:
         "AND period_anchor_ms>0 AND decision_boundary_ms=period_anchor_ms+3600000 "
         "AND effective_from_ms>=decision_boundary_ms AND created_at_ms=effective_from_ms AND created_at_ms<expires_at_ms)")
     constraints = {c["name"]:c["sqltext"] for c in sa.inspect(op.get_bind()).get_check_constraints(table)}
-    for suffix in ("proof_kind_valid","proof_shape","grant_shape"):
+    for suffix in ("proof_kind_valid","proof_shape","grant_shape","active_new_shape"):
         name = "ck_brc_selection_session_authorities_"+suffix
         op.drop_constraint(name,table,type_="check")
         op.create_check_constraint(name,table,f"selection_epoch_id<>'sor-v0' OR COALESCE(({constraints[name]}),false)")
@@ -183,8 +212,10 @@ def _authority_snapshot_epoch() -> None:
         "selection_epoch_id='sor-v0' OR COALESCE(( "
         "(authority_outcome='VALID_EMPTY' AND first_eligible_close_time_ms IS NULL AND grant_proof_kind IS NULL "
         "AND grant_predecessor_authority_id IS NULL) OR "
-        "(authority_outcome='NO_CHANGE' AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
-        "AND materialization_generation_id IS NULL AND authority_gap_audit_id IS NULL AND continued_from_selection_authority_id IS NULL "
+        "(authority_outcome IN ('NO_CHANGE','ACTIVE_NEW') AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
+        "AND ((authority_outcome='NO_CHANGE' AND materialization_generation_id IS NULL) OR "
+        "(authority_outcome='ACTIVE_NEW' AND materialization_generation_id IS NOT NULL)) "
+        "AND authority_gap_audit_id IS NULL AND continued_from_selection_authority_id IS NULL "
         "AND continuity_source_kind='NONE' AND grant_predecessor_authority_id IS NULL "
         "AND grant_proof_kind='PRECOMMITTED_SELECTION_CURRENT_CLOSE' AND first_eligible_close_time_ms IS NOT NULL "
         "AND first_eligible_close_time_ms % 3600000=0 AND first_eligible_close_time_ms=created_at_ms/3600000*3600000 "
@@ -205,7 +236,7 @@ def _authority_snapshot_epoch() -> None:
             RAISE EXCEPTION 'Generic Authority requires explicit epoch';
           END IF;
           IF kind='generic_dynamic_v1' THEN
-            IF NEW.authority_outcome NOT IN ('VALID_EMPTY','NO_CHANGE') THEN
+            IF NEW.authority_outcome NOT IN ('VALID_EMPTY','NO_CHANGE','ACTIVE_NEW') THEN
               RAISE EXCEPTION 'Generic trading Authority proof contract is not installed';
             END IF;
             SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;

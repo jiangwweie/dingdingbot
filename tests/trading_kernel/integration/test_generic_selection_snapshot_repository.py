@@ -53,6 +53,7 @@ from src.trading_kernel.application.run_instrument_selection import (
 )
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
     build_dynamic_membership_freshness,
     build_generic_selection_period,
 )
@@ -1395,6 +1396,7 @@ async def _assert_generic_target_stages(database, source, generation, uid):
     async with PostgresKernelUnitOfWork(database) as uow:
         staged = await advance_strategy_universe(uow, request)
     assert staged.status == UniverseActivationStatus.STAGED
+    await _assert_generic_active_new_storage(database,source,generation,uid,close+30_004)
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await advance_strategy_universe(uow, request) == staged
         lease_expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+HOUR//2+11}))
@@ -1422,6 +1424,63 @@ async def _assert_generic_target_stages(database, source, generation, uid):
     async with PostgresKernelUnitOfWork(database) as uow:
         stale = await advance_strategy_universe(uow, request)
     assert stale.reason_code == "DYNAMIC_GENERATION_CONTROL_CHANGED"
+
+
+async def _assert_generic_active_new_storage(database, source, generation, uid, now):
+    from src.trading_kernel.infrastructure.pg_signal_repository import (
+        PostgresSignalRepository,
+    )
+    # Schema transaction probe, rolled back intentionally so other staging
+    # negative tests continue on the original state. Not runtime activation.
+    async with database.connect() as conn:
+        transaction = await conn.begin()
+        try:
+            repository = PostgresInstrumentSelectionRepository(conn)
+            snapshot = await repository.get_generic_snapshot(generation.selection_snapshot_id)
+            period = build_generic_selection_period(feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms,cadence_hours=source.spec.cadence_hours)
+            cursors = await PostgresSignalRepository(conn).lock_generic_close_coverage(event_spec_id=source.spec.event_spec_id,
+                exchange_instrument_ids=snapshot.selected_members,closed_at_ms=now//HOUR*HOUR)
+            proof = CurrentFinalCloseGrantProof(selection_snapshot_id=snapshot.selection_snapshot_id,selection_committed_at_ms=snapshot.committed_at_ms,
+                source_snapshot_cutoff_at_ms=snapshot.feature_cutoff_at_ms,period=period,current_final_close_time_ms=now//HOUR*HOUR,
+                authority_granted_at_ms=now,observation_cursors=cursors)
+            previous = generation.previous_events[0].universe_version_id
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='retired',retired_at_ms=:now WHERE universe_version_id=:uid"),{"uid":previous,"now":now})
+            await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='retired',entry_enabled=false,observation_enabled=false WHERE universe_version_id=:uid"),{"uid":previous})
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":now})
+            await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,observation_enabled=true WHERE universe_version_id=:uid"),{"uid":uid})
+            digest = await conn.scalar(sa.text("SELECT semantic_digest FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid})
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_current SET universe_version_id=:uid,semantic_digest=:digest,activation_generation=activation_generation+1,activated_at_ms=:now WHERE event_spec_id=:event"),{"uid":uid,"digest":digest,"now":now,"event":source.spec.event_spec_id})
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET lifecycle_state='ACTIVE',activated_at_ms=:now,terminal_at_ms=:now WHERE materialization_generation_id=:gid"),{"gid":generation.materialization_generation_id,"now":now})
+            await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='RESOLVED_ACTIVE',resolved_at_ms=:now WHERE source_generation_id=:gid"),{"gid":generation.materialization_generation_id,"now":now})
+            cid = None
+            revision = None
+            if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
+                cid = "comparison:"+canonical_digest({"exchange_instrument_ids":source.spec.candidate_ids})[7:]
+                revision = await conn.scalar(sa.text("UPDATE brc_comparison_binding_current SET comparison_universe_id=:cid,comparison_transition_revision=comparison_transition_revision+1,source_static_universe_version_id=NULL WHERE event_spec_id=:event RETURNING comparison_transition_revision"),{"cid":cid,"event":source.spec.event_spec_id})
+            authority = GenericSelectionAuthority(selection_authority_id="authority:active:"+source.spec.strategy_group_id,
+                selection_spec_id=source.spec.selection_spec_id,strategy_group_id=source.spec.strategy_group_id,selection_epoch_id=snapshot.selection_epoch_id,
+                selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation.materialization_generation_id,
+                authority_sequence=1,owner_control_version=1,selection_control_version=generation.selection_control_version,period=period,
+                authority_outcome="ACTIVE_NEW",event_binding=AuthorityEventBinding(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
+                    grant_state="ACTIVE",universe_version_id=uid,member_set_digest=snapshot.member_set_digest),current_close_proof=proof,
+                membership_freshness=build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,source_member_set_digest=snapshot.member_set_digest,period=period),
+                comparison_universe_id=cid,comparison_transition_revision=revision,effective_from_ms=now,created_at_ms=now)
+            await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+            await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+            await conn.execute(sa.text("INSERT INTO brc_selection_authority_current VALUES(:spec,:aid,1,:now)"),{"spec":source.spec.selection_spec_id,"aid":authority.selection_authority_id,"now":now})
+            for broken in (
+                "UPDATE brc_strategy_entry_vacuums_current SET state='RECONFIGURING',resolved_at_ms=NULL WHERE source_generation_id=:gid",
+                "UPDATE brc_strategy_universe_materialization_generations SET activated_at_ms=activated_at_ms+1 WHERE materialization_generation_id=:gid",
+                "UPDATE brc_strategy_universe_materialization_generations SET fenced_at_ms=fenced_at_ms+1 WHERE materialization_generation_id=:gid",
+                "DELETE FROM brc_selection_authority_current WHERE selection_spec_id=:spec",
+            ):
+                with pytest.raises(sa.exc.DBAPIError,match="Generic ACTIVE_NEW requires atomic"):
+                    async with conn.begin_nested():
+                        await conn.execute(sa.text(broken),{"gid":generation.materialization_generation_id,"spec":source.spec.selection_spec_id})
+                        await conn.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
+            await conn.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
+        finally:
+            await transaction.rollback()
 
 
 @pytest.mark.asyncio
