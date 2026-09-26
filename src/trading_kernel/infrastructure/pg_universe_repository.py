@@ -925,13 +925,8 @@ class PostgresStrategyUniverseRepository:
             and authority.activation_authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version + int(first_activation)!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
             raise UniverseInstallConflict("GENERIC_SELECTION_CONTROL_CHANGED")
-        if first_activation:
-            authorization = (await self._connection.execute(sa.text("SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
-                {"id":authority.activation_authorization_id})).mappings().one_or_none()
-            expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
-                "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
-            if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>authority.created_at_ms:
-                raise UniverseInstallConflict("GENERIC_ACTIVATION_AUTHORIZATION_CHANGED")
+        if first_activation and not await selection.generic_activation_authorization_matches(authority):
+            raise UniverseInstallConflict("GENERIC_ACTIVATION_AUTHORIZATION_CHANGED")
         await self._lock_installs()
         generation = await selection.get_generic_materialization_generation(str(request.materialization_generation_id),for_update=True)
         target = (await self._connection.execute(sa.select(strategy_universe_versions).where(

@@ -69,6 +69,8 @@ def _generic_normal_binding_guard() -> None:
           SELECT 1 FROM brc_owner_authorizations o
             JOIN brc_instrument_selection_specs s ON s.selection_spec_id=a.selection_spec_id
             JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=s.strategy_group_id
+            JOIN brc_selection_authority_current p ON p.selection_spec_id=a.selection_spec_id
+              AND p.selection_authority_id=a.selection_authority_id
           WHERE o.authorization_id=a.activation_authorization_id AND o.purpose='selection_mode_change'
             AND o.authentication_strength='totp_step_up' AND o.authorized_at_ms<=a.created_at_ms
             AND o.target_scope=jsonb_build_object('strategy_group_id',s.strategy_group_id,
@@ -195,7 +197,7 @@ def _authority_snapshot_epoch() -> None:
     op.create_foreign_key("fk_brc_authority_activation_owner", table, "brc_owner_authorizations", ["activation_authorization_id"], ["authorization_id"])
     op.create_unique_constraint("uq_brc_authority_activation_owner", table, ["activation_authorization_id"])
     op.create_check_constraint("ck_brc_authority_activation_shape", table,
-        "activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','VALID_EMPTY'))")
+        "activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','VALID_EMPTY'))")
     op.add_column(table, sa.Column("current_close_proof", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))

@@ -361,6 +361,14 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+首次NO_CHANGE验证收尾：Generic repository + SOR materialization + Generic migration组合189 passed；最后补current指针约束后覆盖三个首次结果/normal proof/MPG-MI comparison-only的专项32 passed。Unit/Architecture1213 passed，全源码Mypy、相关Ruff/diff及文档authority25 passed。组合在最后一处约束修订前启动，最终修订以32项受影响路径复验，不冒充完整exact-R4；计数重叠不相加，生产未修改。
+
+首次NO_CHANGE约束补强：额外RED证明同事务删掉Authority current指针后仍可提交首次mode转换；共享首次激活deferred guard现要求exact current pointer与Authority一起存在。该约束同时保护ACTIVE_NEW/VALID_EMPTY，不靠应用层顺序掩盖半套提交。未增加新Authority表或第二条mode写入链。
+
+首次NO_CHANGE增量（基于`78eecc45`）：正常Snapshot Coordinator不再仅因Static pending拒绝同输入；仍先验证exact pending period/epoch、实际tradable/comparison输入不变、current认证、Owner/Policy及完整DB current-close proof。首次NO_CHANGE在原事务冻结Owner授权引用、切Dynamic/清pending并写递增后Control版本的Authority/current，不创建Generation/Vacuum。三个首次outcome复用同一PG Owner proof核验函数及deferred授权/mode约束；旧SOR不携带Generic授权字段。CPM/BRF2首次同名单RED已复现并修复；final-clock跨界整体回滚且pending Control完全不变，遗漏mode写入被PG拒绝，缺少pending授权引用拒绝。成功commit后dispose连接池再读证明模式/Authority持久化，exact ENTRY resolver允许该grant。Static scope和Owner proof仍为显式前置，不是Owner API自然链验收。
+
+当前定向`prepare_generic_proof / empty_snapshot_coordinator / commits_and_restarts`组合30 passed；MPG/MI首次同名单但比较集合变化另加正式materialization回归，不把它们算成NO_CHANGE。后续仍须完成首次失败Static恢复、Generic恢复/continuity/supersession、birth successor和自然交易链等整卡验收；不将三个成功outcome接通扩大为GS-08 DONE。
+
 首次空选择最终验证：Generic repository + SOR materialization + Generic migration完整组合185 passed；Unit/Architecture1213 passed，追加授权ID/semantic-digest篡改与非法ID断言后normal Authority专项20 passed；全源码Mypy、相关Ruff/diff、文档authority25 passed。上述数字有重叠，不相加，不替代整卡full-chain或完整R4；全部为Docker PG本地验证。
 
 首次VALID_EMPTY增量（基于`5bb131bc`）：四策略RED复现首次空Authority写入但mode仍Static，expiry后resolver错误返回static_baseline允许ENTRY。现Coordinator为首次空选择冻结pending Owner授权和递增后的Control版本；empty事务校验exact pending/epoch/period、Owner proof、空Snapshot、Vacuum intent/drain/current后，同事务切Dynamic、清pending、写EMPTY Authority/current及VALID_EMPTY Vacuum。原Static Universe不被伪造成新授予目标，不创建Generation或Command；expiry后继续拒绝ENTRY，不fallback。共享0008首次授权deferred约束扩展到VALID_EMPTY，nullable唯一授权FK仍复用原表，SOR shape不变。

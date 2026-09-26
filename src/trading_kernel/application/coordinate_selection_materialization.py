@@ -1172,8 +1172,7 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
             if generic_input_is_unchanged(snapshot,current_members=members.exchange_instrument_ids,comparison=comparison):
-                if control.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
-                    return _blocked("GENERIC_FIRST_ACTIVATION_REQUIRED")
+                first_activation = control.selection_mode is SelectionMode.STATIC_BASELINE
                 prior = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id,for_update=True)
                 now = await uow.instrument_selection.read_authority_clock_ms()
                 if prior is not None and prior.authority.selection_snapshot_id == snapshot.selection_snapshot_id and prior.authority.authority_outcome == "NO_CHANGE":
@@ -1192,7 +1191,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
                     selection_spec_id=snapshot.selection_spec_id,strategy_group_id=snapshot.strategy_group_id,
                     selection_epoch_id=snapshot.selection_epoch_id,selection_snapshot_id=snapshot.selection_snapshot_id,
-                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version,
+                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version+int(first_activation),
+                    activation_authorization_id=control.pending_authorization_id if first_activation else None,
                     period=proof.period,authority_outcome="NO_CHANGE",event_binding=AuthorityEventBinding(event_spec_id=spec.event_spec_id,
                         position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
                         member_set_digest=snapshot.member_set_digest),current_close_proof=proof,

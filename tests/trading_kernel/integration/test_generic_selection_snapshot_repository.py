@@ -146,9 +146,11 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("normal_parent", [False,True,"commit"])
+@pytest.mark.parametrize("group,normal_parent", [
+    (group, mode) for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001") for mode in (False, True, "commit")
+] + [("CPM-RO-001", "first"), ("BRF2-001", "first")])
 async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str, normal_parent: bool | str) -> None:
+    commit_parent = normal_parent in ("commit", "first")
     source = inputs(group)
     async with PostgresKernelUnitOfWork(database) as uow:
         now = await uow.instrument_selection.read_authority_clock_ms()
@@ -213,13 +215,14 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                             **authority.event_binding.model_dump(mode="json")))
                         await conn.execute(sa.text("DELETE FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
                         await conn.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
-                if normal_parent != "commit":
+                if not commit_parent:
                     await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
                     await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
                         **authority.event_binding.model_dump(mode="json")))
-            if normal_parent == "commit":
-                await enable_epoch(database,group)
-                authority = authority.model_copy(update={"selection_control_version":2})
+            if commit_parent:
+                await enable_epoch(database,group,pending=normal_parent=="first",pending_anchor_ms=cutoff)
+                authority = authority.model_copy(update={"selection_control_version":2+int(normal_parent=="first"),
+                    "activation_authorization_id":"owner:first:"+group if normal_parent=="first" else None})
                 async with database.begin() as conn:
                     await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
                 await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=proof.current_final_close_time_ms,
@@ -240,12 +243,22 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 # Test-only savepoint makes the final-clock rollback observable
                 # without releasing the outer proof's per-Episode locks.
                 assert uow._connection is not None
+                pending_control = await uow.instrument_selection.get_selection_control(group)
+                if normal_parent == "first":
+                    with pytest.raises(SelectionJobConflict,match="Selection control"):
+                        await uow.instrument_selection.commit_generic_no_change(authority.model_copy(update={"activation_authorization_id":None}),expected_current_version=None)
+                    with pytest.raises(sa.exc.DBAPIError,match="atomic authorized mode transition"):
+                        async with uow._connection.begin_nested():
+                            with patch.object(uow.instrument_selection,"activate_pending_selection_mode",new=AsyncMock(return_value=pending_control)):
+                                await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
+                                await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 with pytest.raises(ValueError,match="boundary"):
                     async with uow._connection.begin_nested():
                         with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[
                             proof.authority_granted_at_ms,proof.period.period_expires_at_ms])):
                             await uow.instrument_selection.commit_generic_no_change(authority,expected_current_version=None)
                 assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert await uow.instrument_selection.get_selection_control(group) == pending_control
                 assert await uow._connection.scalar(sa.select(sa.func.count()).select_from(selection_session_authorities)) == 0
                 @asynccontextmanager
                 async def borrowed_transaction():
@@ -258,6 +271,16 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
                 assert current is not None
                 authority = current.authority
+                control = await uow.instrument_selection.get_selection_control(group)
+                assert control is not None and control.selection_mode.value == "dynamic_selection"
+                assert control.control_version == 2 + int(normal_parent=="first")
+                assert authority.selection_control_version == control.control_version
+                assert authority.activation_authorization_id == ("owner:first:"+group if normal_parent=="first" else None)
+                if normal_parent == "first":
+                    with pytest.raises(sa.exc.DBAPIError,match="atomic authorized mode transition"):
+                        async with uow._connection.begin_nested():
+                            await uow._connection.execute(sa.text("DELETE FROM brc_selection_authority_current WHERE selection_spec_id=:spec"),{"spec":source.spec.selection_spec_id})
+                            await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 repeated = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,
                     request=coordinator_request,clock_ms=lambda:proof.authority_granted_at_ms+1)
                 assert repeated.selection_authority_id == coordinated.selection_authority_id
@@ -280,12 +303,12 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
                 assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
             async with database.connect() as conn:
-                if normal_parent != "commit":
+                if not commit_parent:
                     row = (await conn.execute(sa.select(selection_session_authorities))).mappings().one()
                     bindings = tuple((await conn.execute(sa.select(selection_authority_event_bindings))).mappings())
                     assert generic_authority_from_storage(dict(row),spec=source.spec,event_bindings=tuple(dict(b) for b in bindings)) == authority
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 0
-            if cid and normal_parent != "commit":
+            if cid and not commit_parent:
                 async with PostgresKernelUnitOfWork(database) as read_uow:
                     comparison_source = await read_uow.strategy_universes.get_comparative_source(
                         event_spec_id=source.spec.event_spec_id,universe_version_id=uid)
@@ -316,6 +339,18 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
             detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=proof.current_final_close_time_ms,
             exchange_instrument_id=snapshot.selected_members[0]).current
         await uow.signals.save_exposure_episode(state,expected_version=0)
+    if commit_parent:
+        await database.dispose()
+        async with PostgresKernelUnitOfWork(database) as restored:
+            persisted = await restored.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            control = await restored.instrument_selection.get_selection_control(group)
+            assert persisted is not None and persisted.authority == authority
+            assert control is not None and control.selection_mode.value == "dynamic_selection"
+            assert control.control_version == authority.selection_control_version
+            assert control.pending_selection_mode is None and control.pending_authorization_id is None
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuums_current")) == 0
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
             {"sid":snapshot.selection_snapshot_id,"proof":proof.model_dump_json(),"at":proof.authority_granted_at_ms}) is False
@@ -800,7 +835,7 @@ async def test_pg_decimal_representation_does_not_change_semantic_identity(datab
         assert loaded.semantic_digest == snapshot.semantic_digest
 
 
-async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1", *, pending=False) -> None:
+async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1", *, pending=False, pending_anchor_ms=CUTOFF) -> None:
     # Isolated repository prerequisite, not an Owner API/activation acceptance.
     async with database.begin() as conn:
         await conn.execute(sa.update(strategy_selection_control_current).where(
@@ -808,10 +843,10 @@ async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1"
         ).values(selection_mode="dynamic_selection", selection_epoch_id=epoch, control_version=2))
         if pending:
             await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
-                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":CUTOFF-1,
-                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":CUTOFF})})
+                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":pending_anchor_ms-1,
+                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":pending_anchor_ms})})
             await conn.execute(sa.update(strategy_selection_control_current).where(strategy_selection_control_current.c.strategy_group_id==group).values(
-                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=CUTOFF,pending_authorization_id="owner:first:"+group))
+                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=pending_anchor_ms,pending_authorization_id="owner:first:"+group))
 
 
 @pytest.mark.asyncio
@@ -1029,6 +1064,12 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
 @pytest.mark.parametrize("first_activation", [False, True])
 async def test_generic_activation_commits_and_restarts_through_real_uow(database: AsyncEngine, group: str, first_activation: bool) -> None:
     await _exercise_generic_generation(database, group, False, durable=True, first_activation=first_activation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
+async def test_first_activation_same_members_still_materializes_changed_comparison(database: AsyncEngine, group: str) -> None:
+    await _exercise_generic_generation(database, group, True, durable=True, first_activation=True)
 
 
 async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False):

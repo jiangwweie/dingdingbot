@@ -2837,6 +2837,15 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
+    async def generic_activation_authorization_matches(self, authority: GenericSelectionAuthority) -> bool:
+        """Exact immutable Owner proof shared by all first-activation outcomes."""
+        authorization = (await self._connection.execute(sa.text(
+            "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
+            {"id":authority.activation_authorization_id})).mappings().one_or_none()
+        expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
+            "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
+        return authorization is not None and authorization["purpose"]=="selection_mode_change" and authorization["authentication_strength"]=="totp_step_up" and authorization["target_scope"]==expected_scope and authorization["authorized_at_ms"]<=authority.created_at_ms
+
     async def commit_generic_no_change(self, authority: GenericSelectionAuthority, *, expected_current_version: int | None) -> None:
         from src.trading_kernel.application.advance_strategy_universe import (
             UniverseActivationOperation,
@@ -2857,10 +2866,17 @@ class PostgresInstrumentSelectionRepository:
         control = await self.get_selection_control(authority.strategy_group_id,for_update=True)
         if owner is None or owner["entry_state"] != "enabled" or owner["control_version"] != authority.owner_control_version:
             raise SelectionJobConflict("NO_CHANGE Owner control changed")
-        if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION or (
+        first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
+            control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_authorization_id == authority.activation_authorization_id
+            and authority.activation_authorization_id is not None)
+        if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or (
             control.selection_spec_id != authority.selection_spec_id or control.selection_epoch_id != authority.selection_epoch_id
-            or control.control_version != authority.selection_control_version):
+            or control.control_version+int(first_activation) != authority.selection_control_version):
             raise SelectionJobConflict("NO_CHANGE Selection control changed")
+        if first_activation and not await self.generic_activation_authorization_matches(authority):
+            raise SelectionJobConflict("NO_CHANGE activation authorization changed")
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,
             selection_spec_id=authority.selection_spec_id,for_update=True)
         if vacuum is not None:
@@ -2871,6 +2887,10 @@ class PostgresInstrumentSelectionRepository:
             if current.authority != authority:
                 raise SelectionJobConflict("NO_CHANGE idempotency identity differs")
             return
+        if authority.activation_authorization_id is not None and not first_activation:
+            raise SelectionJobConflict("NO_CHANGE activation pending required")
+        if first_activation and current is not None:
+            raise SelectionJobConflict("NO_CHANGE first activation Authority exists")
         if (None if current is None else current.projection_version) != expected_current_version:
             raise SelectionJobConflict("NO_CHANGE current version changed")
         sequence = 1
@@ -2923,6 +2943,10 @@ class PostgresInstrumentSelectionRepository:
             comparison = await self.get_comparison_universe_binding(authority.event_binding.event_spec_id,for_update=True)
             if comparison is None or comparison.comparison_universe_id != authority.comparison_universe_id or comparison.comparison_transition_revision != authority.comparison_transition_revision:
                 raise SelectionJobConflict("NO_CHANGE comparison changed")
+        if first_activation:
+            await self.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,
+                expected_control_version=control.control_version,expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,
+                activated_at_ms=authority.created_at_ms)
         await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
         await self._connection.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
             **authority.event_binding.model_dump(mode="json")))
@@ -2956,13 +2980,8 @@ class PostgresInstrumentSelectionRepository:
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version+int(first_activation) != authority.selection_control_version or not self._generic_control_allows(
             control,authority.selection_spec_id,authority.selection_epoch_id,authority.period.feature_cutoff_at_ms):
             raise SelectionJobConflict("Generic empty Selection control changed")
-        if first_activation:
-            authorization = (await self._connection.execute(sa.text("SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
-                {"id":authority.activation_authorization_id})).mappings().one_or_none()
-            expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
-                "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
-            if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>authority.created_at_ms:
-                raise SelectionJobConflict("Generic empty activation authorization changed")
+        if first_activation and not await self.generic_activation_authorization_matches(authority):
+            raise SelectionJobConflict("Generic empty activation authorization changed")
         snapshot = await self.get_generic_snapshot(authority.selection_snapshot_id)
         if snapshot.selected_members or snapshot.selection_epoch_id != authority.selection_epoch_id or (
             snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
