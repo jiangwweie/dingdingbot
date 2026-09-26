@@ -434,6 +434,8 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             assert preserved_cache["comparison_transition_revision"] == 0
             assert preserved_cache["projection_version"] == 1
             target_row = (await conn.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().one()
+            recovery_fields = {key:value for key,value in target_row.items() if key.startswith("authority_recovery_")}
+            assert len(recovery_fields) == 8 and all(value is None for value in recovery_fields.values())
             assert {key: target_row[key] for key in type(episode).model_fields} == episode.model_dump()
             assert target_row["comparison_transition_revision"] == 0
             assert target_row["comparison_armed_at_ms"] is None

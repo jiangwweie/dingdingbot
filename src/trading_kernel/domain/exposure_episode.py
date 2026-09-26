@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.strategy_registry import RegisteredStrategyContract
 
-EpisodeState = Literal["armed", "triggered", "comparison_rebase_required"]
+EpisodeState = Literal["armed", "triggered", "comparison_rebase_required", "authority_rebase_required"]
 
 
 class LockedObservationCursor(BaseModel):
@@ -22,6 +22,7 @@ class LockedObservationCursor(BaseModel):
     exchange_instrument_id: str
     episode_version: int = Field(ge=0)
     comparison_checkpoint_version: int = Field(ge=0)
+    authority_recovery_checkpoint_version: int = Field(default=0, ge=0)
     last_observed_at_ms: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
@@ -29,7 +30,7 @@ class LockedObservationCursor(BaseModel):
         if not self.episode_domain_key.strip() or not self.exchange_instrument_id.strip():
             raise ValueError("Observation cursor identities must be non-blank")
         if self.episode_version == 0:
-            if self.comparison_checkpoint_version != 0 or self.last_observed_at_ms is not None:
+            if self.comparison_checkpoint_version != 0 or self.authority_recovery_checkpoint_version != 0 or self.last_observed_at_ms is not None:
                 raise ValueError("absent Episode cannot carry a consumed cursor")
         elif self.last_observed_at_ms is None:
             raise ValueError("persisted Episode requires its observed close")
@@ -77,8 +78,8 @@ class ExposureEpisodeState(BaseModel):
                 raise ValueError("Episode trigger time must be positive")
         elif self.exposure_episode_id is not None or self.triggered_at_ms is not None:
             raise ValueError("armed Episode forbids active identity and trigger time")
-        if self.state == "comparison_rebase_required" and self.rearmed_at_ms is not None:
-            raise ValueError("comparison rebase cursor must not fabricate an arm")
+        if self.state in {"comparison_rebase_required", "authority_rebase_required"} and self.rearmed_at_ms is not None:
+            raise ValueError("rebase cursor must not fabricate an arm")
         return self
 
 
@@ -230,8 +231,8 @@ def advance_exposure_episode(
         position_side=contract.position_side,
     )
     if current is not None:
-        if current.state == "comparison_rebase_required" and detector_status is DetectorStatus.TRIGGERED:
-            raise ValueError("comparison rebase requires a valid NOT_TRIGGERED before an Episode")
+        if current.state in {"comparison_rebase_required", "authority_rebase_required"} and detector_status is DetectorStatus.TRIGGERED:
+            raise ValueError("rebase requires a valid NOT_TRIGGERED before an Episode")
         if (
             current.episode_domain_key != domain_key
             or current.event_spec_id != contract.event_spec_id

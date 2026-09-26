@@ -28,6 +28,9 @@ from src.trading_kernel.application.ports import (
     WarmReadiness,
 )
 from src.trading_kernel.domain.arbitration import EntryCandidate
+from src.trading_kernel.domain.authority_recovery_rebase import (
+    AuthorityRecoveryCheckpoint,
+)
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
@@ -253,14 +256,17 @@ class PostgresSignalRepository:
                 exchange_instrument_id=member,position_side=contract.position_side)
             episode = await self.lock_exposure_episode(key)
             checkpoint = await self.get_comparison_episode_checkpoint(key)
+            recovery = await self.get_authority_recovery_checkpoint(key)
             times = [x for x in (None if episode is None else episode.last_observed_at_ms,
-                None if checkpoint is None else checkpoint.last_observed_at_ms) if x is not None]
+                None if checkpoint is None else checkpoint.last_observed_at_ms,
+                None if recovery is None else recovery.last_observed_close_time_ms) if x is not None]
             last = max(times) if times else None
             if last is not None and last >= closed_at_ms:
                 raise RuntimeError("Generic grant close was already consumed")
             evidence.append(LockedObservationCursor(episode_domain_key=key,exchange_instrument_id=member,
                 episode_version=0 if episode is None else episode.projection_version,
                 comparison_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version,
+                authority_recovery_checkpoint_version=0 if recovery is None else recovery.projection_version,
                 last_observed_at_ms=last))
         return tuple(evidence)
 
@@ -298,6 +304,20 @@ class PostgresSignalRepository:
             )
         if result.rowcount != 1:
             raise RuntimeError("Exposure Episode authority changed")
+
+    async def get_authority_recovery_checkpoint(self, episode_domain_key: str) -> AuthorityRecoveryCheckpoint | None:
+        row = (await self._connection.execute(sa.select(exposure_episode_current).where(
+            exposure_episode_current.c.episode_domain_key == episode_domain_key))).mappings().one_or_none()
+        if row is None or row["authority_recovery_checkpoint_version"] is None:
+            return None
+        return AuthorityRecoveryCheckpoint(episode_domain_key=episode_domain_key,
+            recovery_id=row["authority_recovery_id"],recovery_revision=row["authority_recovery_revision"],
+            effective_from_ms=row["authority_recovery_effective_from_ms"],
+            first_eligible_close_time_ms=row["authority_recovery_first_eligible_close_time_ms"],
+            state="REBASE_REQUIRED" if row["authority_recovery_armed_at_ms"] is None else "ARMED",
+            armed_at_close_time_ms=row["authority_recovery_armed_at_ms"],
+            last_observed_close_time_ms=row["authority_recovery_last_observed_at_ms"],
+            last_detector_status=row["authority_recovery_last_detector_status"],projection_version=row["authority_recovery_checkpoint_version"])
 
     async def get_comparison_episode_checkpoint(self, episode_domain_key: str) -> ComparisonBindingEpisodeCheckpoint | None:
         row = (await self._connection.execute(sa.select(exposure_episode_current).where(

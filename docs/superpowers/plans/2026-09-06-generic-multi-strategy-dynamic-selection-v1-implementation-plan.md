@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery存储准备验证：Generic repository + SOR materialization + Generic migration组合193 passed；新增8字段NULL保全断言后Static source migration专项4 passed；追加伪造recovery cursor版本拒绝后proof专项14 passed。Unit/Architecture1225 passed，源码及verify_schema脚本Mypy（159 files）、相关Ruff/diff、文档authority25 passed。计数重叠不相加；使用Docker PG，未执行完整Full-chain/R4，生产未修改。
+
+Recovery持久化/读取准备（基于`0109d26c`）：未部署0008在原`brc_exposure_episode_current`增加8个nullable recovery字段（identity/revision、effective/first-close、armed/last-close/status、checkpoint version），没有新增Episode或恢复状态表。SQL约束与typed checkpoint一致，拒绝不完整字段、非未来first-close、无效status/version、trigger自证arming及非Generic Event；新的`authority_rebase_required`占位状态没有Episode ID和arm，原rising-edge reducer禁止从该状态直接TRIGGERED。typed readonly getter重连还原checkpoint。
+
+`LockedObservationCursor`及PG proof函数同时冻结recovery checkpoint version，并以普通Episode/comparison/recovery三个游标最大值判断已消费close。四策略存储探针证明：即使普通Episode游标落后，recovery已消费的close仍在仓储和SQL proof两层拒绝；仅移除fixture recovery字段时同一proof才可通过，排除其他条件误挡。新字段全部从0006/0007来源保全清单排除，旧Static迁移要求8字段全NULL。测试采用显式SQL存储前置，不冒充正式恢复写入；尚无runtime checkpoint写入口、CAS或Recovery Authority绑定，尚未完成Observation接线及恢复全链，正常/故障二分完整验收仍待后续。
+
 Recovery/Episode组合准备（基于`1aa3ce80`）：新增纯`advance_recovery_bound_exposure_episode`及frozen结果模型，将既有recovery checkpoint gate与正式rising-edge/comparison reducer组合，未复制Detector或Episode算法。四策略×无旧Episode/旧armed/旧triggered验证：首个未来TRIGGERED只抑制，未来NOT_TRIGGERED正式arm，再后续TRIGGERED创建唯一新Episode；重复close不推进、不重复Signal。新recovery revision不得继承旧arm，也不伪造Comparison revision；MPG/MI在recovery已armed后发生comparison变更，仍由原comparison barrier抑制。输入校验在抑制分支也拒绝错误scope、已消费close和无效Detector时间；typed组合结果不能伪造Signal或绕过comparison arming。
 
 该增量的checkpoint尚未落PG、未被正式Observation调用；下一步仍需原Episode表持久化/版本CAS、恢复Authority绑定及Observation原子保存，不能据此声称GS-08/09 recovery full-chain完成。当前定向recovery+原Episode29 passed，生产无改动。

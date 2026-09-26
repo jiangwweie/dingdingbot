@@ -175,8 +175,9 @@ def _generic_close_proof_function() -> None:
             'episode_domain_key',m.domain_key,'exchange_instrument_id',m.exchange_instrument_id,
             'episode_version',coalesce(e.projection_version,0),
             'comparison_checkpoint_version',coalesce(e.comparison_checkpoint_version,0),
-            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms)) ORDER BY m.exchange_instrument_id COLLATE "C"),
-            coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms)>=c),false)
+            'authority_recovery_checkpoint_version',coalesce(e.authority_recovery_checkpoint_version,0),
+            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)) ORDER BY m.exchange_instrument_id COLLATE "C"),
+            coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)>=c),false)
           INTO actual_count,cursors,consumed FROM selected m LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
         IF actual_count<>s.selected_count OR consumed THEN RETURN false; END IF;
         RETURN coalesce(proof=jsonb_build_object(
@@ -965,18 +966,45 @@ def _episode_provenance() -> None:
         sa.Column("comparison_last_observed_at_ms", sa.BigInteger(), nullable=True),
         sa.Column("comparison_last_detector_status", sa.String(32), nullable=True),
         sa.Column("comparison_checkpoint_version", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_id", ID, nullable=True),
+        sa.Column("authority_recovery_revision", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_effective_from_ms", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_first_eligible_close_time_ms", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_armed_at_ms", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_last_observed_at_ms", sa.BigInteger(), nullable=True),
+        sa.Column("authority_recovery_last_detector_status", sa.String(32), nullable=True),
+        sa.Column("authority_recovery_checkpoint_version", sa.BigInteger(), nullable=True),
     )
     for column in columns:
         op.add_column("brc_exposure_episode_current", column)
     op.drop_constraint("ck_brc_episode_state", "brc_exposure_episode_current", type_="check")
     op.drop_constraint("ck_brc_episode_state_shape", "brc_exposure_episode_current", type_="check")
     op.create_check_constraint("state_valid", "brc_exposure_episode_current",
-        "state IN ('armed', 'triggered', 'comparison_rebase_required')")
+        "state IN ('armed', 'triggered', 'comparison_rebase_required', 'authority_rebase_required')")
     op.create_check_constraint("state_shape_valid", "brc_exposure_episode_current",
         "(state = 'triggered' AND exposure_episode_id IS NOT NULL AND triggered_at_ms IS NOT NULL AND triggered_at_ms > 0) OR "
         "(state = 'armed' AND exposure_episode_id IS NULL AND triggered_at_ms IS NULL) OR "
         "(state = 'comparison_rebase_required' AND exposure_episode_id IS NULL AND triggered_at_ms IS NULL "
-        "AND rearmed_at_ms IS NULL AND comparison_checkpoint_version IS NOT NULL)")
+        "AND rearmed_at_ms IS NULL AND comparison_checkpoint_version IS NOT NULL) OR "
+        "(state = 'authority_rebase_required' AND exposure_episode_id IS NULL AND triggered_at_ms IS NULL "
+        "AND rearmed_at_ms IS NULL AND authority_recovery_checkpoint_version IS NOT NULL AND authority_recovery_armed_at_ms IS NULL)")
+    op.create_check_constraint("authority_recovery_checkpoint_shape", "brc_exposure_episode_current",
+        "(authority_recovery_id IS NULL AND authority_recovery_revision IS NULL AND authority_recovery_effective_from_ms IS NULL "
+        "AND authority_recovery_first_eligible_close_time_ms IS NULL AND authority_recovery_armed_at_ms IS NULL "
+        "AND authority_recovery_last_observed_at_ms IS NULL AND authority_recovery_last_detector_status IS NULL "
+        "AND authority_recovery_checkpoint_version IS NULL) OR COALESCE(("
+        "length(trim(authority_recovery_id))>0 AND authority_recovery_id=trim(authority_recovery_id) "
+        "AND authority_recovery_revision>0 AND authority_recovery_checkpoint_version>0 "
+        "AND authority_recovery_effective_from_ms>0 AND authority_recovery_effective_from_ms<authority_recovery_first_eligible_close_time_ms "
+        "AND authority_recovery_first_eligible_close_time_ms<=authority_recovery_last_observed_at_ms "
+        "AND authority_recovery_first_eligible_close_time_ms%3600000=0 AND authority_recovery_last_observed_at_ms%3600000=0 "
+        "AND authority_recovery_last_detector_status IN ('triggered','not_triggered') "
+        "AND event_spec_id IN ('event_spec:CPM-RO-001:CPM-LONG:v3','event_spec:MPG-001:MPG-LONG:v3',"
+        "'event_spec:MI-001:MI-LONG:v3','event_spec:BRF2-001:BRF2-SHORT:v3') "
+        "AND ((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status='triggered') OR "
+        "(authority_recovery_armed_at_ms>=authority_recovery_first_eligible_close_time_ms "
+        "AND authority_recovery_armed_at_ms<=authority_recovery_last_observed_at_ms AND authority_recovery_armed_at_ms%3600000=0 "
+        "AND NOT (authority_recovery_last_detector_status='triggered' AND authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms)))),false)")
     op.create_check_constraint("comparison_checkpoint_shape", "brc_exposure_episode_current",
         "comparison_checkpoint_version IS NULL OR COALESCE((comparison_checkpoint_version > 0 "
         "AND comparison_transition_revision > 0 AND comparison_last_observed_at_ms > 0 "

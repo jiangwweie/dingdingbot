@@ -59,6 +59,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_episode import (
+    LockedObservationCursor,
     advance_comparison_bound_exposure_episode,
     advance_exposure_episode,
     build_episode_domain_key,
@@ -143,6 +144,71 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close(database: AsyncEngine, group: str) -> None:
+    from src.trading_kernel.domain.authority_recovery_rebase import (
+        advance_authority_recovery_rebase,
+    )
+    source = inputs(group)
+    spec = source.spec
+    member = compute_generic_selection(source).selected_members[0]
+    source = source.model_copy(update={"member_windows":tuple(qualify_window(w,w.exchange_instrument_id==member) for w in source.member_windows)})
+    snapshot = compute_generic_selection(source)
+    assert snapshot.selected_members == (member,)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+    key = build_episode_domain_key(event_spec_id=spec.event_spec_id,exchange_instrument_id=member,position_side=spec.position_side)
+    recovery = advance_authority_recovery_rebase(current=None,episode_domain_key=key,recovery_id="recovery:test",recovery_revision=1,
+        effective_from_ms=CUTOFF+1,first_eligible_close_time_ms=CUTOFF+HOUR,
+        observed_close_time_ms=CUTOFF+HOUR,detector_status=DetectorStatus.TRIGGERED).checkpoint
+    async with database.begin() as conn:
+        # Storage-only prerequisite. No Recovery Authority or trading grant is
+        # fabricated; the dormant checkpoint must already fence cursor reuse.
+        await conn.execute(sa.text("INSERT INTO brc_exposure_episode_current (episode_domain_key,event_spec_id,exchange_instrument_id,position_side,episode_policy,state,last_observed_at_ms,projection_version,authority_recovery_id,authority_recovery_revision,authority_recovery_effective_from_ms,authority_recovery_first_eligible_close_time_ms,authority_recovery_last_observed_at_ms,authority_recovery_last_detector_status,authority_recovery_checkpoint_version) VALUES (:key,:event,:member,:side,'rising_edge','authority_rebase_required',:close,1,:rid,1,:effective,:close,:close,'triggered',1)"),
+            {"key":key,"event":spec.event_spec_id,"member":member,"side":spec.position_side,"close":CUTOFF+HOUR,"rid":recovery.recovery_id,"effective":CUTOFF+1})
+    await database.dispose()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.signals.get_authority_recovery_checkpoint(key) == recovery
+        state = await uow.signals.lock_exposure_episode(key)
+        assert state is not None and state.state == "authority_rebase_required" and state.exposure_episode_id is None
+        with pytest.raises(ValueError,match="rebase"):
+            advance_exposure_episode(contract=strategy_contract_for(spec.event_spec_id),current=state,
+                detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=CUTOFF+2*HOUR,
+                observed_at_ms=CUTOFF+2*HOUR,exchange_instrument_id=member)
+        with pytest.raises(RuntimeError,match="already consumed"):
+            await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+HOUR)
+        coverage = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+2*HOUR)
+        assert coverage[0].authority_recovery_checkpoint_version == 1
+        assert coverage[0].last_observed_at_ms == CUTOFF+HOUR
+    for update in ("authority_recovery_revision=0", "authority_recovery_first_eligible_close_time_ms=authority_recovery_effective_from_ms",
+                   "authority_recovery_last_detector_status='invalid'", "authority_recovery_checkpoint_version=NULL",
+                   "authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms"):
+        with pytest.raises(sa.exc.DBAPIError):
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET "+update+" WHERE episode_domain_key=:key"),{"key":key})
+    async with database.begin() as conn:
+        # Recovery may advance while preserving an older canonical Episode.
+        await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET state='armed',last_observed_at_ms=:old WHERE episode_domain_key=:key"),{"old":CUTOFF,"key":key})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        with pytest.raises(RuntimeError,match="already consumed"):
+            await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+HOUR)
+    proof = CurrentFinalCloseGrantProof(selection_snapshot_id=snapshot.selection_snapshot_id,selection_committed_at_ms=snapshot.committed_at_ms,
+        source_snapshot_cutoff_at_ms=CUTOFF,period=build_generic_selection_period(feature_cutoff_at_ms=CUTOFF,cadence_hours=spec.cadence_hours),
+        current_final_close_time_ms=CUTOFF+HOUR,authority_granted_at_ms=CUTOFF+HOUR+8000,
+        observation_cursors=(LockedObservationCursor(episode_domain_key=key,exchange_instrument_id=member,episode_version=1,
+            comparison_checkpoint_version=0,last_observed_at_ms=CUTOFF),))
+    async with database.begin() as conn:
+        query = sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)")
+        params = {"sid":snapshot.selection_snapshot_id,"proof":proof.model_dump_json(),"at":proof.authority_granted_at_ms}
+        assert await conn.scalar(query,params) is False
+        checkpoint = await conn.begin_nested()
+        await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET authority_recovery_id=NULL,authority_recovery_revision=NULL,authority_recovery_effective_from_ms=NULL,authority_recovery_first_eligible_close_time_ms=NULL,authority_recovery_armed_at_ms=NULL,authority_recovery_last_observed_at_ms=NULL,authority_recovery_last_detector_status=NULL,authority_recovery_checkpoint_version=NULL WHERE episode_domain_key=:key"),{"key":key})
+        assert await conn.scalar(query,params) is True
+        await checkpoint.rollback()
+        assert await conn.scalar(query,params) is False
 
 
 @pytest.mark.asyncio
@@ -332,6 +398,7 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
             for changes in ({"observation_cursors":[]}, {"selection_committed_at_ms":proof.selection_committed_at_ms+1},
                             {"current_final_close_time_ms":proof.current_final_close_time_ms-HOUR},
                             {"observation_cursors":[{**payload["observation_cursors"][0],"episode_version":99},*payload["observation_cursors"][1:]]},
+                            {"observation_cursors":[{**payload["observation_cursors"][0],"authority_recovery_checkpoint_version":99},*payload["observation_cursors"][1:]]},
                             {"unexpected_field":True}):
                 assert await conn.scalar(sa.text("SELECT brc_generic_close_proof_matches(:sid,CAST(:proof AS jsonb),:at)"),
                     {"sid":snapshot.selection_snapshot_id,"proof":json.dumps({**payload,**changes}),"at":proof.authority_granted_at_ms}) is False

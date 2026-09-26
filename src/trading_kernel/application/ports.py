@@ -53,6 +53,9 @@ from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFa
 from src.trading_kernel.domain.admission_decision import AdmissionDecision
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
+from src.trading_kernel.domain.authority_recovery_rebase import (
+    AuthorityRecoveryCheckpoint,
+)
 from src.trading_kernel.domain.capacity import CapacityClaim, FamilyTicketLimits
 from src.trading_kernel.domain.commands import (
     CommandPayload,
@@ -1086,6 +1089,8 @@ class SignalRepository(Protocol):
     ) -> None: ...
 
     async def get_comparison_episode_checkpoint(self, episode_domain_key: str) -> ComparisonBindingEpisodeCheckpoint | None: ...
+
+    async def get_authority_recovery_checkpoint(self, episode_domain_key: str) -> AuthorityRecoveryCheckpoint | None: ...
 
     async def save_comparison_episode_transition(
         self, transition: ComparisonBoundExposureEpisodeTransition, *,

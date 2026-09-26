@@ -150,6 +150,9 @@ _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS = {
         "comparison_source_evidence_digest", "comparison_armed_at_ms",
         "comparison_last_observed_at_ms", "comparison_last_detector_status",
         "comparison_checkpoint_version",
+        "authority_recovery_id", "authority_recovery_revision", "authority_recovery_effective_from_ms",
+        "authority_recovery_first_eligible_close_time_ms", "authority_recovery_armed_at_ms",
+        "authority_recovery_last_observed_at_ms", "authority_recovery_last_detector_status", "authority_recovery_checkpoint_version",
     ),
 }
 
