@@ -24,6 +24,7 @@ class UniverseActivationStatus(StrEnum):
 class UniverseActivationOperation(StrEnum):
     AUTO = "auto"
     CERTIFY_CURRENT = "certify_current"
+    CERTIFY_STAGED = "certify_staged"
     ACTIVATE_MANUAL = "activate_manual"
     STAGE_DYNAMIC = "stage_dynamic"
     ACTIVATE_DYNAMIC_PAIR = "activate_dynamic_pair"
@@ -170,11 +171,11 @@ class UniverseActivationRequest(BaseModel):
         if (self.materialization_lease_owner is None) != (self.materialization_lease_epoch is None):
             raise ValueError("materialization lease token must be complete")
         if self.materialization_lease_epoch is not None and (
-            self.materialization_lease_epoch <= 0 or self.operation is not UniverseActivationOperation.STAGE_DYNAMIC
+            self.materialization_lease_epoch <= 0 or self.operation not in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED}
         ):
             raise ValueError("materialization lease token is only valid for Dynamic staging")
         if (
-            self.operation is UniverseActivationOperation.STAGE_DYNAMIC
+            self.operation in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED}
             and self.materialization_generation_id is None
         ):
             raise ValueError("Dynamic staging requires exact Generation identity")

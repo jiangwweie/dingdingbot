@@ -1352,6 +1352,9 @@ async def _assert_generic_target_stages(database, source, generation, uid):
         materialization_lease_owner="stage-worker", materialization_lease_epoch=lease.generation.lease_epoch,
         materialization_generation_id=generation.materialization_generation_id)
     async with PostgresKernelUnitOfWork(database) as uow:
+        not_staged = await advance_strategy_universe(uow,request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED}))
+        assert not_staged.reason_code == "STAGED_UNIVERSE_REQUIRED"
+    async with PostgresKernelUnitOfWork(database) as uow:
         stale_lease = await advance_strategy_universe(uow, request.model_copy(update={"materialization_lease_epoch":lease.generation.lease_epoch+1}))
     assert stale_lease.reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
     if source.spec.strategy_group_id in {"MPG-001", "MI-001"}:
@@ -1396,6 +1399,17 @@ async def _assert_generic_target_stages(database, source, generation, uid):
     async with PostgresKernelUnitOfWork(database) as uow:
         staged = await advance_strategy_universe(uow, request)
     assert staged.status == UniverseActivationStatus.STAGED
+    certification = request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert (await advance_strategy_universe(uow,certification)).status == UniverseActivationStatus.STAGED
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        failed = await advance_strategy_universe(uow,certification)
+        assert failed.reason_code == "CERTIFICATION_TEMPORARILY_UNAVAILABLE"
+    async with database.begin() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "staged"
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":uid})
     await _assert_generic_active_new_storage(database,source,generation,uid,close+30_004)
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await advance_strategy_universe(uow, request) == staged

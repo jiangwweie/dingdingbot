@@ -361,6 +361,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+STAGED再认证准备：现有advance_strategy_universe增加CERTIFY_STAGED操作，要求exact staged target和Generation，Generic仍核验Control/epoch/period/lease；重新运行原certification/warm/comparison readiness，不使用STAGED幂等快捷返回。只返回readiness，不修改target/Generation/current或授予ENTRY。四策略及comparison-only六场景验证正常就绪、temporary unavailable拒绝、WARMING冒用入口拒绝；旧STAGE_DYNAMIC行为保留。相关PG161 passed、Unit/Architecture1213 passed，全源码Mypy通过。该操作尚待最终ACTIVE_NEW原子应用事务调用，不代表运行时activation完成。
+
 **目标**：把前三类domain约束组合成durable新交易authority状态机。
 
 Generic正常Authority合同增量：现有`selection_authority.py`新增纯typed Generic正常/VALID_EMPTY模型，复用单Event binding、GenericSelectionPeriod、CurrentFinalCloseGrantProof与DynamicMembershipFreshness，校验Spec/cadence/Event/side、Snapshot/Generation/epoch身份、实际commit时间、固定24 comparison及正revision、fresh source一致性。ACTIVE_NEW必须绑定Generation；VALID_EMPTY只允许EMPTY binding且无positive proof；fallback/continuity/recovery不能冒充本合同。保留原SOR subtype与原Event-set测试。四策略合同专项与既有Event-set合计12 passed，完整Unit/Architecture1195 passed。该模型尚未接入PG原子grant、current指针或FinalGate，不产生任何生产授权，fallback/continuity typed证明仍待扩展。

@@ -639,7 +639,7 @@ class PostgresStrategyUniverseRepository:
                 request=request,
                 previous_long=target,
             )
-        if request.operation is UniverseActivationOperation.STAGE_DYNAMIC:
+        if request.operation in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED}:
             return await self._try_stage_dynamic(
                 request=request,
                 target=target,
@@ -896,6 +896,9 @@ class PostgresStrategyUniverseRepository:
         request: UniverseActivationRequest,
         target: RowMapping,
     ) -> UniverseActivationResult:
+        certification_only = request.operation is UniverseActivationOperation.CERTIFY_STAGED
+        if certification_only and target["lifecycle_state"] != "staged":
+            return _not_ready_activation(target=target,current=None,reason_code="STAGED_UNIVERSE_REQUIRED")
         generation_id = (
             request.materialization_generation_id
             or target["materialization_generation_id"]
@@ -964,7 +967,7 @@ class PostgresStrategyUniverseRepository:
                 or generation["lease_expires_at_ms"] <= request.attempted_at_ms
             ):
                 return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_LEASE_CHANGED")
-        if target["lifecycle_state"] == "staged":
+        if target["lifecycle_state"] == "staged" and not certification_only:
             return UniverseActivationResult(status=UniverseActivationStatus.STAGED,reason_code=None,
                 event_spec_id=str(target["event_spec_id"]),universe_version_id=request.universe_version_id,
                 previous_universe_version_id=None,activation_generation=None,activated_at_ms=None)
@@ -992,7 +995,7 @@ class PostgresStrategyUniverseRepository:
                 and event["timeframe"] in {"15m", "1h"}
             ),
             comparative_event=bool(event is not None and event["event_id"] in {"MPG-LONG", "MI-LONG"}),
-            expected_lifecycle="warming",
+            expected_lifecycle="staged" if certification_only else "warming",
             event=event,
         )
         blocker = activation_readiness_blocker(readiness)
@@ -1002,6 +1005,10 @@ class PostgresStrategyUniverseRepository:
                 current=None,
                 reason_code=blocker,
             )
+        if certification_only:
+            return UniverseActivationResult(status=UniverseActivationStatus.STAGED,reason_code=None,
+                event_spec_id=str(target["event_spec_id"]),universe_version_id=request.universe_version_id,
+                previous_universe_version_id=None,activation_generation=None,activated_at_ms=None)
         scopes = await self._connection.execute(
             sa.update(runtime_scopes_current)
             .where(
