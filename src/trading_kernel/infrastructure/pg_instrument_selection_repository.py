@@ -2948,9 +2948,21 @@ class PostgresInstrumentSelectionRepository:
         control = await self.get_selection_control(authority.strategy_group_id,for_update=True)
         if owner is None or owner["entry_state"] != "enabled" or owner["control_version"] != authority.owner_control_version:
             raise SelectionJobConflict("Generic empty Owner control changed")
-        if control is None or control.control_version != authority.selection_control_version or not self._generic_control_allows(
+        first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
+            control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_authorization_id == authority.activation_authorization_id
+            and authority.activation_authorization_id is not None)
+        if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version+int(first_activation) != authority.selection_control_version or not self._generic_control_allows(
             control,authority.selection_spec_id,authority.selection_epoch_id,authority.period.feature_cutoff_at_ms):
             raise SelectionJobConflict("Generic empty Selection control changed")
+        if first_activation:
+            authorization = (await self._connection.execute(sa.text("SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
+                {"id":authority.activation_authorization_id})).mappings().one_or_none()
+            expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
+                "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
+            if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>authority.created_at_ms:
+                raise SelectionJobConflict("Generic empty activation authorization changed")
         snapshot = await self.get_generic_snapshot(authority.selection_snapshot_id)
         if snapshot.selected_members or snapshot.selection_epoch_id != authority.selection_epoch_id or (
             snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
@@ -2975,6 +2987,10 @@ class PostgresInstrumentSelectionRepository:
             if existing["semantic_digest"] == authority.semantic_digest and current is not None and current["selection_authority_id"] == authority.selection_authority_id and vacuum.state is StrategyEntryVacuumState.VALID_EMPTY:
                 return
             raise SelectionJobConflict("Generic empty Authority identity conflict")
+        if authority.activation_authorization_id is not None and not first_activation:
+            raise SelectionJobConflict("Generic empty activation pending required")
+        if first_activation and current is not None:
+            raise SelectionJobConflict("Generic empty first activation Authority exists")
         if (None if current is None else current["projection_version"]) != expected_current_version:
             raise SelectionJobConflict("Generic empty current version changed")
         if vacuum.projection_version != expected_vacuum_version or vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
@@ -2990,6 +3006,10 @@ class PostgresInstrumentSelectionRepository:
         if authority.authority_sequence != sequence:
             raise SelectionJobConflict("Generic empty sequence changed")
         await self.mark_entry_vacuum_drained(vacuum,target_state="VALID_EMPTY",drained_at_ms=authority.created_at_ms)
+        if first_activation:
+            await self.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,
+                expected_control_version=control.control_version,expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,
+                activated_at_ms=authority.created_at_ms)
         await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
         await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
             selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))

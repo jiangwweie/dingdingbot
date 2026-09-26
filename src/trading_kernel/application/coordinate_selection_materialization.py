@@ -1277,10 +1277,12 @@ async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericS
             entry_vacuum_id=vacuum_id,reason_code="ENTRY_DRAIN_BLOCKED")
     spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
     sequence = 1 if current is None or current.authority.period.feature_cutoff_at_ms != snapshot.feature_cutoff_at_ms else current.authority.authority_sequence+1
+    first_activation = control.selection_mode is SelectionMode.STATIC_BASELINE
     authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
         selection_spec_id=snapshot.selection_spec_id,strategy_group_id=snapshot.strategy_group_id,
         selection_epoch_id=snapshot.selection_epoch_id,selection_snapshot_id=snapshot.selection_snapshot_id,
-        authority_sequence=sequence,owner_control_version=owner_control_version,selection_control_version=control.control_version,
+        authority_sequence=sequence,owner_control_version=owner_control_version,selection_control_version=control.control_version+int(first_activation),
+        activation_authorization_id=control.pending_authorization_id if first_activation else None,
         period=build_generic_selection_period(feature_cutoff_at_ms=snapshot.feature_cutoff_at_ms,cadence_hours=spec.cadence_hours),
         authority_outcome="VALID_EMPTY",event_binding=AuthorityEventBinding.empty(event_spec_id=spec.event_spec_id,position_side=spec.position_side),
         current_close_proof=None,membership_freshness=None,effective_from_ms=now_ms,created_at_ms=now_ms)

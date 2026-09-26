@@ -856,8 +856,8 @@ class GenericSelectionAuthority(BaseModel):
 
     @model_validator(mode="after")
     def _validate_generic_authority(self) -> GenericSelectionAuthority:
-        if self.activation_authorization_id is not None and self.authority_outcome != "ACTIVE_NEW":
-            raise ValueError("first activation proof currently requires ACTIVE_NEW")
+        if self.activation_authorization_id is not None and self.authority_outcome not in {"ACTIVE_NEW", "VALID_EMPTY"}:
+            raise ValueError("first activation proof requires ACTIVE_NEW or VALID_EMPTY")
         spec = generic_selection_spec(self.strategy_group_id)
         if self.selection_spec_id != spec.selection_spec_id or self.period.cadence_hours != spec.cadence_hours:
             raise ValueError("Generic Authority Spec/period differs")

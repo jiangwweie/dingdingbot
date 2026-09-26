@@ -1069,7 +1069,7 @@ selection_session_authorities = sa.Table(
     _id("activation_authorization_id", nullable=True),
     sa.ForeignKeyConstraint(["activation_authorization_id"], ["brc_owner_authorizations.authorization_id"], name="fk_brc_authority_activation_owner"),
     sa.UniqueConstraint("activation_authorization_id", name="uq_brc_authority_activation_owner"),
-    sa.CheckConstraint("activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome='ACTIVE_NEW')", name="activation_shape"),
+    sa.CheckConstraint("activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','VALID_EMPTY'))", name="activation_shape"),
     sa.Column("current_close_proof", JSONB(none_as_null=True), nullable=True),
     sa.Column("membership_freshness", JSONB(none_as_null=True), nullable=True),
     _id("comparison_universe_id", nullable=True),

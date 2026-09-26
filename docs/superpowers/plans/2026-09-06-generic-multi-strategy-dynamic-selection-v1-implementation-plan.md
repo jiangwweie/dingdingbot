@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+首次空选择最终验证：Generic repository + SOR materialization + Generic migration完整组合185 passed；Unit/Architecture1213 passed，追加授权ID/semantic-digest篡改与非法ID断言后normal Authority专项20 passed；全源码Mypy、相关Ruff/diff、文档authority25 passed。上述数字有重叠，不相加，不替代整卡full-chain或完整R4；全部为Docker PG本地验证。
+
+首次VALID_EMPTY增量（基于`5bb131bc`）：四策略RED复现首次空Authority写入但mode仍Static，expiry后resolver错误返回static_baseline允许ENTRY。现Coordinator为首次空选择冻结pending Owner授权和递增后的Control版本；empty事务校验exact pending/epoch/period、Owner proof、空Snapshot、Vacuum intent/drain/current后，同事务切Dynamic、清pending、写EMPTY Authority/current及VALID_EMPTY Vacuum。原Static Universe不被伪造成新授予目标，不创建Generation或Command；expiry后继续拒绝ENTRY，不fallback。共享0008首次授权deferred约束扩展到VALID_EMPTY，nullable唯一授权FK仍复用原表，SOR shape不变。
+
+首次/普通空选择及非空激活专项16 passed：四策略新增省略mode更新在真实commit失败、提交前异常全回滚、重连保持原pending+无Authority+DRAINING_ENTRY、随后成功清pending、版本及授权引用准确、重复调用幂等、expiry仍无新交易。原Static scope与Owner授权仍为明确fixture；本测试无已有Ticket，不替代nonretroactive lifecycle full-chain。首次NO_CHANGE、失败恢复、跨period恢复等仍未完成；GS-04～09继续IN_PROGRESS，production_authority=NONE。
+
 首次激活增量验证：Generic repository + SOR materialization + Generic migration组合首次为177 passed/4 failed，四失败均为新增测试SQL字面量`:wrong`被SQLAlchemy解释为缺失绑定参数；改用`:suffix`绑定后，覆盖全部失败的首次/普通激活专项8 passed（同时覆盖新增漏mode提交负例）。Unit/Architecture1213 passed，全源码Mypy、verify_schema脚本Mypy、相关Ruff/diff通过，文档authority专项25 passed。未伪称组合原始运行全绿，未执行完整R4；上述测试证据有重叠。
 
 首次非空changed-set激活增量（基于`fc2cd0dd`）：STAGED Coordinator允许exact Static pending Dynamic period进入原ACTIVATE_GENERIC事务，而非放宽所有Static请求。Generation保留创建时Control版本；首次成功Authority冻结递增后的Control版本及`activation_authorization_id`，其FK引用已有Owner authorization，不复制Owner事实、不增加Authority表。验证purpose=selection_mode_change、totp_step_up、exact策略/目标mode/period及授权时间；mode转换、清pending、Universe/comparison/current、Generation/Vacuum及Authority同事务提交。0008仍未部署，新增nullable唯一授权引用及deferred约束，要求first activation的Generation→Authority版本恰好+1、最终Control及Owner proof一致；ordinary Dynamic版本仍相等。SOR不允许携带该字段，0006来源保全清单排除新增字段。

@@ -78,6 +78,12 @@ def test_generic_authority_binds_exact_event_period_and_precommitted_close(group
         "event_binding":AuthorityEventBinding.empty(event_spec_id=spec.event_spec_id,position_side=spec.position_side),
         "current_close_proof":None,"membership_freshness":None})
     assert empty.blocks_new_entry and empty.first_eligible_close_time_ms is None
+    first_empty = GenericSelectionAuthority.model_validate({**empty.model_dump(),"activation_authorization_id":"owner:first"})
+    assert first_empty.semantic_digest != empty.semantic_digest
+    assert first_empty.blocks_new_entry
+    for invalid_id in ("", " ", "x"*161):
+        with pytest.raises(ValueError):
+            GenericSelectionAuthority.model_validate({**empty.model_dump(),"activation_authorization_id":invalid_id})
     with pytest.raises(ValueError):
         GenericSelectionAuthority.model_validate({**empty.model_dump(),"event_binding":binding})
     with pytest.raises(ValueError, match="Generation"):
@@ -107,6 +113,7 @@ def test_generic_authority_storage_roundtrip_rejects_tampering(group, empty):
     with pytest.raises(ValueError, match="parent"):
         generic_authority_from_storage(row,spec=spec,event_bindings=({**persisted_binding,"selection_authority_id":"another"},))
     for mutation in ({"semantic_digest":"sha256:"+"0"*64}, {"period_anchor_ms":1},
+                     {"activation_authorization_id":"owner:forged"},
                      {"selection_epoch_id":"different"}, {"first_eligible_close_time_ms":1},
                      {"grant_proof_kind":"AUDITED_AUTHORITY_GAP"},
                      {"continued_from_selection_authority_id":"authority:fake"},

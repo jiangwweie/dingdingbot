@@ -363,7 +363,8 @@ async def test_generic_grant_coverage_rejects_consumed_episode_close(database: A
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("first_activation", [False, True])
+async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str, first_activation: bool) -> None:
     source = inputs(group)
     source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
     snapshot = compute_generic_selection(source)
@@ -382,10 +383,35 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
             {"uid":uid,"now":CUTOFF,"valid":snapshot.expires_at_ms,"digest":installed.universe.semantic_digest})
         await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),
             {"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":CUTOFF})
-    await enable_epoch(database,group)
+    await enable_epoch(database,group,pending=first_activation)
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="empty-coordinator")
     results = []
     for tick in range(4):
+        if first_activation and tick == 1:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                pending = await uow.instrument_selection.get_selection_control(group)
+            with pytest.raises(sa.exc.DBAPIError,match="atomic authorized mode transition"), patch.object(
+                PostgresInstrumentSelectionRepository,"activate_pending_selection_mode",new=AsyncMock(return_value=pending)):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                    request=request,clock_ms=lambda:snapshot.effective_from_ms+2)
+
+            @asynccontextmanager
+            async def fail_empty_commit():
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    yield uow
+                    control = await uow.instrument_selection.get_selection_control(group)
+                    assert control is not None and control.selection_mode.value == "dynamic_selection"
+                    raise RuntimeError("empty commit interrupted")
+
+            with pytest.raises(RuntimeError,match="empty commit interrupted"):
+                await coordinate_selection_materialization_once(uow_factory=fail_empty_commit,
+                    request=request,clock_ms=lambda:snapshot.effective_from_ms+2)
+            await database.dispose()
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_selection_control(group) == pending
+                assert await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id) is None
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=snapshot.selection_spec_id)
+                assert vacuum is not None and vacuum.state.value == "DRAINING_ENTRY"
         results.append(await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
             request=request,clock_ms=lambda tick=tick:snapshot.effective_from_ms+tick+1))
     assert results[-1].disposition == MaterializationDisposition.VALID_EMPTY
@@ -422,6 +448,12 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
         current = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id)
         assert current is not None and current.authority.blocks_new_entry
         assert current.projection_version == 1
+        control = await uow.instrument_selection.get_selection_control(group)
+        assert control is not None and control.selection_mode.value == "dynamic_selection"
+        assert control.control_version == 2 + int(first_activation)
+        assert control.pending_authorization_id is None and control.pending_selection_mode is None
+        assert current.authority.selection_control_version == control.control_version
+        assert current.authority.activation_authorization_id == ("owner:first:"+group if first_activation else None)
     async with database.connect() as conn:
         for table in ("brc_strategy_universe_materialization_generations","brc_trade_tickets","brc_exchange_commands"):
             assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
@@ -768,12 +800,18 @@ async def test_pg_decimal_representation_does_not_change_semantic_identity(datab
         assert loaded.semantic_digest == snapshot.semantic_digest
 
 
-async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1") -> None:
+async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1", *, pending=False) -> None:
     # Isolated repository prerequisite, not an Owner API/activation acceptance.
     async with database.begin() as conn:
         await conn.execute(sa.update(strategy_selection_control_current).where(
             strategy_selection_control_current.c.strategy_group_id == group,
         ).values(selection_mode="dynamic_selection", selection_epoch_id=epoch, control_version=2))
+        if pending:
+            await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
+                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":CUTOFF-1,
+                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":CUTOFF})})
+            await conn.execute(sa.update(strategy_selection_control_current).where(strategy_selection_control_current.c.strategy_group_id==group).values(
+                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=CUTOFF,pending_authorization_id="owner:first:"+group))
 
 
 @pytest.mark.asyncio
@@ -1026,14 +1064,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:cid,:member)"), {"cid": comparison_id, "member": source.spec.candidate_ids[0]})
             await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,0,:uid)"),
                 {"event":source.spec.event_spec_id,"cid":comparison_id,"uid":uid})
-    await enable_epoch(database, group)
-    if first_activation:
-        async with database.begin() as conn:
-            await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
-                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":CUTOFF-1,
-                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":CUTOFF})})
-            await conn.execute(sa.update(strategy_selection_control_current).where(strategy_selection_control_current.c.strategy_group_id==group).values(
-                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=CUTOFF,pending_authorization_id="owner:first:"+group))
+    await enable_epoch(database, group, pending=first_activation)
     generation = GenericMaterializationGeneration.build(snapshot=snapshot, selection_control_version=2, created_at_ms=CUTOFF+HOUR+1,
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
             grant_state="ACTIVE",universe_version_id=uid,member_set_digest=selected_member_set_digest(source.spec.candidate_ids[:1]),
