@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+首次激活增量验证：Generic repository + SOR materialization + Generic migration组合首次为177 passed/4 failed，四失败均为新增测试SQL字面量`:wrong`被SQLAlchemy解释为缺失绑定参数；改用`:suffix`绑定后，覆盖全部失败的首次/普通激活专项8 passed（同时覆盖新增漏mode提交负例）。Unit/Architecture1213 passed，全源码Mypy、verify_schema脚本Mypy、相关Ruff/diff通过，文档authority专项25 passed。未伪称组合原始运行全绿，未执行完整R4；上述测试证据有重叠。
+
+首次非空changed-set激活增量（基于`fc2cd0dd`）：STAGED Coordinator允许exact Static pending Dynamic period进入原ACTIVATE_GENERIC事务，而非放宽所有Static请求。Generation保留创建时Control版本；首次成功Authority冻结递增后的Control版本及`activation_authorization_id`，其FK引用已有Owner authorization，不复制Owner事实、不增加Authority表。验证purpose=selection_mode_change、totp_step_up、exact策略/目标mode/period及授权时间；mode转换、清pending、Universe/comparison/current、Generation/Vacuum及Authority同事务提交。0008仍未部署，新增nullable唯一授权引用及deferred约束，要求first activation的Generation→Authority版本恰好+1、最终Control及Owner proof一致；ordinary Dynamic版本仍相等。SOR不允许携带该字段，0006来源保全清单排除新增字段。
+
+四策略首次及普通激活共8场景通过：错误purpose拒绝；人为省略mode更新在真实commit时被PG约束拒绝；提交前异常保留原Static pending/Control版本、旧Universe及STAGED目标；重连后成功变Dynamic并冻结新版本/授权，重复worker调用不增事件。授权行与原Static baseline仍为明确测试前置，不是Owner API/TOTP交互验收。首次VALID_EMPTY、首次NO_CHANGE、失败Static恢复与跨periodsupersession尚未接线；不得将本增量称作首次激活所有分支完成，GS-04～09及production_authority状态不变。
+
 持久化增量最终回归：完整`integration/test_generic_selection_snapshot_repository.py`与`architecture/test_current_document_authority.py`组合113 passed；追加target状态/ACTIVE事件回滚断言后四策略专项4 passed，Ruff和diff检查通过。本次只修改测试与证据台账，不改变production实现、不重复声称完整R4。
 
 2026-09-26持久化验收增量（基于`c487665c`）：四策略新增真实UoW独立提交测试，复用原Snapshot→Generation→fence/drain→warming/staging准备流程；Active baseline与certification仍为明确前置。Coordinator执行完但commit前注入异常，由正式UoW回滚；dispose连接池、创建新仓储后确认无Authority、Generation仍STAGED且无lease、旧current及RECONFIGURING Vacuum保留。再次正式激活真实commit后再dispose/read，验证ACTIVE Generation、exact Authority/current、RESOLVED_ACTIVE Vacuum；更换worker重复调用不增materialization事件、不产生Exchange Command。四策略故障+持久化专项4 passed；增加故障前的原六场景+四策略提交组合10 passed，计数不相加。该证据关闭正常激活的独立事务/连接重建缺口，不代表进程强杀、首次Static pending、timeout fallback、跨period恢复或自然Signal→Ticket验收；DB时钟仍为受控fixture。

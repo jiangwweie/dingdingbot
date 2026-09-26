@@ -988,11 +988,12 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_generic_activation_commits_and_restarts_through_real_uow(database: AsyncEngine, group: str) -> None:
-    await _exercise_generic_generation(database, group, False, durable=True)
+@pytest.mark.parametrize("first_activation", [False, True])
+async def test_generic_activation_commits_and_restarts_through_real_uow(database: AsyncEngine, group: str, first_activation: bool) -> None:
+    await _exercise_generic_generation(database, group, False, durable=True, first_activation=first_activation)
 
 
-async def _exercise_generic_generation(database, group, comparison_only, *, durable=False):
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False):
     source = inputs(group)
     if comparison_only:
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
@@ -1026,6 +1027,13 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,0,:uid)"),
                 {"event":source.spec.event_spec_id,"cid":comparison_id,"uid":uid})
     await enable_epoch(database, group)
+    if first_activation:
+        async with database.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
+                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":CUTOFF-1,
+                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":CUTOFF})})
+            await conn.execute(sa.update(strategy_selection_control_current).where(strategy_selection_control_current.c.strategy_group_id==group).values(
+                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=CUTOFF,pending_authorization_id="owner:first:"+group))
     generation = GenericMaterializationGeneration.build(snapshot=snapshot, selection_control_version=2, created_at_ms=CUTOFF+HOUR+1,
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
             grant_state="ACTIVE",universe_version_id=uid,member_set_digest=selected_member_set_digest(source.spec.candidate_ids[:1]),
@@ -1049,7 +1057,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     with pytest.raises(sa.exc.DBAPIError, match="immutable"):
         async with database.begin() as conn:
             await conn.execute(sa.text("UPDATE brc_materialization_generation_event_baselines SET universe_version_id=:uid"), {"uid":uid})
-    if group == "CPM-RO-001":
+    if group == "CPM-RO-001" and not first_activation:
         with pytest.raises(sa.exc.DBAPIError, match="Generation source identity is immutable"):
             async with database.begin() as conn:
                 await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET semantic_digest=:digest"), {"digest":"sha256:"+"b"*64})
@@ -1467,10 +1475,36 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
     def factory():
         return PostgresKernelUnitOfWork(database)
 
+    async with factory() as uow:
+        original_control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
+    assert original_control is not None
+
+    if original_control.pending_authorization_id is not None:
+        @asynccontextmanager
+        async def invalid_owner_proof():
+            async with PostgresKernelUnitOfWork(database) as uow:
+                conn = uow._require_connection()
+                # A wrong-purpose proof is present in the same transaction; it
+                # must not become sufficient merely because the FK exists.
+                await conn.execute(sa.text("INSERT INTO brc_owner_authorizations SELECT authorization_id||:suffix, 'universe_configure', owner_identity, authentication_strength, request_digest, target_scope, idempotency_key||:suffix, authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"), {"id":original_control.pending_authorization_id,"suffix":":wrong"})
+                await conn.execute(sa.text("UPDATE brc_strategy_selection_control_current SET pending_authorization_id=:id WHERE strategy_group_id=:group"), {"id":original_control.pending_authorization_id+":wrong", "group":source.spec.strategy_group_id})
+                yield uow
+        with pytest.raises(UniverseInstallConflict, match="ACTIVATION_AUTHORIZATION_CHANGED"), patch.object(
+            PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)
+        ):
+            await coordinate_selection_materialization_once(uow_factory=invalid_owner_proof, request=request, clock_ms=lambda:now)
+        # Omitting the mode write must fail at actual transaction commit, not
+        # merely rely on application validation before the authority insert.
+        with pytest.raises(sa.exc.DBAPIError, match="atomic authorized mode transition"), patch.object(
+            PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)
+        ), patch.object(PostgresInstrumentSelectionRepository, "activate_pending_selection_mode", new=AsyncMock(return_value=original_control)):
+            await coordinate_selection_materialization_once(uow_factory=factory, request=request, clock_ms=lambda:now)
+
     @asynccontextmanager
     async def interrupted_before_commit():
         async with PostgresKernelUnitOfWork(database) as uow:
             yield uow
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is not None
             raise RuntimeError("injected interruption before commit")
 
     with pytest.raises(RuntimeError, match="injected interruption"), patch.object(
@@ -1479,6 +1513,7 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
         await coordinate_selection_materialization_once(uow_factory=interrupted_before_commit, request=request, clock_ms=lambda:now)
     await database.dispose()
     async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == original_control
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
         interrupted = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
         old_current = await uow.strategy_universes.get_current(source.spec.event_spec_id)
@@ -1491,7 +1526,7 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='ACTIVE'"), {"gid":generation.materialization_generation_id}) == 0
     with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)):
         activated = await coordinate_selection_materialization_once(uow_factory=factory, request=request, clock_ms=lambda:now)
-    assert activated.disposition == MaterializationDisposition.ACTIVE_NEW
+    assert activated.disposition == MaterializationDisposition.ACTIVE_NEW, activated
     # Drop pooled connections, then create fresh repositories: recovery must
     # use committed facts, not objects retained by the activating transaction.
     await database.dispose()
@@ -1501,6 +1536,13 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
         persisted = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id, selection_spec_id=source.spec.selection_spec_id)
         assert authority is not None and authority.authority.selection_authority_id == activated.selection_authority_id
+        control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
+        assert control is not None and control.selection_mode.value == "dynamic_selection"
+        assert control.pending_authorization_id is None and control.pending_selection_mode is None
+        assert control.control_version == original_control.control_version + int(original_control.pending_authorization_id is not None)
+        assert authority.authority.selection_control_version == control.control_version
+        assert authority.authority.activation_authorization_id == original_control.pending_authorization_id
+        assert persisted is not None and persisted.selection_control_version == original_control.control_version
         assert current is not None and current.universe_version_id == uid
         assert persisted is not None and persisted.lifecycle_state.value == "ACTIVE" and persisted.lease_owner is None
         assert vacuum is None

@@ -79,6 +79,20 @@ def _generic_normal_binding_guard() -> None:
           RAISE EXCEPTION 'Generic normal Authority comparison changed before commit';
         END IF;
         IF a.authority_outcome='ACTIVE_NEW' THEN
+          IF a.activation_authorization_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM brc_owner_authorizations o
+              JOIN brc_instrument_selection_specs s ON s.selection_spec_id=a.selection_spec_id
+              JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=s.strategy_group_id
+            WHERE o.authorization_id=a.activation_authorization_id AND o.purpose='selection_mode_change'
+              AND o.authentication_strength='totp_step_up' AND o.authorized_at_ms<=a.created_at_ms
+              AND o.target_scope=jsonb_build_object('strategy_group_id',s.strategy_group_id,
+                'target_selection_mode','dynamic_selection','effective_period_anchor_ms',a.period_anchor_ms)
+              AND c.selection_spec_id=a.selection_spec_id AND c.selection_epoch_id=a.selection_epoch_id
+              AND c.selection_mode='dynamic_selection' AND c.control_version=a.selection_control_version
+              AND c.pending_selection_mode IS NULL AND c.pending_authorization_id IS NULL
+              AND c.pending_effective_period_anchor_ms IS NULL AND c.updated_at_ms=a.effective_from_ms) THEN
+            RAISE EXCEPTION 'Generic first activation requires atomic authorized mode transition';
+          END IF;
           SELECT count(*) INTO matches FROM brc_strategy_universe_materialization_generations g
             JOIN brc_strategy_universe_versions u ON u.materialization_generation_id=g.materialization_generation_id
             JOIN brc_selection_authority_event_bindings b ON b.selection_authority_id=a.selection_authority_id AND b.universe_version_id=u.universe_version_id
@@ -86,7 +100,8 @@ def _generic_normal_binding_guard() -> None:
             JOIN brc_selection_authority_current c ON c.selection_spec_id=a.selection_spec_id AND c.selection_authority_id=a.selection_authority_id
             WHERE g.materialization_generation_id=a.materialization_generation_id AND g.lifecycle_state='ACTIVE'
               AND g.selection_spec_id=a.selection_spec_id AND g.selection_snapshot_id=a.selection_snapshot_id
-              AND g.selection_epoch_id=a.selection_epoch_id AND g.selection_control_version=a.selection_control_version
+              AND g.selection_epoch_id=a.selection_epoch_id
+              AND g.selection_control_version + CASE WHEN a.activation_authorization_id IS NULL THEN 0 ELSE 1 END = a.selection_control_version
               AND g.activated_at_ms=a.effective_from_ms AND g.terminal_at_ms=a.effective_from_ms
               AND u.lifecycle_state='active' AND u.activated_at_ms=a.effective_from_ms
               AND v.state='RESOLVED_ACTIVE' AND v.resolved_at_ms=a.effective_from_ms
@@ -175,6 +190,11 @@ def _authority_snapshot_epoch() -> None:
     table = "brc_selection_session_authorities"
     op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
     op.add_column(table, sa.Column("selection_control_version", sa.BigInteger(), nullable=True))
+    op.add_column(table, sa.Column("activation_authorization_id", ID, nullable=True))
+    op.create_foreign_key("fk_brc_authority_activation_owner", table, "brc_owner_authorizations", ["activation_authorization_id"], ["authorization_id"])
+    op.create_unique_constraint("uq_brc_authority_activation_owner", table, ["activation_authorization_id"])
+    op.create_check_constraint("ck_brc_authority_activation_shape", table,
+        "activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome='ACTIVE_NEW')")
     op.add_column(table, sa.Column("current_close_proof", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))

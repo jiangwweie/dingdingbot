@@ -1392,7 +1392,11 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
             if generation.lifecycle_state is MaterializationGenerationState.STAGED:
                 control = await uow.instrument_selection.get_selection_control(generation.strategy_group_id,for_update=True)
-                if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
+                first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
+                    control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+                    and control.pending_effective_period_anchor_ms == generation.period_anchor_ms
+                    and control.pending_authorization_id is not None)
+                if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation):
                     return _blocked("GENERIC_FIRST_ACTIVATION_REQUIRED")
                 targets = await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id,for_update=True)
                 spec = await uow.instrument_selection.get_generic_spec(generation.selection_spec_id)
@@ -1422,7 +1426,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
                     selection_spec_id=generation.selection_spec_id,strategy_group_id=generation.strategy_group_id,selection_epoch_id=generation.selection_epoch_id,
                     selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation.materialization_generation_id,
-                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version,
+                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version + int(first_activation),
+                    activation_authorization_id=control.pending_authorization_id if first_activation else None,
                     period=proof.period,authority_outcome="ACTIVE_NEW",event_binding=AuthorityEventBinding(event_spec_id=spec.event_spec_id,
                         position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=target.universe_version_id,member_set_digest=snapshot.member_set_digest),
                     current_close_proof=proof,membership_freshness=build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,

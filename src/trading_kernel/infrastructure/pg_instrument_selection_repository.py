@@ -3947,6 +3947,7 @@ def generic_authority_storage_values(authority: GenericSelectionAuthority) -> di
         "selection_spec_id":authority.selection_spec_id,
         "selection_epoch_id":authority.selection_epoch_id,
         "selection_control_version":authority.selection_control_version,
+        "activation_authorization_id":authority.activation_authorization_id,
         "period_anchor_ms":authority.period.feature_cutoff_at_ms,
         "decision_boundary_ms":authority.period.scheduled_effective_at_ms,
         "authority_sequence":authority.authority_sequence,
@@ -3980,7 +3981,7 @@ def generic_authority_from_storage(row: Mapping[str, object], *, spec: GenericSe
     authority = GenericSelectionAuthority.model_validate({
         **{name:row[name] for name in (
             "selection_authority_id","selection_spec_id","selection_epoch_id","selection_snapshot_id",
-            "materialization_generation_id","authority_sequence","owner_control_version","selection_control_version",
+            "materialization_generation_id","authority_sequence","owner_control_version","selection_control_version","activation_authorization_id",
             "selection_mode","authority_outcome","current_close_proof","membership_freshness",
             "comparison_universe_id","comparison_transition_revision","effective_from_ms","created_at_ms")},
         "strategy_group_id":spec.strategy_group_id,

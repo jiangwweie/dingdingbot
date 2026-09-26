@@ -805,6 +805,7 @@ class GenericSelectionAuthority(BaseModel):
     authority_sequence: int = Field(gt=0)
     owner_control_version: int = Field(gt=0)
     selection_control_version: int = Field(gt=0)
+    activation_authorization_id: str | None = None
     period: GenericSelectionPeriod
     authority_outcome: Literal["ACTIVE_NEW", "NO_CHANGE", "VALID_EMPTY"]
     event_binding: AuthorityEventBinding
@@ -822,7 +823,7 @@ class GenericSelectionAuthority(BaseModel):
             raise ValueError("Generic Authority requires bounded identity")
         return value.strip()
 
-    @field_validator("materialization_generation_id", "comparison_universe_id")
+    @field_validator("materialization_generation_id", "comparison_universe_id", "activation_authorization_id")
     @classmethod
     def _optional_identity(cls, value: str | None) -> str | None:
         if value is not None and (not value.strip() or value != value.strip() or len(value)>160):
@@ -855,6 +856,8 @@ class GenericSelectionAuthority(BaseModel):
 
     @model_validator(mode="after")
     def _validate_generic_authority(self) -> GenericSelectionAuthority:
+        if self.activation_authorization_id is not None and self.authority_outcome != "ACTIVE_NEW":
+            raise ValueError("first activation proof currently requires ACTIVE_NEW")
         spec = generic_selection_spec(self.strategy_group_id)
         if self.selection_spec_id != spec.selection_spec_id or self.period.cadence_hours != spec.cadence_hours:
             raise ValueError("Generic Authority Spec/period differs")

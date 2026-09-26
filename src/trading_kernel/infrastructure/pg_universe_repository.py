@@ -918,8 +918,20 @@ class PostgresStrategyUniverseRepository:
         control = await selection.get_selection_control(authority.strategy_group_id,for_update=True)
         if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=authority.owner_control_version:
             raise UniverseInstallConflict("GENERIC_OWNER_CONTROL_CHANGED")
-        if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION or control.control_version!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
+        first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
+            control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_authorization_id == authority.activation_authorization_id
+            and authority.activation_authorization_id is not None)
+        if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version + int(first_activation)!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
             raise UniverseInstallConflict("GENERIC_SELECTION_CONTROL_CHANGED")
+        if first_activation:
+            authorization = (await self._connection.execute(sa.text("SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
+                {"id":authority.activation_authorization_id})).mappings().one_or_none()
+            expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
+                "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
+            if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>authority.created_at_ms:
+                raise UniverseInstallConflict("GENERIC_ACTIVATION_AUTHORIZATION_CHANGED")
         await self._lock_installs()
         generation = await selection.get_generic_materialization_generation(str(request.materialization_generation_id),for_update=True)
         target = (await self._connection.execute(sa.select(strategy_universe_versions).where(
@@ -934,6 +946,8 @@ class PostgresStrategyUniverseRepository:
             return UniverseActivationResult(status=UniverseActivationStatus.ALREADY_ACTIVE,reason_code=None,
                 event_spec_id=authority.event_binding.event_spec_id,universe_version_id=request.universe_version_id,
                 previous_universe_version_id=None,activation_generation=current_target.activation_generation,activated_at_ms=current_target.activated_at_ms)
+        if authority.activation_authorization_id is not None and not first_activation:
+            raise UniverseInstallConflict("GENERIC_ACTIVATION_PENDING_REQUIRED")
         vacuum = await selection.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,selection_spec_id=authority.selection_spec_id,for_update=True)
         if generation.lifecycle_state.value!="STAGED" or vacuum is None or vacuum.state.value!="RECONFIGURING" or vacuum.source_generation_id!=generation.materialization_generation_id or vacuum.fenced_at_ms!=generation.fenced_at_ms:
             raise UniverseInstallConflict("GENERIC_STAGED_DRAINED_GENERATION_REQUIRED")
@@ -967,6 +981,8 @@ class PostgresStrategyUniverseRepository:
             if revision!=authority.comparison_transition_revision:
                 raise UniverseInstallConflict("GENERIC_COMPARISON_REVISION_CHANGED")
         current_authority = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+        if first_activation and current_authority is not None:
+            raise UniverseInstallConflict("GENERIC_FIRST_ACTIVATION_AUTHORITY_EXISTS")
         if current_authority is not None and (current_authority.authority.blocks_new_entry
             or current_authority.authority.expires_at_ms < authority.period.scheduled_effective_at_ms):
             raise UniverseInstallConflict("GENERIC_ACTIVATION_REQUIRES_RECOVERY")
@@ -1014,6 +1030,9 @@ class PostgresStrategyUniverseRepository:
             lease_owner=None,lease_expires_at_ms=None))
         await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id).values(
             state="RESOLVED_ACTIVE",resolved_at_ms=at,projection_version=vacuum.projection_version+1))
+        if first_activation:
+            await selection.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,
+                expected_control_version=control.control_version,expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,activated_at_ms=at)
         await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
         await self._connection.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
         if current_authority is None:
