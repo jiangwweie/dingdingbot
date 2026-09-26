@@ -29,6 +29,11 @@ from src.trading_kernel.application.coordinate_selection_materialization import 
     coordinate_selection_materialization_once,
     prepare_generic_current_close_proof,
 )
+from src.trading_kernel.application.drain_strategy_entry_vacuum import (
+    DrainStrategyEntryVacuumRequest,
+    VacuumDrainStatus,
+    drain_strategy_entry_vacuum_once,
+)
 from src.trading_kernel.application.ingest_signal import (
     resolve_selection_entry_authority,
 )
@@ -489,6 +494,13 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="empty-coordinator")
     results = []
     for tick in range(4):
+        if tick == 1:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                with patch.object(uow.instrument_selection,"get_snapshot_disposition",new=AsyncMock(side_effect=AssertionError("Generic drain must not read SOR Snapshot"))):
+                    drained = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                        strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,now_ms=snapshot.effective_from_ms+2))
+                assert drained.status == VacuumDrainStatus.ENTRY_DRAINED
+                assert await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id) is None
         if first_activation and tick == 1:
             async with PostgresKernelUnitOfWork(database) as uow:
                 pending = await uow.instrument_selection.get_selection_control(group)
@@ -1147,6 +1159,13 @@ async def test_generic_failure_releases_target_but_keeps_recovery_vacuum(databas
     await _exercise_generic_generation(database,group,False,failure_case=failure_case,first_activation=first_activation)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+@pytest.mark.parametrize("failed_first", [False,True])
+async def test_new_empty_selection_supersedes_failed_generation_on_same_vacuum(database, group, failed_first):
+    await _exercise_generic_generation(database,group,False,failure_case="timeout_then_empty" if failed_first else "staged_then_empty")
+
+
 async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None):
     source = inputs(group)
     if comparison_only:
@@ -1560,6 +1579,12 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
         request=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
             worker_id="stage-coordinator"),clock_ms=lambda:close+30_004)
     assert coordinated.disposition == MaterializationDisposition.GENERATION_STAGED
+    if failure_case == "staged_then_empty":
+        async with PostgresKernelUnitOfWork(database) as uow:
+            original = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)
+        await _assert_generic_empty_handoff(database,source,original,vacuum)
+        return
     if failure_case:
         await _assert_generic_failed_target(database,source,generation,uid,failure_case)
         return
@@ -1696,6 +1721,79 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":staged.materialization_generation_id}) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"),{"uid":uid}) == 0
+    if failure_case == "timeout_then_empty":
+        await _assert_generic_empty_handoff(database,source,persisted,vacuum)
+
+
+async def _assert_generic_empty_handoff(database, source, original, vacuum):
+    next_source = next_input(source)
+    while next_source.feature_cutoff_at_ms <= original.period_anchor_ms:
+        next_source = next_input(next_source)
+    next_source = next_source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in next_source.member_windows)})
+    empty = compute_generic_selection(next_source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(empty,decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
+    empty_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,worker_id="empty-successor")
+    now = empty.effective_from_ms+8000
+    async with PostgresKernelUnitOfWork(database) as uow:
+        owner = await uow.owner_controls.get_strategy_control(source.spec.strategy_group_id)
+        control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
+    for old_vacuum, owner_version, control_version, checked_at, error in (
+        (vacuum,owner.control_version+1,control.control_version,now,"Owner or Control"),
+        (vacuum,owner.control_version,control.control_version+1,now,"Owner or Control"),
+        (vacuum.model_copy(update={"projection_version":vacuum.projection_version+1}),owner.control_version,control.control_version,now,"Vacuum changed"),
+        (vacuum,owner.control_version,control.control_version,empty.effective_from_ms-1,"latest effective"),
+    ):
+        with pytest.raises(SelectionJobConflict,match=error), patch.object(
+            PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=checked_at)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.instrument_selection.retarget_generic_empty_vacuum(old_vacuum,selection_snapshot_id=empty.selection_snapshot_id,
+                    expected_owner_version=owner_version,expected_control_version=control_version)
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group"),{"group":source.spec.strategy_group_id})
+    paused = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:now)
+    assert paused.disposition == MaterializationDisposition.OWNER_PAUSED
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id=:group"),{"group":source.spec.strategy_group_id})
+
+    @asynccontextmanager
+    async def interrupted_handoff():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            assert current is not None and current.authority.blocks_new_entry
+            raise RuntimeError("empty handoff interrupted")
+
+    with pytest.raises(RuntimeError,match="empty handoff interrupted"), patch.object(
+        PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_handoff,request=empty_request,clock_ms=lambda:now)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id) == vacuum
+        assert await uow.instrument_selection.get_generic_materialization_generation(original.materialization_generation_id) == original
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+        result = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:now)
+    assert result.disposition == MaterializationDisposition.VALID_EMPTY, result
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert current is not None and current.authority.blocks_new_entry
+        assert current.authority.selection_snapshot_id == empty.selection_snapshot_id
+        old = await uow.instrument_selection.get_generic_materialization_generation(original.materialization_generation_id)
+        if original.lifecycle_state.value == "FAILED_CLOSED":
+            assert old == original
+        else:
+            assert old.lifecycle_state.value == "SUPERSEDED" and old.terminal_at_ms == now
+    async with database.connect() as conn:
+        row = (await conn.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current"))).mappings().one()
+        assert row["entry_vacuum_id"] == vacuum.entry_vacuum_id
+        assert row["state"] == "VALID_EMPTY" and row["source_generation_id"] is None
+        assert row["fenced_at_ms"] == vacuum.fenced_at_ms and row["drained_at_ms"] == vacuum.drained_at_ms
+        assert row["period_anchor_ms"] == empty.feature_cutoff_at_ms
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+    repeated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:now+1)
+    assert repeated.selection_authority_id == result.selection_authority_id
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuum_events WHERE entry_vacuum_id=:id AND event_type='VALID_EMPTY_INTENT'"),{"id":vacuum.entry_vacuum_id}) == 1
 
 
 async def _assert_generic_durable_activation(database, source, generation, uid, now):

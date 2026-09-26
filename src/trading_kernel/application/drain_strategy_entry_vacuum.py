@@ -529,6 +529,17 @@ async def _complete_entry_drain(
             reason_code="VALID_EMPTY_VACUUM_INTENT_INVALID",
         )
 
+    if request.strategy_group_id != "SOR-001":
+        # Generic EMPTY Authority belongs to the Coordinator's atomic commit.
+        # A Ticket can finish between its initial read and this drain tick;
+        # do not fall through into the SOR-only Snapshot/Authority decoder.
+        blocked = await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=request.strategy_group_id)
+        return DrainStrategyEntryVacuumResult(
+            status=VacuumDrainStatus.BLOCKED if blocked else VacuumDrainStatus.ENTRY_DRAINED,
+            entry_vacuum_id=vacuum.entry_vacuum_id,
+            reason_code="ENTRY_DRAIN_BLOCKED" if blocked else "GENERIC_EMPTY_AUTHORITY_COMMIT_REQUIRED",
+        )
+
     snapshot = await uow.instrument_selection.get_snapshot_disposition(
         selection_spec_id=request.selection_spec_id,
         session_start_ms=vacuum.period_anchor_ms,

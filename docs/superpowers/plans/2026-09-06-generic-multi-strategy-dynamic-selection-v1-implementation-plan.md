@@ -361,6 +361,14 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+EMPTY supersession收尾验证：Generic repository + SOR materialization + ENTRY Vacuum drain组合233 passed；追加Owner/Control/Vacuum旧版本及未到effective拒绝后的supersession专项8 passed；Unit/Architecture1226 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。计数重叠不相加，未执行完整R4或自然Signal→Ticket全链；所有PG验证在本地Docker，生产未修改。
+
+Generic VALID_EMPTY supersession增量（基于`9b868587`）：已复现新zero-member Snapshot被旧failed Vacuum永久挡在GENERIC_EMPTY_REQUIRES_SUPERSESSION。现同一Coordinator在Owner/Control及Spec lineage锁下确认最新due、未过期、exact epoch的空Snapshot，复用原Vacuum追加VALID_EMPTY_INTENT；旧MATERIALIZING/STAGED目标经正式abandon并标SUPERSEDED，已FAILED_CLOSED父行保持原终态/时间/版本。Vacuum转移到新period/intent但保留原ID、fence及已完成drain时间；统一empty提交读取最新追加intent，不改写旧OPEN事件，不新建空Universe/Generation、不fallback。旧Generation仍DRAINING时先继续正式drain，未清空不能跳过；Owner Pause优先。
+
+四策略×staged/failed八场景验证同Vacuum原子EMPTY提交、Owner pause拒绝、commit前中断整体回滚、保留原fence/drain和失败父行、重试不重复intent。测试仍为明确Static baseline与无Ticket的materialization前置，不替代已有Position/Ticket非追溯full-chain。非空supersession、跨epoch/Owner-Pause恢复和正式fallback Authority仍未完成。
+
+Generic empty drain边界修复：直接无Ticket drain会调用SOR专属get_snapshot_disposition的RED已复现。现Generic generation-free empty drain仅验证drain blockers并返回GENERIC_EMPTY_AUTHORITY_COMMIT_REQUIRED，保持DRAINING_ENTRY且不生成Authority；仍由Coordinator原子提交EMPTY。首次/普通empty四策略回归显式断言零SOR Snapshot读取，覆盖Ticket在外层查询后清空时会到达的同一无Ticket分支，不声称已做真实并发Ticket全链。empty/supersession定向组合16 passed。
+
 失败handoff验证：Generic repository + SOR materialization组合195 passed；补充真实DB deadline前拒绝超时后的失败专项14 passed（四策略timeout/permanent/expired及两条首次Static失败），覆盖wrong lease、commit前中断全回滚、target/旧current/Control/Vacuum/零Command与重复失败事件幂等。最终activation直接入口的6场景额外验证final-clock跨close、跨deadline、跨lease均回滚。Unit/Architecture1226 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。数字重叠不相加，未执行完整R4，生产未修改。
 
 Generic失败handoff（基于`5715f215`）：四策略到原fence+1800s仍返回TARGET_WARMING的RED已复现。现MATERIALIZING/STAGED在超时或period expiry时停止目标；认证owner_action_required/not_eligible走同一负向失败入口，temporary unavailable在deadline前仍重试。入口核对Owner/Control/epoch、worker lease、Generation/Vacuum版本及drain，用正式Universe abandon清理未生效target并释放warming资源；同事务Generation变FAILED_CLOSED且terminal、清lease，Vacuum保留RECONFIGURING及原fence/drain，不写resolved时间，追加RECOVERY_REQUIRED及失败原因/deadline。已有previous Universe、Selection Control、Ticket/Command不变，没有伪造FALLBACK_PREVIOUS或positive Authority。相同Generation重试读取原blocker，不追加失败事件。

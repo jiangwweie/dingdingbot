@@ -1260,7 +1260,17 @@ async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericS
             drained_at_ms=None,resolved_at_ms=None,first_blocker="NO_SELECTION_READY_MEMBERS",projection_version=1)
         await uow.instrument_selection.open_valid_empty_intent_vacuum(vacuum,selection_snapshot_id=snapshot.selection_snapshot_id)
     if vacuum.entry_vacuum_id != vacuum_id or vacuum.source_generation_id is not None:
-        return _blocked("GENERIC_EMPTY_REQUIRES_SUPERSESSION")
+        if vacuum.source_generation_id is not None and vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY:
+            drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,now_ms=now_ms))
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
+        if vacuum.state not in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,StrategyEntryVacuumState.RECONFIGURING}:
+            return _blocked("GENERIC_EMPTY_REQUIRES_SUPERSESSION")
+        vacuum = await uow.instrument_selection.retarget_generic_empty_vacuum(vacuum,selection_snapshot_id=snapshot.selection_snapshot_id,
+            expected_owner_version=owner_control_version,expected_control_version=control.control_version)
+        vacuum_id = vacuum.entry_vacuum_id
+        now_ms = await uow.instrument_selection.read_authority_clock_ms()
     if vacuum.state is StrategyEntryVacuumState.OPEN:
         await uow.instrument_selection.mark_entry_vacuum_draining(vacuum,started_at_ms=now_ms)
         return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,

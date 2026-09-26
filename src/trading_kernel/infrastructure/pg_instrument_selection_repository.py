@@ -3075,7 +3075,8 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Generic empty Vacuum differs")
         intent = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
             strategy_entry_vacuum_events.c.entry_vacuum_id == entry_vacuum_id,
-            strategy_entry_vacuum_events.c.event_sequence == 1))).scalar_one_or_none()
+            strategy_entry_vacuum_events.c.payload["intended_authority_outcome"].astext == "VALID_EMPTY"
+        ).order_by(strategy_entry_vacuum_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
         if intent is None or intent.get("selection_snapshot_id") != authority.selection_snapshot_id or intent.get("intended_authority_outcome") != "VALID_EMPTY":
             raise SelectionJobConflict("Generic empty Vacuum Snapshot intent differs")
         current = (await self._connection.execute(sa.select(selection_authority_current).where(
@@ -3217,6 +3218,89 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=vacuum.fenced_at_ms,
             )
         )
+
+    async def retarget_generic_empty_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        selection_snapshot_id: str, expected_owner_version: int, expected_control_version: int,
+    ) -> StrategyEntryVacuum:
+        """New empty Desired takes over an uninterrupted fence; never grant fallback."""
+        from src.trading_kernel.application.abandon_strategy_universe import (
+            AbandonStrategyUniverseRequest,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+        snapshot = await self.get_generic_snapshot(selection_snapshot_id)
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==snapshot.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(snapshot.strategy_group_id,for_update=True)
+        if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=expected_owner_version or (
+            control is None or control.control_version!=expected_control_version
+            or not self._generic_control_allows(control,snapshot.selection_spec_id,snapshot.selection_epoch_id,snapshot.feature_cutoff_at_ms)):
+            raise SelectionJobConflict("Generic empty handoff Owner or Control changed")
+        await self._connection.execute(sa.select(instrument_selection_specs.c.selection_spec_id).where(
+            instrument_selection_specs.c.selection_spec_id==snapshot.selection_spec_id).with_for_update())
+        now = await self.read_authority_clock_ms()
+        latest = await self._connection.scalar(sa.select(instrument_selection_snapshots.c.selection_snapshot_id).where(
+            instrument_selection_snapshots.c.selection_spec_id==snapshot.selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id==snapshot.selection_epoch_id,
+            instrument_selection_snapshots.c.eligibility_not_before_ms<=now,
+        ).order_by(instrument_selection_snapshots.c.period_anchor_ms.desc()).limit(1))
+        if snapshot.selected_members or latest!=selection_snapshot_id or not snapshot.effective_from_ms<=now<snapshot.expires_at_ms or snapshot.committed_at_ms>now:
+            raise SelectionJobConflict("Generic empty handoff requires latest effective zero-member Snapshot")
+        current = await self.get_current_entry_vacuum(strategy_group_id=snapshot.strategy_group_id,
+            selection_spec_id=snapshot.selection_spec_id,for_update=True)
+        if current!=vacuum or vacuum.state not in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,StrategyEntryVacuumState.RECONFIGURING}:
+            raise SelectionJobConflict("Generic empty handoff Vacuum changed")
+        if vacuum.source_generation_id is None and vacuum.period_anchor_ms==snapshot.feature_cutoff_at_ms:
+            intent = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
+                strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+                strategy_entry_vacuum_events.c.payload["intended_authority_outcome"].astext=="VALID_EMPTY"
+            ).order_by(strategy_entry_vacuum_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
+            if intent is None or intent.get("selection_snapshot_id")!=selection_snapshot_id:
+                raise SelectionJobConflict("Generic empty handoff intent changed")
+            return vacuum
+        if snapshot.feature_cutoff_at_ms<=vacuum.period_anchor_ms:
+            raise SelectionJobConflict("Generic empty handoff Snapshot is not newer")
+        if vacuum.source_generation_id is not None:
+            old = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
+            if old is None or old.selection_spec_id!=snapshot.selection_spec_id or old.selection_epoch_id!=snapshot.selection_epoch_id or (
+                old.period_anchor_ms>=snapshot.feature_cutoff_at_ms or old.fenced_at_ms!=vacuum.fenced_at_ms
+                or old.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED,MaterializationGenerationState.FAILED_CLOSED}
+                or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None):
+                raise SelectionJobConflict("Generic empty handoff requires exact drained previous Generation")
+            universes = PostgresStrategyUniverseRepository(self._connection)
+            targets = await universes.get_generation_universe_targets(old.materialization_generation_id,for_update=True)
+            if len(targets)>1:
+                raise SelectionJobConflict("Generic empty handoff target set differs")
+            for target in targets:
+                if target.lifecycle_state.value!="abandoned":
+                    await universes.abandon(AbandonStrategyUniverseRequest(universe_version_id=target.universe_version_id,
+                        reason_code="superseded_by_valid_empty",attempted_at_ms=now))
+            if old.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED:
+                changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id==old.materialization_generation_id,
+                    strategy_universe_materialization_generations.c.projection_version==old.projection_version).values(
+                        lifecycle_state="SUPERSEDED",terminal_at_ms=now,projection_version=old.projection_version+1,lease_owner=None,lease_expires_at_ms=None))
+                if changed.rowcount!=1:
+                    raise SelectionJobConflict("Generic empty handoff Generation CAS changed")
+            seq = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==old.materialization_generation_id)) or 0)+1
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=f"materialization-event:{old.materialization_generation_id}:{seq}",materialization_generation_id=old.materialization_generation_id,
+                event_sequence=seq,event_type="SUPERSEDED_BY_VALID_EMPTY",payload={"selection_snapshot_id":selection_snapshot_id,"entry_vacuum_id":vacuum.entry_vacuum_id},occurred_at_ms=now))
+        retargeted = StrategyEntryVacuum.model_validate({**vacuum.model_dump(),"source_generation_id":None,
+            "period_anchor_ms":snapshot.feature_cutoff_at_ms,"state":"DRAINING_ENTRY","first_blocker":"NO_SELECTION_READY_MEMBERS",
+            "projection_version":vacuum.projection_version+1})
+        changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(**retargeted.model_dump(mode="json")))
+        if changed.rowcount!=1:
+            raise SelectionJobConflict("Generic empty handoff Vacuum CAS changed")
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{retargeted.projection_version}",entry_vacuum_id=vacuum.entry_vacuum_id,
+            event_sequence=retargeted.projection_version,event_type="VALID_EMPTY_INTENT",
+            payload={"selection_snapshot_id":selection_snapshot_id,"intended_authority_outcome":"VALID_EMPTY","previous_generation_id":vacuum.source_generation_id},occurred_at_ms=now))
+        return retargeted
 
     async def open_valid_empty_intent_vacuum(
         self,
@@ -3485,7 +3569,7 @@ class PostgresInstrumentSelectionRepository:
             vacuum.model_copy(
                 update={
                     "state": target,
-                    "drained_at_ms": drained_at_ms,
+                    "drained_at_ms": vacuum.drained_at_ms if vacuum.strategy_group_id!="SOR-001" and vacuum.drained_at_ms is not None else drained_at_ms,
                     "resolved_at_ms": resolved_at_ms,
                     "projection_version": vacuum.projection_version + 1,
                 }
@@ -3507,7 +3591,7 @@ class PostgresInstrumentSelectionRepository:
             )
             .values(
                 state=drained.state.value,
-                drained_at_ms=drained_at_ms,
+                drained_at_ms=drained.drained_at_ms,
                 resolved_at_ms=resolved_at_ms,
                 projection_version=drained.projection_version,
             )
