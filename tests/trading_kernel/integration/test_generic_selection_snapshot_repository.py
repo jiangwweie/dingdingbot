@@ -1139,7 +1139,15 @@ async def test_first_activation_same_members_still_materializes_changed_comparis
     await _exercise_generic_generation(database, group, True, durable=True, first_activation=True)
 
 
-async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group,failure_case,first_activation", [
+    (group,case,False) for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001") for case in ("timeout", "permanent", "expired")
+] + [("CPM-RO-001","timeout",True),("MI-001","expired",True)])
+async def test_generic_failure_releases_target_but_keeps_recovery_vacuum(database, group, failure_case, first_activation):
+    await _exercise_generic_generation(database,group,False,failure_case=failure_case,first_activation=first_activation)
+
+
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None):
     source = inputs(group)
     if comparison_only:
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
@@ -1422,8 +1430,8 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
         # The synthetic cache-row checks below use another fixture timestamp.
         async with database.begin() as conn:
             await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current"))
-        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable)
-        if durable:
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable, failure_case=failure_case)
+        if durable or failure_case:
             return
         candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
         close = candles[-1].close_time_ms
@@ -1482,8 +1490,8 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             assert saved.comparison_transition_revision == 1
             assert saved.projection_version == 2
     else:
-        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable)
-        if durable:
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable, failure_case=failure_case)
+        if durable or failure_case:
             return
     if comparison_only:
         with pytest.raises(sa.exc.DBAPIError,match="uq_brc_strategy_universe_versions_current_digest"):
@@ -1499,7 +1507,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
                 [{"uid":uid,"member":member} for member in source.spec.candidate_ids[1:11]])
 
 
-async def _assert_generic_target_stages(database, source, generation, uid, *, durable=False):
+async def _assert_generic_target_stages(database, source, generation, uid, *, durable=False, failure_case=None):
     # Certification/warm facts are explicit prerequisites. The caller already
     # drove Coordinator fence/drain; activation is checked by the helpers below.
     close = generation.created_at_ms - 1
@@ -1507,7 +1515,7 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
         warm_closed_bar_time_ms=close, valid_until_ms=close+HOUR)
     async with PostgresKernelUnitOfWork(database) as uow:
         lease = await uow.instrument_selection.claim_generic_materialization_generation(
-            generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+10,lease_duration_ms=HOUR//2)
+            generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+10,lease_duration_ms=HOUR//4)
     assert lease.generation is not None
     request = UniverseActivationRequest(universe_version_id=uid, attempted_at_ms=close+30_004,
         operation=UniverseActivationOperation.STAGE_DYNAMIC,
@@ -1552,13 +1560,16 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
         request=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
             worker_id="stage-coordinator"),clock_ms=lambda:close+30_004)
     assert coordinated.disposition == MaterializationDisposition.GENERATION_STAGED
+    if failure_case:
+        await _assert_generic_failed_target(database,source,generation,uid,failure_case)
+        return
     if durable:
         await _assert_generic_durable_activation(database, source, generation, uid, close+30_004)
         return
     async with PostgresKernelUnitOfWork(database) as uow:
         lease = await uow.instrument_selection.claim_generic_materialization_generation(
             generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+30_004,
-            lease_duration_ms=HOUR//2-29_994)
+            lease_duration_ms=HOUR//4-29_994)
     assert lease.generation is not None
     request = request.model_copy(update={"materialization_lease_epoch":lease.generation.lease_epoch})
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -1578,17 +1589,17 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
     await _assert_generic_active_new_storage(database,source,generation,uid,close+30_004)
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await advance_strategy_universe(uow, request) == staged
-        lease_expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+HOUR//2+11}))
+        lease_expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+HOUR//4+11}))
         assert lease_expired.reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
         expired = await advance_strategy_universe(uow, request.model_copy(update={"attempted_at_ms":close+source.spec.cadence_hours*HOUR}))
         assert expired.reason_code == "GENERATION_SOURCE_PERIOD_EXPIRED"
     async with PostgresKernelUnitOfWork(database) as uow:
         reclaimed = await uow.instrument_selection.claim_generic_materialization_generation(
             generation.materialization_generation_id, worker_id="stage-worker",
-            now_ms=close+HOUR//2+12, lease_duration_ms=60_000)
+            now_ms=close+HOUR//4+12, lease_duration_ms=60_000)
     assert reclaimed.generation is not None
     assert reclaimed.generation.lease_epoch == lease.generation.lease_epoch + 1
-    callback = request.model_copy(update={"attempted_at_ms":close+HOUR//2+13})
+    callback = request.model_copy(update={"attempted_at_ms":close+HOUR//4+13})
     async with PostgresKernelUnitOfWork(database) as uow:
         assert (await advance_strategy_universe(uow, callback)).reason_code == "DYNAMIC_GENERATION_LEASE_CHANGED"
         assert await advance_strategy_universe(uow, callback.model_copy(update={"materialization_lease_epoch":reclaimed.generation.lease_epoch})) == staged
@@ -1603,6 +1614,88 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
     async with PostgresKernelUnitOfWork(database) as uow:
         stale = await advance_strategy_universe(uow, request)
     assert stale.reason_code == "DYNAMIC_GENERATION_CONTROL_CHANGED"
+
+
+async def _assert_generic_failed_target(database, source, generation, uid, failure_case):
+    async with PostgresKernelUnitOfWork(database) as uow:
+        staged = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+        control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
+    assert staged is not None and staged.fenced_at_ms is not None
+    deadline = staged.fenced_at_ms+source.spec.materialization_timeout_ms
+    request = CoordinateGenericGenerationRequest(materialization_generation_id=staged.materialization_generation_id,worker_id="failure-coordinator")
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":uid})
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=deadline-1)):
+        waiting = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:deadline-1)
+    assert waiting.disposition == MaterializationDisposition.TARGET_WARMING
+    async with PostgresKernelUnitOfWork(database) as uow:
+        retried = await uow.instrument_selection.get_generic_materialization_generation(staged.materialization_generation_id)
+        assert retried.fenced_at_ms == staged.fenced_at_ms and retried.created_at_ms == staged.created_at_ms
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=deadline-1)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            premature = await uow.instrument_selection.claim_generic_materialization_generation(staged.materialization_generation_id,
+                worker_id="premature-timeout",now_ms=deadline-1,lease_duration_ms=30_000)
+            assert premature.generation is not None
+            with pytest.raises(SelectionJobConflict,match="deadline has not elapsed"):
+                await uow.instrument_selection.fail_generic_materialization_generation(staged.materialization_generation_id,
+                    expected_projection_version=premature.generation.projection_version,worker_id="premature-timeout",
+                    lease_epoch=premature.generation.lease_epoch,reason_code="MATERIALIZATION_TIMEOUT")
+            await uow.instrument_selection.release_generic_materialization_generation_lease(staged.materialization_generation_id,
+                worker_id="premature-timeout",lease_epoch=premature.generation.lease_epoch)
+    at = deadline
+    reason = "MATERIALIZATION_TIMEOUT"
+    if failure_case == "permanent":
+        at = deadline-1
+        reason = "CERTIFICATION_OWNER_ACTION_REQUIRED"
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='owner_action_required',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":uid})
+    elif failure_case == "expired":
+        at = staged.period_anchor_ms+(source.spec.cadence_hours+1)*HOUR
+        reason = "MATERIALIZATION_PERIOD_EXPIRED"
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), pytest.raises(SelectionJobConflict,match="lease/state changed"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.fail_generic_materialization_generation(staged.materialization_generation_id,
+                expected_projection_version=staged.projection_version,worker_id="wrong-worker",lease_epoch=staged.lease_epoch,
+                reason_code=reason)
+
+    @asynccontextmanager
+    async def interrupted_failure():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            failed_state = await uow.instrument_selection.get_generic_materialization_generation(staged.materialization_generation_id)
+            assert failed_state.lifecycle_state.value == "FAILED_CLOSED"
+            raise RuntimeError("failure handoff interrupted")
+
+    with pytest.raises(RuntimeError,match="failure handoff interrupted"), patch.object(
+        PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_failure,request=request,clock_ms=lambda:at)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "staged"
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"),{"gid":staged.materialization_generation_id}) == "STAGED"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":staged.materialization_generation_id}) == 0
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+        failed = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at)
+    assert failed.disposition == MaterializationDisposition.BLOCKED and failed.reason_code == reason
+    await database.dispose()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        persisted = await uow.instrument_selection.get_generic_materialization_generation(staged.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)
+        assert persisted.lifecycle_state.value == "FAILED_CLOSED" and persisted.terminal_at_ms == at and persisted.lease_owner is None
+        assert vacuum.state.value == "RECONFIGURING" and vacuum.first_blocker == reason
+        assert vacuum.fenced_at_ms == staged.fenced_at_ms and vacuum.resolved_at_ms is None
+        assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+        current = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+        assert current.universe_version_id == staged.previous_events[0].universe_version_id
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "abandoned"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state IN ('warming','staged')")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+    repeated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+1)
+    assert repeated.disposition == MaterializationDisposition.BLOCKED and repeated.reason_code == reason
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":staged.materialization_generation_id}) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"),{"uid":uid}) == 0
 
 
 async def _assert_generic_durable_activation(database, source, generation, uid, now):
@@ -1769,6 +1862,14 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
                 async with conn.begin_nested():
                     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,(now//HOUR+1)*HOUR])):
                         await PostgresStrategyUniverseRepository(conn).try_activate(request)
+            for final_clock, reason in (
+                (leased.fenced_at_ms+source.spec.materialization_timeout_ms,"MATERIALIZATION_TIMEOUT"),
+                (leased.lease_expires_at_ms,"DYNAMIC_GENERATION_LEASE_CHANGED"),
+            ):
+                with pytest.raises(UniverseInstallConflict,match=reason):
+                    async with conn.begin_nested():
+                        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,final_clock])):
+                            await PostgresStrategyUniverseRepository(conn).try_activate(request)
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
             assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "staged"
             assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"),{"gid":generation.materialization_generation_id}) == "RECONFIGURING"
@@ -1791,7 +1892,7 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
                 assert waiting.disposition == expected_disposition
                 assert waiting.reason_code == expected_reason
                 pending = await repository.get_generic_materialization_generation(generation.materialization_generation_id)
-                assert pending is not None and pending.lifecycle_state.value == "STAGED"
+                assert pending is not None and pending.lifecycle_state.value == ("FAILED_CLOSED" if certification_status=="owner_action_required" else "STAGED")
                 assert pending.created_at_ms == generation.created_at_ms
                 assert pending.lease_owner is None
                 assert await repository.get_current_generic_authority(source.spec.selection_spec_id) is None

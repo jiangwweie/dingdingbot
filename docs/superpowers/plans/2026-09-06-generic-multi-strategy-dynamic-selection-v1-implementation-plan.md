@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+失败handoff验证：Generic repository + SOR materialization组合195 passed；补充真实DB deadline前拒绝超时后的失败专项14 passed（四策略timeout/permanent/expired及两条首次Static失败），覆盖wrong lease、commit前中断全回滚、target/旧current/Control/Vacuum/零Command与重复失败事件幂等。最终activation直接入口的6场景额外验证final-clock跨close、跨deadline、跨lease均回滚。Unit/Architecture1226 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。数字重叠不相加，未执行完整R4，生产未修改。
+
+Generic失败handoff（基于`5715f215`）：四策略到原fence+1800s仍返回TARGET_WARMING的RED已复现。现MATERIALIZING/STAGED在超时或period expiry时停止目标；认证owner_action_required/not_eligible走同一负向失败入口，temporary unavailable在deadline前仍重试。入口核对Owner/Control/epoch、worker lease、Generation/Vacuum版本及drain，用正式Universe abandon清理未生效target并释放warming资源；同事务Generation变FAILED_CLOSED且terminal、清lease，Vacuum保留RECONFIGURING及原fence/drain，不写resolved时间，追加RECOVERY_REQUIRED及失败原因/deadline。已有previous Universe、Selection Control、Ticket/Command不变，没有伪造FALLBACK_PREVIOUS或positive Authority。相同Generation重试读取原blocker，不追加失败事件。
+
+已fenced的DRAINING_ENTRY/MATERIALIZING/STAGED允许period过期后获取cleanup lease，以便继续既有drain并终止过期目标；这是负向收尾，不延长Snapshot/ENTRY资格。pre-fence过期仍拒绝，新的目标安装/直接STAGE/CERTIFY/ACTIVATE仍校验period及原deadline，ACTIVATE最终DB clock还检查close边界、deadline与lease expiry，任一失败整事务回滚。原lease-reclaim fixture改为deadline内15min lease；不能保留“30min deadline后仍可staged成功”的旧断言。expiry/failure之后的恢复Authority、Static失败清pending、supersession及global-slot-before-fence完整排序仍待后续，不将本handoff标成fallback全链完成。
+
 本轮收尾验证：相关PG108 passed、首次/普通激活专项10 passed；时钟/rebase/timing专项34 passed，最终Unit/Architecture1226 passed；全源码Mypy、相关Ruff/diff及文档authority25 passed。计数重叠不相加，不替代GS-09自然生产链或完整R4；未部署、无交易所写入。
 
 首次激活ENTRY接线修复（基于`ad916ed4`）：正式resolver新增四策略RED，证明首次ACTIVE_NEW的Generation pending版v与Authority committed版v+1被旧等号误判selection_generation_not_active。现仅在immutable Authority携带首次Owner授权引用时接受exact +1，普通激活仍exact相等；不放宽为任意大于关系。真实commit/reconnect后检验current-as-birth和exact-birth两种resolver入口，并注入上下漂移版本继续拒绝。首次/普通/比较集合独立切换专项10 passed；Generic repository + Selection ENTRY authority组合108 passed，仍不是自然Signal→Ticket全链。

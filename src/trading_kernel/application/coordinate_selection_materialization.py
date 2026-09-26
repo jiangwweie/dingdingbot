@@ -1304,6 +1304,13 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         if owner.entry_state is StrategyEntryState.PAUSED:
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
                 materialization_generation_id=initial.materialization_generation_id)
+        if initial.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=initial.strategy_group_id,
+                selection_spec_id=initial.selection_spec_id,for_update=True)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                materialization_generation_id=initial.materialization_generation_id,selection_snapshot_id=initial.selection_snapshot_id,
+                entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
+                reason_code=vacuum.first_blocker if vacuum is not None and vacuum.source_generation_id==initial.materialization_generation_id else "GENERIC_RECOVERY_REQUIRED")
         if initial.lifecycle_state is MaterializationGenerationState.ACTIVE:
             control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
             committed = await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)
@@ -1334,6 +1341,14 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         try:
             identity = {"materialization_generation_id":generation.materialization_generation_id,
                 "selection_snapshot_id":generation.selection_snapshot_id}
+            if generation.lifecycle_state in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                spec = await uow.instrument_selection.get_generic_spec(generation.selection_spec_id)
+                expiry = generation.period_anchor_ms+(1+spec.cadence_hours)*3_600_000
+                reason = "MATERIALIZATION_PERIOD_EXPIRED" if now_ms>=expiry else (
+                    "MATERIALIZATION_TIMEOUT" if generation.fenced_at_ms is not None
+                    and now_ms>=generation.fenced_at_ms+spec.materialization_timeout_ms else None)
+                if reason is not None:
+                    return await _fail_generic_generation(uow,generation,request,reason)
             if generation.lifecycle_state is MaterializationGenerationState.PENDING:
                 await uow.instrument_selection.mark_generic_materialization_generation_desired(
                     generation.materialization_generation_id,worker_id=request.worker_id,
@@ -1387,6 +1402,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 if staged.status is UniverseActivationStatus.STAGED:
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_STAGED,
                         entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+                if staged.reason_code in {"CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
+                    return await _fail_generic_generation(uow,generation,request,staged.reason_code)
                 if staged.reason_code not in _GENERIC_TRANSIENT_WARMING_BLOCKERS:
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
                         reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
@@ -1411,6 +1428,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_STAGED,materialization_generation_id=generation.materialization_generation_id,
                     materialization_lease_owner=request.worker_id,materialization_lease_epoch=generation.lease_epoch))
                 if certified.status is not UniverseActivationStatus.STAGED:
+                    if certified.reason_code in {"CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
+                        return await _fail_generic_generation(uow,generation,request,certified.reason_code)
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING
                         if certified.reason_code in _GENERIC_TRANSIENT_WARMING_BLOCKERS else MaterializationDisposition.BLOCKED,
                         reason_code=certified.reason_code,**identity)
@@ -1453,6 +1472,16 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             if not failed:
                 await uow.instrument_selection.release_generic_materialization_generation_lease(
                     generation.materialization_generation_id,worker_id=request.worker_id,lease_epoch=generation.lease_epoch)
+
+
+async def _fail_generic_generation(uow: KernelUnitOfWork, generation: GenericMaterializationGeneration,
+    request: CoordinateGenericGenerationRequest, reason: str) -> CoordinateSelectionMaterializationResult:
+    await uow.instrument_selection.fail_generic_materialization_generation(generation.materialization_generation_id,
+        expected_projection_version=generation.projection_version,worker_id=request.worker_id,
+        lease_epoch=generation.lease_epoch,reason_code=reason)
+    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+        materialization_generation_id=generation.materialization_generation_id,selection_snapshot_id=generation.selection_snapshot_id,
+        reason_code=reason)
 
 
 class _AuthorityGrantWindowExpired(RuntimeError):

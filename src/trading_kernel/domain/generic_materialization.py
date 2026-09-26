@@ -121,6 +121,9 @@ class GenericMaterializationGeneration(BaseModel):
                 raise ValueError("fallback Generation requires terminal reason and time")
         elif self.fallback_reason_code is not None:
             raise ValueError("non-fallback Generation cannot claim fallback reason")
+        if self.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED and (
+            self.fenced_at_ms is None or self.terminal_at_ms is None or self.activated_at_ms is not None or self.fallback_at_ms is not None):
+            raise ValueError("failed Generic Generation requires terminal fenced failure without a grant")
         return self
 
     @property

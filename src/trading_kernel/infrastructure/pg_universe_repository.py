@@ -947,6 +947,9 @@ class PostgresStrategyUniverseRepository:
         if generation.lifecycle_state.value!="STAGED" or vacuum is None or vacuum.state.value!="RECONFIGURING" or vacuum.source_generation_id!=generation.materialization_generation_id or vacuum.fenced_at_ms!=generation.fenced_at_ms:
             raise UniverseInstallConflict("GENERIC_STAGED_DRAINED_GENERATION_REQUIRED")
         now = await selection.read_authority_clock_ms()
+        activation_spec = await selection.get_generic_spec(authority.selection_spec_id)
+        if generation.fenced_at_ms is None or now>=generation.fenced_at_ms+activation_spec.materialization_timeout_ms:
+            raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
         proof = authority.current_close_proof
         if proof is None:
             raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
@@ -1045,7 +1048,12 @@ class PostgresStrategyUniverseRepository:
             materialization_generation_id=gid,event_sequence=event_sequence,event_type="ACTIVE",payload={"universe_version_id":request.universe_version_id,"selection_authority_id":authority.selection_authority_id},occurred_at_ms=at))
         await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
             entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RESOLVED_ACTIVE",payload={"materialization_generation_id":gid},occurred_at_ms=at))
-        require_current_close_commit(proof,committed_at_ms=await selection.read_authority_clock_ms())
+        committed_at = await selection.read_authority_clock_ms()
+        require_current_close_commit(proof,committed_at_ms=committed_at)
+        if committed_at>=generation.fenced_at_ms+activation_spec.materialization_timeout_ms:
+            raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
+        if generation.lease_expires_at_ms is None or committed_at>=generation.lease_expires_at_ms:
+            raise UniverseInstallConflict("DYNAMIC_GENERATION_LEASE_CHANGED")
         return UniverseActivationResult(status=UniverseActivationStatus.ACTIVATED,reason_code=None,event_spec_id=authority.event_binding.event_spec_id,
             universe_version_id=request.universe_version_id,previous_universe_version_id=old_id,activation_generation=current["activation_generation"]+1,activated_at_ms=at)
 
@@ -1106,6 +1114,10 @@ class PostgresStrategyUniverseRepository:
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if spec["selection_kind"] == "generic_dynamic_v1":
+            from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+                PostgresInstrumentSelectionRepository,
+            )
+            generic_spec = await PostgresInstrumentSelectionRepository(self._connection).get_generic_spec(generation["selection_spec_id"])
             control = (await self._connection.execute(sa.select(strategy_selection_control_current).where(
                 strategy_selection_control_current.c.strategy_group_id == generation["strategy_group_id"],
             ).with_for_update())).mappings().one_or_none()
@@ -1119,6 +1131,8 @@ class PostgresStrategyUniverseRepository:
             ))).mappings().one_or_none()
             if snapshot is None or not snapshot["eligibility_not_before_ms"] <= request.attempted_at_ms < snapshot["expires_at_ms"]:
                 return _not_ready_activation(target=target,current=None,reason_code="GENERATION_SOURCE_PERIOD_EXPIRED")
+            if generation["fenced_at_ms"] is None or request.attempted_at_ms>=generation["fenced_at_ms"]+generic_spec.materialization_timeout_ms:
+                return _not_ready_activation(target=target,current=None,reason_code="MATERIALIZATION_TIMEOUT")
             if request.materialization_lease_owner is None or request.materialization_lease_epoch is None or (
                 generation["lease_owner"] != request.materialization_lease_owner
                 or generation["lease_epoch"] != request.materialization_lease_epoch

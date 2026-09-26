@@ -1477,7 +1477,9 @@ class PostgresInstrumentSelectionRepository:
         if (not self._generic_control_allows(control,generation.selection_spec_id,generation.selection_epoch_id,generation.period_anchor_ms)
             or control is None or control.control_version!=generation.selection_control_version):
             raise SelectionJobConflict("Generic Generation control/epoch changed")
-        if not generation.created_at_ms<=now_ms<generation.period_anchor_ms+(1+spec.cadence_hours)*3600000:
+        cleanup_only = generation.fenced_at_ms is not None and generation.lifecycle_state in {
+            MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}
+        if now_ms < generation.created_at_ms or (now_ms>=generation.period_anchor_ms+(1+spec.cadence_hours)*3600000 and not cleanup_only):
             raise SelectionJobConflict("Generic Generation is outside eligible source period")
         row = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
             strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id))).mappings().one()
@@ -1486,6 +1488,84 @@ class PostgresInstrumentSelectionRepository:
         refreshed = await self.get_generic_materialization_generation(materialization_generation_id)
         return GenericMaterializationLeaseClaim(status=MaterializationGenerationClaimStatus.CLAIMED if acquired else MaterializationGenerationClaimStatus.LEASE_HELD,
             generation=refreshed)
+
+    async def fail_generic_materialization_generation(self, materialization_generation_id: str, *,
+        expected_projection_version: int, worker_id: str, lease_epoch: int, reason_code: str,
+    ) -> GenericMaterializationGeneration:
+        """Release failed targets, preserving the same unresolved recovery Vacuum."""
+        from src.trading_kernel.application.abandon_strategy_universe import (
+            AbandonStrategyUniverseRequest,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        if reason_code not in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED",
+            "CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
+            raise ValueError("Generic failure requires a classified terminal cause")
+        initial = await self.get_generic_materialization_generation(materialization_generation_id)
+        if initial is None:
+            raise SelectionJobConflict("Generic failure Generation missing")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==initial.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(initial.strategy_group_id,for_update=True)
+        generation = await self.get_generic_materialization_generation(materialization_generation_id,for_update=True)
+        now = await self.read_authority_clock_ms()
+        if owner is None or owner["entry_state"]!="enabled" or generation is None or control is None or (
+            control.control_version!=generation.selection_control_version
+            or not self._generic_control_allows(control,generation.selection_spec_id,generation.selection_epoch_id,generation.period_anchor_ms)):
+            raise SelectionJobConflict("Generic failure Owner or Selection control changed")
+        if generation.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED} or (
+            generation.projection_version!=expected_projection_version or generation.lease_owner!=worker_id
+            or generation.lease_epoch!=lease_epoch or generation.lease_expires_at_ms is None or now>=generation.lease_expires_at_ms
+            or generation.fenced_at_ms is None or now<generation.fenced_at_ms):
+            raise SelectionJobConflict("Generic failure Generation lease/state changed")
+        spec = await self.get_generic_spec(generation.selection_spec_id)
+        deadline = generation.fenced_at_ms+spec.materialization_timeout_ms
+        expiry = generation.period_anchor_ms+(1+spec.cadence_hours)*3600000
+        if reason_code=="MATERIALIZATION_TIMEOUT" and now<deadline or reason_code=="MATERIALIZATION_PERIOD_EXPIRED" and now<expiry:
+            raise SelectionJobConflict("Generic failure deadline has not elapsed")
+        vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,
+            selection_spec_id=generation.selection_spec_id,for_update=True)
+        if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or (
+            vacuum.fenced_at_ms!=generation.fenced_at_ms or await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)):
+            raise SelectionJobConflict("Generic failure requires exact drained Vacuum")
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)
+        if len(targets)>1:
+            raise SelectionJobConflict("Generic failure target set differs")
+        for target in targets:
+            if target.event_spec_id!=spec.event_spec_id:
+                raise SelectionJobConflict("Generic failure target Event differs")
+            await universes.abandon(AbandonStrategyUniverseRequest(universe_version_id=target.universe_version_id,
+                reason_code=reason_code.lower(),attempted_at_ms=now))
+        failed = GenericMaterializationGeneration.model_validate({**generation.model_dump(),
+            "lifecycle_state":"FAILED_CLOSED","terminal_at_ms":now,"projection_version":generation.projection_version+1,
+            "lease_owner":None,"lease_expires_at_ms":None})
+        updated = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version==expected_projection_version,
+            strategy_universe_materialization_generations.c.lease_epoch==lease_epoch).values(
+                lifecycle_state="FAILED_CLOSED",terminal_at_ms=now,projection_version=failed.projection_version,lease_owner=None,lease_expires_at_ms=None))
+        if updated.rowcount!=1:
+            raise SelectionJobConflict("Generic failure Generation CAS changed")
+        sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==materialization_generation_id)) or 0)+1
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id=f"materialization-event:{materialization_generation_id}:{sequence}",
+            materialization_generation_id=materialization_generation_id,event_sequence=sequence,event_type="FAILED_CLOSED",
+            payload={"reason_code":reason_code,"entry_vacuum_id":vacuum.entry_vacuum_id,"materialization_deadline_ms":deadline},occurred_at_ms=now))
+        updated = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(
+                first_blocker=reason_code,projection_version=vacuum.projection_version+1))
+        if updated.rowcount!=1:
+            raise SelectionJobConflict("Generic failure Vacuum CAS changed")
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RECOVERY_REQUIRED",
+            payload={"reason_code":reason_code,"source_generation_id":materialization_generation_id},occurred_at_ms=now))
+        return failed
 
     async def release_generic_materialization_generation_lease(
         self, materialization_generation_id: str, *, worker_id: str, lease_epoch: int,
