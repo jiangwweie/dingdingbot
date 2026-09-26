@@ -361,6 +361,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+已DYNAMIC的ACTIVE_NEW原子入口增量：advance_strategy_universe新增typed ACTIVATE_GENERIC请求绑定Authority/Generation/target/lease，先锁Owner/Control再进入共用Universe锁。正式入口复核STAGED readiness、Policy、drain、previous Universe/member/comparison/Authority、完整Episode覆盖及DB proof；同事务retire旧scope/Universe、启用target、CAS current、切comparison revision、提交ACTIVE Generation/RESOLVED_ACTIVE Vacuum及事件、Authority parent/binding/current，最终DB clock越界整体回滚，成功释放Generation lease。同ID/内容/current返回ALREADY_ACTIVE，不重复事件。六场景测试将原SQL切换探针替换为正式入口，保留受控时钟与外层rollback，覆盖错误lease/Owner版本、最终clock越界回滚、成功及幂等；不是实际生产部署或自然Worker全链路。仅允许selection_mode已DYNAMIC；首次pending mode、Coordinator STAGED分支接线、fallback/recovery及其余GS验收继续未完成。
+
 STAGED再认证准备：现有advance_strategy_universe增加CERTIFY_STAGED操作，要求exact staged target和Generation，Generic仍核验Control/epoch/period/lease；重新运行原certification/warm/comparison readiness，不使用STAGED幂等快捷返回。只返回readiness，不修改target/Generation/current或授予ENTRY。四策略及comparison-only六场景验证正常就绪、temporary unavailable拒绝、WARMING冒用入口拒绝；旧STAGE_DYNAMIC行为保留。相关PG161 passed、Unit/Architecture1213 passed，全源码Mypy通过。该操作尚待最终ACTIVE_NEW原子应用事务调用，不代表运行时activation完成。
 
 **目标**：把前三类domain约束组合成durable新交易authority状态机。

@@ -105,6 +105,7 @@ from src.trading_kernel.infrastructure.pg_models import (
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.pg_universe_repository import (
     PostgresStrategyUniverseRepository,
+    UniverseInstallConflict,
 )
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
@@ -1444,8 +1445,8 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
     from src.trading_kernel.infrastructure.pg_signal_repository import (
         PostgresSignalRepository,
     )
-    # Schema transaction probe, rolled back intentionally so other staging
-    # negative tests continue on the original state. Not runtime activation.
+    # Official activation entrypoint in a rollback probe, so subsequent staging
+    # fault cases continue on the same fixture. Database wall-clock is injected.
     async with database.connect() as conn:
         transaction = await conn.begin()
         try:
@@ -1457,20 +1458,12 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
             proof = CurrentFinalCloseGrantProof(selection_snapshot_id=snapshot.selection_snapshot_id,selection_committed_at_ms=snapshot.committed_at_ms,
                 source_snapshot_cutoff_at_ms=snapshot.feature_cutoff_at_ms,period=period,current_final_close_time_ms=now//HOUR*HOUR,
                 authority_granted_at_ms=now,observation_cursors=cursors)
-            previous = generation.previous_events[0].universe_version_id
-            await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='retired',retired_at_ms=:now WHERE universe_version_id=:uid"),{"uid":previous,"now":now})
-            await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='retired',entry_enabled=false,observation_enabled=false WHERE universe_version_id=:uid"),{"uid":previous})
-            await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":now})
-            await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,observation_enabled=true WHERE universe_version_id=:uid"),{"uid":uid})
-            digest = await conn.scalar(sa.text("SELECT semantic_digest FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid})
-            await conn.execute(sa.text("UPDATE brc_strategy_universe_current SET universe_version_id=:uid,semantic_digest=:digest,activation_generation=activation_generation+1,activated_at_ms=:now WHERE event_spec_id=:event"),{"uid":uid,"digest":digest,"now":now,"event":source.spec.event_spec_id})
-            await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET lifecycle_state='ACTIVE',activated_at_ms=:now,terminal_at_ms=:now WHERE materialization_generation_id=:gid"),{"gid":generation.materialization_generation_id,"now":now})
-            await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='RESOLVED_ACTIVE',resolved_at_ms=:now WHERE source_generation_id=:gid"),{"gid":generation.materialization_generation_id,"now":now})
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
             cid = None
             revision = None
             if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
                 cid = "comparison:"+canonical_digest({"exchange_instrument_ids":source.spec.candidate_ids})[7:]
-                revision = await conn.scalar(sa.text("UPDATE brc_comparison_binding_current SET comparison_universe_id=:cid,comparison_transition_revision=comparison_transition_revision+1,source_static_universe_version_id=NULL WHERE event_spec_id=:event RETURNING comparison_transition_revision"),{"cid":cid,"event":source.spec.event_spec_id})
+                revision = generation.previous_events[0].comparison_transition_revision + 1
             authority = GenericSelectionAuthority(selection_authority_id="authority:active:"+source.spec.strategy_group_id,
                 selection_spec_id=source.spec.selection_spec_id,strategy_group_id=source.spec.strategy_group_id,selection_epoch_id=snapshot.selection_epoch_id,
                 selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation.materialization_generation_id,
@@ -1479,9 +1472,31 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
                     grant_state="ACTIVE",universe_version_id=uid,member_set_digest=snapshot.member_set_digest),current_close_proof=proof,
                 membership_freshness=build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,source_member_set_digest=snapshot.member_set_digest,period=period),
                 comparison_universe_id=cid,comparison_transition_revision=revision,effective_from_ms=now,created_at_ms=now)
-            await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
-            await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
-            await conn.execute(sa.text("INSERT INTO brc_selection_authority_current VALUES(:spec,:aid,1,:now)"),{"spec":source.spec.selection_spec_id,"aid":authority.selection_authority_id,"now":now})
+            leased = await repository.get_generic_materialization_generation(generation.materialization_generation_id)
+            request = UniverseActivationRequest(universe_version_id=uid,attempted_at_ms=now,operation=UniverseActivationOperation.ACTIVATE_GENERIC,
+                materialization_generation_id=generation.materialization_generation_id,materialization_lease_owner=leased.lease_owner,
+                materialization_lease_epoch=leased.lease_epoch,generic_authority=authority)
+            for bad_request, reason in (
+                (request.model_copy(update={"materialization_lease_epoch":leased.lease_epoch+1}),"LEASE_CHANGED"),
+                (request.model_copy(update={"generic_authority":authority.model_copy(update={"owner_control_version":99})}),"OWNER_CONTROL_CHANGED"),
+            ):
+                with pytest.raises(UniverseInstallConflict,match=reason), patch.object(
+                    PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                    await PostgresStrategyUniverseRepository(conn).try_activate(bad_request)
+            with pytest.raises(ValueError,match="boundary"):
+                async with conn.begin_nested():
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,(now//HOUR+1)*HOUR])):
+                        await PostgresStrategyUniverseRepository(conn).try_activate(request)
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+            assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "staged"
+            assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"),{"gid":generation.materialization_generation_id}) == "RECONFIGURING"
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                result = await PostgresStrategyUniverseRepository(conn).try_activate(request)
+            assert result.status == UniverseActivationStatus.ACTIVATED
+            assert await conn.scalar(sa.text("SELECT lease_owner FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"),{"gid":generation.materialization_generation_id}) is None
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                assert (await PostgresStrategyUniverseRepository(conn).try_activate(request)).status == UniverseActivationStatus.ALREADY_ACTIVE
             for broken in (
                 "UPDATE brc_strategy_entry_vacuums_current SET state='RECONFIGURING',resolved_at_ms=NULL WHERE source_generation_id=:gid",
                 "UPDATE brc_strategy_universe_materialization_generations SET activated_at_ms=activated_at_ms+1 WHERE materialization_generation_id=:gid",

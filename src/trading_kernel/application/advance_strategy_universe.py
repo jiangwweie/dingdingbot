@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.domain.selection_authority import SelectionSessionAuthority
+from src.trading_kernel.domain.selection_authority import (
+    GenericSelectionAuthority,
+    SelectionSessionAuthority,
+)
 
 if TYPE_CHECKING:
     from src.trading_kernel.application.ports import KernelUnitOfWork
@@ -25,6 +28,7 @@ class UniverseActivationOperation(StrEnum):
     AUTO = "auto"
     CERTIFY_CURRENT = "certify_current"
     CERTIFY_STAGED = "certify_staged"
+    ACTIVATE_GENERIC = "activate_generic"
     ACTIVATE_MANUAL = "activate_manual"
     STAGE_DYNAMIC = "stage_dynamic"
     ACTIVATE_DYNAMIC_PAIR = "activate_dynamic_pair"
@@ -139,6 +143,7 @@ class UniverseActivationRequest(BaseModel):
     materialization_lease_epoch: int | None = None
     paired_universe_version_id: str | None = None
     selection_authority: SelectionSessionAuthority | None = None
+    generic_authority: GenericSelectionAuthority | None = None
 
     @field_validator("universe_version_id", mode="before")
     @classmethod
@@ -168,10 +173,20 @@ class UniverseActivationRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_operation_shape(self) -> UniverseActivationRequest:
+        if self.operation is UniverseActivationOperation.ACTIVATE_GENERIC:
+            authority = self.generic_authority
+            if authority is None or authority.authority_outcome != "ACTIVE_NEW" or (
+                authority.materialization_generation_id != self.materialization_generation_id
+                or authority.event_binding.universe_version_id != self.universe_version_id
+                or authority.created_at_ms != self.attempted_at_ms
+                or self.materialization_lease_owner is None):
+                raise ValueError("Generic activation requires exact Authority target and lease")
+        elif self.generic_authority is not None:
+            raise ValueError("Generic Authority is only valid for Generic activation")
         if (self.materialization_lease_owner is None) != (self.materialization_lease_epoch is None):
             raise ValueError("materialization lease token must be complete")
         if self.materialization_lease_epoch is not None and (
-            self.materialization_lease_epoch <= 0 or self.operation not in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED}
+            self.materialization_lease_epoch <= 0 or self.operation not in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED, UniverseActivationOperation.ACTIVATE_GENERIC}
         ):
             raise ValueError("materialization lease token is only valid for Dynamic staging")
         if (

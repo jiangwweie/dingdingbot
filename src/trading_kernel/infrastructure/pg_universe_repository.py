@@ -61,6 +61,9 @@ from src.trading_kernel.domain.comparison_universe import (
     ComparisonObservationSource,
     comparative_lookback_bars,
 )
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    require_current_close_commit,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     CertificationBatchMemberResult,
@@ -80,6 +83,7 @@ from src.trading_kernel.domain.product import (
     require_product_compatibility,
 )
 from src.trading_kernel.domain.selection_authority import (
+    GenericSelectionAuthority,
     SelectionMode,
     selected_member_set_digest,
 )
@@ -90,6 +94,7 @@ from src.trading_kernel.domain.strategy_universe import (
 )
 from src.trading_kernel.infrastructure.pg_models import (
     comparative_projection_current,
+    comparison_binding_current,
     event_product_compatibility,
     event_specs,
     generic_dynamic_selection_specs_v1,
@@ -109,7 +114,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_scopes_current,
     schema_metadata,
     selection_authority_current,
+    selection_authority_event_bindings,
     selection_authority_gap_audits_current,
+    selection_session_authorities,
     strategy_entry_controls_current,
     strategy_entry_vacuum_events,
     strategy_entry_vacuums_current,
@@ -611,6 +618,8 @@ class PostgresStrategyUniverseRepository:
         self,
         request: UniverseActivationRequest,
     ) -> UniverseActivationResult:
+        if request.operation is UniverseActivationOperation.ACTIVATE_GENERIC:
+            return await self._activate_generic(request)
         await self._lock_installs()
         target = (
             await self._connection.execute(
@@ -889,6 +898,142 @@ class PostgresStrategyUniverseRepository:
             activation_generation=generation,
             activated_at_ms=request.attempted_at_ms,
         )
+
+    async def _activate_generic(self, request: UniverseActivationRequest) -> UniverseActivationResult:
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            PostgresInstrumentSelectionRepository,
+            generic_authority_storage_values,
+        )
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        if request.generic_authority is None:
+            raise UniverseInstallConflict("GENERIC_AUTHORITY_REQUIRED")
+        authority = GenericSelectionAuthority.model_validate(request.generic_authority.model_dump())
+        if authority.authority_outcome != "ACTIVE_NEW" or authority.materialization_generation_id != request.materialization_generation_id or authority.event_binding.universe_version_id != request.universe_version_id or authority.created_at_ms != request.attempted_at_ms:
+            raise UniverseInstallConflict("GENERIC_AUTHORITY_TARGET_CONFLICT")
+        selection = PostgresInstrumentSelectionRepository(self._connection)
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==authority.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await selection.get_selection_control(authority.strategy_group_id,for_update=True)
+        if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=authority.owner_control_version:
+            raise UniverseInstallConflict("GENERIC_OWNER_CONTROL_CHANGED")
+        if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION or control.control_version!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
+            raise UniverseInstallConflict("GENERIC_SELECTION_CONTROL_CHANGED")
+        await self._lock_installs()
+        generation = await selection.get_generic_materialization_generation(str(request.materialization_generation_id),for_update=True)
+        target = (await self._connection.execute(sa.select(strategy_universe_versions).where(
+            strategy_universe_versions.c.universe_version_id==request.universe_version_id).with_for_update())).mappings().one_or_none()
+        if generation is None or target is None or target["materialization_generation_id"]!=generation.materialization_generation_id or generation.selection_snapshot_id!=authority.selection_snapshot_id:
+            raise UniverseInstallConflict("GENERIC_GENERATION_TARGET_CHANGED")
+        if generation.lifecycle_state.value=="ACTIVE" and target["lifecycle_state"]=="active":
+            committed = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+            current_target = await self.get_current(authority.event_binding.event_spec_id)
+            if committed is None or committed.authority!=authority or current_target is None or current_target.universe_version_id!=request.universe_version_id:
+                raise UniverseInstallConflict("GENERIC_ACTIVATION_IDEMPOTENCY_CONFLICT")
+            return UniverseActivationResult(status=UniverseActivationStatus.ALREADY_ACTIVE,reason_code=None,
+                event_spec_id=authority.event_binding.event_spec_id,universe_version_id=request.universe_version_id,
+                previous_universe_version_id=None,activation_generation=current_target.activation_generation,activated_at_ms=current_target.activated_at_ms)
+        vacuum = await selection.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,selection_spec_id=authority.selection_spec_id,for_update=True)
+        if generation.lifecycle_state.value!="STAGED" or vacuum is None or vacuum.state.value!="RECONFIGURING" or vacuum.source_generation_id!=generation.materialization_generation_id or vacuum.fenced_at_ms!=generation.fenced_at_ms:
+            raise UniverseInstallConflict("GENERIC_STAGED_DRAINED_GENERATION_REQUIRED")
+        now = await selection.read_authority_clock_ms()
+        proof = authority.current_close_proof
+        if proof is None:
+            raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+        require_current_close_commit(proof,committed_at_ms=now)
+        certified = await self._try_stage_dynamic(request=request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED,"attempted_at_ms":now}),target=target)
+        if certified.status is not UniverseActivationStatus.STAGED:
+            raise UniverseInstallConflict(str(certified.reason_code))
+        policies = (await self._connection.execute(sa.text("SELECT DISTINCT p.enabled,p.new_entry_submit_enabled FROM brc_owner_policy_current p JOIN brc_runtime_scopes_current s ON s.owner_policy_id=p.owner_policy_id WHERE s.universe_version_id=:uid LIMIT 2"),{"uid":request.universe_version_id})).mappings().all()
+        if len(policies)!=1 or not policies[0]["enabled"] or not policies[0]["new_entry_submit_enabled"]:
+            raise UniverseInstallConflict("GENERIC_POLICY_BLOCKED")
+        if await selection.entry_vacuum_has_drain_blockers(strategy_group_id=authority.strategy_group_id):
+            raise UniverseInstallConflict("GENERIC_ENTRY_DRAIN_INCOMPLETE")
+        previous = generation.previous_events[0]
+        current = (await self._connection.execute(sa.select(strategy_universe_current).where(
+            strategy_universe_current.c.event_spec_id==authority.event_binding.event_spec_id).with_for_update())).mappings().one_or_none()
+        if current is None or current["universe_version_id"]!=previous.universe_version_id:
+            raise UniverseInstallConflict("GENERIC_PREVIOUS_UNIVERSE_CHANGED")
+        old_members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
+            strategy_universe_members.c.universe_version_id==previous.universe_version_id).order_by(strategy_universe_members.c.exchange_instrument_id).limit(17))).scalars())
+        if selected_member_set_digest(old_members)!=previous.member_set_digest:
+            raise UniverseInstallConflict("GENERIC_PREVIOUS_MEMBERS_CHANGED")
+        comparison = await selection.get_comparison_universe_binding(authority.event_binding.event_spec_id,for_update=True) if authority.comparison_universe_id else None
+        if authority.comparison_universe_id:
+            if comparison is None or comparison.comparison_universe_id!=previous.comparison_universe_id or comparison.comparison_transition_revision!=previous.comparison_transition_revision:
+                raise UniverseInstallConflict("GENERIC_PREVIOUS_COMPARISON_CHANGED")
+            revision = comparison.comparison_transition_revision + (comparison.comparison_universe_id!=authority.comparison_universe_id)
+            if revision!=authority.comparison_transition_revision:
+                raise UniverseInstallConflict("GENERIC_COMPARISON_REVISION_CHANGED")
+        current_authority = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+        if current_authority is not None and (current_authority.authority.blocks_new_entry
+            or current_authority.authority.expires_at_ms < authority.period.scheduled_effective_at_ms):
+            raise UniverseInstallConflict("GENERIC_ACTIVATION_REQUIRES_RECOVERY")
+        if current_authority is not None and (
+            current_authority.authority.event_binding.universe_version_id != previous.universe_version_id
+            or current_authority.authority.event_binding.member_set_digest != previous.member_set_digest
+            or current_authority.authority.selection_epoch_id != authority.selection_epoch_id
+            or current_authority.authority.owner_control_version != authority.owner_control_version
+            or current_authority.authority.comparison_universe_id != previous.comparison_universe_id
+            or current_authority.authority.comparison_transition_revision != previous.comparison_transition_revision):
+            raise UniverseInstallConflict("GENERIC_PREVIOUS_AUTHORITY_CHANGED")
+        sequence = 1 if current_authority is None or current_authority.authority.period!=authority.period else current_authority.authority.authority_sequence+1
+        if sequence!=authority.authority_sequence:
+            raise UniverseInstallConflict("GENERIC_AUTHORITY_SEQUENCE_CHANGED")
+        snapshot = await selection.get_generic_snapshot(authority.selection_snapshot_id)
+        if snapshot.selection_spec_id!=authority.selection_spec_id or snapshot.selection_epoch_id!=authority.selection_epoch_id or snapshot.member_set_digest!=authority.event_binding.member_set_digest:
+            raise UniverseInstallConflict("GENERIC_ACTIVATION_SNAPSHOT_CHANGED")
+        signals = PostgresSignalRepository(self._connection)
+        cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
+            exchange_instrument_ids=snapshot.selected_members,closed_at_ms=proof.current_final_close_time_ms)
+        if cursors!=proof.observation_cursors:
+            raise UniverseInstallConflict("GENERIC_CLOSE_COVERAGE_CHANGED")
+        await selection.require_generic_close_proof(proof)
+        at = authority.created_at_ms
+        old_id = current["universe_version_id"]
+        await self._connection.execute(sa.update(runtime_scopes_current).where(runtime_scopes_current.c.universe_version_id==old_id).values(
+            lifecycle_state="retired",observation_enabled=False,entry_enabled=False,scope_version=runtime_scopes_current.c.scope_version+1,
+            next_observation_due_at_ms=None,lease_owner=None,lease_expires_at_ms=None,observation_generation=runtime_scopes_current.c.observation_generation+1,updated_at_ms=at))
+        await self._connection.execute(sa.update(strategy_universe_versions).where(strategy_universe_versions.c.universe_version_id==old_id).values(lifecycle_state="retired",retired_at_ms=at))
+        await self._connection.execute(sa.update(strategy_universe_versions).where(strategy_universe_versions.c.universe_version_id==request.universe_version_id).values(lifecycle_state="active",activated_at_ms=at))
+        await self._connection.execute(sa.update(runtime_scopes_current).where(runtime_scopes_current.c.universe_version_id==request.universe_version_id).values(
+            lifecycle_state="active",observation_enabled=True,entry_enabled=True,scope_version=runtime_scopes_current.c.scope_version+1,
+            next_observation_due_at_ms=at,lease_owner=None,lease_expires_at_ms=None,observation_generation=runtime_scopes_current.c.observation_generation+1,updated_at_ms=at))
+        changed = await self._connection.execute(sa.update(strategy_universe_current).where(strategy_universe_current.c.event_spec_id==current["event_spec_id"],
+            strategy_universe_current.c.activation_generation==current["activation_generation"],strategy_universe_current.c.universe_version_id==old_id).values(
+                universe_version_id=request.universe_version_id,semantic_digest=target["semantic_digest"],activation_generation=current["activation_generation"]+1,activated_at_ms=at))
+        if changed.rowcount!=1:
+            raise UniverseInstallConflict("GENERIC_CURRENT_CAS_FAILED")
+        if comparison is not None:
+            await self._connection.execute(sa.update(comparison_binding_current).where(comparison_binding_current.c.event_spec_id==authority.event_binding.event_spec_id).values(
+                comparison_universe_id=authority.comparison_universe_id,comparison_transition_revision=authority.comparison_transition_revision,source_static_universe_version_id=None))
+        gid = generation.materialization_generation_id
+        await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(strategy_universe_materialization_generations.c.materialization_generation_id==gid).values(
+            lifecycle_state="ACTIVE",activated_at_ms=at,terminal_at_ms=at,projection_version=generation.projection_version+1,
+            lease_owner=None,lease_expires_at_ms=None))
+        await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id).values(
+            state="RESOLVED_ACTIVE",resolved_at_ms=at,projection_version=vacuum.projection_version+1))
+        await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
+        await self._connection.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+        if current_authority is None:
+            changed = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=authority.selection_spec_id,
+                selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=at).on_conflict_do_nothing())
+        else:
+            changed = await self._connection.execute(sa.update(selection_authority_current).where(selection_authority_current.c.selection_spec_id==authority.selection_spec_id,
+                selection_authority_current.c.projection_version==current_authority.projection_version).values(selection_authority_id=authority.selection_authority_id,
+                    projection_version=current_authority.projection_version+1,updated_at_ms=at))
+        if changed.rowcount!=1:
+            raise UniverseInstallConflict("GENERIC_AUTHORITY_CAS_FAILED")
+        event_sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==gid)) or 0)+1
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(materialization_event_id=f"materialization-event:{gid}:{event_sequence}",
+            materialization_generation_id=gid,event_sequence=event_sequence,event_type="ACTIVE",payload={"universe_version_id":request.universe_version_id,"selection_authority_id":authority.selection_authority_id},occurred_at_ms=at))
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RESOLVED_ACTIVE",payload={"materialization_generation_id":gid},occurred_at_ms=at))
+        require_current_close_commit(proof,committed_at_ms=await selection.read_authority_clock_ms())
+        return UniverseActivationResult(status=UniverseActivationStatus.ACTIVATED,reason_code=None,event_spec_id=authority.event_binding.event_spec_id,
+            universe_version_id=request.universe_version_id,previous_universe_version_id=old_id,activation_generation=current["activation_generation"]+1,activated_at_ms=at)
 
     async def _try_stage_dynamic(
         self,
