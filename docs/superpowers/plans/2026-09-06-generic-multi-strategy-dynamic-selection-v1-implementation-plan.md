@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery/Episode组合准备（基于`1aa3ce80`）：新增纯`advance_recovery_bound_exposure_episode`及frozen结果模型，将既有recovery checkpoint gate与正式rising-edge/comparison reducer组合，未复制Detector或Episode算法。四策略×无旧Episode/旧armed/旧triggered验证：首个未来TRIGGERED只抑制，未来NOT_TRIGGERED正式arm，再后续TRIGGERED创建唯一新Episode；重复close不推进、不重复Signal。新recovery revision不得继承旧arm，也不伪造Comparison revision；MPG/MI在recovery已armed后发生comparison变更，仍由原comparison barrier抑制。输入校验在抑制分支也拒绝错误scope、已消费close和无效Detector时间；typed组合结果不能伪造Signal或绕过comparison arming。
+
+该增量的checkpoint尚未落PG、未被正式Observation调用；下一步仍需原Episode表持久化/版本CAS、恢复Authority绑定及Observation原子保存，不能据此声称GS-08/09 recovery full-chain完成。当前定向recovery+原Episode29 passed，生产无改动。
+
+Recovery组合验证：完整Unit/Architecture1225 passed，全源码Mypy（158 files）、相关Ruff/diff、文档authority25 passed；追加typed结果不能夹带未armed comparison checkpoint的断言后定向29 passed。此次未修改Schema/PG/运行接线，未重复跑PostgreSQL或R4，不将纯组件测试替代数据库证据。
+
 首次NO_CHANGE验证收尾：Generic repository + SOR materialization + Generic migration组合189 passed；最后补current指针约束后覆盖三个首次结果/normal proof/MPG-MI comparison-only的专项32 passed。Unit/Architecture1213 passed，全源码Mypy、相关Ruff/diff及文档authority25 passed。组合在最后一处约束修订前启动，最终修订以32项受影响路径复验，不冒充完整exact-R4；计数重叠不相加，生产未修改。
 
 首次NO_CHANGE约束补强：额外RED证明同事务删掉Authority current指针后仍可提交首次mode转换；共享首次激活deferred guard现要求exact current pointer与Authority一起存在。该约束同时保护ACTIVE_NEW/VALID_EMPTY，不靠应用层顺序掩盖半套提交。未增加新Authority表或第二条mode写入链。

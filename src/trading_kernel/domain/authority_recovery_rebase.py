@@ -7,6 +7,18 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_episode import (
+    ComparisonBindingEpisodeCheckpoint,
+    ComparisonBindingEpisodeState,
+    ExposureEpisodeState,
+    ExposureEpisodeTransition,
+    advance_comparison_bound_exposure_episode,
+    advance_exposure_episode,
+    build_episode_domain_key,
+)
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+from src.trading_kernel.domain.strategy_registry import RegisteredStrategyContract
 
 HOUR_MS = 3600000
 
@@ -51,6 +63,100 @@ class AuthorityRecoveryRebaseTransition(BaseModel):
     checkpoint: AuthorityRecoveryCheckpoint
     allow_episode_advance: bool
     suppression_reason: Literal["RECOVERY_REBASE_REQUIRED", "RECOVERY_CLOSE_ALREADY_OBSERVED"] | None
+
+
+class RecoveryBoundExposureEpisodeTransition(BaseModel):
+    """One atomic persistence input; never a Signal, Ticket or authority grant."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    recovery_checkpoint: AuthorityRecoveryCheckpoint
+    comparison_checkpoint: ComparisonBindingEpisodeCheckpoint | None
+    episode_transition: ExposureEpisodeTransition | None
+    signal_eligible: bool
+    suppression_reason: str | None
+
+    @model_validator(mode="after")
+    def _consistent_transition(self) -> RecoveryBoundExposureEpisodeTransition:
+        key = self.recovery_checkpoint.episode_domain_key
+        if self.comparison_checkpoint is not None and self.comparison_checkpoint.episode_domain_key != key:
+            raise ValueError("recovery/comparison Episode identity differs")
+        episode = self.episode_transition
+        if episode is not None and (episode.current.episode_domain_key != key
+            or episode.current.last_observed_at_ms != self.recovery_checkpoint.last_observed_close_time_ms
+            or self.recovery_checkpoint.state != "ARMED"):
+            raise ValueError("recovery Episode advancement requires its exact armed cursor")
+        if episode is not None and self.comparison_checkpoint is not None and (
+            self.comparison_checkpoint.state is not ComparisonBindingEpisodeState.ARMED_UNDER_BINDING
+            or self.comparison_checkpoint.last_observed_at_ms != self.recovery_checkpoint.last_observed_close_time_ms):
+            raise ValueError("recovery Episode must also satisfy its comparison barrier")
+        if self.signal_eligible and (episode is None or not episode.created_new_episode or self.suppression_reason is not None):
+            raise ValueError("recovery Signal requires one unsuppressed new Episode")
+        return self
+
+
+def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContract,
+    current_episode: ExposureEpisodeState | None, current_recovery: AuthorityRecoveryCheckpoint | None,
+    current_comparison: ComparisonBindingEpisodeCheckpoint | None,
+    recovery_id: str, recovery_revision: int, effective_from_ms: int, first_eligible_close_time_ms: int,
+    detector_status: DetectorStatus, occurred_at_ms: int | None, observed_at_ms: int,
+    exchange_instrument_id: str, comparison_binding_digest: str | None = None,
+    comparison_transition_revision: int | None = None,
+) -> RecoveryBoundExposureEpisodeTransition:
+    """Compose recovery and comparison gates before the original Episode reducer.
+
+    Caller must first prove current Owner/Authority/epoch/freshness and persist
+    all returned projections atomically. A suppressed close preserves old Episode
+    identity; it cannot mint an arm or silently increment comparison revision.
+    """
+    spec = generic_selection_spec(contract.strategy_group_id)
+    if contract.event_spec_id != spec.event_spec_id or exchange_instrument_id not in spec.candidate_ids:
+        raise ValueError("recovery Event or member differs from Generic Spec")
+    if detector_status is DetectorStatus.INVALID or (
+        detector_status is DetectorStatus.TRIGGERED and (occurred_at_ms is None or not 0 < occurred_at_ms <= observed_at_ms)
+    ) or (detector_status is DetectorStatus.NOT_TRIGGERED and occurred_at_ms is not None):
+        raise ValueError("recovery requires a valid closed-bar Detector result")
+    key = build_episode_domain_key(event_spec_id=spec.event_spec_id,exchange_instrument_id=exchange_instrument_id,position_side=spec.position_side)
+    if current_recovery is not None:
+        current_recovery = AuthorityRecoveryCheckpoint.model_validate(current_recovery.model_dump())
+    duplicate = current_recovery is not None and current_recovery.last_observed_close_time_ms == observed_at_ms
+    if current_episode is not None:
+        current_episode = ExposureEpisodeState.model_validate(current_episode.model_dump())
+        if (current_episode.episode_domain_key,current_episode.event_spec_id,current_episode.exchange_instrument_id,current_episode.position_side) != (key,spec.event_spec_id,exchange_instrument_id,spec.position_side):
+            raise ValueError("recovery Episode identity differs")
+        if current_episode.last_observed_at_ms > observed_at_ms or (current_episode.last_observed_at_ms == observed_at_ms and not duplicate):
+            raise ValueError("recovery cannot reuse a consumed Episode close")
+    comparative = contract.strategy_group_id in {"MPG-001","MI-001"}
+    if comparative:
+        if comparison_binding_digest != canonical_digest({"exchange_instrument_ids":spec.candidate_ids}) or comparison_transition_revision is None or comparison_transition_revision <= 0:
+            raise ValueError("recovery comparison requires exact fixed24 identity")
+        if current_comparison is not None:
+            current_comparison = ComparisonBindingEpisodeCheckpoint.model_validate(current_comparison.model_dump())
+            if current_comparison.episode_domain_key != key or comparison_transition_revision < current_comparison.comparison_transition_revision or (
+                comparison_transition_revision == current_comparison.comparison_transition_revision and comparison_binding_digest != current_comparison.comparison_binding_digest):
+                raise ValueError("recovery comparison identity or revision differs")
+            if current_comparison.last_observed_at_ms > observed_at_ms or (current_comparison.last_observed_at_ms == observed_at_ms and not duplicate):
+                raise ValueError("recovery cannot reuse a consumed comparison close")
+    elif any(value is not None for value in (current_comparison,comparison_binding_digest,comparison_transition_revision)):
+        raise ValueError("non-comparative recovery forbids comparison identity")
+    recovery = advance_authority_recovery_rebase(current=current_recovery,episode_domain_key=key,
+        recovery_id=recovery_id,recovery_revision=recovery_revision,effective_from_ms=effective_from_ms,
+        first_eligible_close_time_ms=first_eligible_close_time_ms,observed_close_time_ms=observed_at_ms,detector_status=detector_status)
+    if not recovery.allow_episode_advance:
+        return RecoveryBoundExposureEpisodeTransition(recovery_checkpoint=recovery.checkpoint,
+            comparison_checkpoint=current_comparison,episode_transition=None,signal_eligible=False,suppression_reason=recovery.suppression_reason)
+    if comparative:
+        assert comparison_binding_digest is not None and comparison_transition_revision is not None
+        compared = advance_comparison_bound_exposure_episode(contract=contract,current_episode=current_episode,
+            current_checkpoint=current_comparison,detector_status=detector_status,occurred_at_ms=occurred_at_ms,
+            observed_at_ms=observed_at_ms,exchange_instrument_id=exchange_instrument_id,
+            comparison_binding_digest=comparison_binding_digest,comparison_transition_revision=comparison_transition_revision)
+        return RecoveryBoundExposureEpisodeTransition(recovery_checkpoint=recovery.checkpoint,
+            comparison_checkpoint=compared.checkpoint,episode_transition=compared.episode_transition,
+            signal_eligible=compared.signal_eligible,suppression_reason=compared.suppression_reason)
+    episode = advance_exposure_episode(contract=contract,current=current_episode,detector_status=detector_status,
+        occurred_at_ms=occurred_at_ms,observed_at_ms=observed_at_ms,exchange_instrument_id=exchange_instrument_id)
+    return RecoveryBoundExposureEpisodeTransition(recovery_checkpoint=recovery.checkpoint,
+        comparison_checkpoint=None,episode_transition=episode,
+        signal_eligible=episode.created_new_episode and detector_status is DetectorStatus.TRIGGERED,suppression_reason=None)
 
 
 def advance_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | None,
