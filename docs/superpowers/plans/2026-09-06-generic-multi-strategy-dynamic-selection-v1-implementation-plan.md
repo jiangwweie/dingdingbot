@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+持久化增量最终回归：完整`integration/test_generic_selection_snapshot_repository.py`与`architecture/test_current_document_authority.py`组合113 passed；追加target状态/ACTIVE事件回滚断言后四策略专项4 passed，Ruff和diff检查通过。本次只修改测试与证据台账，不改变production实现、不重复声称完整R4。
+
+2026-09-26持久化验收增量（基于`c487665c`）：四策略新增真实UoW独立提交测试，复用原Snapshot→Generation→fence/drain→warming/staging准备流程；Active baseline与certification仍为明确前置。Coordinator执行完但commit前注入异常，由正式UoW回滚；dispose连接池、创建新仓储后确认无Authority、Generation仍STAGED且无lease、旧current及RECONFIGURING Vacuum保留。再次正式激活真实commit后再dispose/read，验证ACTIVE Generation、exact Authority/current、RESOLVED_ACTIVE Vacuum；更换worker重复调用不增materialization事件、不产生Exchange Command。四策略故障+持久化专项4 passed；增加故障前的原六场景+四策略提交组合10 passed，计数不相加。该证据关闭正常激活的独立事务/连接重建缺口，不代表进程强杀、首次Static pending、timeout fallback、跨period恢复或自然Signal→Ticket验收；DB时钟仍为受控fixture。
+
 本轮验证命令沿用`.venv/bin/python -m pytest <targets> -q -o addopts=--tb=short`：`integration/test_generic_selection_snapshot_repository.py + integration/test_selection_materialization_repository.py`共161 passed；最终锁顺序修订后Generic Generation专项6 passed；`unit + architecture`1213 passed，文档authority专项25 passed。全源码Mypy（158 files）、相关Ruff与diff检查通过；测试数字重叠、不相加，不构成整卡或R4认证。全部使用本地Docker PG，生产未修改。
 
 2026-09-26 Coordinator接线增量（基于`5d3b8729`）：已DYNAMIC的STAGED Generation经共享Coordinator重新认证、构造DB current-close proof，并调用正式ACTIVATE_GENERIC原子入口；重复ACTIVE tick按Owner→Control→current Authority顺序核验DB时钟、epoch/version及真实Universe后返回同一Authority，不再claim或重复写事件。四策略及MPG/MI comparison-only场景验证Coordinator到ENTRY resolver的exact-birth正向读取；仍使用显式认证前置、受控DB时钟和外层rollback，不代表独立事务durable restart或自然Signal→Ticket全链。MPG比较缓存丢失在STAGED错误返回BLOCKED的RED已复现，统一Generic两阶段retryable分类后修复；临时certification不可用保持TARGET_WARMING，owner_action_required保持BLOCKED，无positive Authority且lease释放。SOR分类不变。首次pending mode、durable restart、fallback/recovery/supersession和其余整卡验收仍未完成，下面早期增量中的“尚待Coordinator接线”由本段更新，不将整卡标DONE。

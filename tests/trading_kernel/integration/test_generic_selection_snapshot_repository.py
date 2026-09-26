@@ -983,6 +983,16 @@ async def test_control_cannot_point_at_another_strategys_selection_spec(database
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group,comparison_only", [("CPM-RO-001",False), ("MPG-001",False), ("MI-001",False), ("BRF2-001",False), ("MPG-001",True), ("MI-001",True)])
 async def test_generic_generation_schema_uses_one_exact_previous_event_without_fake_pair(database: AsyncEngine, group: str, comparison_only: bool) -> None:
+    await _exercise_generic_generation(database, group, comparison_only)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_activation_commits_and_restarts_through_real_uow(database: AsyncEngine, group: str) -> None:
+    await _exercise_generic_generation(database, group, False, durable=True)
+
+
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False):
     source = inputs(group)
     if comparison_only:
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
@@ -1265,7 +1275,9 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
         # The synthetic cache-row checks below use another fixture timestamp.
         async with database.begin() as conn:
             await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current"))
-        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id)
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable)
+        if durable:
+            return
         candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
         close = candles[-1].close_time_ms
         for members in (source.spec.candidate_ids,snapshot.selected_members):
@@ -1323,7 +1335,9 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
             assert saved.comparison_transition_revision == 1
             assert saved.projection_version == 2
     else:
-        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id)
+        await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable)
+        if durable:
+            return
     if comparison_only:
         with pytest.raises(sa.exc.DBAPIError,match="uq_brc_strategy_universe_versions_current_digest"):
             async with database.begin() as conn:
@@ -1338,9 +1352,9 @@ async def test_generic_generation_schema_uses_one_exact_previous_event_without_f
                 [{"uid":uid,"member":member} for member in source.spec.candidate_ids[1:11]])
 
 
-async def _assert_generic_target_stages(database, source, generation, uid):
-    # Stage-readiness prerequisites only: Coordinator fence/drain is not mocked
-    # as completed by this test. No activation or positive grant is requested.
+async def _assert_generic_target_stages(database, source, generation, uid, *, durable=False):
+    # Certification/warm facts are explicit prerequisites. The caller already
+    # drove Coordinator fence/drain; activation is checked by the helpers below.
     close = generation.created_at_ms - 1
     await make_warming_ready(database, universe_version_id=uid,
         warm_closed_bar_time_ms=close, valid_until_ms=close+HOUR)
@@ -1391,6 +1405,9 @@ async def _assert_generic_target_stages(database, source, generation, uid):
         request=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,
             worker_id="stage-coordinator"),clock_ms=lambda:close+30_004)
     assert coordinated.disposition == MaterializationDisposition.GENERATION_STAGED
+    if durable:
+        await _assert_generic_durable_activation(database, source, generation, uid, close+30_004)
+        return
     async with PostgresKernelUnitOfWork(database) as uow:
         lease = await uow.instrument_selection.claim_generic_materialization_generation(
             generation.materialization_generation_id,worker_id="stage-worker",now_ms=close+30_004,
@@ -1439,6 +1456,64 @@ async def _assert_generic_target_stages(database, source, generation, uid):
     async with PostgresKernelUnitOfWork(database) as uow:
         stale = await advance_strategy_universe(uow, request)
     assert stale.reason_code == "DYNAMIC_GENERATION_CONTROL_CHANGED"
+
+
+async def _assert_generic_durable_activation(database, source, generation, uid, now):
+    # Existing Active baseline/certification are explicit prerequisites. Unlike
+    # the storage probe below, every coordinator call owns and commits its UoW.
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+    request = CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id, worker_id="durable-activation")
+    def factory():
+        return PostgresKernelUnitOfWork(database)
+
+    @asynccontextmanager
+    async def interrupted_before_commit():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected interruption before commit")
+
+    with pytest.raises(RuntimeError, match="injected interruption"), patch.object(
+        PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)
+    ):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_before_commit, request=request, clock_ms=lambda:now)
+    await database.dispose()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+        interrupted = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+        old_current = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+        unresolved = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id, selection_spec_id=source.spec.selection_spec_id)
+        assert interrupted is not None and interrupted.lifecycle_state.value == "STAGED" and interrupted.lease_owner is None
+        assert old_current is not None and old_current.universe_version_id == generation.previous_events[0].universe_version_id
+        assert unresolved is not None and unresolved.state.value == "RECONFIGURING"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"), {"uid":uid}) == "staged"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='ACTIVE'"), {"gid":generation.materialization_generation_id}) == 0
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)):
+        activated = await coordinate_selection_materialization_once(uow_factory=factory, request=request, clock_ms=lambda:now)
+    assert activated.disposition == MaterializationDisposition.ACTIVE_NEW
+    # Drop pooled connections, then create fresh repositories: recovery must
+    # use committed facts, not objects retained by the activating transaction.
+    await database.dispose()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        current = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+        persisted = await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id, selection_spec_id=source.spec.selection_spec_id)
+        assert authority is not None and authority.authority.selection_authority_id == activated.selection_authority_id
+        assert current is not None and current.universe_version_id == uid
+        assert persisted is not None and persisted.lifecycle_state.value == "ACTIVE" and persisted.lease_owner is None
+        assert vacuum is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == "RESOLVED_ACTIVE"
+        before = await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id})
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now+1)):
+        repeated = await coordinate_selection_materialization_once(uow_factory=factory, request=request.model_copy(update={"worker_id":"restarted-worker"}), clock_ms=lambda:now+1)
+    assert repeated.selection_authority_id == activated.selection_authority_id
+    assert repeated.disposition == MaterializationDisposition.ACTIVE_NEW
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == before
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
 
 
 async def _assert_generic_active_new_storage(database, source, generation, uid, now):
