@@ -1442,6 +1442,12 @@ async def _assert_generic_target_stages(database, source, generation, uid):
 
 
 async def _assert_generic_active_new_storage(database, source, generation, uid, now):
+    from types import SimpleNamespace
+
+    from src.trading_kernel.infrastructure.pg_repositories import (
+        PostgresEntryAdmissionRepository,
+        PostgresOwnerControlRepository,
+    )
     from src.trading_kernel.infrastructure.pg_signal_repository import (
         PostgresSignalRepository,
     )
@@ -1490,9 +1496,67 @@ async def _assert_generic_active_new_storage(database, source, generation, uid, 
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
             assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "staged"
             assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"),{"gid":generation.materialization_generation_id}) == "RECONFIGURING"
+            await repository.release_generic_materialization_generation_lease(generation.materialization_generation_id,
+                worker_id=leased.lease_owner,lease_epoch=leased.lease_epoch)
+            @asynccontextmanager
+            async def borrowed_transaction():
+                yield SimpleNamespace(instrument_selection=repository,signals=PostgresSignalRepository(conn),
+                    strategy_universes=PostgresStrategyUniverseRepository(conn),owner_controls=PostgresOwnerControlRepository(conn),
+                    entry_admission=PostgresEntryAdmissionRepository(conn))
+            coordinator_request = CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,worker_id="activate-coordinator")
+            for certification_status, expected_disposition, expected_reason in (
+                ("temporarily_unavailable", MaterializationDisposition.TARGET_WARMING, "CERTIFICATION_TEMPORARILY_UNAVAILABLE"),
+                ("owner_action_required", MaterializationDisposition.BLOCKED, "CERTIFICATION_OWNER_ACTION_REQUIRED"),
+            ):
+                checkpoint = await conn.begin_nested()
+                await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status=:status,blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"), {"status":certification_status,"uid":uid})
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                    waiting = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,request=coordinator_request,clock_ms=lambda:now)
+                assert waiting.disposition == expected_disposition
+                assert waiting.reason_code == expected_reason
+                pending = await repository.get_generic_materialization_generation(generation.materialization_generation_id)
+                assert pending is not None and pending.lifecycle_state.value == "STAGED"
+                assert pending.created_at_ms == generation.created_at_ms
+                assert pending.lease_owner is None
+                assert await repository.get_current_generic_authority(source.spec.selection_spec_id) is None
+                await checkpoint.rollback()
+            if source.spec.strategy_group_id in {"MPG-001", "MI-001"}:
+                # Lose the persisted comparison input after staging. The real
+                # readiness path must wait without granting or resetting time.
+                checkpoint = await conn.begin_nested()
+                before = await repository.get_generic_materialization_generation(generation.materialization_generation_id)
+                await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current WHERE universe_version_id=:uid"), {"uid":uid})
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                    waiting = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,request=coordinator_request,clock_ms=lambda:now)
+                assert waiting.disposition == MaterializationDisposition.TARGET_WARMING
+                assert waiting.reason_code == "COMPARATIVE_PROJECTION_INCOMPLETE"
+                after = await repository.get_generic_materialization_generation(generation.materialization_generation_id)
+                assert before is not None and after is not None
+                assert after.lifecycle_state == before.lifecycle_state
+                assert after.created_at_ms == before.created_at_ms
+                assert after.lease_owner is None
+                assert await repository.get_current_generic_authority(source.spec.selection_spec_id) is None
+                await checkpoint.rollback()
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
-                result = await PostgresStrategyUniverseRepository(conn).try_activate(request)
-            assert result.status == UniverseActivationStatus.ACTIVATED
+                result = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,request=coordinator_request,clock_ms=lambda:now)
+            assert result.disposition == MaterializationDisposition.ACTIVE_NEW
+            committed = await repository.get_current_generic_authority(source.spec.selection_spec_id)
+            assert committed is not None
+            authority = committed.authority
+            request = request.model_copy(update={"generic_authority":authority})
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                repeated = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,request=coordinator_request,clock_ms=lambda:now)
+            assert repeated.selection_authority_id == authority.selection_authority_id
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=authority.expires_at_ms)):
+                stale = await coordinate_selection_materialization_once(uow_factory=borrowed_transaction,request=coordinator_request,
+                    clock_ms=lambda:now)
+            assert stale.disposition == MaterializationDisposition.BLOCKED
+            scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
+            async with borrowed_transaction() as active_uow:
+                scope = await active_uow.signals.get_runtime_scope(scope_id)
+                allowed = await resolve_selection_entry_authority(active_uow,runtime_scope=scope,birth_selection_authority_id=None,
+                    observed_close_time_ms=proof.current_final_close_time_ms,now_ms=now,allow_current_as_birth=True,lock_current=True)
+                assert allowed.allowed and allowed.selection_authority_id == authority.selection_authority_id
             assert await conn.scalar(sa.text("SELECT lease_owner FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=:gid"),{"gid":generation.materialization_generation_id}) is None
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):

@@ -37,6 +37,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_dynamic_membership_freshness,
     build_generic_selection_period,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     MaterializationEventBaseline,
@@ -300,6 +301,9 @@ _TRANSIENT_WARMING_BLOCKERS = frozenset(
     }
 )
 _MATERIALIZATION_TIMEOUT_MS = 1_800_000
+_GENERIC_TRANSIENT_WARMING_BLOCKERS = _TRANSIENT_WARMING_BLOCKERS | {
+    "COMPARATIVE_PROJECTION_INCOMPLETE",
+}
 
 
 def plan_authority_gap_audit_window(
@@ -1298,6 +1302,24 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         if owner.entry_state is StrategyEntryState.PAUSED:
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
                 materialization_generation_id=initial.materialization_generation_id)
+        if initial.lifecycle_state is MaterializationGenerationState.ACTIVE:
+            control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
+            committed = await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)
+            checked_at = await uow.instrument_selection.read_authority_clock_ms()
+            if committed is None or control is None or committed.authority.materialization_generation_id != initial.materialization_generation_id or (
+                committed.authority.selection_control_version != control.control_version
+                or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+                or control.selection_spec_id != initial.selection_spec_id
+                or control.selection_epoch_id != initial.selection_epoch_id
+                or committed.authority.owner_control_version != owner.control_version
+                or not committed.authority.effective_from_ms <= checked_at < committed.authority.expires_at_ms):
+                return _blocked("GENERIC_ACTIVE_AUTHORITY_CHANGED")
+            active = await uow.strategy_universes.get_current(committed.authority.event_binding.event_spec_id)
+            if active is None or active.universe_version_id != committed.authority.event_binding.universe_version_id:
+                return _blocked("GENERIC_ACTIVE_UNIVERSE_CHANGED")
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
+                selection_authority_id=committed.authority.selection_authority_id,selection_snapshot_id=initial.selection_snapshot_id,
+                materialization_generation_id=initial.materialization_generation_id)
         claim = await uow.instrument_selection.claim_generic_materialization_generation(
             initial.materialization_generation_id,worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
         if claim.status is MaterializationGenerationClaimStatus.LEASE_HELD:
@@ -1363,11 +1385,57 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 if staged.status is UniverseActivationStatus.STAGED:
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_STAGED,
                         entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
-                if staged.reason_code not in _TRANSIENT_WARMING_BLOCKERS and staged.reason_code != "COMPARATIVE_PROJECTION_INCOMPLETE":
+                if staged.reason_code not in _GENERIC_TRANSIENT_WARMING_BLOCKERS:
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
                         reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
                     reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
+            if generation.lifecycle_state is MaterializationGenerationState.STAGED:
+                control = await uow.instrument_selection.get_selection_control(generation.strategy_group_id,for_update=True)
+                if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
+                    return _blocked("GENERIC_FIRST_ACTIVATION_REQUIRED")
+                targets = await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id,for_update=True)
+                spec = await uow.instrument_selection.get_generic_spec(generation.selection_spec_id)
+                snapshot = await uow.instrument_selection.get_generic_snapshot(generation.selection_snapshot_id)
+                if len(targets)!=1 or targets[0].event_spec_id!=spec.event_spec_id or targets[0].lifecycle_state.value!="staged":
+                    return _blocked("GENERIC_STAGED_TARGET_CHANGED")
+                target = targets[0]
+                now = await uow.instrument_selection.read_authority_clock_ms()
+                certified = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=target.universe_version_id,
+                    attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_STAGED,materialization_generation_id=generation.materialization_generation_id,
+                    materialization_lease_owner=request.worker_id,materialization_lease_epoch=generation.lease_epoch))
+                if certified.status is not UniverseActivationStatus.STAGED:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING
+                        if certified.reason_code in _GENERIC_TRANSIENT_WARMING_BLOCKERS else MaterializationDisposition.BLOCKED,
+                        reason_code=certified.reason_code,**identity)
+                comparison_id = None
+                comparison_revision = None
+                if generation.strategy_group_id in {"MPG-001","MI-001"}:
+                    comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+                    if comparison is None:
+                        return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
+                    comparison_id = "comparison:"+canonical_digest({"exchange_instrument_ids":spec.candidate_ids})[7:]
+                    comparison_revision = comparison.comparison_transition_revision + (comparison.comparison_universe_id!=comparison_id)
+                prior = await uow.instrument_selection.get_current_generic_authority(generation.selection_spec_id,for_update=True)
+                proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                sequence = 1 if prior is None or prior.authority.period!=proof.period else prior.authority.authority_sequence+1
+                authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
+                    selection_spec_id=generation.selection_spec_id,strategy_group_id=generation.strategy_group_id,selection_epoch_id=generation.selection_epoch_id,
+                    selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation.materialization_generation_id,
+                    authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version,
+                    period=proof.period,authority_outcome="ACTIVE_NEW",event_binding=AuthorityEventBinding(event_spec_id=spec.event_spec_id,
+                        position_side=spec.position_side,grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=target.universe_version_id,member_set_digest=snapshot.member_set_digest),
+                    current_close_proof=proof,membership_freshness=build_dynamic_membership_freshness(source_snapshot_id=snapshot.selection_snapshot_id,
+                        source_member_set_digest=snapshot.member_set_digest,period=proof.period),comparison_universe_id=comparison_id,
+                    comparison_transition_revision=comparison_revision,effective_from_ms=proof.authority_granted_at_ms,created_at_ms=proof.authority_granted_at_ms)
+                activated = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=target.universe_version_id,
+                    attempted_at_ms=authority.created_at_ms,operation=UniverseActivationOperation.ACTIVATE_GENERIC,
+                    materialization_generation_id=generation.materialization_generation_id,materialization_lease_owner=request.worker_id,
+                    materialization_lease_epoch=generation.lease_epoch,generic_authority=authority))
+                if activated.status not in {UniverseActivationStatus.ACTIVATED,UniverseActivationStatus.ALREADY_ACTIVE}:
+                    return _blocked(str(activated.reason_code))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
+                    selection_authority_id=authority.selection_authority_id,**identity)
             return _blocked("GENERIC_ACTIVATION_REQUIRED")
         except BaseException:
             # The enclosing UoW rolls back the claim and all changes. Do not run
