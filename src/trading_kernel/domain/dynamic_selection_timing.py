@@ -65,9 +65,12 @@ class HourlyRecoveryClosePlan(BaseModel):
     def _validate_recovery_clock(self) -> HourlyRecoveryClosePlan:
         if not self.recovery_id.strip() or len(self.recovery_id)>160 or self.recovery_revision<=0:
             raise ValueError("recovery requires durable identity and revision")
-        if self.evaluated_at_ms<self.period.scheduled_effective_at_ms:
-            raise ValueError("recovery period is not effective")
-        first = (self.evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS
+        if self.evaluated_at_ms<self.period.feature_cutoff_at_ms:
+            raise ValueError("recovery cannot plan beyond the adjacent eligible period")
+        # An hourly failure loses its current close. Planning the adjacent
+        # period before its boundary avoids permanently losing every hour.
+        # This is a plan, not a grant or permission to refresh membership age.
+        first = max(self.period.scheduled_effective_at_ms,(self.evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS)
         if first>=self.period.period_expires_at_ms:
             if self.status!="NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY" or self.first_eligible_close_time_ms is not None:
                 raise ValueError("recovery cannot invent an eligible close before expiry")
@@ -78,7 +81,7 @@ class HourlyRecoveryClosePlan(BaseModel):
 
 def plan_hourly_recovery_close(*, recovery_id: str, recovery_revision: int, reason: HourlyRecoveryReason,
                               period: GenericSelectionPeriod, evaluated_at_ms: int) -> HourlyRecoveryClosePlan:
-    first = (evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS
+    first = max(period.scheduled_effective_at_ms,(evaluated_at_ms//_HOUR_MS+1)*_HOUR_MS)
     eligible = first<period.period_expires_at_ms
     return HourlyRecoveryClosePlan(recovery_id=recovery_id,recovery_revision=recovery_revision,reason=reason,
         period=period,evaluated_at_ms=evaluated_at_ms,

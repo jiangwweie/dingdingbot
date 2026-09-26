@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+本轮收尾验证：相关PG108 passed、首次/普通激活专项10 passed；时钟/rebase/timing专项34 passed，最终Unit/Architecture1226 passed；全源码Mypy、相关Ruff/diff及文档authority25 passed。计数重叠不相加，不替代GS-09自然生产链或完整R4；未部署、无交易所写入。
+
+首次激活ENTRY接线修复（基于`ad916ed4`）：正式resolver新增四策略RED，证明首次ACTIVE_NEW的Generation pending版v与Authority committed版v+1被旧等号误判selection_generation_not_active。现仅在immutable Authority携带首次Owner授权引用时接受exact +1，普通激活仍exact相等；不放宽为任意大于关系。真实commit/reconnect后检验current-as-birth和exact-birth两种resolver入口，并注入上下漂移版本继续拒绝。首次/普通/比较集合独立切换专项10 passed；Generic repository + Selection ENTRY authority组合108 passed，仍不是自然Signal→Ticket全链。
+
+Hourly恢复下一period预规划：原pure planner要求evaluated>=scheduled_effective，导致1h每个period都只能得到NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY。RED证明05:30为下一[06:00,07:00) period规划被错误拒绝。现仅在相邻period cutoff已到时允许预规划，first=max(period nominal effective,严格下一future close)；05:30可计划06:00，06:00及之后提交仍拒绝，不能提前计划尚未到cutoff的更远period。没有改正常05:00:08消费05:00规则，没有延长expiry、更新membership source或实际grant。该计划是Recovery Authority/Coordinator后续实现的输入，不是新增交易授权；真正恢复仍需DB事实、Owner、drain、source freshness及恢复rebase完整原子链，不能据此声称runtime liveness已验收。时钟/rebase/原timing专项34 passed。
+
 Recovery存储准备验证：Generic repository + SOR materialization + Generic migration组合193 passed；新增8字段NULL保全断言后Static source migration专项4 passed；追加伪造recovery cursor版本拒绝后proof专项14 passed。Unit/Architecture1225 passed，源码及verify_schema脚本Mypy（159 files）、相关Ruff/diff、文档authority25 passed。计数重叠不相加；使用Docker PG，未执行完整Full-chain/R4，生产未修改。
 
 Recovery持久化/读取准备（基于`0109d26c`）：未部署0008在原`brc_exposure_episode_current`增加8个nullable recovery字段（identity/revision、effective/first-close、armed/last-close/status、checkpoint version），没有新增Episode或恢复状态表。SQL约束与typed checkpoint一致，拒绝不完整字段、非未来first-close、无效status/version、trigger自证arming及非Generic Event；新的`authority_rebase_required`占位状态没有Episode ID和arm，原rising-edge reducer禁止从该状态直接TRIGGERED。typed readonly getter重连还原checkpoint。

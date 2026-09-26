@@ -1687,7 +1687,27 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
         assert vacuum is None
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == "RESOLVED_ACTIVE"
+        scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
         before = await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        decision = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=None,observed_close_time_ms=now//HOUR*HOUR,
+            now_ms=now,allow_current_as_birth=True,lock_current=True)
+        assert decision.allowed, decision
+        assert decision.selection_authority_id == activated.selection_authority_id
+        born = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=decision.selection_authority_id,observed_close_time_ms=now//HOUR*HOUR,
+            now_ms=now+1,allow_current_as_birth=False,lock_current=True)
+        assert born.allowed and born.selection_authority_id == decision.selection_authority_id
+        for wrong_version in (persisted.selection_control_version-1,persisted.selection_control_version+1):
+            with patch.object(uow.instrument_selection,"get_generic_materialization_generation",new=AsyncMock(
+                return_value=persisted.model_copy(update={"selection_control_version":wrong_version}))):
+                denied = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+                    birth_selection_authority_id=decision.selection_authority_id,observed_close_time_ms=now//HOUR*HOUR,
+                    now_ms=now+1,allow_current_as_birth=False,lock_current=True)
+            assert not denied.allowed and denied.reason_code == "selection_generation_not_active"
     with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now+1)):
         repeated = await coordinate_selection_materialization_once(uow_factory=factory, request=request.model_copy(update={"worker_id":"restarted-worker"}), clock_ms=lambda:now+1)
     assert repeated.selection_authority_id == activated.selection_authority_id

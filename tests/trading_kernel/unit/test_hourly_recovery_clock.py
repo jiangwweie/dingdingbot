@@ -58,3 +58,23 @@ def test_recovery_cannot_extend_a_period_by_copying_its_model() -> None:
     with pytest.raises(ValueError):
         plan_hourly_recovery_close(recovery_id="recovery:forged",recovery_revision=1,
             reason="AUTHORITY_GAP",period=forged,evaluated_at_ms=5*HOUR+1)
+
+
+def test_hourly_recovery_can_plan_next_period_without_reusing_missed_close() -> None:
+    failed_period = build_generic_selection_period(feature_cutoff_at_ms=4*HOUR,cadence_hours=1)
+    now = 5*HOUR+30*60_000
+    missed = plan_hourly_recovery_close(recovery_id="recovery:gap",recovery_revision=1,
+        reason="AUTHORITY_GAP",period=failed_period,evaluated_at_ms=now)
+    assert missed.status == "NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY"
+    next_period = build_generic_selection_period(feature_cutoff_at_ms=5*HOUR,cadence_hours=1)
+    planned = plan_hourly_recovery_close(recovery_id="recovery:gap",recovery_revision=2,
+        reason="AUTHORITY_GAP",period=next_period,evaluated_at_ms=now)
+    assert planned.first_eligible_close_time_ms == 6*HOUR
+    assert planned.first_eligible_close_time_ms < planned.period.period_expires_at_ms
+    require_hourly_recovery_commit(planned,committed_at_ms=now+1)
+    with pytest.raises(ValueError,match="boundary"):
+        require_hourly_recovery_commit(planned,committed_at_ms=6*HOUR)
+    too_far = build_generic_selection_period(feature_cutoff_at_ms=6*HOUR,cadence_hours=1)
+    with pytest.raises(ValueError):
+        plan_hourly_recovery_close(recovery_id="recovery:gap",recovery_revision=3,
+            reason="AUTHORITY_GAP",period=too_far,evaluated_at_ms=now)

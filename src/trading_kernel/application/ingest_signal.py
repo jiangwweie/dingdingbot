@@ -538,7 +538,9 @@ async def _resolve_generic_selection_authority(
             if generation is None or generation.lifecycle_state.value != "ACTIVE" or (
                 generation.selection_snapshot_id != snapshot.selection_snapshot_id
                 or generation.selection_epoch_id != authority.selection_epoch_id
-                or generation.selection_control_version != authority.selection_control_version
+                # A first activation freezes the pending version on Generation
+                # and commits the next Control version on its Authority.
+                or generation.selection_control_version + int(authority.activation_authorization_id is not None) != authority.selection_control_version
                 or generation.desired_member_count != len(snapshot.selected_members)
                 or generation.activated_at_ms != authority.effective_from_ms):
                 return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_generation_not_active")
