@@ -188,6 +188,15 @@ async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close
         coverage = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+2*HOUR)
         assert coverage[0].authority_recovery_checkpoint_version == 1
         assert coverage[0].last_observed_at_ms == CUTOFF+HOUR
+        recovery_coverage = await uow.signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,
+            exchange_instrument_ids=(member,),selection_mode="dynamic_selection",evaluated_at_ms=CUTOFF+HOUR+1)
+        assert recovery_coverage == coverage
+        with pytest.raises(RuntimeError,match="future"):
+            await uow.signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,
+                exchange_instrument_ids=(member,),selection_mode="dynamic_selection",evaluated_at_ms=CUTOFF+HOUR-1)
+        with pytest.raises(ValueError):
+            await uow.signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,
+                exchange_instrument_ids=(member,member),selection_mode="dynamic_selection",evaluated_at_ms=CUTOFF+HOUR+1)
     for update in ("authority_recovery_revision=0", "authority_recovery_first_eligible_close_time_ms=authority_recovery_effective_from_ms",
                    "authority_recovery_last_detector_status='invalid'", "authority_recovery_checkpoint_version=NULL",
                    "authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms"):
@@ -1166,6 +1175,12 @@ async def test_new_empty_selection_supersedes_failed_generation_on_same_vacuum(d
     await _exercise_generic_generation(database,group,False,failure_case="timeout_then_empty" if failed_first else "staged_then_empty")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_static_recovery_proposal_is_built_from_database_without_grant(database, group):
+    await _exercise_generic_generation(database,group,False,failure_case="timeout_then_prepare",first_activation=True)
+
+
 async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None):
     source = inputs(group)
     if comparison_only:
@@ -1723,6 +1738,50 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"),{"uid":uid}) == 0
     if failure_case == "timeout_then_empty":
         await _assert_generic_empty_handoff(database,source,persisted,vacuum)
+    if failure_case == "timeout_then_prepare":
+        previous_uid = persisted.previous_events[0].universe_version_id
+        now = at+1
+        close = now//HOUR*HOUR
+        await make_warming_ready(database,universe_version_id=previous_uid,warm_closed_bar_time_ms=close,valid_until_ms=now+HOUR)
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+        if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
+            template = mpg_long_snapshot() if source.spec.strategy_group_id=="MPG-001" else mi_long_snapshot()
+            delta = close-template.trigger_candle_close_time_ms
+            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+            members = source.spec.candidate_ids[:1]
+            projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=previous_uid,
+                strategy_group_id=source.spec.strategy_group_id,exchange_instrument_ids=members,closed_bar_time_ms=close,
+                lookback_bars=8 if source.spec.strategy_group_id=="MPG-001" else 12,freshness_window_ms=HOUR,
+                member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in members))
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(projection)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                proposal = await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                assert proposal.selection_mode == "static_baseline"
+                assert proposal.first_eligible_close_time_ms > now
+                assert proposal.event_binding.universe_version_id == previous_uid
+                assert proposal.failed_activation_authorization_id == control.pending_authorization_id
+                assert proposal.selection_control_version == control.control_version+1
+                assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
+                assert await uow.instrument_selection.get_generic_materialization_generation(persisted.materialization_generation_id) == persisted
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id) == vacuum
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert uow._connection is not None
+                for sql, params, reason in (
+                    ("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group",{"group":source.spec.strategy_group_id},"Owner Control"),
+                    ("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false WHERE owner_policy_id='policy-main'",{},"Policy"),
+                    ("UPDATE brc_strategy_selection_control_current SET control_version=control_version+1 WHERE strategy_group_id=:group",{"group":source.spec.strategy_group_id},"Control"),
+                    ("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id=:member",{"member":source.spec.candidate_ids[0]},"not ready"),
+                ):
+                    savepoint = await uow._connection.begin_nested()
+                    await uow._connection.execute(sa.text(sql),params)
+                    with pytest.raises(SelectionJobConflict,match=reason):
+                        await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                    await savepoint.rollback()
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,proposal.first_eligible_close_time_ms])), pytest.raises(ValueError,match="boundary"):
+                    await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
 
 
 async def _assert_generic_empty_handoff(database, source, original, vacuum):

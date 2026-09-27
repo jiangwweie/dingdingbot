@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+DB recovery提案准备验证：Generic repository + SOR materialization组合207 passed，首次Static提案四策略专项4 passed（含Owner/Policy/Control/certification/clock负例）；完整Unit/Architecture1237 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。cursor准备与normal cursor共用读取也通过原覆盖回归。计数重叠不相加；没有正式Recovery Authority写入、没有解锁ENTRY，没有完整R4或自然交易全链认证，生产未修改。
+
+首次Static恢复提案DB准备（基于`67f6ac11`）：`prepare_generic_recovery_grant_proof`仅接收Generation ID，锁定Owner/Control/failed Generation/Vacuum，核验pending授权purpose/TOTP/exact period、RECOVERY_REQUIRED事件归因、drain已清、目标已abandoned、previous current/member/comparison未变、current认证及Policy开关；不允许替代既有Dynamic Authority。由数据库时钟选择本周期或相邻下一period的future close，从真实Episode/comparison/recovery cursor推导新recovery revision，末次DB clock跨界拒绝。方法无业务写入，不清pending、不解Vacuum、不创建current Authority；尚未由Coordinator调用，正式commit必须再次核验并原子持久化。
+
+共享cursor读取新增recovery入口：保留已消费close作为证据而非normal路径直接拒绝，但拒绝相对evaluated time位于未来的cursor；Static最多10个previous成员且不被Candidate24重定义，Dynamic按Spec上界/面板校验。normal/recovery共用原Episode advisory/row lock读取，不新增游标表或写链。四策略PG用实际失败Generation及显式previous readiness前置生成Static proposal，验证无Control/Generation/Vacuum/Authority变更；Owner Pause、Policy关闭、Control漂移、认证暂不可用及末次时钟跨界拒绝。Dynamic source恢复、正式commit、非空supersession与自然交易链仍未完成，不能将准备入口视为交易恢复授权。
+
 Recovery proof验证：四策略Static/Dynamic、stale deadline、无合法close、previous Static面板外成员及各scope/version/time/comparison负例共11个测试；完整Unit/Architecture1237 passed，全源码Mypy（158 files）、相关Ruff/diff通过，文档authority25 passed。此次未改PG或runtime接线，不重复跑PG/R4，不将组件证据上升为整卡完成；生产未修改。
 
 Recovery Grant Proof合同准备（基于`0152b45c`）：新增frozen `GenericRecoveryGrantProof`，与normal current-close proof分开；绑定原Vacuum/fence、恢复原因与revision、未来close、完整previous member cursor、Owner/Control版本及原source引用。Dynamic形态要求已有source Authority和真实membership freshness，按目标period精确匹配0/1 miss、绝对deadline不变，首个close不能到达或超过deadline；首次Static fallback要求失败的Dynamic Owner授权及Generation引用，不伪造Dynamic source。MPG/MI分别保留Static comparison集合或Dynamic fixed24；交易成员digest与comparison definition digest采用各自规范化键，不能互换。Static previous set不被Candidate24偷偷重定义，仍须后续DB/venue证明其合法性。

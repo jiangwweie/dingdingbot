@@ -133,6 +133,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityGapScopeResult,
     CurrentGenericSelectionAuthority,
     CurrentSelectionAuthority,
+    GenericRecoveryGrantProof,
     GenericSelectionAuthority,
     MaterializationGeneration,
     MaterializationGenerationLeaseClaim,
@@ -1081,6 +1082,10 @@ class SignalRepository(Protocol):
     async def lock_generic_close_coverage(self, *, event_spec_id: str,
         exchange_instrument_ids: tuple[str, ...], closed_at_ms: int) -> tuple[LockedObservationCursor, ...]: ...
 
+    async def lock_recovery_close_coverage(self, *, event_spec_id: str, exchange_instrument_ids: tuple[str, ...],
+        selection_mode: Literal["dynamic_selection", "static_baseline"], evaluated_at_ms: int,
+    ) -> tuple[LockedObservationCursor, ...]: ...
+
     async def save_exposure_episode(
         self,
         state: ExposureEpisodeState,
@@ -1534,6 +1539,7 @@ class SelectionJobRecord(BaseModel):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof: ...
     async def read_authority_clock_ms(self) -> int: ...
     async def require_generic_close_proof(self, proof: CurrentFinalCloseGrantProof) -> None: ...
     async def get_current_generic_authority(self, selection_spec_id: str, *,

@@ -248,6 +248,31 @@ class PostgresSignalRepository:
             tuple(sorted(set(exchange_instrument_ids))) != exchange_instrument_ids
             or not set(exchange_instrument_ids).issubset(spec.candidate_ids)):
             raise ValueError("Generic grant coverage members differ from Spec")
+        evidence = await self._lock_selection_observation_cursors(event_spec_id=event_spec_id,exchange_instrument_ids=exchange_instrument_ids)
+        if any(cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>=closed_at_ms for cursor in evidence):
+            raise RuntimeError("Generic grant close was already consumed")
+        return evidence
+
+    async def lock_recovery_close_coverage(self, *, event_spec_id: str, exchange_instrument_ids: tuple[str, ...],
+        selection_mode: Literal["dynamic_selection", "static_baseline"], evaluated_at_ms: int,
+    ) -> tuple[LockedObservationCursor, ...]:
+        contract = strategy_contract_for(event_spec_id)
+        spec = generic_selection_spec(contract.strategy_group_id)
+        if selection_mode not in {"dynamic_selection","static_baseline"} or evaluated_at_ms<=0:
+            raise ValueError("Recovery cursor request mode/time is invalid")
+        static = selection_mode=="static_baseline"
+        if not 1<=len(exchange_instrument_ids)<=(MAX_MANUAL_UNIVERSE_MEMBERS if static else spec.retain_rank) or (
+            tuple(sorted(set(exchange_instrument_ids)))!=exchange_instrument_ids
+            or (not static and not set(exchange_instrument_ids).issubset(spec.candidate_ids))):
+            raise ValueError("Recovery coverage requires canonical bounded previous membership")
+        evidence = await self._lock_selection_observation_cursors(event_spec_id=event_spec_id,exchange_instrument_ids=exchange_instrument_ids)
+        if any(cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>evaluated_at_ms for cursor in evidence):
+            raise RuntimeError("Recovery observation cursor is in the future")
+        return evidence
+
+    async def _lock_selection_observation_cursors(self, *, event_spec_id: str,
+        exchange_instrument_ids: tuple[str, ...]) -> tuple[LockedObservationCursor, ...]:
+        contract = strategy_contract_for(event_spec_id)
         evidence = []
         # Same stable per-Episode advisory lock used by formal Observation,
         # including absent rows. Canonical instrument order avoids deadlocks.
@@ -261,8 +286,6 @@ class PostgresSignalRepository:
                 None if checkpoint is None else checkpoint.last_observed_at_ms,
                 None if recovery is None else recovery.last_observed_close_time_ms) if x is not None]
             last = max(times) if times else None
-            if last is not None and last >= closed_at_ms:
-                raise RuntimeError("Generic grant close was already consumed")
             evidence.append(LockedObservationCursor(episode_domain_key=key,exchange_instrument_id=member,
                 episode_version=0 if episode is None else episode.projection_version,
                 comparison_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version,
