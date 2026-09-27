@@ -135,6 +135,10 @@ def _generic_static_recovery_proof_function() -> None:
         IF evaluated IS NULL OR committed IS NULL OR evaluated<g.terminal_at_ms
           OR evaluated<o.updated_at_ms OR evaluated<c.updated_at_ms
           OR evaluated<v.fenced_at_ms OR committed<evaluated OR checked_at<committed THEN RETURN false; END IF;
+        IF EXISTS (SELECT 1 FROM brc_instrument_selection_snapshots s
+          WHERE s.selection_spec_id=g.selection_spec_id AND s.selection_epoch_id=g.selection_epoch_id
+            AND s.period_anchor_ms>g.period_anchor_ms AND s.created_at_ms<=checked_at
+            AND s.eligibility_not_before_ms<=checked_at AND s.expires_at_ms>checked_at) THEN RETURN false; END IF;
         cutoff := ((evaluated-3600000)/(cadence*3600000::bigint))*(cadence*3600000::bigint);
         first_close := (evaluated/3600000+1)*3600000;
         IF first_close>=cutoff+(cadence+1)*3600000::bigint THEN cutoff:=cutoff+cadence*3600000::bigint; END IF;

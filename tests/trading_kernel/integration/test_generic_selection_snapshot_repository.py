@@ -1838,6 +1838,17 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 for cursor in proposal.observation_cursors:
                     assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
 
+                newer_source = next_input(source)
+                newer_source = newer_source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in newer_source.member_windows)})
+                newer = compute_generic_selection(newer_source)
+                await uow.instrument_selection.save_generic_snapshot(newer,decision_at_ms=newer_source.decision_at_ms,
+                    source_observed_at_ms=newer_source.source_observed_at_ms)
+                # A committed future Desired cannot displace the current
+                # recovery early; once due, newest Selection takes priority.
+                assert await uow.instrument_selection.require_generic_recovery_grant_proof(proposal) == now
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=newer.effective_from_ms+1)), pytest.raises(SelectionJobConflict,match="newer effective Selection"):
+                    await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+
                 for detector_status in (DetectorStatus.NOT_TRIGGERED,DetectorStatus.TRIGGERED):
                     existing_savepoint = await uow._connection.begin_nested()
                     member = proposal.observation_cursors[0].exchange_instrument_id

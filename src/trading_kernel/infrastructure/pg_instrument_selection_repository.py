@@ -3045,6 +3045,20 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Recovery failure time is in the future")
         if now<owner["updated_at_ms"] or now<control.updated_at_ms:
             raise SelectionJobConflict("Recovery control time is in the future")
+        # Share Selection's lineage lock so a newly committed due Snapshot
+        # cannot race the decision to recover a displaced failed attempt.
+        await self._connection.execute(sa.select(instrument_selection_specs.c.selection_spec_id).where(
+            instrument_selection_specs.c.selection_spec_id==generation.selection_spec_id).with_for_update())
+        newer = await self._connection.scalar(sa.select(instrument_selection_snapshots.c.selection_snapshot_id).where(
+            instrument_selection_snapshots.c.selection_spec_id==generation.selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id==generation.selection_epoch_id,
+            instrument_selection_snapshots.c.period_anchor_ms>generation.period_anchor_ms,
+            instrument_selection_snapshots.c.created_at_ms<=now,
+            instrument_selection_snapshots.c.eligibility_not_before_ms<=now,
+            instrument_selection_snapshots.c.expires_at_ms>now,
+        ).order_by(instrument_selection_snapshots.c.period_anchor_ms.desc()).limit(1))
+        if newer is not None:
+            raise SelectionJobConflict("Recovery superseded by newer effective Selection")
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":control.pending_authorization_id})).mappings().one_or_none()

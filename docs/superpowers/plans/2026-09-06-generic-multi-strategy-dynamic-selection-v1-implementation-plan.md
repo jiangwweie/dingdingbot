@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+newest Selection排除条件验证：四策略recovery PG专项4 passed、Generic migration12 passed、Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed；未运行完整PG/Full-chain/R4，未部署。GS-04～09仍IN_PROGRESS。
+
+恢复与newest Selection优先级（基于`d8d9b920`）：Static recovery prepare新增共用Spec lineage锁及有界同epoch查询，存在较新、已commit、effective已到且未expired的Snapshot时拒绝旧恢复提案，交回supersession分支；SQL proof checker也按checked-at执行相同否定条件。future Snapshot尚未生效不提前阻断恢复，expired Snapshot不被冒充有效替代。四策略测试提交future VALID_EMPTY后旧提案仍可核验；到effective后优先返回newer effective Selection blocker而非先尝试旧Universe认证。此为恢复准备的必要排除条件，尚不代表所有supersession/Static新period控制语义已接通，正式Recovery grant仍关闭。
+
 初始化旧Episode保全证据（基于`abd8a3bf`）：四策略Static recovery PG探针新增旧armed及旧triggered起点，正式reducer创建原Episode后重新准备proof再初始化，断言普通Episode对象全部字段精确不变、旧close作为高水位保留、新recovery无Detector结果/无arm；初始旧proof因cursor变更被拒绝，不得沿用。外层savepoint回滚清除测试初始化。本轮仅增加测试与证据，四策略专项4 passed、相关Ruff/diff通过；多成员故障与正式恢复commit/消费链仍未完成，无生产改动。
 
 Pending checkpoint原子初始化组件（基于`6afe0242`）：PG Selection仓储新增initialize_generic_recovery_checkpoints，先经完整locked proof/app/SQL再验证，按原Episode key/canonical member顺序初始化原表recovery字段；无旧Episode只建无观察、无ID、未armed占位，有旧Episode保留其普通字段和comparison字段。写入使用Episode/recovery版本CAS，并在内部savepoint末尾再次校验DB future-close窗口，异常整体撤回；最终恢复事务仍应包围此组件及Authority/Control/Vacuum提交。未接Coordinator、不创建恢复Authority、不清pending、不解除Vacuum；正式grant仍被DB禁止，不能单独以组件成功授予交易。
