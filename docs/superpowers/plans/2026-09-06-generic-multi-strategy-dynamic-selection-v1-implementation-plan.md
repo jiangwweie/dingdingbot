@@ -361,6 +361,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+初始化旧Episode保全证据（基于`abd8a3bf`）：四策略Static recovery PG探针新增旧armed及旧triggered起点，正式reducer创建原Episode后重新准备proof再初始化，断言普通Episode对象全部字段精确不变、旧close作为高水位保留、新recovery无Detector结果/无arm；初始旧proof因cursor变更被拒绝，不得沿用。外层savepoint回滚清除测试初始化。本轮仅增加测试与证据，四策略专项4 passed、相关Ruff/diff通过；多成员故障与正式恢复commit/消费链仍未完成，无生产改动。
+
 Pending checkpoint原子初始化组件（基于`6afe0242`）：PG Selection仓储新增initialize_generic_recovery_checkpoints，先经完整locked proof/app/SQL再验证，按原Episode key/canonical member顺序初始化原表recovery字段；无旧Episode只建无观察、无ID、未armed占位，有旧Episode保留其普通字段和comparison字段。写入使用Episode/recovery版本CAS，并在内部savepoint末尾再次校验DB future-close窗口，异常整体撤回；最终恢复事务仍应包围此组件及Authority/Control/Vacuum提交。未接Coordinator、不创建恢复Authority、不清pending、不解除Vacuum；正式grant仍被DB禁止，不能单独以组件成功授予交易。
 
 四策略真实failed-generation proposal专项4 passed，含最终clock跨close自动回滚、成功初始化读回、外层rollback恢复无checkpoint及Control/current不变；测试尚无已有Episode与多成员故障矩阵，不能宣称该矩阵完成。Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff通过。本轮未执行完整PG/Full-chain/R4，生产未修改，GS-04～09仍IN_PROGRESS。

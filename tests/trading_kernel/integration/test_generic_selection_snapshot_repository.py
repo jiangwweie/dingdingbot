@@ -1837,6 +1837,25 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     await uow.instrument_selection.initialize_generic_recovery_checkpoints(proposal)
                 for cursor in proposal.observation_cursors:
                     assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
+
+                for detector_status in (DetectorStatus.NOT_TRIGGERED,DetectorStatus.TRIGGERED):
+                    existing_savepoint = await uow._connection.begin_nested()
+                    member = proposal.observation_cursors[0].exchange_instrument_id
+                    observed = (proposal.vacuum_fenced_at_ms//HOUR)*HOUR
+                    existing_episode = advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),current=None,
+                        detector_status=detector_status,occurred_at_ms=observed if detector_status is DetectorStatus.TRIGGERED else None,
+                        observed_at_ms=observed,exchange_instrument_id=member).current
+                    await uow.signals.save_exposure_episode(existing_episode,expected_version=0)
+                    refreshed = await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                    with pytest.raises(SelectionJobConflict,match="recovery proof changed"):
+                        await uow.instrument_selection.initialize_generic_recovery_checkpoints(proposal)
+                    checkpoints = await uow.instrument_selection.initialize_generic_recovery_checkpoints(refreshed)
+                    assert await uow.signals.lock_exposure_episode(existing_episode.episode_domain_key) == existing_episode
+                    assert checkpoints[0].state == "REBASE_REQUIRED" and checkpoints[0].armed_at_close_time_ms is None
+                    assert checkpoints[0].last_detector_status is None
+                    assert checkpoints[0].last_observed_close_time_ms == observed
+                    assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                    await existing_savepoint.rollback()
                 initialized = await uow.instrument_selection.initialize_generic_recovery_checkpoints(proposal)
                 assert len(initialized) == len(proposal.observation_cursors)
                 for checkpoint in initialized:
