@@ -3,6 +3,7 @@ import pytest
 from src.trading_kernel.domain.authority_recovery_rebase import (
     advance_authority_recovery_rebase,
     advance_recovery_bound_exposure_episode,
+    recovery_rebase_entry_rejection,
 )
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
@@ -60,6 +61,25 @@ def test_trigger_close_cannot_be_forged_into_an_arming_proof() -> None:
     assert "exposure_episode_id" not in first.checkpoint.model_dump()
 
 
+def test_entry_rebase_gate_requires_exact_recovery_and_observed_trigger():
+    from src.trading_kernel.domain.authority_recovery_rebase import (
+        recovery_rebase_entry_rejection,
+    )
+    args = {"episode_domain_key":"episode:existing","recovery_id":"recovery:1","recovery_revision":1,
+        "recovery_committed_at_ms":5*HOUR+1000,"first_eligible_close_time_ms":6*HOUR,"signal_close_time_ms":7*HOUR}
+    assert recovery_rebase_entry_rejection(checkpoint=None,**args) == "RECOVERY_REBASE_REQUIRED"
+    unarmed = advance(None,6*HOUR,DetectorStatus.TRIGGERED).checkpoint
+    assert recovery_rebase_entry_rejection(checkpoint=unarmed,**args) == "RECOVERY_REBASE_REQUIRED"
+    armed = advance(None,6*HOUR,DetectorStatus.NOT_TRIGGERED).checkpoint
+    assert recovery_rebase_entry_rejection(checkpoint=armed,**args) == "RECOVERY_TRIGGER_NOT_CURRENT"
+    triggered = advance(armed,7*HOUR,DetectorStatus.TRIGGERED).checkpoint
+    assert recovery_rebase_entry_rejection(checkpoint=triggered,**args) is None
+    for changed in ({"episode_domain_key":"other"},{"recovery_id":"other"},{"recovery_revision":2},
+                    {"recovery_committed_at_ms":5*HOUR+2000},{"first_eligible_close_time_ms":7*HOUR}):
+        assert recovery_rebase_entry_rejection(checkpoint=triggered,**{**args,**changed}) == "RECOVERY_REBASE_AUTHORITY_CHANGED"
+    assert recovery_rebase_entry_rejection(checkpoint=triggered,**{**args,"signal_close_time_ms":8*HOUR}) == "RECOVERY_TRIGGER_NOT_CURRENT"
+
+
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 @pytest.mark.parametrize("old_state", [None, "armed", "triggered"])
 def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_state):
@@ -86,6 +106,12 @@ def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_
         current_recovery=armed.recovery_checkpoint,current_comparison=armed.comparison_checkpoint,
         detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=8*HOUR,observed_at_ms=8*HOUR)
     assert triggered.signal_eligible and triggered.episode_transition.created_new_episode
+    entry_args = {"episode_domain_key":triggered.recovery_checkpoint.episode_domain_key,
+        "recovery_id":kwargs["recovery_id"],"recovery_revision":kwargs["recovery_revision"],
+        "recovery_committed_at_ms":kwargs["effective_from_ms"],"first_eligible_close_time_ms":kwargs["first_eligible_close_time_ms"],
+        "signal_close_time_ms":8*HOUR}
+    assert recovery_rebase_entry_rejection(checkpoint=triggered.recovery_checkpoint,**entry_args) is None
+    assert recovery_rebase_entry_rejection(checkpoint=suppressed.recovery_checkpoint,**entry_args) == "RECOVERY_REBASE_REQUIRED"
     assert old is None or triggered.episode_transition.exposure_episode_id != old.exposure_episode_id
     assert triggered.comparison_checkpoint is None if not comparative else triggered.comparison_checkpoint.comparison_transition_revision == 1
     repeated = advance_recovery_bound_exposure_episode(**kwargs,current_episode=triggered.episode_transition.current,

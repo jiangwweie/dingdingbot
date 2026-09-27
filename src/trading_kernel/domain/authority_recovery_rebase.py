@@ -65,6 +65,30 @@ class AuthorityRecoveryRebaseTransition(BaseModel):
     suppression_reason: Literal["RECOVERY_REBASE_REQUIRED", "RECOVERY_CLOSE_ALREADY_OBSERVED"] | None
 
 
+def recovery_rebase_entry_rejection(*, checkpoint: AuthorityRecoveryCheckpoint | None,
+    episode_domain_key: str, recovery_id: str, recovery_revision: int,
+    recovery_committed_at_ms: int, first_eligible_close_time_ms: int, signal_close_time_ms: int,
+) -> str | None:
+    """Additional ENTRY gate; never blocks observation needed to establish rebase.
+
+    Current Owner/Selection/Universe authority and Episode identity remain
+    separate mandatory checks. The commit time is the frozen recovery origin,
+    not the nominal start of a future Selection period.
+    """
+    if checkpoint is None:
+        return "RECOVERY_REBASE_REQUIRED"
+    checkpoint = AuthorityRecoveryCheckpoint.model_validate(checkpoint.model_dump())
+    if (checkpoint.episode_domain_key,checkpoint.recovery_id,checkpoint.recovery_revision,
+        checkpoint.effective_from_ms,checkpoint.first_eligible_close_time_ms) != (
+        episode_domain_key,recovery_id,recovery_revision,recovery_committed_at_ms,first_eligible_close_time_ms):
+        return "RECOVERY_REBASE_AUTHORITY_CHANGED"
+    if checkpoint.state != "ARMED" or checkpoint.armed_at_close_time_ms is None:
+        return "RECOVERY_REBASE_REQUIRED"
+    if checkpoint.last_detector_status is not DetectorStatus.TRIGGERED or checkpoint.last_observed_close_time_ms != signal_close_time_ms or signal_close_time_ms <= checkpoint.armed_at_close_time_ms:
+        return "RECOVERY_TRIGGER_NOT_CURRENT"
+    return None
+
+
 class RecoveryBoundExposureEpisodeTransition(BaseModel):
     """One atomic persistence input; never a Signal, Ticket or authority grant."""
     model_config = ConfigDict(frozen=True, extra="forbid")

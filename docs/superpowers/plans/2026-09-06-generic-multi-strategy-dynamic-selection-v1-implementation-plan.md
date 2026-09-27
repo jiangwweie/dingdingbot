@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery ENTRY rebase gate组件（基于`bba6e91e`）：新增pure `recovery_rebase_entry_rejection`，要求checkpoint精确匹配Episode key、recovery ID/revision、冻结恢复commit时间和first eligible close；必须已ARMED且当前记录为严格晚于arming close的TRIGGERED，并与Signal close相等。缺checkpoint、旧恢复身份、只有NOT_TRIGGERED或过时trigger均拒绝。此门槛仅用于ENTRY，不能放在Observation前阻止建立NOT_TRIGGERED rebase；当前scope/time eligibility仍是另一项必需检查，不可单独视为可发单。
+
+四策略×三种旧Episode起点的组合测试接上此gate，另验证缺失/错误身份/错误时间与stale trigger。Unit/Architecture1247 passed；追加组合断言后的recovery/proof定向37 passed，全源码Mypy、相关Ruff/diff通过。正式PG checkpoint写入、Authority current/rebase读取和四ENTRY边界接线仍未完成，本轮无Schema或PG变更，不把pure测试当作恢复full-chain。生产未修改。
+
 Recovery再验证收尾：Generic repository完整模块130 passed；追加failure-time倒退拒绝后Static recovery四策略专项4 passed；Unit/Architecture1246 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。模块在最后时钟因果guard前启动，最终guard以四策略专项复验；未执行完整R4，计数不相加，生产未修改。
 
 Recovery proof提交前再验证准备（基于`74c2779b`）：新增`require_generic_recovery_grant_proof`，在数据库时钟和原准备入口锁域下重建全部事实，只容许同一future-close窗口内evaluated/checked时间前进；其余proof字段逐项精确比对，Owner/Control/Vacuum/time篡改拒绝。再次检查Pause、Policy、certification及future-close；时钟倒退拒绝。另一个RED证明首次prepare可在DB时钟倒退至已记录failure之前时构造提案，现增加`now >= generation.terminal_at_ms`的因果校验。
