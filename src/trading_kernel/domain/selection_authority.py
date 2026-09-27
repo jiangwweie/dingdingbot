@@ -20,8 +20,13 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     DynamicMembershipFreshness,
     DynamicMembershipState,
     GenericSelectionPeriod,
+    HourlyRecoveryClosePlan,
+    require_hourly_recovery_commit,
 )
-from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
+from src.trading_kernel.domain.exposure_episode import (
+    LockedObservationCursor,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     DAY_MS,
@@ -939,6 +944,116 @@ def generic_authority_entry_rejection(*, authority: GenericSelectionAuthority,
     if authority.membership_freshness is None or not authority.membership_freshness.allows_new_entry_at(now_ms):
         return "selection_membership_stale"
     return None
+
+
+class GenericRecoveryGrantProof(BaseModel):
+    """Recovery evidence only, not a current pointer or a production grant.
+
+    PostgreSQL must bind these references to actual current Owner/Control,
+    Vacuum, previous Universe and source Authority before accepting a grant.
+    Static form is the failed first Dynamic activation transition only.
+    """
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    proof_kind: Literal["FUTURE_CLOSE_REBASE_REQUIRED"] = "FUTURE_CLOSE_REBASE_REQUIRED"
+    selection_spec_id: str
+    strategy_group_id: str
+    selection_epoch_id: str
+    selection_mode: Literal["dynamic_selection", "static_baseline"]
+    source_entry_vacuum_id: str
+    vacuum_fenced_at_ms: int = Field(gt=0)
+    materialization_generation_id: str | None
+    source_selection_authority_id: str | None
+    failed_activation_authorization_id: str | None
+    owner_control_version: int = Field(gt=0)
+    selection_control_version: int = Field(gt=0)
+    event_binding: AuthorityEventBinding
+    recovery_close_plan: HourlyRecoveryClosePlan
+    membership_freshness: DynamicMembershipFreshness | None
+    comparison_universe_id: str | None
+    comparison_transition_revision: int | None
+    observation_cursors: tuple[LockedObservationCursor, ...]
+    committed_at_ms: int = Field(gt=0)
+    episode_rebase_required: Literal[True] = True
+
+    @field_validator("selection_spec_id", "strategy_group_id", "selection_epoch_id", "source_entry_vacuum_id",
+        "materialization_generation_id", "source_selection_authority_id", "failed_activation_authorization_id", "comparison_universe_id")
+    @classmethod
+    def _canonical_reference(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value != value.strip() or len(value)>160):
+            raise ValueError("recovery proof requires canonical bounded references")
+        return value
+
+    @property
+    def first_eligible_close_time_ms(self) -> int:
+        first = self.recovery_close_plan.first_eligible_close_time_ms
+        if first is None:
+            raise ValueError("NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY is not a grant")
+        return first
+
+    @property
+    def effective_from_ms(self) -> int:
+        return max(self.committed_at_ms,self.recovery_close_plan.period.scheduled_effective_at_ms)
+
+    @property
+    def expires_at_ms(self) -> int:
+        period_end = self.recovery_close_plan.period.period_expires_at_ms
+        return period_end if self.membership_freshness is None else min(period_end,self.membership_freshness.membership_valid_until_ms)
+
+    @property
+    def semantic_digest(self) -> str:
+        return _semantic_digest(self.model_dump(mode="json"))
+
+    @model_validator(mode="after")
+    def _validate_recovery_proof(self) -> GenericRecoveryGrantProof:
+        spec = generic_selection_spec(self.strategy_group_id)
+        plan = self.recovery_close_plan
+        if self.selection_spec_id != spec.selection_spec_id or self.selection_epoch_id == "sor-v0" or plan.period.cadence_hours != spec.cadence_hours:
+            raise ValueError("recovery Spec, epoch or cadence differs")
+        require_hourly_recovery_commit(plan,committed_at_ms=self.committed_at_ms)
+        if self.vacuum_fenced_at_ms > plan.evaluated_at_ms:
+            raise ValueError("recovery cannot precede its Vacuum fence")
+        if plan.reason in {"MATERIALIZATION_FAILURE","MATERIALIZATION_TIMEOUT"} and self.materialization_generation_id is None:
+            raise ValueError("materialization recovery requires its Generation")
+        binding = self.event_binding
+        if binding.grant_state is not AuthorityEventGrantState.ACTIVE or (
+            binding.event_spec_id,binding.position_side)!=(spec.event_spec_id,spec.position_side):
+            raise ValueError("recovery requires the exact previous active Event")
+        members = tuple(cursor.exchange_instrument_id for cursor in self.observation_cursors)
+        static = self.selection_mode == "static_baseline"
+        if not 1<=len(members)<=(10 if static else spec.retain_rank) or tuple(sorted(set(members)))!=members or (
+            selected_member_set_digest(members)!=binding.member_set_digest or (not static and not set(members).issubset(spec.candidate_ids))):
+            raise ValueError("recovery previous member coverage differs")
+        for cursor in self.observation_cursors:
+            LockedObservationCursor.model_validate(cursor.model_dump())
+            if cursor.episode_domain_key!=build_episode_domain_key(event_spec_id=spec.event_spec_id,
+                exchange_instrument_id=cursor.exchange_instrument_id,position_side=spec.position_side) or (
+                cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>self.committed_at_ms):
+                raise ValueError("recovery cursor scope or time differs")
+        if static:
+            if self.membership_freshness is not None or self.source_selection_authority_id is not None or (
+                self.failed_activation_authorization_id is None or self.materialization_generation_id is None):
+                raise ValueError("first Static fallback requires failed activation provenance, not Dynamic freshness")
+        else:
+            fresh = self.membership_freshness
+            if fresh is None or self.source_selection_authority_id is None or self.failed_activation_authorization_id is not None:
+                raise ValueError("Dynamic recovery requires existing source Authority and freshness")
+            fresh = DynamicMembershipFreshness.model_validate(fresh.model_dump())
+            missed = (plan.period.scheduled_effective_at_ms-fresh.source_snapshot_effective_at_ms)//(spec.cadence_hours*HOUR_MS)
+            expected_state = DynamicMembershipState.ACTIVE if missed==0 else DynamicMembershipState.GRACE
+            if fresh.source_member_set_digest!=binding.member_set_digest or fresh.cadence_hours!=spec.cadence_hours or (
+                fresh.source_snapshot_effective_at_ms>self.committed_at_ms or missed not in {0,1}
+                or fresh.consecutive_missed_periods!=missed or fresh.state is not expected_state
+                or not fresh.allows_new_entry_at(self.first_eligible_close_time_ms)):
+                raise ValueError("recovery freshness cannot refresh or exceed the original deadline")
+        if not self.effective_from_ms<=self.first_eligible_close_time_ms<self.expires_at_ms:
+            raise ValueError("recovery deadline leaves no eligible close")
+        if self.strategy_group_id in {"MPG-001","MI-001"}:
+            expected = _semantic_digest({"exchange_instrument_ids":members if static else spec.candidate_ids})
+            if self.comparison_universe_id!="comparison:"+expected[7:] or self.comparison_transition_revision is None or self.comparison_transition_revision<(0 if static else 1):
+                raise ValueError("recovery comparison must preserve the previous semantic identity")
+        elif self.comparison_universe_id is not None or self.comparison_transition_revision is not None:
+            raise ValueError("non-comparative recovery forbids comparison identity")
+        return self
 
 
 class CurrentGenericSelectionAuthority(BaseModel):

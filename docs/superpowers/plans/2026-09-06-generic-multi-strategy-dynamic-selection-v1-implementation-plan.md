@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery proof验证：四策略Static/Dynamic、stale deadline、无合法close、previous Static面板外成员及各scope/version/time/comparison负例共11个测试；完整Unit/Architecture1237 passed，全源码Mypy（158 files）、相关Ruff/diff通过，文档authority25 passed。此次未改PG或runtime接线，不重复跑PG/R4，不将组件证据上升为整卡完成；生产未修改。
+
+Recovery Grant Proof合同准备（基于`0152b45c`）：新增frozen `GenericRecoveryGrantProof`，与normal current-close proof分开；绑定原Vacuum/fence、恢复原因与revision、未来close、完整previous member cursor、Owner/Control版本及原source引用。Dynamic形态要求已有source Authority和真实membership freshness，按目标period精确匹配0/1 miss、绝对deadline不变，首个close不能到达或超过deadline；首次Static fallback要求失败的Dynamic Owner授权及Generation引用，不伪造Dynamic source。MPG/MI分别保留Static comparison集合或Dynamic fixed24；交易成员digest与comparison definition digest采用各自规范化键，不能互换。Static previous set不被Candidate24偷偷重定义，仍须后续DB/venue证明其合法性。
+
+本组件只表示待核验恢复证据，尚未加入current Authority union、PG codec/constraints或grant入口；不能用模型构造成功作为恢复交易授权。后续必须将引用绑定真实DB current及source记录，并与Vacuum/Control/Episode checkpoint原子写入。非空supersession和恢复全链继续未完成。
+
 EMPTY supersession收尾验证：Generic repository + SOR materialization + ENTRY Vacuum drain组合233 passed；追加Owner/Control/Vacuum旧版本及未到effective拒绝后的supersession专项8 passed；Unit/Architecture1226 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。计数重叠不相加，未执行完整R4或自然Signal→Ticket全链；所有PG验证在本地Docker，生产未修改。
 
 Generic VALID_EMPTY supersession增量（基于`9b868587`）：已复现新zero-member Snapshot被旧failed Vacuum永久挡在GENERIC_EMPTY_REQUIRES_SUPERSESSION。现同一Coordinator在Owner/Control及Spec lineage锁下确认最新due、未过期、exact epoch的空Snapshot，复用原Vacuum追加VALID_EMPTY_INTENT；旧MATERIALIZING/STAGED目标经正式abandon并标SUPERSEDED，已FAILED_CLOSED父行保持原终态/时间/版本。Vacuum转移到新period/intent但保留原ID、fence及已完成drain时间；统一empty提交读取最新追加intent，不改写旧OPEN事件，不新建空Universe/Generation、不fallback。旧Generation仍DRAINING时先继续正式drain，未清空不能跳过；Owner Pause优先。
