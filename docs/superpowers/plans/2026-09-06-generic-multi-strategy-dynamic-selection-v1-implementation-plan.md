@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Pending初始化因果补强（基于`254617f9`）：RED证明无观察pending checkpoint可用更高revision把effective/first-close倒退到过去；同revision幂等返回也会忽略非法latest-consumed cursor。现初始化先验证positive hourly cursor，再要求effective时间不早于现有recovery，保留真实close高水位及已armed幂等状态。此为正式checkpoint原子写入前的pure边界补强，未开放数据库Recovery写入或ENTRY消费。
+
+本轮Unit/Architecture1257 passed、全源码Mypy、相关Ruff/diff及文档authority25 passed；无Schema或PG变更，未重复运行PG/R4，生产未修改，GS-04～09仍未完成。
+
 Recovery current读取收尾：Generic repository + Selection ENTRY authority组合138 passed；Unit/Architecture1257 passed，追加current JSON subtype roundtrip断言后的recovery专项24 passed；全源码Mypy、相关Ruff/diff、文档authority25 passed。数据库恢复写入约束未开放，运行消费仍明确fail closed；未进行完整R4或生产动作。
 
 Recovery current读取准备（基于`b5879a70`）：原CurrentGenericSelectionAuthority支持normal/Recovery两种frozen值，仍读取原current表/指针；PG按recovery_grant_proof是否存在调用各自严格codec，没有第二Authority链。Recovery公共身份/period/binding属性由proof推导。shared ENTRY resolver在正式rebase消费未接通前明确拒绝Recovery子类型，包括Static且已过期的记录，禁止落回裸Static放行；NO_CHANGE/ACTIVE_NEW的Recovery successor同样明确阻塞，避免新normal grant跳过恢复首close/rebase。相关暂存保护必须在正式消费者及其回归完成时替换，不能作为最终运行语义交付。

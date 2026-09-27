@@ -83,10 +83,14 @@ def begin_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | No
     not an Observation under the new recovery, so Detector status stays absent.
     An idempotent repeat must not disarm a checkpoint that already progressed.
     """
+    if latest_consumed_close_time_ms is not None and (latest_consumed_close_time_ms<=0 or latest_consumed_close_time_ms%HOUR_MS):
+        raise ValueError("recovery initialization cursor must be a positive hourly close")
     if current is not None:
         current = AuthorityRecoveryCheckpoint.model_validate(current.model_dump())
         if current.episode_domain_key!=episode_domain_key or recovery_revision<current.recovery_revision:
             raise ValueError("recovery initialization scope or revision is stale")
+        if effective_from_ms<current.effective_from_ms:
+            raise ValueError("recovery initialization time cannot move backwards")
         if recovery_revision==current.recovery_revision:
             if (current.recovery_id,current.effective_from_ms,current.first_eligible_close_time_ms)!=(recovery_id,effective_from_ms,first_eligible_close_time_ms):
                 raise ValueError("recovery initialization identity changed")

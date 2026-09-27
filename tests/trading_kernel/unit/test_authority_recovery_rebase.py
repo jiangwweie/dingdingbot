@@ -29,6 +29,12 @@ def test_recovery_can_be_required_before_any_observation_without_fake_close():
     pending = begin_authority_recovery_rebase(current=None,latest_consumed_close_time_ms=None,**kwargs)
     assert pending.state == "REBASE_REQUIRED" and pending.armed_at_close_time_ms is None
     assert pending.last_observed_close_time_ms is None and pending.last_detector_status is None
+    with pytest.raises(ValueError,match="backwards"):
+        begin_authority_recovery_rebase(current=pending,latest_consumed_close_time_ms=None,
+            **{**kwargs,"recovery_id":"recovery:2","recovery_revision":2,"effective_from_ms":4*HOUR+1,"first_eligible_close_time_ms":5*HOUR})
+    for invalid_cursor in (-1,6*HOUR+1):
+        with pytest.raises(ValueError,match="cursor"):
+            begin_authority_recovery_rebase(current=pending,latest_consumed_close_time_ms=invalid_cursor,**kwargs)
     first = advance(pending,6*HOUR,DetectorStatus.TRIGGERED)
     assert not first.allow_episode_advance and first.checkpoint.projection_version == 2
     armed = advance(first.checkpoint,7*HOUR,DetectorStatus.NOT_TRIGGERED).checkpoint
