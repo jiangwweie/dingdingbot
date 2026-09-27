@@ -14,6 +14,7 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
+    GenericRecoveryAuthority,
     SelectionControl,
     SelectionMode,
     SelectionSessionAuthority,
@@ -501,6 +502,10 @@ async def _resolve_generic_selection_authority(
     current = await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id,for_update=lock_current)
     authority = None if current is None else current.authority
     current_id = None if authority is None else authority.selection_authority_id
+    if isinstance(authority, GenericRecoveryAuthority):
+        # Keep recovery fail-closed until Observation can persist the mandatory
+        # rebase and every ENTRY boundary can consume that exact checkpoint.
+        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_rebase_runtime_not_installed")
     if authority is not None and authority.effective_from_ms <= now_ms < authority.expires_at_ms:
         if authority.selection_epoch_id != control.selection_epoch_id or authority.selection_control_version != control.control_version:
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_control_changed")

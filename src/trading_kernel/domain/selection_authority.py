@@ -1090,6 +1090,42 @@ class GenericRecoveryAuthority(BaseModel):
         return self.recovery_proof.selection_spec_id
 
     @property
+    def strategy_group_id(self) -> str:
+        return self.recovery_proof.strategy_group_id
+
+    @property
+    def selection_epoch_id(self) -> str:
+        return self.recovery_proof.selection_epoch_id
+
+    @property
+    def selection_control_version(self) -> int:
+        return self.recovery_proof.selection_control_version
+
+    @property
+    def owner_control_version(self) -> int:
+        return self.recovery_proof.owner_control_version
+
+    @property
+    def period(self) -> GenericSelectionPeriod:
+        return self.recovery_proof.recovery_close_plan.period
+
+    @property
+    def materialization_generation_id(self) -> str | None:
+        return self.recovery_proof.materialization_generation_id
+
+    @property
+    def comparison_universe_id(self) -> str | None:
+        return self.recovery_proof.comparison_universe_id
+
+    @property
+    def comparison_transition_revision(self) -> int | None:
+        return self.recovery_proof.comparison_transition_revision
+
+    @property
+    def blocks_new_entry(self) -> bool:
+        return False
+
+    @property
     def selection_mode(self) -> Literal["dynamic_selection", "static_baseline"]:
         return self.recovery_proof.selection_mode
 
@@ -1164,7 +1200,7 @@ def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
 
 class CurrentGenericSelectionAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    authority: GenericSelectionAuthority
+    authority: GenericSelectionAuthority | GenericRecoveryAuthority
     projection_version: int = Field(gt=0)
 
 

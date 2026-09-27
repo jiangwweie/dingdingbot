@@ -83,6 +83,7 @@ from src.trading_kernel.domain.product import (
     require_product_compatibility,
 )
 from src.trading_kernel.domain.selection_authority import (
+    GenericRecoveryAuthority,
     GenericSelectionAuthority,
     SelectionMode,
     selected_member_set_digest,
@@ -979,6 +980,8 @@ class PostgresStrategyUniverseRepository:
             if revision!=authority.comparison_transition_revision:
                 raise UniverseInstallConflict("GENERIC_COMPARISON_REVISION_CHANGED")
         current_authority = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+        if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority):
+            raise UniverseInstallConflict("GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")
         if first_activation and current_authority is not None:
             raise UniverseInstallConflict("GENERIC_FIRST_ACTIVATION_AUTHORITY_EXISTS")
         if current_authority is not None and (current_authority.authority.blocks_new_entry

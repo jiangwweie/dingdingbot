@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery current读取收尾：Generic repository + Selection ENTRY authority组合138 passed；Unit/Architecture1257 passed，追加current JSON subtype roundtrip断言后的recovery专项24 passed；全源码Mypy、相关Ruff/diff、文档authority25 passed。数据库恢复写入约束未开放，运行消费仍明确fail closed；未进行完整R4或生产动作。
+
+Recovery current读取准备（基于`b5879a70`）：原CurrentGenericSelectionAuthority支持normal/Recovery两种frozen值，仍读取原current表/指针；PG按recovery_grant_proof是否存在调用各自严格codec，没有第二Authority链。Recovery公共身份/period/binding属性由proof推导。shared ENTRY resolver在正式rebase消费未接通前明确拒绝Recovery子类型，包括Static且已过期的记录，禁止落回裸Static放行；NO_CHANGE/ACTIVE_NEW的Recovery successor同样明确阻塞，避免新normal grant跳过恢复首close/rebase。相关暂存保护必须在正式消费者及其回归完成时替换，不能作为最终运行语义交付。
+
+纯模型和resolver定向24 passed，覆盖Dynamic/Static以及未过期/过期四种读入后全部fail closed。此时数据库仍禁止recovery proof非NULL写入，因此尚无正式恢复current实盘记录或可用ENTRY恢复，不把typed读取支持当作恢复成功。
+
 Static comparison组件收尾：Unit/Architecture1253 passed，全源码Mypy、相关Ruff/diff及文档authority25 passed；本轮无PG/Schema变更，未重复跑数据库或R4，不扩大为整卡完成，生产未修改。
 
 Static recovery comparison组件（基于`b2abbcf5`）：恢复组合reducer改用frozen ComparisonUniverseBinding及明确current selection_mode/Universe ID，删除只接收digest/revision的旧参数，不保留双入口。Dynamic仍由binding合同强制fixed24；Static恢复原bounded比较集合（可含Dynamic panel之外的原合法成员），source_static_universe_version_id必须匹配实际current Universe。Static revision0不伪造comparison transition/checkpoint，仍执行recovery rebase；Static正revision继续走原comparison barrier，不能通过回退revision继承旧arm。CPM/BRF2不构造comparison。

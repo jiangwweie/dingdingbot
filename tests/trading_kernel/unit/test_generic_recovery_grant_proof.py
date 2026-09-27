@@ -132,6 +132,14 @@ def test_recovery_authority_uses_exact_proof_and_never_claims_normal_activation(
     )
     proof = GenericRecoveryGrantProof(**recovery_payload(group,static))
     authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
+    from src.trading_kernel.domain.selection_authority import (
+        CurrentGenericSelectionAuthority,
+    )
+    current = CurrentGenericSelectionAuthority(authority=authority,projection_version=1)
+    assert current.authority == authority
+    restored_current = CurrentGenericSelectionAuthority.model_validate_json(current.model_dump_json())
+    assert isinstance(restored_current.authority,GenericRecoveryAuthority)
+    assert restored_current == current
     assert authority.authority_outcome == "FALLBACK_PREVIOUS"
     assert authority.selection_spec_id == proof.selection_spec_id
     assert authority.selection_mode == proof.selection_mode
@@ -205,3 +213,37 @@ def test_recovery_identity_changes_when_any_frozen_proof_changes():
     assert changed.selection_authority_id != original.selection_authority_id
     with pytest.raises(ValueError):
         GenericRecoveryAuthority.model_validate({**original.model_dump(),"recovery_proof":changed.recovery_proof})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("static", [False,True])
+@pytest.mark.parametrize("expired", [False,True])
+async def test_current_recovery_cannot_fall_through_to_static_or_normal_entry(static, expired):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.application.ingest_signal import (
+        resolve_selection_entry_authority,
+    )
+    from src.trading_kernel.domain.selection_authority import (
+        CurrentGenericSelectionAuthority,
+        GenericRecoveryAuthority,
+        GenericRecoveryGrantProof,
+        SelectionMode,
+    )
+    proof = GenericRecoveryGrantProof(**recovery_payload("CPM-RO-001",static))
+    authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
+    control = SimpleNamespace(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,
+        selection_mode=SelectionMode(proof.selection_mode),selection_epoch_id=None if static else proof.selection_epoch_id,
+        control_version=proof.selection_control_version)
+    scope = SimpleNamespace(strategy_group_id=proof.strategy_group_id,event_spec_id=proof.event_binding.event_spec_id,
+        position_side=proof.event_binding.position_side,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
+        universe_version_id=proof.event_binding.universe_version_id,exchange_instrument_id=proof.observation_cursors[0].exchange_instrument_id)
+    uow = SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control),
+        get_current_entry_vacuum=AsyncMock(return_value=None),get_current_generic_authority=AsyncMock(return_value=CurrentGenericSelectionAuthority(authority=authority,projection_version=1))),
+        owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=SimpleNamespace(entry_state=SimpleNamespace(value="enabled"),control_version=proof.owner_control_version))),
+        entry_admission=SimpleNamespace(get_owner_policy=AsyncMock(return_value=SimpleNamespace(enabled=True,new_entry_submit_enabled=True,scope=SimpleNamespace(authorizes=lambda **_:True)))))
+    result = await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=None,
+        observed_close_time_ms=authority.first_eligible_close_time_ms,now_ms=authority.expires_at_ms+1 if expired else authority.first_eligible_close_time_ms+1,
+        allow_current_as_birth=True)
+    assert not result.allowed and result.reason_code == "selection_recovery_rebase_runtime_not_installed"

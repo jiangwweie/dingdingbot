@@ -3107,6 +3107,8 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("NO_CHANGE cannot cross an open Vacuum")
         current = await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
         now = await self.read_authority_clock_ms()
+        if current is not None and isinstance(current.authority,GenericRecoveryAuthority):
+            raise SelectionJobConflict("Recovery successor contract is not installed")
         if current is not None and current.authority.selection_authority_id == authority.selection_authority_id:
             if current.authority != authority:
                 raise SelectionJobConflict("NO_CHANGE idempotency identity differs")
@@ -4236,7 +4238,9 @@ class PostgresInstrumentSelectionRepository:
         bindings = tuple((await self._connection.execute(sa.select(selection_authority_event_bindings).where(
             selection_authority_event_bindings.c.selection_authority_id == row["selection_authority_id"],
         ).order_by(selection_authority_event_bindings.c.event_spec_id).limit(2))).mappings())
-        authority = generic_authority_from_storage(dict(row),spec=spec,event_bindings=tuple(dict(binding) for binding in bindings))
+        authority: GenericSelectionAuthority | GenericRecoveryAuthority = (generic_authority_from_storage(dict(row),spec=spec,event_bindings=tuple(dict(binding) for binding in bindings))
+            if row["recovery_grant_proof"] is None else
+            generic_recovery_authority_from_storage(dict(row),spec=spec,event_bindings=tuple(dict(binding) for binding in bindings)))
         return CurrentGenericSelectionAuthority(authority=authority,projection_version=row["current_projection_version"])
 
     async def get_current_authority(
