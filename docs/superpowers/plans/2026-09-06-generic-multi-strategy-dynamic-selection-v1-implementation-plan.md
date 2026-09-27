@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+2026-09-27既有full-chain审计（exact code `cdb2eff0`）：运行`.venv/bin/python -m pytest tests/trading_kernel/full_chain -q -o addopts=--tb=short`，51 passed，94.29s。本轮未修改生产源码，全部本地Docker PostgreSQL/recording venue。直接检查`test_registered_event_reaches_terminal_review_from_closed_market_input`确认从正式Observation Worker进入；`test_official_replacement_keeps_old_runner_ticket_to_terminal_review`验证旧Ticket冻结身份跨Universe替换继续生命周期。后者从已签发Ticket前置开始，两者均未走Generic Selection/恢复Authority完整producer路径，不能作为GS-09 Generic full-chain完成证明，也不是R4或部署授权。
+
+下一必需交付仍为：解除临时recovery写入禁止之前，完整实现并验证Static恢复原子commit（Control/current/Vacuum/pending rebase）、正式Observation消费及四ENTRY边界；Dynamic recovery与非空supersession、source/target Static migration neutrality、Generic自然Selection→Ticket→terminal evidence均不得以该51项既有回归替代。GS-04～09维持IN_PROGRESS。
+
 Pending初始化因果补强（基于`254617f9`）：RED证明无观察pending checkpoint可用更高revision把effective/first-close倒退到过去；同revision幂等返回也会忽略非法latest-consumed cursor。现初始化先验证positive hourly cursor，再要求effective时间不早于现有recovery，保留真实close高水位及已armed幂等状态。此为正式checkpoint原子写入前的pure边界补强，未开放数据库Recovery写入或ENTRY消费。
 
 本轮Unit/Architecture1257 passed、全源码Mypy、相关Ruff/diff及文档authority25 passed；无Schema或PG变更，未重复运行PG/R4，生产未修改，GS-04～09仍未完成。
