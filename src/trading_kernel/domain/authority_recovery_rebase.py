@@ -6,8 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.detector import DetectorStatus
-from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBindingEpisodeState,
@@ -155,8 +155,8 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
     current_comparison: ComparisonBindingEpisodeCheckpoint | None,
     recovery_id: str, recovery_revision: int, effective_from_ms: int, first_eligible_close_time_ms: int,
     detector_status: DetectorStatus, occurred_at_ms: int | None, observed_at_ms: int,
-    exchange_instrument_id: str, comparison_binding_digest: str | None = None,
-    comparison_transition_revision: int | None = None,
+    exchange_instrument_id: str, selection_mode: Literal["dynamic_selection", "static_baseline"],
+    universe_version_id: str, comparison_binding: ComparisonUniverseBinding | None = None,
 ) -> RecoveryBoundExposureEpisodeTransition:
     """Compose recovery and comparison gates before the original Episode reducer.
 
@@ -165,7 +165,10 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
     identity; it cannot mint an arm or silently increment comparison revision.
     """
     spec = generic_selection_spec(contract.strategy_group_id)
-    if contract.event_spec_id != spec.event_spec_id or exchange_instrument_id not in spec.candidate_ids:
+    if selection_mode not in {"dynamic_selection","static_baseline"} or not universe_version_id.strip():
+        raise ValueError("recovery requires an exact current mode and Universe")
+    static = selection_mode=="static_baseline"
+    if contract.event_spec_id != spec.event_spec_id or not exchange_instrument_id.strip() or (not static and exchange_instrument_id not in spec.candidate_ids):
         raise ValueError("recovery Event or member differs from Generic Spec")
     if detector_status is DetectorStatus.INVALID or (
         detector_status is DetectorStatus.TRIGGERED and (occurred_at_ms is None or not 0 < occurred_at_ms <= observed_at_ms)
@@ -182,9 +185,17 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
         if current_episode.last_observed_at_ms is not None and (current_episode.last_observed_at_ms > observed_at_ms or (current_episode.last_observed_at_ms == observed_at_ms and not duplicate)):
             raise ValueError("recovery cannot reuse a consumed Episode close")
     comparative = contract.strategy_group_id in {"MPG-001","MI-001"}
+    comparison_binding_digest = None
+    comparison_transition_revision = None
     if comparative:
-        if comparison_binding_digest != canonical_digest({"exchange_instrument_ids":spec.candidate_ids}) or comparison_transition_revision is None or comparison_transition_revision <= 0:
-            raise ValueError("recovery comparison requires exact fixed24 identity")
+        if comparison_binding is None:
+            raise ValueError("recovery comparison binding is missing")
+        comparison_binding = ComparisonUniverseBinding.model_validate(comparison_binding.model_dump())
+        if comparison_binding.event_spec_id!=spec.event_spec_id or exchange_instrument_id not in comparison_binding.exchange_instrument_ids or (
+            comparison_binding.source_static_universe_version_id!=(universe_version_id if static else None)):
+            raise ValueError("recovery comparison mode, member or Universe differs")
+        comparison_binding_digest = comparison_binding.member_set_digest
+        comparison_transition_revision = comparison_binding.comparison_transition_revision
         if current_comparison is not None:
             current_comparison = ComparisonBindingEpisodeCheckpoint.model_validate(current_comparison.model_dump())
             if current_comparison.episode_domain_key != key or comparison_transition_revision < current_comparison.comparison_transition_revision or (
@@ -192,7 +203,7 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
                 raise ValueError("recovery comparison identity or revision differs")
             if current_comparison.last_observed_at_ms > observed_at_ms or (current_comparison.last_observed_at_ms == observed_at_ms and not duplicate):
                 raise ValueError("recovery cannot reuse a consumed comparison close")
-    elif any(value is not None for value in (current_comparison,comparison_binding_digest,comparison_transition_revision)):
+    elif current_comparison is not None or comparison_binding is not None:
         raise ValueError("non-comparative recovery forbids comparison identity")
     recovery = advance_authority_recovery_rebase(current=current_recovery,episode_domain_key=key,
         recovery_id=recovery_id,recovery_revision=recovery_revision,effective_from_ms=effective_from_ms,
@@ -200,7 +211,7 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
     if not recovery.allow_episode_advance:
         return RecoveryBoundExposureEpisodeTransition(recovery_checkpoint=recovery.checkpoint,
             comparison_checkpoint=current_comparison,episode_transition=None,signal_eligible=False,suppression_reason=recovery.suppression_reason)
-    if comparative:
+    if comparative and comparison_transition_revision != 0:
         assert comparison_binding_digest is not None and comparison_transition_revision is not None
         compared = advance_comparison_bound_exposure_episode(contract=contract,current_episode=current_episode,
             current_checkpoint=current_comparison,detector_status=detector_status,occurred_at_ms=occurred_at_ms,

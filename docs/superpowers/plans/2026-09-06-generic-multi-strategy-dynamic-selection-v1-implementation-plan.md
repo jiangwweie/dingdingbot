@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Static comparison组件收尾：Unit/Architecture1253 passed，全源码Mypy、相关Ruff/diff及文档authority25 passed；本轮无PG/Schema变更，未重复跑数据库或R4，不扩大为整卡完成，生产未修改。
+
+Static recovery comparison组件（基于`b2abbcf5`）：恢复组合reducer改用frozen ComparisonUniverseBinding及明确current selection_mode/Universe ID，删除只接收digest/revision的旧参数，不保留双入口。Dynamic仍由binding合同强制fixed24；Static恢复原bounded比较集合（可含Dynamic panel之外的原合法成员），source_static_universe_version_id必须匹配实际current Universe。Static revision0不伪造comparison transition/checkpoint，仍执行recovery rebase；Static正revision继续走原comparison barrier，不能通过回退revision继承旧arm。CPM/BRF2不构造comparison。
+
+MPG/MI × Static revision0/2验证首TRIGGERED抑制、真实NOT_TRIGGERED arming、后续唯一Episode，以及错误mode/Universe拒绝；原四策略Dynamic矩阵保留。定向23 passed，全源码Mypy通过。尚未接入正式Observation，绑定事实仍须由应用层DB核验后提供；不能把pure分支支持宣称Static恢复已上线。
+
 Pending rebase验证：四策略pending/observed checkpoint PG专项8 passed；Generic repository + migration + Observation组合首次162 passed/1 failed，暴露新增Episode校验复制对象导致same-close重放被误判成新保存。现只校验不替换原对象，完整Observation模块重跑17 passed；最终Unit/Architecture1249 passed，全源码及verify_schema Mypy（159 files）、相关Ruff/diff、文档authority25 passed。初次组合失败不改写为全绿；schema/read准备仍不等于正式recovery commit，生产未修改。
 
 Pending recovery rebase表示（基于`742a997c`）：新增`begin_authority_recovery_rebase`，在future close前冻结REBASE_REQUIRED，而不伪造Detector结果或观察时间。无历史时last_observed/status均NULL；重开恢复时保留真实已消费close高水位、清除新revision的arming，status保持未观察。重复同identity初始化返回原checkpoint，不重置已推进的arm；旧revision/矛盾identity拒绝。`advance_authority_recovery_rebase`在幂等判断前先检查future eligible close，不能借保留的旧cursor绕过first-close。

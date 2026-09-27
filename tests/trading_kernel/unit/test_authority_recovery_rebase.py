@@ -5,6 +5,7 @@ from src.trading_kernel.domain.authority_recovery_rebase import (
     advance_recovery_bound_exposure_episode,
     recovery_rebase_entry_rejection,
 )
+from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_episode import (
@@ -140,10 +141,13 @@ def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_
         detector_status=DetectorStatus.TRIGGERED if old_state=="triggered" else DetectorStatus.NOT_TRIGGERED,
         occurred_at_ms=4*HOUR if old_state=="triggered" else None,observed_at_ms=4*HOUR,exchange_instrument_id=member).current
     comparative = group in {"MPG-001","MI-001"}
+    comparison_digest = canonical_digest({"exchange_instrument_ids":spec.candidate_ids})
+    binding = ComparisonUniverseBinding(event_spec_id=spec.event_spec_id,comparison_universe_id="comparison:"+comparison_digest[7:],
+        member_set_digest=comparison_digest,exchange_instrument_ids=spec.candidate_ids,comparison_transition_revision=1,
+        source_static_universe_version_id=None) if comparative else None
     kwargs = {"contract":contract,"exchange_instrument_id":member,"recovery_id":"recovery:1","recovery_revision":1,
         "effective_from_ms":5*HOUR+1,"first_eligible_close_time_ms":6*HOUR,
-        "comparison_binding_digest":canonical_digest({"exchange_instrument_ids":spec.candidate_ids}) if comparative else None,
-        "comparison_transition_revision":1 if comparative else None}
+        "selection_mode":"dynamic_selection","universe_version_id":"universe:current","comparison_binding":binding}
     suppressed = advance_recovery_bound_exposure_episode(**kwargs,current_episode=old,current_recovery=None,current_comparison=None,
         detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=6*HOUR,observed_at_ms=6*HOUR)
     assert suppressed.episode_transition is None and not suppressed.signal_eligible
@@ -187,7 +191,7 @@ def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_
     assert new_recovery.comparison_checkpoint == triggered.comparison_checkpoint
     assert new_recovery.recovery_checkpoint.state == "REBASE_REQUIRED"
     if comparative:
-        changed_comparison = advance_recovery_bound_exposure_episode(**{**kwargs,"comparison_transition_revision":2},
+        changed_comparison = advance_recovery_bound_exposure_episode(**{**kwargs,"comparison_binding":binding.model_copy(update={"comparison_transition_revision":2})},
             current_episode=armed.episode_transition.current,current_recovery=armed.recovery_checkpoint,
             current_comparison=armed.comparison_checkpoint,detector_status=DetectorStatus.TRIGGERED,
             occurred_at_ms=8*HOUR,observed_at_ms=8*HOUR)
@@ -195,3 +199,34 @@ def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_
         assert not changed_comparison.signal_eligible and changed_comparison.episode_transition is None
         with pytest.raises(ValueError,match="comparison barrier"):
             type(triggered).model_validate({**triggered.model_dump(),"comparison_checkpoint":changed_comparison.comparison_checkpoint})
+
+
+@pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
+@pytest.mark.parametrize("revision", [0,2])
+def test_static_recovery_keeps_original_comparison_and_requires_real_rebase(group, revision):
+    spec = generic_selection_spec(group)
+    member = "binance-usdm:OUTSIDEUSDT:perpetual"
+    digest = canonical_digest({"exchange_instrument_ids":(member,)})
+    binding = ComparisonUniverseBinding(event_spec_id=spec.event_spec_id,comparison_universe_id="comparison:"+digest[7:],
+        member_set_digest=digest,exchange_instrument_ids=(member,),comparison_transition_revision=revision,
+        source_static_universe_version_id="universe:static")
+    args = {"contract":strategy_contract_for(spec.event_spec_id),"exchange_instrument_id":member,
+        "selection_mode":"static_baseline","universe_version_id":"universe:static","comparison_binding":binding,
+        "recovery_id":"recovery:static","recovery_revision":1,"effective_from_ms":5*HOUR+1,"first_eligible_close_time_ms":6*HOUR}
+    suppressed = advance_recovery_bound_exposure_episode(**args,current_episode=None,current_recovery=None,current_comparison=None,
+        detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=6*HOUR,observed_at_ms=6*HOUR)
+    assert not suppressed.signal_eligible and suppressed.episode_transition is None
+    armed = advance_recovery_bound_exposure_episode(**args,current_episode=None,current_recovery=suppressed.recovery_checkpoint,
+        current_comparison=None,detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=7*HOUR)
+    triggered = advance_recovery_bound_exposure_episode(**args,current_episode=armed.episode_transition.current,
+        current_recovery=armed.recovery_checkpoint,current_comparison=armed.comparison_checkpoint,
+        detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=8*HOUR,observed_at_ms=8*HOUR)
+    assert triggered.signal_eligible
+    if revision == 0:
+        assert triggered.comparison_checkpoint is None
+    else:
+        assert triggered.comparison_checkpoint.comparison_transition_revision == revision
+    for changes in ({"universe_version_id":"universe:wrong"},{"selection_mode":"dynamic_selection"}):
+        with pytest.raises(ValueError):
+            advance_recovery_bound_exposure_episode(**{**args,**changes},current_episode=None,current_recovery=None,current_comparison=None,
+                detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=6*HOUR,observed_at_ms=6*HOUR)
