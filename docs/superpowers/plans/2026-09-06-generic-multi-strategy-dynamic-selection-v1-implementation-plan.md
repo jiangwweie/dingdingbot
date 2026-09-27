@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Pending checkpoint原子初始化组件（基于`6afe0242`）：PG Selection仓储新增initialize_generic_recovery_checkpoints，先经完整locked proof/app/SQL再验证，按原Episode key/canonical member顺序初始化原表recovery字段；无旧Episode只建无观察、无ID、未armed占位，有旧Episode保留其普通字段和comparison字段。写入使用Episode/recovery版本CAS，并在内部savepoint末尾再次校验DB future-close窗口，异常整体撤回；最终恢复事务仍应包围此组件及Authority/Control/Vacuum提交。未接Coordinator、不创建恢复Authority、不清pending、不解除Vacuum；正式grant仍被DB禁止，不能单独以组件成功授予交易。
+
+四策略真实failed-generation proposal专项4 passed，含最终clock跨close自动回滚、成功初始化读回、外层rollback恢复无checkpoint及Control/current不变；测试尚无已有Episode与多成员故障矩阵，不能宣称该矩阵完成。Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff通过。本轮未执行完整PG/Full-chain/R4，生产未修改，GS-04～09仍IN_PROGRESS。
+
 2026-09-27既有full-chain审计（exact code `cdb2eff0`）：运行`.venv/bin/python -m pytest tests/trading_kernel/full_chain -q -o addopts=--tb=short`，51 passed，94.29s。本轮未修改生产源码，全部本地Docker PostgreSQL/recording venue。直接检查`test_registered_event_reaches_terminal_review_from_closed_market_input`确认从正式Observation Worker进入；`test_official_replacement_keeps_old_runner_ticket_to_terminal_review`验证旧Ticket冻结身份跨Universe替换继续生命周期。后者从已签发Ticket前置开始，两者均未走Generic Selection/恢复Authority完整producer路径，不能作为GS-09 Generic full-chain完成证明，也不是R4或部署授权。
 
 下一必需交付仍为：解除临时recovery写入禁止之前，完整实现并验证Static恢复原子commit（Control/current/Vacuum/pending rebase）、正式Observation消费及四ENTRY边界；Dynamic recovery与非空supersession、source/target Static migration neutrality、Generic自然Selection→Ticket→terminal evidence均不得以该51项既有回归替代。GS-04～09维持IN_PROGRESS。

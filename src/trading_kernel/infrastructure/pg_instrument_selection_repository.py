@@ -19,6 +19,10 @@ from src.trading_kernel.application.recover_expired_dynamic_activation import (
     RecoverExpiredDynamicActivationResult,
 )
 from src.trading_kernel.application.runtime import RuntimeReleaseCompatibilityFact
+from src.trading_kernel.domain.authority_recovery_rebase import (
+    AuthorityRecoveryCheckpoint,
+    begin_authority_recovery_rebase,
+)
 from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
@@ -28,6 +32,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     require_hourly_recovery_commit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
@@ -99,6 +104,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     comparison_binding_current,
     comparison_universe_definitions,
     comparison_universe_members,
+    exposure_episode_current,
     generic_dynamic_selection_specs_v1,
     instrument_product_profiles,
     instrument_selection_attempts,
@@ -2920,6 +2926,59 @@ class PostgresInstrumentSelectionRepository:
         if len(rows) > limit:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
+
+    async def initialize_generic_recovery_checkpoints(self, proof: GenericRecoveryGrantProof) -> tuple[AuthorityRecoveryCheckpoint, ...]:
+        """Atomic component of recovery, not a grant; caller owns the transaction.
+
+        Require the original locked proof before any write. A retry of a final
+        recovery commit must load its committed Authority, not rerun this step.
+        """
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        await self.require_generic_recovery_grant_proof(proof)
+        signals = PostgresSignalRepository(self._connection)
+        checkpoints = []
+        # The proof checker already acquired these advisory/row locks in the
+        # canonical member order. A savepoint also protects against callers
+        # catching an error and accidentally committing a partial member set.
+        async with self._connection.begin_nested():
+            for cursor in proof.observation_cursors:
+                current = await signals.lock_exposure_episode(cursor.episode_domain_key)
+                prior = await signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+                if (0 if current is None else current.projection_version)!=cursor.episode_version or (
+                    (0 if prior is None else prior.projection_version)!=cursor.authority_recovery_checkpoint_version):
+                    raise SelectionJobConflict("Recovery initialization cursor changed")
+                checkpoint = begin_authority_recovery_rebase(current=prior,episode_domain_key=cursor.episode_domain_key,
+                    recovery_id=proof.recovery_close_plan.recovery_id,recovery_revision=proof.recovery_close_plan.recovery_revision,
+                    effective_from_ms=proof.committed_at_ms,first_eligible_close_time_ms=proof.first_eligible_close_time_ms,
+                    latest_consumed_close_time_ms=cursor.last_observed_at_ms)
+                state = current if current is not None else ExposureEpisodeState(episode_domain_key=cursor.episode_domain_key,
+                    event_spec_id=proof.event_binding.event_spec_id,exchange_instrument_id=cursor.exchange_instrument_id,
+                    position_side=proof.event_binding.position_side,state="authority_rebase_required",exposure_episode_id=None,
+                    triggered_at_ms=None,rearmed_at_ms=None,last_observed_at_ms=None,projection_version=1)
+                values = {"authority_recovery_id":checkpoint.recovery_id,"authority_recovery_revision":checkpoint.recovery_revision,
+                    "authority_recovery_effective_from_ms":checkpoint.effective_from_ms,
+                    "authority_recovery_first_eligible_close_time_ms":checkpoint.first_eligible_close_time_ms,
+                    "authority_recovery_armed_at_ms":checkpoint.armed_at_close_time_ms,
+                    "authority_recovery_last_observed_at_ms":checkpoint.last_observed_close_time_ms,
+                    "authority_recovery_last_detector_status":None,"authority_recovery_checkpoint_version":checkpoint.projection_version}
+                if current is None:
+                    changed = await self._connection.execute(pg_insert(exposure_episode_current).values(**state.model_dump(),**values)
+                        .on_conflict_do_nothing(index_elements=[exposure_episode_current.c.episode_domain_key]))
+                else:
+                    changed = await self._connection.execute(sa.update(exposure_episode_current).where(
+                        exposure_episode_current.c.episode_domain_key==cursor.episode_domain_key,
+                        exposure_episode_current.c.projection_version==cursor.episode_version,
+                        sa.func.coalesce(exposure_episode_current.c.authority_recovery_checkpoint_version,0)==cursor.authority_recovery_checkpoint_version,
+                    ).values(**values))
+                if changed.rowcount!=1:
+                    raise SelectionJobConflict("Recovery initialization Episode CAS changed")
+                checkpoints.append(checkpoint)
+            require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=await self.read_authority_clock_ms())
+        return tuple(checkpoints)
 
     async def require_generic_recovery_grant_proof(self, proof: GenericRecoveryGrantProof) -> int:
         """Recheck every frozen reference under the preparation locks; grant nothing."""

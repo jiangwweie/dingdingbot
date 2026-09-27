@@ -1832,6 +1832,25 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     await savepoint.rollback()
                 with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,proposal.first_eligible_close_time_ms])), pytest.raises(ValueError,match="boundary"):
                     await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                savepoint = await uow._connection.begin_nested()
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,now,now,proposal.first_eligible_close_time_ms])), pytest.raises(ValueError,match="boundary"):
+                    await uow.instrument_selection.initialize_generic_recovery_checkpoints(proposal)
+                for cursor in proposal.observation_cursors:
+                    assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
+                initialized = await uow.instrument_selection.initialize_generic_recovery_checkpoints(proposal)
+                assert len(initialized) == len(proposal.observation_cursors)
+                for checkpoint in initialized:
+                    assert checkpoint.state == "REBASE_REQUIRED"
+                    assert checkpoint.last_detector_status is None and checkpoint.last_observed_close_time_ms is None
+                    assert await uow.signals.get_authority_recovery_checkpoint(checkpoint.episode_domain_key) == checkpoint
+                    episode = await uow.signals.lock_exposure_episode(checkpoint.episode_domain_key)
+                    assert episode.state == "authority_rebase_required" and episode.last_observed_at_ms is None
+                    assert episode.exposure_episode_id is None
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
+                await savepoint.rollback()
+                for cursor in proposal.observation_cursors:
+                    assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
 
 
 async def _assert_generic_empty_handoff(database, source, original, vacuum):
