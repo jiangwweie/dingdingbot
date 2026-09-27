@@ -68,7 +68,8 @@ def certify_static_comparison_source(
     members = evidence.current_member_ids
     expected_fact_count = len(contract.required_facts)
     if (
-        evidence.scope_universe_version_id != evidence.current_universe_version_id
+        episode.last_observed_at_ms is None
+        or evidence.scope_universe_version_id != evidence.current_universe_version_id
         or evidence.current_universe_activated_at_ms >= episode.last_observed_at_ms
         or evidence.scope_universe_digest != evidence.current_universe_digest
         or evidence.current_universe_digest != canonical_digest({

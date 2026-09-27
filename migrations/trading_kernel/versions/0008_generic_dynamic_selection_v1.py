@@ -1099,6 +1099,12 @@ def _episode_provenance() -> None:
     )
     for column in columns:
         op.add_column("brc_exposure_episode_current", column)
+    op.alter_column("brc_exposure_episode_current","last_observed_at_ms",existing_type=sa.BigInteger(),nullable=True)
+    op.drop_constraint("ck_brc_episode_version_time","brc_exposure_episode_current",type_="check")
+    op.create_check_constraint("version_and_observation_positive","brc_exposure_episode_current",
+        "projection_version > 0 AND ((last_observed_at_ms IS NOT NULL AND last_observed_at_ms>0) OR "
+        "(last_observed_at_ms IS NULL AND state='authority_rebase_required' AND authority_recovery_checkpoint_version IS NOT NULL "
+        "AND authority_recovery_last_observed_at_ms IS NULL AND authority_recovery_last_detector_status IS NULL))")
     op.drop_constraint("ck_brc_episode_state", "brc_exposure_episode_current", type_="check")
     op.drop_constraint("ck_brc_episode_state_shape", "brc_exposure_episode_current", type_="check")
     op.create_check_constraint("state_valid", "brc_exposure_episode_current",
@@ -1118,15 +1124,18 @@ def _episode_provenance() -> None:
         "length(trim(authority_recovery_id))>0 AND authority_recovery_id=trim(authority_recovery_id) "
         "AND authority_recovery_revision>0 AND authority_recovery_checkpoint_version>0 "
         "AND authority_recovery_effective_from_ms>0 AND authority_recovery_effective_from_ms<authority_recovery_first_eligible_close_time_ms "
-        "AND authority_recovery_first_eligible_close_time_ms<=authority_recovery_last_observed_at_ms "
-        "AND authority_recovery_first_eligible_close_time_ms%3600000=0 AND authority_recovery_last_observed_at_ms%3600000=0 "
-        "AND authority_recovery_last_detector_status IN ('triggered','not_triggered') "
+        "AND authority_recovery_first_eligible_close_time_ms%3600000=0 "
         "AND event_spec_id IN ('event_spec:CPM-RO-001:CPM-LONG:v3','event_spec:MPG-001:MPG-LONG:v3',"
         "'event_spec:MI-001:MI-LONG:v3','event_spec:BRF2-001:BRF2-SHORT:v3') "
-        "AND ((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status='triggered') OR "
+        "AND ((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status IS NULL AND "
+        "(authority_recovery_last_observed_at_ms IS NULL OR (authority_recovery_last_observed_at_ms>0 AND "
+        "authority_recovery_last_observed_at_ms<=authority_recovery_effective_from_ms AND authority_recovery_last_observed_at_ms%3600000=0))) OR "
+        "(authority_recovery_first_eligible_close_time_ms<=authority_recovery_last_observed_at_ms AND authority_recovery_last_observed_at_ms%3600000=0 "
+        "AND authority_recovery_last_detector_status IN ('triggered','not_triggered') AND "
+        "((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status='triggered') OR "
         "(authority_recovery_armed_at_ms>=authority_recovery_first_eligible_close_time_ms "
         "AND authority_recovery_armed_at_ms<=authority_recovery_last_observed_at_ms AND authority_recovery_armed_at_ms%3600000=0 "
-        "AND NOT (authority_recovery_last_detector_status='triggered' AND authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms)))),false)")
+        "AND NOT (authority_recovery_last_detector_status='triggered' AND authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms)))))),false)")
     op.create_check_constraint("comparison_checkpoint_shape", "brc_exposure_episode_current",
         "comparison_checkpoint_version IS NULL OR COALESCE((comparison_checkpoint_version > 0 "
         "AND comparison_transition_revision > 0 AND comparison_last_observed_at_ms > 0 "

@@ -1784,7 +1784,7 @@ exposure_episode_current = sa.Table(
     _id("exposure_episode_id", nullable=True),
     _time("triggered_at_ms", nullable=True),
     _time("rearmed_at_ms", nullable=True),
-    _time("last_observed_at_ms"),
+    _time("last_observed_at_ms", nullable=True),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
     sa.Column("comparison_binding_digest", sa.String(71), nullable=True),
     sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True),
@@ -1809,15 +1809,18 @@ exposure_episode_current = sa.Table(
         "length(trim(authority_recovery_id))>0 AND authority_recovery_id=trim(authority_recovery_id) "
         "AND authority_recovery_revision>0 AND authority_recovery_checkpoint_version>0 "
         "AND authority_recovery_effective_from_ms>0 AND authority_recovery_effective_from_ms<authority_recovery_first_eligible_close_time_ms "
-        "AND authority_recovery_first_eligible_close_time_ms<=authority_recovery_last_observed_at_ms "
-        "AND authority_recovery_first_eligible_close_time_ms%3600000=0 AND authority_recovery_last_observed_at_ms%3600000=0 "
-        "AND authority_recovery_last_detector_status IN ('triggered','not_triggered') "
+        "AND authority_recovery_first_eligible_close_time_ms%3600000=0 "
         "AND event_spec_id IN ('event_spec:CPM-RO-001:CPM-LONG:v3','event_spec:MPG-001:MPG-LONG:v3',"
         "'event_spec:MI-001:MI-LONG:v3','event_spec:BRF2-001:BRF2-SHORT:v3') "
-        "AND ((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status='triggered') OR "
+        "AND ((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status IS NULL AND "
+        "(authority_recovery_last_observed_at_ms IS NULL OR (authority_recovery_last_observed_at_ms>0 AND "
+        "authority_recovery_last_observed_at_ms<=authority_recovery_effective_from_ms AND authority_recovery_last_observed_at_ms%3600000=0))) OR "
+        "(authority_recovery_first_eligible_close_time_ms<=authority_recovery_last_observed_at_ms AND authority_recovery_last_observed_at_ms%3600000=0 "
+        "AND authority_recovery_last_detector_status IN ('triggered','not_triggered') AND "
+        "((authority_recovery_armed_at_ms IS NULL AND authority_recovery_last_detector_status='triggered') OR "
         "(authority_recovery_armed_at_ms>=authority_recovery_first_eligible_close_time_ms "
         "AND authority_recovery_armed_at_ms<=authority_recovery_last_observed_at_ms AND authority_recovery_armed_at_ms%3600000=0 "
-        "AND NOT (authority_recovery_last_detector_status='triggered' AND authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms)))),false)",
+        "AND NOT (authority_recovery_last_detector_status='triggered' AND authority_recovery_armed_at_ms=authority_recovery_last_observed_at_ms)))))),false)",
         name="authority_recovery_checkpoint_shape",
     ),
     sa.CheckConstraint(
@@ -1842,7 +1845,9 @@ exposure_episode_current = sa.Table(
         name="state_valid",
     ),
     sa.CheckConstraint(
-        "projection_version > 0 AND last_observed_at_ms > 0",
+        "projection_version > 0 AND ((last_observed_at_ms IS NOT NULL AND last_observed_at_ms>0) OR "
+        "(last_observed_at_ms IS NULL AND state='authority_rebase_required' AND authority_recovery_checkpoint_version IS NOT NULL "
+        "AND authority_recovery_last_observed_at_ms IS NULL AND authority_recovery_last_detector_status IS NULL))",
         name="version_and_observation_positive",
     ),
     sa.CheckConstraint(

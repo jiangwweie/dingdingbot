@@ -32,8 +32,8 @@ class AuthorityRecoveryCheckpoint(BaseModel):
     first_eligible_close_time_ms: int
     state: Literal["REBASE_REQUIRED", "ARMED"]
     armed_at_close_time_ms: int | None
-    last_observed_close_time_ms: int
-    last_detector_status: DetectorStatus
+    last_observed_close_time_ms: int | None
+    last_detector_status: DetectorStatus | None
     projection_version: int
 
     @model_validator(mode="after")
@@ -42,16 +42,24 @@ class AuthorityRecoveryCheckpoint(BaseModel):
             raise ValueError("recovery checkpoint identity is invalid")
         if self.recovery_revision<=0 or self.projection_version<=0:
             raise ValueError("recovery checkpoint versions must be positive")
-        if not 0<self.effective_from_ms<self.first_eligible_close_time_ms<=self.last_observed_close_time_ms:
+        if not 0<self.effective_from_ms<self.first_eligible_close_time_ms:
             raise ValueError("recovery checkpoint cannot consume a past close")
-        if self.first_eligible_close_time_ms%HOUR_MS or self.last_observed_close_time_ms%HOUR_MS:
+        last = self.last_observed_close_time_ms
+        if self.first_eligible_close_time_ms%HOUR_MS or (last is not None and (last<=0 or last%HOUR_MS)):
             raise ValueError("recovery checkpoint requires hourly close boundaries")
+        if last is None or last<self.first_eligible_close_time_ms:
+            if self.state!="REBASE_REQUIRED" or self.armed_at_close_time_ms is not None or self.last_detector_status is not None or (
+                last is not None and last>self.effective_from_ms):
+                raise ValueError("pending recovery cannot fabricate an observation or an arm")
+            return self
+        if self.last_detector_status is None:
+            raise ValueError("observed recovery requires Detector status")
         if self.last_detector_status is DetectorStatus.INVALID:
             raise ValueError("invalid Detector input cannot advance recovery")
         if self.state=="REBASE_REQUIRED":
             if self.armed_at_close_time_ms is not None or self.last_detector_status is not DetectorStatus.TRIGGERED:
                 raise ValueError("unarmed recovery checkpoint has contradictory state")
-        elif self.armed_at_close_time_ms is None or not self.first_eligible_close_time_ms<=self.armed_at_close_time_ms<=self.last_observed_close_time_ms or self.armed_at_close_time_ms%HOUR_MS:
+        elif self.armed_at_close_time_ms is None or not self.first_eligible_close_time_ms<=self.armed_at_close_time_ms<=last or self.armed_at_close_time_ms%HOUR_MS:
             raise ValueError("armed recovery checkpoint requires a legal arming close")
         if self.state=="ARMED" and self.last_detector_status is DetectorStatus.TRIGGERED and self.last_observed_close_time_ms==self.armed_at_close_time_ms:
             raise ValueError("trigger close cannot itself prove recovery arming")
@@ -63,6 +71,31 @@ class AuthorityRecoveryRebaseTransition(BaseModel):
     checkpoint: AuthorityRecoveryCheckpoint
     allow_episode_advance: bool
     suppression_reason: Literal["RECOVERY_REBASE_REQUIRED", "RECOVERY_CLOSE_ALREADY_OBSERVED"] | None
+
+
+def begin_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | None,
+    episode_domain_key: str, recovery_id: str, recovery_revision: int, effective_from_ms: int,
+    first_eligible_close_time_ms: int, latest_consumed_close_time_ms: int | None,
+) -> AuthorityRecoveryCheckpoint:
+    """Freeze a pending barrier without inventing a Detector result or close.
+
+    Preserve the actual consumed-close high-water mark across revisions. It is
+    not an Observation under the new recovery, so Detector status stays absent.
+    An idempotent repeat must not disarm a checkpoint that already progressed.
+    """
+    if current is not None:
+        current = AuthorityRecoveryCheckpoint.model_validate(current.model_dump())
+        if current.episode_domain_key!=episode_domain_key or recovery_revision<current.recovery_revision:
+            raise ValueError("recovery initialization scope or revision is stale")
+        if recovery_revision==current.recovery_revision:
+            if (current.recovery_id,current.effective_from_ms,current.first_eligible_close_time_ms)!=(recovery_id,effective_from_ms,first_eligible_close_time_ms):
+                raise ValueError("recovery initialization identity changed")
+            return current
+    consumed = [value for value in (latest_consumed_close_time_ms,None if current is None else current.last_observed_close_time_ms) if value is not None]
+    return AuthorityRecoveryCheckpoint(episode_domain_key=episode_domain_key,recovery_id=recovery_id,
+        recovery_revision=recovery_revision,effective_from_ms=effective_from_ms,first_eligible_close_time_ms=first_eligible_close_time_ms,
+        state="REBASE_REQUIRED",armed_at_close_time_ms=None,last_observed_close_time_ms=max(consumed) if consumed else None,
+        last_detector_status=None,projection_version=1 if current is None else current.projection_version+1)
 
 
 def recovery_rebase_entry_rejection(*, checkpoint: AuthorityRecoveryCheckpoint | None,
@@ -146,7 +179,7 @@ def advance_recovery_bound_exposure_episode(*, contract: RegisteredStrategyContr
         current_episode = ExposureEpisodeState.model_validate(current_episode.model_dump())
         if (current_episode.episode_domain_key,current_episode.event_spec_id,current_episode.exchange_instrument_id,current_episode.position_side) != (key,spec.event_spec_id,exchange_instrument_id,spec.position_side):
             raise ValueError("recovery Episode identity differs")
-        if current_episode.last_observed_at_ms > observed_at_ms or (current_episode.last_observed_at_ms == observed_at_ms and not duplicate):
+        if current_episode.last_observed_at_ms is not None and (current_episode.last_observed_at_ms > observed_at_ms or (current_episode.last_observed_at_ms == observed_at_ms and not duplicate)):
             raise ValueError("recovery cannot reuse a consumed Episode close")
     comparative = contract.strategy_group_id in {"MPG-001","MI-001"}
     if comparative:
@@ -192,6 +225,8 @@ def advance_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | 
     This gate never mints an Episode ID, mutates a comparison revision or grants
     trading authority. Owner/epoch/freshness/current Authority checks remain mandatory.
     """
+    if observed_close_time_ms<first_eligible_close_time_ms or observed_close_time_ms%HOUR_MS:
+        raise ValueError("recovery Observation must use a future eligible hourly close")
     if current is not None:
         current = AuthorityRecoveryCheckpoint.model_validate(current.model_dump())
         if current.episode_domain_key!=episode_domain_key or recovery_revision<current.recovery_revision:
@@ -201,7 +236,7 @@ def advance_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | 
             or first_eligible_close_time_ms!=current.first_eligible_close_time_ms
         ):
             raise ValueError("same recovery revision has contradictory identity")
-        if observed_close_time_ms<current.last_observed_close_time_ms:
+        if current.last_observed_close_time_ms is not None and observed_close_time_ms<current.last_observed_close_time_ms:
             raise ValueError("recovery Observation cannot move backwards")
         if observed_close_time_ms==current.last_observed_close_time_ms:
             if recovery_revision!=current.recovery_revision or detector_status is not current.last_detector_status:

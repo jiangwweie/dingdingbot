@@ -153,9 +153,11 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("pending", [False,True])
+async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close(database: AsyncEngine, group: str, pending: bool) -> None:
     from src.trading_kernel.domain.authority_recovery_rebase import (
         advance_authority_recovery_rebase,
+        begin_authority_recovery_rebase,
     )
     source = inputs(group)
     spec = source.spec
@@ -169,11 +171,15 @@ async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close
     recovery = advance_authority_recovery_rebase(current=None,episode_domain_key=key,recovery_id="recovery:test",recovery_revision=1,
         effective_from_ms=CUTOFF+1,first_eligible_close_time_ms=CUTOFF+HOUR,
         observed_close_time_ms=CUTOFF+HOUR,detector_status=DetectorStatus.TRIGGERED).checkpoint
+    if pending:
+        recovery = begin_authority_recovery_rebase(current=None,episode_domain_key=key,recovery_id="recovery:test",recovery_revision=1,
+            effective_from_ms=CUTOFF+1,first_eligible_close_time_ms=CUTOFF+HOUR,latest_consumed_close_time_ms=None)
     async with database.begin() as conn:
         # Storage-only prerequisite. No Recovery Authority or trading grant is
         # fabricated; the dormant checkpoint must already fence cursor reuse.
-        await conn.execute(sa.text("INSERT INTO brc_exposure_episode_current (episode_domain_key,event_spec_id,exchange_instrument_id,position_side,episode_policy,state,last_observed_at_ms,projection_version,authority_recovery_id,authority_recovery_revision,authority_recovery_effective_from_ms,authority_recovery_first_eligible_close_time_ms,authority_recovery_last_observed_at_ms,authority_recovery_last_detector_status,authority_recovery_checkpoint_version) VALUES (:key,:event,:member,:side,'rising_edge','authority_rebase_required',:close,1,:rid,1,:effective,:close,:close,'triggered',1)"),
-            {"key":key,"event":spec.event_spec_id,"member":member,"side":spec.position_side,"close":CUTOFF+HOUR,"rid":recovery.recovery_id,"effective":CUTOFF+1})
+        await conn.execute(sa.text("INSERT INTO brc_exposure_episode_current (episode_domain_key,event_spec_id,exchange_instrument_id,position_side,episode_policy,state,last_observed_at_ms,projection_version,authority_recovery_id,authority_recovery_revision,authority_recovery_effective_from_ms,authority_recovery_first_eligible_close_time_ms,authority_recovery_last_observed_at_ms,authority_recovery_last_detector_status,authority_recovery_checkpoint_version) VALUES (:key,:event,:member,:side,'rising_edge','authority_rebase_required',:observed,1,:rid,1,:effective,:first,:observed,:status,1)"),
+            {"key":key,"event":spec.event_spec_id,"member":member,"side":spec.position_side,"first":CUTOFF+HOUR,"rid":recovery.recovery_id,"effective":CUTOFF+1,
+             "observed":None if pending else CUTOFF+HOUR,"status":None if pending else "triggered"})
     await database.dispose()
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.signals.get_authority_recovery_checkpoint(key) == recovery
@@ -183,6 +189,17 @@ async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close
             advance_exposure_episode(contract=strategy_contract_for(spec.event_spec_id),current=state,
                 detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=CUTOFF+2*HOUR,
                 observed_at_ms=CUTOFF+2*HOUR,exchange_instrument_id=member)
+        if pending:
+            coverage = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+HOUR)
+            assert coverage[0].episode_version == 1 and coverage[0].authority_recovery_checkpoint_version == 1
+            assert coverage[0].last_observed_at_ms is None
+            assert state.last_observed_at_ms is None
+    if pending:
+        with pytest.raises(sa.exc.DBAPIError):
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET state='armed' WHERE episode_domain_key=:key"),{"key":key})
+        return
+    async with PostgresKernelUnitOfWork(database) as uow:
         with pytest.raises(RuntimeError,match="already consumed"):
             await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+HOUR)
         coverage = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=(member,),closed_at_ms=CUTOFF+2*HOUR)

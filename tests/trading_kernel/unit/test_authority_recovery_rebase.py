@@ -7,11 +7,61 @@ from src.trading_kernel.domain.authority_recovery_rebase import (
 )
 from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-from src.trading_kernel.domain.exposure_episode import advance_exposure_episode
+from src.trading_kernel.domain.exposure_episode import (
+    ExposureEpisodeState,
+    LockedObservationCursor,
+    advance_exposure_episode,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 HOUR = 3600000
+
+
+def test_recovery_can_be_required_before_any_observation_without_fake_close():
+    from src.trading_kernel.domain.authority_recovery_rebase import (
+        begin_authority_recovery_rebase,
+    )
+    kwargs = {"episode_domain_key":"episode:existing","recovery_id":"recovery:1","recovery_revision":1,
+        "effective_from_ms":5*HOUR+1000,"first_eligible_close_time_ms":6*HOUR}
+    pending = begin_authority_recovery_rebase(current=None,latest_consumed_close_time_ms=None,**kwargs)
+    assert pending.state == "REBASE_REQUIRED" and pending.armed_at_close_time_ms is None
+    assert pending.last_observed_close_time_ms is None and pending.last_detector_status is None
+    first = advance(pending,6*HOUR,DetectorStatus.TRIGGERED)
+    assert not first.allow_episode_advance and first.checkpoint.projection_version == 2
+    armed = advance(first.checkpoint,7*HOUR,DetectorStatus.NOT_TRIGGERED).checkpoint
+    assert begin_authority_recovery_rebase(current=armed,latest_consumed_close_time_ms=7*HOUR,**kwargs) == armed
+    next_pending = begin_authority_recovery_rebase(current=armed,latest_consumed_close_time_ms=8*HOUR,
+        **{**kwargs,"recovery_id":"recovery:2","recovery_revision":2,"effective_from_ms":8*HOUR+1,"first_eligible_close_time_ms":9*HOUR})
+    assert next_pending.last_observed_close_time_ms == 8*HOUR
+    assert next_pending.last_detector_status is None and next_pending.armed_at_close_time_ms is None
+    with pytest.raises(ValueError):
+        advance(next_pending,8*HOUR,DetectorStatus.NOT_TRIGGERED,revision=2,effective=8*HOUR+1,first=9*HOUR)
+    with pytest.raises(ValueError):
+        begin_authority_recovery_rebase(current=next_pending,latest_consumed_close_time_ms=None,**kwargs)
+
+
+def test_unobserved_recovery_episode_is_not_an_armed_or_consumed_bar():
+    spec = generic_selection_spec("CPM-RO-001")
+    member = spec.candidate_ids[0]
+    key = build_episode_domain_key(event_spec_id=spec.event_spec_id,exchange_instrument_id=member,position_side=spec.position_side)
+    pending = ExposureEpisodeState(episode_domain_key=key,event_spec_id=spec.event_spec_id,exchange_instrument_id=member,
+        position_side=spec.position_side,state="authority_rebase_required",exposure_episode_id=None,
+        triggered_at_ms=None,rearmed_at_ms=None,last_observed_at_ms=None,projection_version=1)
+    cursor = LockedObservationCursor(episode_domain_key=key,exchange_instrument_id=member,episode_version=1,
+        comparison_checkpoint_version=0,authority_recovery_checkpoint_version=1,last_observed_at_ms=None)
+    assert cursor.last_observed_at_ms is None
+    with pytest.raises(ValueError,match="rebase"):
+        advance_exposure_episode(contract=strategy_contract_for(spec.event_spec_id),current=pending,
+            detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=6*HOUR,observed_at_ms=6*HOUR,exchange_instrument_id=member)
+    armed = advance_exposure_episode(contract=strategy_contract_for(spec.event_spec_id),current=pending,
+        detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=6*HOUR,exchange_instrument_id=member)
+    assert armed.current.last_observed_at_ms == 6*HOUR and armed.current.rearmed_at_ms == 6*HOUR
+    with pytest.raises(ValueError):
+        ExposureEpisodeState.model_validate({**pending.model_dump(),"state":"armed"})
+    with pytest.raises(ValueError):
+        LockedObservationCursor.model_validate({**cursor.model_dump(),"authority_recovery_checkpoint_version":0})
 
 
 def advance(current, close, status, *, revision=1, effective=5*HOUR+1000, first=6*HOUR):

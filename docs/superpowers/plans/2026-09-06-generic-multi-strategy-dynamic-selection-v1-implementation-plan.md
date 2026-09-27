@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Pending rebase验证：四策略pending/observed checkpoint PG专项8 passed；Generic repository + migration + Observation组合首次162 passed/1 failed，暴露新增Episode校验复制对象导致same-close重放被误判成新保存。现只校验不替换原对象，完整Observation模块重跑17 passed；最终Unit/Architecture1249 passed，全源码及verify_schema Mypy（159 files）、相关Ruff/diff、文档authority25 passed。初次组合失败不改写为全绿；schema/read准备仍不等于正式recovery commit，生产未修改。
+
+Pending recovery rebase表示（基于`742a997c`）：新增`begin_authority_recovery_rebase`，在future close前冻结REBASE_REQUIRED，而不伪造Detector结果或观察时间。无历史时last_observed/status均NULL；重开恢复时保留真实已消费close高水位、清除新revision的arming，status保持未观察。重复同identity初始化返回原checkpoint，不重置已推进的arm；旧revision/矛盾identity拒绝。`advance_authority_recovery_rebase`在幂等判断前先检查future eligible close，不能借保留的旧cursor绕过first-close。
+
+原Episode DTO与未部署0008允许仅`authority_rebase_required`且有完整pending recovery证据的行保持NULL last_observed；普通armed/triggered仍要求真实时间，comparison行为不放宽。LockedObservationCursor识别这种“行已存在但未观察”的状态，不将其解释为已消费bar；原rising-edge reducer拒绝从pending直接TRIGGERED，真实NOT_TRIGGERED才能推进。PG getter和四策略重连存储测试覆盖NULL pending；源0007 provenance对缺观察明确SOURCE_PROVENANCE_INSUFFICIENT，不猜测历史。此处仍为model/schema/read准备，尚无正式初始化写入口或恢复grant解锁。
+
 Static recovery SQL验证收尾：Generic repository + Generic migration组合142 passed；最后补Gen Dynamic来源/未曾active以及failure原因白名单后四策略专项4 passed；Unit/Architecture1247 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。数字重叠不相加，未运行完整R4；仍保留recovery_grant_proof非NULL写入禁用约束，生产未修改。
 
 Static恢复proof SQL核验（基于`3de95b2c`）：未部署0008新增read-only函数`brc_generic_static_recovery_proof_matches`，由failed Generation、pending Control、TOTP Owner事实、RECOVERY_REQUIRED事件、未解决且已drain的Vacuum、exact previous current/member/comparison、Policy开关及原Episode游标重建完整JSON。拒绝额外字段、错误版本/来源/归因/成员/cursor、非法时间和跨future-close。恢复revision取真实checkpoint最大revision+1，不能由调用方自报。`require_generic_recovery_grant_proof`在原应用层锁定/认证再验证之后，要求该SQL核验也为TRUE；SQL不替代应用层完整certification/readiness检查。

@@ -32,7 +32,7 @@ class LockedObservationCursor(BaseModel):
         if self.episode_version == 0:
             if self.comparison_checkpoint_version != 0 or self.authority_recovery_checkpoint_version != 0 or self.last_observed_at_ms is not None:
                 raise ValueError("absent Episode cannot carry a consumed cursor")
-        elif self.last_observed_at_ms is None:
+        elif self.last_observed_at_ms is None and (self.authority_recovery_checkpoint_version==0 or self.comparison_checkpoint_version!=0):
             raise ValueError("persisted Episode requires its observed close")
         return self
 
@@ -49,7 +49,7 @@ class ExposureEpisodeState(BaseModel):
     exposure_episode_id: str | None
     triggered_at_ms: int | None
     rearmed_at_ms: int | None
-    last_observed_at_ms: int
+    last_observed_at_ms: int | None
     projection_version: int
 
     @field_validator(
@@ -67,8 +67,10 @@ class ExposureEpisodeState(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> ExposureEpisodeState:
-        if self.last_observed_at_ms <= 0 or self.projection_version <= 0:
+        if self.projection_version <= 0 or (self.last_observed_at_ms is not None and self.last_observed_at_ms<=0):
             raise ValueError("Exposure Episode time and version must be positive")
+        if self.last_observed_at_ms is None and self.state!="authority_rebase_required":
+            raise ValueError("only a pending recovery Episode may be unobserved")
         if self.rearmed_at_ms is not None and self.rearmed_at_ms <= 0:
             raise ValueError("Exposure Episode re-arm time must be positive")
         if self.state == "triggered":
@@ -231,6 +233,7 @@ def advance_exposure_episode(
         position_side=contract.position_side,
     )
     if current is not None:
+        ExposureEpisodeState.model_validate(current.model_dump())
         if current.state in {"comparison_rebase_required", "authority_rebase_required"} and detector_status is DetectorStatus.TRIGGERED:
             raise ValueError("rebase requires a valid NOT_TRIGGERED before an Episode")
         if (
@@ -240,7 +243,7 @@ def advance_exposure_episode(
             or current.position_side != contract.position_side
         ):
             raise ValueError("Exposure Episode current state identity differs")
-        if observed_at_ms < current.last_observed_at_ms:
+        if current.last_observed_at_ms is not None and observed_at_ms < current.last_observed_at_ms:
             raise ValueError("Exposure Episode observation cannot move backwards")
         if observed_at_ms == current.last_observed_at_ms:
             expected_state = (
@@ -364,7 +367,7 @@ def advance_comparison_bound_exposure_episode(
         != comparison_transition_revision
     )
     if binding_changed:
-        if current_episode is not None and observed_at_ms <= current_episode.last_observed_at_ms:
+        if current_episode is not None and current_episode.last_observed_at_ms is not None and observed_at_ms <= current_episode.last_observed_at_ms:
             raise ValueError("comparison transition cannot reuse a consumed Episode close")
         if (
             current_checkpoint is not None
