@@ -1056,6 +1056,112 @@ class GenericRecoveryGrantProof(BaseModel):
         return self
 
 
+class GenericRecoveryAuthority(BaseModel):
+    """Prepared immutable recovery identity; only a committed current row grants.
+
+    Kept distinct from normal/empty authority so recovery can never acquire a
+    current-close grant merely through normal model decoding.
+    """
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_authority_id: str
+    authority_sequence: int = Field(gt=0)
+    authority_outcome: Literal["FALLBACK_PREVIOUS"] = "FALLBACK_PREVIOUS"
+    recovery_proof: GenericRecoveryGrantProof
+
+    @classmethod
+    def build(cls, *, proof: GenericRecoveryGrantProof, authority_sequence: int) -> GenericRecoveryAuthority:
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        return cls(selection_authority_id=cls._identity(proof,authority_sequence),
+            authority_sequence=authority_sequence,recovery_proof=proof)
+
+    @staticmethod
+    def _identity(proof: GenericRecoveryGrantProof, sequence: int) -> str:
+        return "authority:recovery:"+_semantic_digest({"proof_digest":proof.semantic_digest,"authority_sequence":sequence})[7:]
+
+    @model_validator(mode="after")
+    def _validate_identity(self) -> GenericRecoveryAuthority:
+        proof = GenericRecoveryGrantProof.model_validate(self.recovery_proof.model_dump())
+        if self.selection_authority_id!=self._identity(proof,self.authority_sequence):
+            raise ValueError("Recovery Authority identity differs from its frozen proof and sequence")
+        return self
+
+    @property
+    def selection_spec_id(self) -> str:
+        return self.recovery_proof.selection_spec_id
+
+    @property
+    def selection_mode(self) -> Literal["dynamic_selection", "static_baseline"]:
+        return self.recovery_proof.selection_mode
+
+    @property
+    def selection_snapshot_id(self) -> str | None:
+        fresh = self.recovery_proof.membership_freshness
+        return None if fresh is None else fresh.source_snapshot_id
+
+    @property
+    def event_binding(self) -> AuthorityEventBinding:
+        return self.recovery_proof.event_binding
+
+    @property
+    def created_at_ms(self) -> int:
+        return self.recovery_proof.committed_at_ms
+
+    @property
+    def effective_from_ms(self) -> int:
+        return self.recovery_proof.effective_from_ms
+
+    @property
+    def first_eligible_close_time_ms(self) -> int:
+        return self.recovery_proof.first_eligible_close_time_ms
+
+    @property
+    def expires_at_ms(self) -> int:
+        return self.recovery_proof.expires_at_ms
+
+    @property
+    def allows_existing_ticket_lifecycle(self) -> bool:
+        return True
+
+    @property
+    def rewrites_existing_lineage(self) -> bool:
+        return False
+
+    @property
+    def semantic_digest(self) -> str:
+        return _semantic_digest(self.model_dump(mode="json"))
+
+
+def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
+    selection_spec_id: str, selection_epoch_id: str | None, selection_mode: str,
+    selection_control_version: int, owner_control_version: int,
+    event_spec_id: str, position_side: str, universe_version_id: str, exchange_instrument_id: str,
+    birth_selection_authority_id: str | None, allow_current_as_birth: bool,
+    observed_close_time_ms: int, now_ms: int) -> str | None:
+    """Exact recovery eligibility only; caller must also enforce rebase and DB facts."""
+    authority = GenericRecoveryAuthority.model_validate(authority.model_dump())
+    proof = authority.recovery_proof
+    # Failed first activation clears the pending Dynamic epoch on Control while
+    # retaining that attempted epoch in immutable transition evidence.
+    expected_epoch = None if proof.selection_mode=="static_baseline" else proof.selection_epoch_id
+    if (selection_spec_id!=proof.selection_spec_id or selection_mode!=proof.selection_mode
+        or selection_epoch_id!=expected_epoch or selection_control_version!=proof.selection_control_version
+        or owner_control_version!=proof.owner_control_version):
+        return "selection_recovery_control_changed"
+    binding = proof.event_binding
+    if (event_spec_id,position_side,universe_version_id)!=(binding.event_spec_id,binding.position_side,binding.universe_version_id) or (
+        exchange_instrument_id not in {cursor.exchange_instrument_id for cursor in proof.observation_cursors}):
+        return "selection_recovery_scope_changed"
+    if birth_selection_authority_id!=authority.selection_authority_id and not (birth_selection_authority_id is None and allow_current_as_birth):
+        return "selection_recovery_birth_changed"
+    if not authority.effective_from_ms<=now_ms<authority.expires_at_ms:
+        return "selection_recovery_not_effective"
+    if observed_close_time_ms%HOUR_MS or not authority.first_eligible_close_time_ms<=observed_close_time_ms<=now_ms or observed_close_time_ms>=authority.expires_at_ms:
+        return "selection_recovery_close_ineligible"
+    if proof.membership_freshness is not None and not proof.membership_freshness.allows_new_entry_at(now_ms):
+        return "selection_membership_stale"
+    return None
+
+
 class CurrentGenericSelectionAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     authority: GenericSelectionAuthority

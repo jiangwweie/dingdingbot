@@ -200,6 +200,10 @@ def _authority_snapshot_epoch() -> None:
     op.create_check_constraint("ck_brc_authority_activation_shape", table,
         "activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','VALID_EMPTY'))")
     op.add_column(table, sa.Column("current_close_proof", sa.dialects.postgresql.JSONB(), nullable=True))
+    op.add_column(table, sa.Column("recovery_grant_proof", sa.dialects.postgresql.JSONB(), nullable=True))
+    # Preparation only: Recovery grant SQL validation/atomic commit is not yet
+    # installed. Keep every runtime insert fail-closed until that gate exists.
+    op.create_check_constraint("ck_brc_recovery_grant_not_installed",table,"recovery_grant_proof IS NULL")
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))
     op.add_column(table, sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True))

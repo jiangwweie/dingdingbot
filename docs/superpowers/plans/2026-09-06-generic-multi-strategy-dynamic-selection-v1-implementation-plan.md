@@ -361,6 +361,14 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery Authority/codec准备验证：Generic repository + SOR materialization + Generic migration组合219 passed；完整Unit/Architecture1246 passed，后补nullable列缺失必须拒绝的RED/GREEN后proof/recovery/normal codec专项40 passed。全源码及verify_schema Mypy（159 files）、相关Ruff/diff、文档authority25 passed。PG明确证明recovery_grant_proof的None绑定为SQL NULL，任何非NULL normal插入被暂存fail-closed约束拒绝；未伪称恢复grant写入已认证，未执行完整R4，生产未修改。
+
+Recovery Authority/codec准备（基于`08e2044e`）：新增frozen `GenericRecoveryAuthority`，只允许FALLBACK_PREVIOUS，确定性ID绑定完整Recovery Grant Proof摘要和authority_sequence；字段投影由proof推导，不能用重写字段伪装normal ACTIVE_NEW/NO_CHANGE。恢复专用pure ENTRY判定验证Control/mode、exact成员及Event/Universe、birth、future eligible close和absolute expiry；Static首次失败证据保留attempt epoch，但恢复后Control必须清epoch。该判定不替代PG current/rebase检查，尚未被正式ENTRY resolver调用。
+
+原Authority表新增nullable recovery_grant_proof JSONB，normal/SOR仍写NULL；当前0008约束明确禁止非NULL，直到完整Recovery grant SQL验证/原子commit安装，不能用准备代码提前写入grant。新codec映射原parent全部列和唯一Event binding，逐字段/digest比对，拒绝错误proof-kind/mode/source/时间/授权混入；不新增Authority/current表，不将source引用写成双重predecessor链。source0006保全清单排除新增列。测试聚合到原recovery proof模块，不保留跨测试模块fixture依赖。
+
+本次仅完成模型、codec及fail-closed存储准备，未开放recovery current读取、fallback事务、Vacuum解除、checkpoint原子写入或Observation消费；GS-04～09整体继续未完成。pure proof/Authority/normal codec专项40 passed，PG与静态检查结果见后续台账。
+
 DB recovery提案准备验证：Generic repository + SOR materialization组合207 passed，首次Static提案四策略专项4 passed（含Owner/Policy/Control/certification/clock负例）；完整Unit/Architecture1237 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。cursor准备与normal cursor共用读取也通过原覆盖回归。计数重叠不相加；没有正式Recovery Authority写入、没有解锁ENTRY，没有完整R4或自然交易全链认证，生产未修改。
 
 首次Static恢复提案DB准备（基于`67f6ac11`）：`prepare_generic_recovery_grant_proof`仅接收Generation ID，锁定Owner/Control/failed Generation/Vacuum，核验pending授权purpose/TOTP/exact period、RECOVERY_REQUIRED事件归因、drain已清、目标已abandoned、previous current/member/comparison未变、current认证及Policy开关；不允许替代既有Dynamic Authority。由数据库时钟选择本周期或相邻下一period的future close，从真实Episode/comparison/recovery cursor推导新recovery revision，末次DB clock跨界拒绝。方法无业务写入，不清pending、不解Vacuum、不创建current Authority；尚未由Coordinator调用，正式commit必须再次核验并原子持久化。

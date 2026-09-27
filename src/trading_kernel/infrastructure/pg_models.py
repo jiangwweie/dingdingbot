@@ -1071,6 +1071,8 @@ selection_session_authorities = sa.Table(
     sa.UniqueConstraint("activation_authorization_id", name="uq_brc_authority_activation_owner"),
     sa.CheckConstraint("activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','VALID_EMPTY'))", name="activation_shape"),
     sa.Column("current_close_proof", JSONB(none_as_null=True), nullable=True),
+    sa.Column("recovery_grant_proof", JSONB(none_as_null=True), nullable=True),
+    sa.CheckConstraint("recovery_grant_proof IS NULL",name="recovery_grant_not_installed"),
     sa.Column("membership_freshness", JSONB(none_as_null=True), nullable=True),
     _id("comparison_universe_id", nullable=True),
     sa.Column("comparison_transition_revision", sa.BigInteger, nullable=True),

@@ -76,6 +76,7 @@ from src.trading_kernel.domain.selection_authority import (
     ContinuitySourceKind,
     CurrentGenericSelectionAuthority,
     CurrentSelectionAuthority,
+    GenericRecoveryAuthority,
     GenericRecoveryGrantProof,
     GenericSelectionAuthority,
     MaterializationGeneration,
@@ -4276,6 +4277,7 @@ def generic_authority_storage_values(authority: GenericSelectionAuthority) -> di
         "grant_proof_kind":None if authority.blocks_new_entry else "PRECOMMITTED_SELECTION_CURRENT_CLOSE",
         "grant_predecessor_authority_id":None,
         "current_close_proof":None if authority.current_close_proof is None else authority.current_close_proof.model_dump(mode="json"),
+        "recovery_grant_proof":None,
         "membership_freshness":None if authority.membership_freshness is None else authority.membership_freshness.model_dump(mode="json"),
         "comparison_universe_id":authority.comparison_universe_id,
         "comparison_transition_revision":authority.comparison_transition_revision,
@@ -4284,6 +4286,49 @@ def generic_authority_storage_values(authority: GenericSelectionAuthority) -> di
         "expires_at_ms":authority.expires_at_ms,"reason_code":authority.authority_outcome,
         "semantic_digest":authority.semantic_digest,"created_at_ms":authority.created_at_ms,
     }
+
+
+def generic_recovery_authority_storage_values(authority: GenericRecoveryAuthority) -> dict[str, object]:
+    authority = GenericRecoveryAuthority.model_validate(authority.model_dump())
+    proof = authority.recovery_proof
+    period = proof.recovery_close_plan.period
+    return {
+        "selection_authority_id":authority.selection_authority_id,"selection_spec_id":proof.selection_spec_id,
+        "selection_epoch_id":proof.selection_epoch_id,"selection_control_version":proof.selection_control_version,
+        "activation_authorization_id":None,"period_anchor_ms":period.feature_cutoff_at_ms,
+        "decision_boundary_ms":period.scheduled_effective_at_ms,"authority_sequence":authority.authority_sequence,
+        "selection_mode":proof.selection_mode,"selection_job_id":None,"selection_attempt_id":None,
+        "selection_snapshot_id":authority.selection_snapshot_id,
+        "continued_from_selection_authority_id":proof.source_selection_authority_id,
+        "continuity_source_kind":"STATIC_BASELINE" if proof.selection_mode=="static_baseline" else "SELECTION_AUTHORITY",
+        "authority_gap_audit_id":None,"materialization_generation_id":proof.materialization_generation_id,
+        "owner_control_version":proof.owner_control_version,"authority_outcome":"FALLBACK_PREVIOUS",
+        "grant_proof_kind":"FUTURE_CLOSE_REBASE_REQUIRED","grant_predecessor_authority_id":None,
+        "current_close_proof":None,"recovery_grant_proof":proof.model_dump(mode="json"),
+        "membership_freshness":None if proof.membership_freshness is None else proof.membership_freshness.model_dump(mode="json"),
+        "comparison_universe_id":proof.comparison_universe_id,"comparison_transition_revision":proof.comparison_transition_revision,
+        "effective_from_ms":authority.effective_from_ms,"first_eligible_close_time_ms":authority.first_eligible_close_time_ms,
+        "expires_at_ms":authority.expires_at_ms,"reason_code":proof.recovery_close_plan.reason,
+        "semantic_digest":authority.semantic_digest,"created_at_ms":authority.created_at_ms,
+    }
+
+
+def generic_recovery_authority_from_storage(row: Mapping[str, object], *, spec: GenericSelectionSpecV1,
+    event_bindings: tuple[Mapping[str, object], ...]) -> GenericRecoveryAuthority:
+    authority = GenericRecoveryAuthority.model_validate({"selection_authority_id":row["selection_authority_id"],
+        "authority_sequence":row["authority_sequence"],"authority_outcome":row["authority_outcome"],"recovery_proof":row["recovery_grant_proof"]})
+    if authority.selection_spec_id!=spec.selection_spec_id or authority.recovery_proof.strategy_group_id!=spec.strategy_group_id:
+        raise ValueError("Recovery Authority installed Spec differs")
+    if len(event_bindings)!=1:
+        raise ValueError("Recovery Authority requires one exact Event binding")
+    binding = event_bindings[0]
+    if binding.get("selection_authority_id",authority.selection_authority_id)!=authority.selection_authority_id or any(
+        binding.get(key)!=value for key,value in authority.event_binding.model_dump(mode="json").items()):
+        raise ValueError("Recovery Authority Event binding differs")
+    canonical = generic_recovery_authority_storage_values(authority)
+    if any(key not in row or row[key]!=value for key,value in canonical.items()):
+        raise ValueError("Recovery Authority storage identity or digest differs")
+    return authority
 
 
 def generic_authority_from_storage(row: Mapping[str, object], *, spec: GenericSelectionSpecV1,

@@ -121,3 +121,87 @@ def test_no_eligible_close_is_a_miss_not_a_recovery_grant():
         evaluated_at_ms=values["committed_at_ms"]-1)
     with pytest.raises(ValueError,match="NO_ELIGIBLE"):
         GenericRecoveryGrantProof(**values)
+
+
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+@pytest.mark.parametrize("static", [False, True])
+def test_recovery_authority_uses_exact_proof_and_never_claims_normal_activation(group, static):
+    from src.trading_kernel.domain.selection_authority import (
+        GenericRecoveryAuthority,
+        GenericRecoveryGrantProof,
+    )
+    proof = GenericRecoveryGrantProof(**recovery_payload(group,static))
+    authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
+    assert authority.authority_outcome == "FALLBACK_PREVIOUS"
+    assert authority.selection_spec_id == proof.selection_spec_id
+    assert authority.selection_mode == proof.selection_mode
+    assert authority.created_at_ms == proof.committed_at_ms
+    assert authority.effective_from_ms == proof.effective_from_ms
+    assert authority.first_eligible_close_time_ms == proof.first_eligible_close_time_ms
+    assert authority.expires_at_ms == proof.expires_at_ms
+    assert authority.event_binding == proof.event_binding
+    assert authority.allows_existing_ticket_lifecycle and not authority.rewrites_existing_lineage
+    assert authority.selection_snapshot_id == (None if static else proof.membership_freshness.source_snapshot_id)
+    assert GenericRecoveryAuthority.model_validate_json(authority.model_dump_json()) == authority
+    for changes in ({"authority_sequence":0},{"selection_authority_id":"authority:forged"},
+                    {"authority_outcome":"ACTIVE_NEW"},{"authority_outcome":"NO_CHANGE"},
+                    {"authority_sequence":2},{"current_close_proof":{}}):
+        with pytest.raises(ValueError):
+            GenericRecoveryAuthority.model_validate({**authority.model_dump(),**changes})
+    later = GenericRecoveryAuthority.build(proof=proof,authority_sequence=2)
+    assert later.selection_authority_id != authority.selection_authority_id
+    assert later.semantic_digest != authority.semantic_digest
+    from src.trading_kernel.domain.selection_authority import (
+        generic_recovery_entry_rejection,
+    )
+    args = {"authority":authority,"selection_spec_id":proof.selection_spec_id,
+        "selection_epoch_id":None if static else proof.selection_epoch_id,"selection_mode":proof.selection_mode,
+        "selection_control_version":proof.selection_control_version,"owner_control_version":proof.owner_control_version,
+        "event_spec_id":proof.event_binding.event_spec_id,"position_side":proof.event_binding.position_side,
+        "universe_version_id":proof.event_binding.universe_version_id,"exchange_instrument_id":proof.observation_cursors[0].exchange_instrument_id,
+        "birth_selection_authority_id":None,"allow_current_as_birth":True,
+        "observed_close_time_ms":proof.first_eligible_close_time_ms,"now_ms":proof.first_eligible_close_time_ms+1}
+    assert generic_recovery_entry_rejection(**args) is None
+    assert generic_recovery_entry_rejection(**{**args,"allow_current_as_birth":False,"birth_selection_authority_id":authority.selection_authority_id}) is None
+    for changes in ({"now_ms":proof.expires_at_ms},{"now_ms":proof.effective_from_ms-1},
+                    {"observed_close_time_ms":proof.first_eligible_close_time_ms-HOUR},
+                    {"observed_close_time_ms":proof.first_eligible_close_time_ms+1},
+                    {"allow_current_as_birth":False},{"birth_selection_authority_id":"other"},
+                    {"selection_control_version":proof.selection_control_version+1},
+                    {"selection_epoch_id":"wrong"},{"exchange_instrument_id":"not-selected"}):
+        assert generic_recovery_entry_rejection(**{**args,**changes}) is not None
+    from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+        generic_recovery_authority_from_storage,
+        generic_recovery_authority_storage_values,
+    )
+    from src.trading_kernel.infrastructure.pg_models import (
+        selection_session_authorities,
+    )
+    row = generic_recovery_authority_storage_values(authority)
+    bindings = ({"selection_authority_id":authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")},)
+    spec = generic_selection_spec(group)
+    assert set(row) == set(selection_session_authorities.c.keys())
+    assert generic_recovery_authority_from_storage(row,spec=spec,event_bindings=bindings) == authority
+    for mutation in ({"semantic_digest":"sha256:"+"0"*64},{"selection_mode":"disabled"},
+                     {"selection_epoch_id":"wrong"},{"first_eligible_close_time_ms":proof.first_eligible_close_time_ms-HOUR},
+                     {"grant_proof_kind":"PRECOMMITTED_SELECTION_CURRENT_CLOSE"},{"recovery_grant_proof":{}},
+                     {"effective_from_ms":proof.effective_from_ms-1},{"activation_authorization_id":"owner:fake"}):
+        with pytest.raises(ValueError):
+            generic_recovery_authority_from_storage({**row,**mutation},spec=spec,event_bindings=bindings)
+    with pytest.raises(ValueError):
+        generic_recovery_authority_from_storage(row,spec=spec,event_bindings=())
+    with pytest.raises(ValueError):
+        generic_recovery_authority_from_storage({key:value for key,value in row.items() if key!="selection_job_id"},spec=spec,event_bindings=bindings)
+
+
+def test_recovery_identity_changes_when_any_frozen_proof_changes():
+    from src.trading_kernel.domain.selection_authority import (
+        GenericRecoveryAuthority,
+        GenericRecoveryGrantProof,
+    )
+    proof = GenericRecoveryGrantProof(**recovery_payload("CPM-RO-001",True))
+    original = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
+    changed = GenericRecoveryAuthority.build(proof=proof.model_copy(update={"owner_control_version":2}),authority_sequence=1)
+    assert changed.selection_authority_id != original.selection_authority_id
+    with pytest.raises(ValueError):
+        GenericRecoveryAuthority.model_validate({**original.model_dump(),"recovery_proof":changed.recovery_proof})

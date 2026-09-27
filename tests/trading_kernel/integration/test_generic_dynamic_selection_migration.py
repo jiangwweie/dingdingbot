@@ -82,7 +82,7 @@ async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> No
         selection_session_authorities,
     )
     async with head_template_engine.begin() as conn:
-        for column in ("current_close_proof", "membership_freshness"):
+        for column in ("current_close_proof", "membership_freshness", "recovery_grant_proof"):
             nullable_type = selection_session_authorities.c[column].type
             assert await conn.scalar(sa.select(sa.bindparam("proof", None, type_=nullable_type).is_(None))) is True
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:

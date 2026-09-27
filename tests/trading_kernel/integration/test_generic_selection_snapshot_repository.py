@@ -288,6 +288,10 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                         async with conn.begin_nested():
                             await conn.execute(sa.insert(selection_session_authorities).values(**{
                                 **generic_authority_storage_values(authority),**changes}))
+                with pytest.raises(sa.exc.DBAPIError,match="recovery_grant_not_installed"):
+                    async with conn.begin_nested():
+                        await conn.execute(sa.insert(selection_session_authorities).values(**{
+                            **generic_authority_storage_values(authority),"recovery_grant_proof":{}}))
                 with pytest.raises(sa.exc.DBAPIError,match="Generic NO_CHANGE requires exact current active membership"):
                     async with conn.begin_nested():
                         await conn.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
