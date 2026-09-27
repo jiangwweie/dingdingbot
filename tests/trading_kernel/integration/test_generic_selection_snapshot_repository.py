@@ -1768,6 +1768,15 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert proposal.event_binding.universe_version_id == previous_uid
                 assert proposal.failed_activation_authorization_id == control.pending_authorization_id
                 assert proposal.selection_control_version == control.control_version+1
+                assert uow._connection is not None
+                sql_check = sa.text("SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:at)")
+                assert await uow._connection.scalar(sql_check,{"proof":proposal.model_dump_json(),"at":now}) is True
+                for mutation in ({"observation_cursors":[]},{"selection_control_version":999},
+                                 {"vacuum_fenced_at_ms":proposal.vacuum_fenced_at_ms-1},
+                                 {"source_entry_vacuum_id":"wrong"},{"unexpected_field":True},{"committed_at_ms":"not-ms"},
+                                 {"recovery_close_plan":{**proposal.recovery_close_plan.model_dump(mode="json"),"reason":"UNPROVEN_CRASH_CONTINUITY"}}):
+                    assert await uow._connection.scalar(sql_check,{"proof":json.dumps({**proposal.model_dump(mode="json"),**mutation}),"at":now}) is False
+                assert await uow._connection.scalar(sql_check,{"proof":proposal.model_dump_json(),"at":proposal.first_eligible_close_time_ms}) is False
                 assert await uow.instrument_selection.require_generic_recovery_grant_proof(proposal) == now
                 for mutation in ({"owner_control_version":proposal.owner_control_version+1},
                                  {"selection_control_version":proposal.selection_control_version+1},
@@ -1792,10 +1801,13 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     ("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group",{"group":source.spec.strategy_group_id},"Owner Control"),
                     ("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false WHERE owner_policy_id='policy-main'",{},"Policy"),
                     ("UPDATE brc_strategy_selection_control_current SET control_version=control_version+1 WHERE strategy_group_id=:group",{"group":source.spec.strategy_group_id},"Control"),
+                    ("UPDATE brc_strategy_entry_controls_current SET updated_at_ms=:future WHERE strategy_group_id=:group",{"group":source.spec.strategy_group_id,"future":now+1},"control time"),
                     ("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id=:member",{"member":source.spec.candidate_ids[0]},"not ready"),
                 ):
                     savepoint = await uow._connection.begin_nested()
                     await uow._connection.execute(sa.text(sql),params)
+                    if reason != "not ready":
+                        assert await uow._connection.scalar(sql_check,{"proof":proposal.model_dump_json(),"at":now}) is False
                     with pytest.raises(SelectionJobConflict,match=reason):
                         await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
                     with pytest.raises(SelectionJobConflict,match=reason):

@@ -2940,6 +2940,11 @@ class PostgresInstrumentSelectionRepository:
         if expected!=actual:
             raise SelectionJobConflict("Generic recovery proof changed")
         require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=fresh.committed_at_ms)
+        matches = await self._connection.scalar(sa.text(
+            "SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof":proof.model_dump_json(),"checked_at":fresh.committed_at_ms})
+        if matches is not True:
+            raise SelectionJobConflict("Generic recovery PostgreSQL proof differs")
         return fresh.committed_at_ms
 
     async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof:
@@ -2979,6 +2984,8 @@ class PostgresInstrumentSelectionRepository:
         now = await self.read_authority_clock_ms()
         if now<generation.terminal_at_ms:
             raise SelectionJobConflict("Recovery failure time is in the future")
+        if now<owner["updated_at_ms"] or now<control.updated_at_ms:
+            raise SelectionJobConflict("Recovery control time is in the future")
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":control.pending_authorization_id})).mappings().one_or_none()

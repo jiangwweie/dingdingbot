@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Static recovery SQL验证收尾：Generic repository + Generic migration组合142 passed；最后补Gen Dynamic来源/未曾active以及failure原因白名单后四策略专项4 passed；Unit/Architecture1247 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。数字重叠不相加，未运行完整R4；仍保留recovery_grant_proof非NULL写入禁用约束，生产未修改。
+
+Static恢复proof SQL核验（基于`3de95b2c`）：未部署0008新增read-only函数`brc_generic_static_recovery_proof_matches`，由failed Generation、pending Control、TOTP Owner事实、RECOVERY_REQUIRED事件、未解决且已drain的Vacuum、exact previous current/member/comparison、Policy开关及原Episode游标重建完整JSON。拒绝额外字段、错误版本/来源/归因/成员/cursor、非法时间和跨future-close。恢复revision取真实checkpoint最大revision+1，不能由调用方自报。`require_generic_recovery_grant_proof`在原应用层锁定/认证再验证之后，要求该SQL核验也为TRUE；SQL不替代应用层完整certification/readiness检查。
+
+新增RED证明Owner control updated_at位于核验时间未来仍会通过，现应用/SQL同步拒绝Owner和Selection Control的时间因果倒置。恢复写入禁用约束没有解除，本函数不写current、Control或Vacuum，正式恢复事务/Observation/ENTRY接线仍未完成，不能据此宣布恢复生产授权。
+
 Recovery ENTRY rebase gate组件（基于`bba6e91e`）：新增pure `recovery_rebase_entry_rejection`，要求checkpoint精确匹配Episode key、recovery ID/revision、冻结恢复commit时间和first eligible close；必须已ARMED且当前记录为严格晚于arming close的TRIGGERED，并与Signal close相等。缺checkpoint、旧恢复身份、只有NOT_TRIGGERED或过时trigger均拒绝。此门槛仅用于ENTRY，不能放在Observation前阻止建立NOT_TRIGGERED rebase；当前scope/time eligibility仍是另一项必需检查，不可单独视为可发单。
 
 四策略×三种旧Episode起点的组合测试接上此gate，另验证缺失/错误身份/错误时间与stale trigger。Unit/Architecture1247 passed；追加组合断言后的recovery/proof定向37 passed，全源码Mypy、相关Ruff/diff通过。正式PG checkpoint写入、Authority current/rebase读取和四ENTRY边界接线仍未完成，本轮无Schema或PG变更，不把pure测试当作恢复full-chain。生产未修改。
