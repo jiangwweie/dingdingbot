@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery再验证收尾：Generic repository完整模块130 passed；追加failure-time倒退拒绝后Static recovery四策略专项4 passed；Unit/Architecture1246 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。模块在最后时钟因果guard前启动，最终guard以四策略专项复验；未执行完整R4，计数不相加，生产未修改。
+
+Recovery proof提交前再验证准备（基于`74c2779b`）：新增`require_generic_recovery_grant_proof`，在数据库时钟和原准备入口锁域下重建全部事实，只容许同一future-close窗口内evaluated/checked时间前进；其余proof字段逐项精确比对，Owner/Control/Vacuum/time篡改拒绝。再次检查Pause、Policy、certification及future-close；时钟倒退拒绝。另一个RED证明首次prepare可在DB时钟倒退至已记录failure之前时构造提案，现增加`now >= generation.terminal_at_ms`的因果校验。
+
+该入口当前仅支持首次Static失败的DB绑定，返回checked-at时间，不写Authority、不清pending、不解Vacuum。未来正式commit须同一UoW调用，不能把返回值当作独立、可重放的授权；Dynamic恢复、current union、SQL grant验证和Observation rebase仍待实施。
+
 Recovery Authority/codec准备验证：Generic repository + SOR materialization + Generic migration组合219 passed；完整Unit/Architecture1246 passed，后补nullable列缺失必须拒绝的RED/GREEN后proof/recovery/normal codec专项40 passed。全源码及verify_schema Mypy（159 files）、相关Ruff/diff、文档authority25 passed。PG明确证明recovery_grant_proof的None绑定为SQL NULL，任何非NULL normal插入被暂存fail-closed约束拒绝；未伪称恢复grant写入已认证，未执行完整R4，生产未修改。
 
 Recovery Authority/codec准备（基于`08e2044e`）：新增frozen `GenericRecoveryAuthority`，只允许FALLBACK_PREVIOUS，确定性ID绑定完整Recovery Grant Proof摘要和authority_sequence；字段投影由proof推导，不能用重写字段伪装normal ACTIVE_NEW/NO_CHANGE。恢复专用pure ENTRY判定验证Control/mode、exact成员及Event/Universe、birth、future eligible close和absolute expiry；Static首次失败证据保留attempt epoch，但恢复后Control必须清epoch。该判定不替代PG current/rebase检查，尚未被正式ENTRY resolver调用。

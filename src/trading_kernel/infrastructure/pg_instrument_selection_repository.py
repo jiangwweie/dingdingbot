@@ -2921,6 +2921,27 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
+    async def require_generic_recovery_grant_proof(self, proof: GenericRecoveryGrantProof) -> int:
+        """Recheck every frozen reference under the preparation locks; grant nothing."""
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        if proof.selection_mode!="static_baseline" or proof.materialization_generation_id is None:
+            raise SelectionJobConflict("Dynamic recovery commit contract is not installed")
+        now = await self.read_authority_clock_ms()
+        if now<proof.committed_at_ms:
+            raise ValueError("Recovery verification clock moved backwards")
+        require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=now)
+        fresh = await self.prepare_generic_recovery_grant_proof(proof.materialization_generation_id)
+        # Time may advance inside the same future-close window. Never normalize
+        # versions, members, origin, first close, period or source identity.
+        expected = proof.model_dump(mode="json")
+        actual = fresh.model_dump(mode="json")
+        expected["committed_at_ms"] = actual["committed_at_ms"]
+        expected["recovery_close_plan"]["evaluated_at_ms"] = actual["recovery_close_plan"]["evaluated_at_ms"]
+        if expected!=actual:
+            raise SelectionJobConflict("Generic recovery proof changed")
+        require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=fresh.committed_at_ms)
+        return fresh.committed_at_ms
+
     async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof:
         """Prepare first-activation Static recovery from locked DB facts; write nothing.
 
@@ -2956,6 +2977,8 @@ class PostgresInstrumentSelectionRepository:
             control.pending_effective_period_anchor_ms!=generation.period_anchor_ms or control.pending_authorization_id is None):
             raise SelectionJobConflict("Static recovery requires exact failed first activation")
         now = await self.read_authority_clock_ms()
+        if now<generation.terminal_at_ms:
+            raise SelectionJobConflict("Recovery failure time is in the future")
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":control.pending_authorization_id})).mappings().one_or_none()

@@ -1768,6 +1768,21 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert proposal.event_binding.universe_version_id == previous_uid
                 assert proposal.failed_activation_authorization_id == control.pending_authorization_id
                 assert proposal.selection_control_version == control.control_version+1
+                assert await uow.instrument_selection.require_generic_recovery_grant_proof(proposal) == now
+                for mutation in ({"owner_control_version":proposal.owner_control_version+1},
+                                 {"selection_control_version":proposal.selection_control_version+1},
+                                 {"source_entry_vacuum_id":"vacuum:forged"},
+                                 {"vacuum_fenced_at_ms":proposal.vacuum_fenced_at_ms-1}):
+                    with pytest.raises(SelectionJobConflict,match="recovery proof changed"):
+                        await uow.instrument_selection.require_generic_recovery_grant_proof(proposal.model_copy(update=mutation))
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)):
+                    assert await uow.instrument_selection.require_generic_recovery_grant_proof(proposal) == now+1
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=now-1)), pytest.raises(ValueError,match="backwards"):
+                    await uow.instrument_selection.require_generic_recovery_grant_proof(proposal)
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=persisted.terminal_at_ms-1)), pytest.raises(SelectionJobConflict,match="failure time"):
+                    await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=proposal.first_eligible_close_time_ms)), pytest.raises(ValueError,match="boundary"):
+                    await uow.instrument_selection.require_generic_recovery_grant_proof(proposal)
                 assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
                 assert await uow.instrument_selection.get_generic_materialization_generation(persisted.materialization_generation_id) == persisted
                 assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id) == vacuum
@@ -1783,6 +1798,8 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     await uow._connection.execute(sa.text(sql),params)
                     with pytest.raises(SelectionJobConflict,match=reason):
                         await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
+                    with pytest.raises(SelectionJobConflict,match=reason):
+                        await uow.instrument_selection.require_generic_recovery_grant_proof(proposal)
                     await savepoint.rollback()
                 with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(side_effect=[now,proposal.first_eligible_close_time_ms])), pytest.raises(ValueError,match="boundary"):
                     await uow.instrument_selection.prepare_generic_recovery_grant_proof(persisted.materialization_generation_id)
