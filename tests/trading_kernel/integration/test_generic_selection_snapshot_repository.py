@@ -1785,6 +1785,15 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert proposal.event_binding.universe_version_id == previous_uid
                 assert proposal.failed_activation_authorization_id == control.pending_authorization_id
                 assert proposal.selection_control_version == control.control_version+1
+                # Current schema deliberately has no recovery write authority.
+                # The new transaction assembler must fail atomically here until
+                # recovery SQL pre/post constraints are installed.
+                with pytest.raises(sa.exc.DBAPIError):
+                    await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,
+                    selection_spec_id=source.spec.selection_spec_id) == vacuum
                 assert uow._connection is not None
                 sql_check = sa.text("SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:at)")
                 assert await uow._connection.scalar(sql_check,{"proof":proposal.model_dump_json(),"at":now}) is True

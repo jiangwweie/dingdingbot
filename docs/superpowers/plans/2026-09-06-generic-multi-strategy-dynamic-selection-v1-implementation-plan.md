@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Static恢复事务组装（基于`8db4d283`）：新增commit_generic_static_recovery仓储实现草案，内部savepoint串联proof再验证、Authority/binding INSERT、pending checkpoint初始化、Static Control清pending/epoch并递增version、current CAS、Vacuum RESOLVED_FALLBACK及事件，最终DB clock再检；旧FAILED_CLOSED Generation保留终态并追加恢复事件，不复活目标。尚未对应用端口/Coordinator开放，现有SQL grant gate仍拒绝INSERT，后续成功写入分支必须经恢复专属pre/post SQL约束和故障测试后才能开放。
+
+本轮四策略PG只证明该入口在当前Schema拒绝时完整回滚且外层事务可继续：Authority=current无新增、Control/Vacuum不变；不证明其INSERT后的各步骤已运行或成功commit，更不代表恢复交易。相关专项4 passed、全源码Mypy及Ruff/diff通过。成功分支、幂等重启和完整恢复消费链继续未完成，生产未修改。
+
 newest Selection排除条件验证：四策略recovery PG专项4 passed、Generic migration12 passed、Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed；未运行完整PG/Full-chain/R4，未部署。GS-04～09仍IN_PROGRESS。
 
 恢复与newest Selection优先级（基于`d8d9b920`）：Static recovery prepare新增共用Spec lineage锁及有界同epoch查询，存在较新、已commit、effective已到且未expired的Snapshot时拒绝旧恢复提案，交回supersession分支；SQL proof checker也按checked-at执行相同否定条件。future Snapshot尚未生效不提前阻断恢复，expired Snapshot不被冒充有效替代。四策略测试提交future VALID_EMPTY后旧提案仍可核验；到effective后优先返回newer effective Selection blocker而非先尝试旧Universe认证。此为恢复准备的必要排除条件，尚不代表所有supersession/Static新period控制语义已接通，正式Recovery grant仍关闭。

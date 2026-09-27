@@ -2927,6 +2927,65 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
+    async def commit_generic_static_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
+        """Assemble recovery in one transaction; SQL grant gate remains authoritative.
+
+        This entry cannot succeed until the recovery migration's pre/post-state
+        guards are installed. Never bypass those guards or commit a partial step.
+        """
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        if proof.selection_mode!="static_baseline" or proof.materialization_generation_id is None:
+            raise SelectionJobConflict("Static recovery transaction requires failed first activation")
+        async with self._connection.begin_nested():
+            checked_at = await self.require_generic_recovery_grant_proof(proof)
+            # Grant facts freeze the actual verification boundary, not the time
+            # a caller prepared the proposal. The immutable origin window stays.
+            proof = GenericRecoveryGrantProof.model_validate({**proof.model_dump(),"committed_at_ms":checked_at})
+            sequence = int(await self._connection.scalar(sa.select(sa.func.max(selection_session_authorities.c.authority_sequence)).where(
+                selection_session_authorities.c.selection_spec_id==proof.selection_spec_id,
+                selection_session_authorities.c.period_anchor_ms==proof.recovery_close_plan.period.feature_cutoff_at_ms)) or 0)+1
+            authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=sequence)
+            # Pre-state validation belongs to the INSERT trigger, before Control
+            # and checkpoints change. Deferred SQL guards verify the final set.
+            await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_recovery_authority_storage_values(authority)))
+            await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+            await self.initialize_generic_recovery_checkpoints(proof)
+            changed = await self._connection.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id==proof.strategy_group_id,
+                strategy_selection_control_current.c.control_version==proof.selection_control_version-1,
+                strategy_selection_control_current.c.selection_mode=="static_baseline",
+                strategy_selection_control_current.c.pending_authorization_id==proof.failed_activation_authorization_id,
+                strategy_selection_control_current.c.selection_epoch_id==proof.selection_epoch_id).values(
+                    pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
+                    selection_epoch_id=None,control_version=proof.selection_control_version,updated_at_ms=proof.committed_at_ms))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Static recovery Control CAS changed")
+            vacuum = await self.get_current_entry_vacuum(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,for_update=True)
+            if vacuum is None or vacuum.entry_vacuum_id!=proof.source_entry_vacuum_id:
+                raise SelectionJobConflict("Static recovery Vacuum changed")
+            changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(
+                    state="RESOLVED_FALLBACK",resolved_at_ms=proof.committed_at_ms,projection_version=vacuum.projection_version+1))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Static recovery Vacuum CAS changed")
+            changed = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=proof.selection_spec_id,
+                selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=proof.committed_at_ms).on_conflict_do_nothing())
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Static recovery current CAS changed")
+            await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",entry_vacuum_id=vacuum.entry_vacuum_id,
+                event_sequence=vacuum.projection_version+1,event_type="RESOLVED_FALLBACK",
+                payload={"selection_authority_id":authority.selection_authority_id,"source_generation_id":proof.materialization_generation_id},occurred_at_ms=proof.committed_at_ms))
+            seq = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==proof.materialization_generation_id)) or 0)+1
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=f"materialization-event:{proof.materialization_generation_id}:{seq}",materialization_generation_id=proof.materialization_generation_id,
+                event_sequence=seq,event_type="STATIC_RECOVERY_COMMITTED",payload={"selection_authority_id":authority.selection_authority_id},occurred_at_ms=proof.committed_at_ms))
+            require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=await self.read_authority_clock_ms())
+        return authority
+
     async def initialize_generic_recovery_checkpoints(self, proof: GenericRecoveryGrantProof) -> tuple[AuthorityRecoveryCheckpoint, ...]:
         """Atomic component of recovery, not a grant; caller owns the transaction.
 
