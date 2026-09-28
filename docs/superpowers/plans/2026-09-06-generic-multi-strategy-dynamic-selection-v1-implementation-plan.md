@@ -361,6 +361,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Static恢复幂等comparison补强（基于`bcb45dc9`）：RED证明已提交恢复后comparison revision变化，commit重试仍返回原Authority成功。现幂等分支锁定并校验comparison ID/revision及source_static_universe_version_id，漂移明确拒绝。四策略恢复PG专项4 passed（MPG/MI负例），全源码Mypy、相关Ruff/diff通过；该修正只保护已提交操作的重复读取，未开放Observation/ENTRY恢复消费，GS-04～09仍未完成，生产未修改。
+
 首次Static恢复Coordinator验证：Generic repository + SOR materialization组合211 passed；四策略专项4 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。测试证明正式Coordinator独立提交/重复tick及重连读取，不代表恢复Observation/ENTRY已开放，未执行完整R4，生产未修改。
 
 首次Static恢复Coordinator接线（基于`829e4b4a`）：FAILED_CLOSED分支在Owner pause之后读取Control/current/Vacuum；exact Static pending且尚无current时调用DB prepare→atomic commit，返回FALLBACK_PREVIOUS及原Vacuum；已有同Generation Recovery current则走正式幂等commit读取原Authority。应用层新增SelectionPersistenceConflict端口异常基类，PG原SelectionJobConflict继承它，Coordinator不导入PG模块、不吞SQL错误。准备事实冲突不写grant，保留原failure blocker等待后续合法事实；Dynamic recovery仍保持原显式阻断。

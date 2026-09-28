@@ -2961,6 +2961,12 @@ class PostgresInstrumentSelectionRepository:
                     strategy_universe_current.c.event_spec_id==proof.event_binding.event_spec_id))
                 if previous_current!=proof.event_binding.universe_version_id:
                     raise SelectionJobConflict("Static recovery idempotency Universe changed")
+                if proof.comparison_universe_id is not None:
+                    comparison = await self.get_comparison_universe_binding(proof.event_binding.event_spec_id,for_update=True)
+                    if comparison is None or comparison.comparison_universe_id!=proof.comparison_universe_id or (
+                        comparison.comparison_transition_revision!=proof.comparison_transition_revision
+                        or comparison.source_static_universe_version_id!=previous_current):
+                        raise SelectionJobConflict("Static recovery idempotency comparison changed")
                 return existing
             checked_at = await self.require_generic_recovery_grant_proof(proof)
             # Grant facts freeze the actual verification boundary, not the time

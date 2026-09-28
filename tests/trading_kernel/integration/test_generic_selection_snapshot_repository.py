@@ -1939,6 +1939,13 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)):
                 repeated_recovery = await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
             assert repeated_recovery == committed_recovery
+            if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
+                assert restarted._connection is not None
+                checkpoint = await restarted._connection.begin_nested()
+                await restarted._connection.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=comparison_transition_revision+1 WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)), pytest.raises(SelectionJobConflict,match="comparison changed"):
+                    await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+                await checkpoint.rollback()
             with pytest.raises(SelectionJobConflict,match="idempotency"):
                 await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof.model_copy(update={"owner_control_version":999}))
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=committed_recovery.expires_at_ms)), pytest.raises(SelectionJobConflict,match="idempotency"):
