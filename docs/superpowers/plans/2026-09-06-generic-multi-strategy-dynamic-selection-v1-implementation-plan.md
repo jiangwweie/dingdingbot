@@ -361,6 +361,16 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Static恢复SQL提交最终验证：Docker恢复后Generic repository + Generic migration + SOR materialization组合223 passed；最终幂等Universe/expiry及事件不重复断言以四策略专项4 passed复验；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。成功入口已完成真实独立UoW提交并重连exact-read；负例在延迟约束处拒绝半提交。未完成Coordinator调用、recovery Observation/ENTRY消费及Dynamic恢复，不声明GS-08/09完成，不构成R4或部署授权。
+
+2026-09-28恢复提交接续验证：前轮PG进程handle已丢失，不能推定通过；重跑发现Docker daemon关闭/5432拒绝连接，启动本机Docker Desktop后既有dingdingbot-pg恢复healthy，未使用其他PG或生产数据库。首次环境错误批次（8 failed/213 errors）不作为代码验证结果，后续重新执行受影响组合。
+
+Static恢复commit新增exact-current幂等分支，按Owner→Control→current锁顺序核验原Recovery proof、Control静态/清epoch/无pending、Vacuum已RESOLVED_FALLBACK及原resolution时间、current Universe仍相同、未过expiry；返回原Authority而不重复事件。首次四策略独立提交/dispose/reconnect后重试成功，改proof/过期重试拒绝。幂等返回是已完成操作的读取，不授予新交易；ENTRY runtime-not-installed仍保留。前轮SQL成功提交测试、current/Control/Vacuum/checkpoint破坏负例及comparison漂移负例仍纳入验证。
+
+首次Static恢复SQL提交（基于`c45e37eb`）：未部署0008将临时recovery非NULL全面禁止替换为Static专属shape、BEFORE源事实核验和deferred完整提交校验。源proof必须匹配原failed Generation/pending授权/Vacuum/current/游标，parent时间/source/mode字段必须与proof一致；提交末要求Static Control清pending/epoch且version递增、exact current Authority/Event binding、Vacuum RESOLVED_FALLBACK、完整pending checkpoint及两类commit events。Dynamic恢复仍未支持，SOR原fallback约束仅在其subtype维持，不以Generic绕过。
+
+四策略经正式commit_generic_static_recovery首次成功写入并强制执行全部deferred约束；破坏current、Control、Vacuum、checkpoint分别拒绝并由savepoint回滚。测试随后独立UoW提交、dispose连接池重连读回恢复Authority/checkpoint，旧Generation保持FAILED_CLOSED，不复活旧target。仍无Coordinator调用和正式recovery ENTRY消费；共享resolver的runtime-not-installed阻断保留，因此不能据此声明已恢复交易。commit重试幂等、完整跨period生命周期、其他故障/多成员矩阵仍待完成。
+
 Static恢复事务组装（基于`8db4d283`）：新增commit_generic_static_recovery仓储实现草案，内部savepoint串联proof再验证、Authority/binding INSERT、pending checkpoint初始化、Static Control清pending/epoch并递增version、current CAS、Vacuum RESOLVED_FALLBACK及事件，最终DB clock再检；旧FAILED_CLOSED Generation保留终态并追加恢复事件，不复活目标。尚未对应用端口/Coordinator开放，现有SQL grant gate仍拒绝INSERT，后续成功写入分支必须经恢复专属pre/post SQL约束和故障测试后才能开放。
 
 本轮四策略PG只证明该入口在当前Schema拒绝时完整回滚且外层事务可继续：Authority=current无新增、Control/Vacuum不变；不证明其INSERT后的各步骤已运行或成功commit，更不代表恢复交易。相关专项4 passed、全源码Mypy及Ruff/diff通过。成功分支、幂等重启和完整恢复消费链继续未完成，生产未修改。

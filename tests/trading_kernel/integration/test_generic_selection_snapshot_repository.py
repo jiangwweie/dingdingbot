@@ -305,7 +305,7 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                         async with conn.begin_nested():
                             await conn.execute(sa.insert(selection_session_authorities).values(**{
                                 **generic_authority_storage_values(authority),**changes}))
-                with pytest.raises(sa.exc.DBAPIError,match="recovery_grant_not_installed"):
+                with pytest.raises(sa.exc.DBAPIError,match="Static recovery proof differs"):
                     async with conn.begin_nested():
                         await conn.execute(sa.insert(selection_session_authorities).values(**{
                             **generic_authority_storage_values(authority),"recovery_grant_proof":{}}))
@@ -1785,15 +1785,45 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert proposal.event_binding.universe_version_id == previous_uid
                 assert proposal.failed_activation_authorization_id == control.pending_authorization_id
                 assert proposal.selection_control_version == control.control_version+1
-                # Current schema deliberately has no recovery write authority.
-                # The new transaction assembler must fail atomically here until
-                # recovery SQL pre/post constraints are installed.
-                with pytest.raises(sa.exc.DBAPIError):
-                    await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                assert uow._connection is not None
+                recovery_savepoint = await uow._connection.begin_nested()
+                recovered = await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
+                committed = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                assert committed is not None and committed.authority == recovered
+                recovered_control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
+                assert recovered_control.selection_mode.value == "static_baseline"
+                assert recovered_control.pending_selection_mode is None and recovered_control.selection_epoch_id is None
+                assert recovered_control.control_version == proposal.selection_control_version
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,
+                    selection_spec_id=source.spec.selection_spec_id) is None
+                for cursor in proposal.observation_cursors:
+                    checkpoint = await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+                    assert checkpoint is not None and checkpoint.state == "REBASE_REQUIRED"
+                await recovery_savepoint.rollback()
+                for broken in (
+                    "DELETE FROM brc_selection_authority_current WHERE selection_spec_id=:spec",
+                    "UPDATE brc_strategy_selection_control_current SET control_version=control_version+1 WHERE selection_spec_id=:spec",
+                    "UPDATE brc_strategy_entry_vacuums_current SET state='RECONFIGURING',resolved_at_ms=NULL WHERE selection_spec_id=:spec",
+                    "DELETE FROM brc_exposure_episode_current WHERE episode_domain_key=:key",
+                ):
+                    with pytest.raises(sa.exc.DBAPIError,match="Static recovery requires"):
+                        async with uow._connection.begin_nested():
+                            await uow._connection.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
+                            await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                            await uow._connection.execute(sa.text(broken),{"spec":source.spec.selection_spec_id,"key":proposal.observation_cursors[0].episode_domain_key})
+                            await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
                 assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == control
                 assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,
                     selection_spec_id=source.spec.selection_spec_id) == vacuum
+                if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
+                    with pytest.raises(sa.exc.DBAPIError,match="unchanged comparison"):
+                        async with uow._connection.begin_nested():
+                            await uow._connection.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
+                            await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                            await uow._connection.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=comparison_transition_revision+1 WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
+                            await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 assert uow._connection is not None
                 sql_check = sa.text("SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:at)")
                 assert await uow._connection.scalar(sql_check,{"proof":proposal.model_dump_json(),"at":now}) is True
@@ -1890,6 +1920,27 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 await savepoint.rollback()
                 for cursor in proposal.observation_cursors:
                     assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+            async with PostgresKernelUnitOfWork(database) as recovery_uow:
+                committed_recovery = await recovery_uow.instrument_selection.commit_generic_static_recovery(proposal)
+        await database.dispose()
+        async with PostgresKernelUnitOfWork(database) as restarted:
+            current = await restarted.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            assert current is not None and current.authority == committed_recovery
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)):
+                repeated_recovery = await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+            assert repeated_recovery == committed_recovery
+            with pytest.raises(SelectionJobConflict,match="idempotency"):
+                await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof.model_copy(update={"owner_control_version":999}))
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=committed_recovery.expires_at_ms)), pytest.raises(SelectionJobConflict,match="idempotency"):
+                await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+            for cursor in proposal.observation_cursors:
+                checkpoint = await restarted.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+                assert checkpoint is not None and checkpoint.state == "REBASE_REQUIRED"
+            assert await restarted.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,
+                selection_spec_id=source.spec.selection_spec_id) is None
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='STATIC_RECOVERY_COMMITTED'"),{"gid":persisted.materialization_generation_id}) == 1
 
 
 async def _assert_generic_empty_handoff(database, source, original, vacuum):

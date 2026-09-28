@@ -1072,7 +1072,7 @@ selection_session_authorities = sa.Table(
     sa.CheckConstraint("activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','VALID_EMPTY'))", name="activation_shape"),
     sa.Column("current_close_proof", JSONB(none_as_null=True), nullable=True),
     sa.Column("recovery_grant_proof", JSONB(none_as_null=True), nullable=True),
-    sa.CheckConstraint("recovery_grant_proof IS NULL",name="recovery_grant_not_installed"),
+    sa.CheckConstraint("recovery_grant_proof IS NULL OR (jsonb_typeof(recovery_grant_proof)='object' AND selection_epoch_id<>'sor-v0' AND authority_outcome='FALLBACK_PREVIOUS' AND selection_mode='static_baseline')",name="recovery_grant_shape"),
     sa.Column("membership_freshness", JSONB(none_as_null=True), nullable=True),
     _id("comparison_universe_id", nullable=True),
     sa.Column("comparison_transition_revision", sa.BigInteger, nullable=True),

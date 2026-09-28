@@ -57,6 +57,72 @@ def upgrade() -> None:
     _generic_close_proof_function()
     _generic_normal_binding_guard()
     _generic_static_recovery_proof_function()
+    _generic_static_recovery_commit_guard()
+
+
+def _generic_static_recovery_commit_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_static_recovery_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE a brc_selection_session_authorities%ROWTYPE; p jsonb; b jsonb;
+        n integer; actual jsonb; expected jsonb;
+      BEGIN
+        SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
+        IF NOT FOUND OR a.recovery_grant_proof IS NULL THEN RETURN NULL; END IF;
+        p:=a.recovery_grant_proof; b:=p->'event_binding';
+        IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current
+          WHERE selection_spec_id=a.selection_spec_id AND selection_authority_id=a.selection_authority_id AND updated_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current
+            WHERE strategy_group_id=p->>'strategy_group_id' AND selection_spec_id=a.selection_spec_id
+              AND selection_mode='static_baseline' AND selection_epoch_id IS NULL
+              AND pending_selection_mode IS NULL AND pending_effective_period_anchor_ms IS NULL AND pending_authorization_id IS NULL
+              AND control_version=a.selection_control_version AND updated_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_controls_current
+            WHERE strategy_group_id=p->>'strategy_group_id' AND entry_state='enabled' AND control_version=a.owner_control_version)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current
+            WHERE entry_vacuum_id=p->>'source_entry_vacuum_id' AND source_generation_id=a.materialization_generation_id
+              AND state='RESOLVED_FALLBACK' AND fenced_at_ms=(p->>'vacuum_fenced_at_ms')::bigint
+              AND drained_at_ms IS NOT NULL AND resolved_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations
+            WHERE materialization_generation_id=a.materialization_generation_id AND lifecycle_state='FAILED_CLOSED'
+              AND selection_epoch_id=a.selection_epoch_id AND selection_control_version=a.selection_control_version-1)
+          THEN RAISE EXCEPTION 'Static recovery requires atomic Control Vacuum Authority'; END IF;
+        IF a.comparison_universe_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_comparison_binding_current WHERE event_spec_id=b->>'event_spec_id'
+            AND comparison_universe_id=a.comparison_universe_id AND comparison_transition_revision=a.comparison_transition_revision
+            AND source_static_universe_version_id=b->>'universe_version_id') THEN
+          RAISE EXCEPTION 'Static recovery requires unchanged comparison binding';
+        END IF;
+        SELECT count(*) INTO n FROM brc_selection_authority_event_bindings WHERE selection_authority_id=a.selection_authority_id;
+        IF n<>1 OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings x
+          JOIN brc_strategy_universe_current u ON u.event_spec_id=x.event_spec_id AND u.universe_version_id=x.universe_version_id
+          JOIN brc_strategy_universe_versions v ON v.universe_version_id=x.universe_version_id
+          WHERE x.selection_authority_id=a.selection_authority_id AND x.event_spec_id=b->>'event_spec_id'
+            AND x.position_side=b->>'position_side' AND x.grant_state='ACTIVE' AND x.universe_version_id=b->>'universe_version_id'
+            AND x.member_set_digest=b->>'member_set_digest' AND u.lifecycle_state='active' AND v.lifecycle_state='active') THEN
+          RAISE EXCEPTION 'Static recovery requires exact previous Event binding'; END IF;
+        SELECT jsonb_agg(jsonb_build_object('key',e.episode_domain_key,'rid',e.authority_recovery_id,
+          'revision',e.authority_recovery_revision,'effective',e.authority_recovery_effective_from_ms,
+          'first',e.authority_recovery_first_eligible_close_time_ms,'armed',e.authority_recovery_armed_at_ms,
+          'observed',e.authority_recovery_last_observed_at_ms,'status',e.authority_recovery_last_detector_status,
+          'version',e.authority_recovery_checkpoint_version) ORDER BY e.episode_domain_key COLLATE "C") INTO actual
+          FROM jsonb_array_elements(p->'observation_cursors') c JOIN brc_exposure_episode_current e ON e.episode_domain_key=c->>'episode_domain_key';
+        SELECT jsonb_agg(jsonb_build_object('key',c->>'episode_domain_key','rid',p->'recovery_close_plan'->>'recovery_id',
+          'revision',(p->'recovery_close_plan'->>'recovery_revision')::bigint,'effective',a.created_at_ms,
+          'first',a.first_eligible_close_time_ms,'armed',NULL,'observed',c->'last_observed_at_ms','status',NULL,
+          'version',(c->>'authority_recovery_checkpoint_version')::bigint+1) ORDER BY c->>'episode_domain_key' COLLATE "C") INTO expected
+          FROM jsonb_array_elements(p->'observation_cursors') c;
+        IF actual IS DISTINCT FROM expected THEN RAISE EXCEPTION 'Static recovery requires complete pending rebase'; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events WHERE entry_vacuum_id=p->>'source_entry_vacuum_id'
+          AND event_type='RESOLVED_FALLBACK' AND payload->>'selection_authority_id'=a.selection_authority_id)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=a.materialization_generation_id
+          AND event_type='STATIC_RECOVERY_COMMITTED' AND payload->>'selection_authority_id'=a.selection_authority_id) THEN
+          RAISE EXCEPTION 'Static recovery requires durable commit events'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    for table in ("brc_selection_session_authorities", "brc_selection_authority_event_bindings"):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_static_recovery AFTER INSERT ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_static_recovery_commit()"))
 
 
 def _generic_static_recovery_proof_function() -> None:
@@ -323,9 +389,9 @@ def _authority_snapshot_epoch() -> None:
         "activation_authorization_id IS NULL OR (selection_epoch_id<>'sor-v0' AND authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','VALID_EMPTY'))")
     op.add_column(table, sa.Column("current_close_proof", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("recovery_grant_proof", sa.dialects.postgresql.JSONB(), nullable=True))
-    # Preparation only: Recovery grant SQL validation/atomic commit is not yet
-    # installed. Keep every runtime insert fail-closed until that gate exists.
-    op.create_check_constraint("ck_brc_recovery_grant_not_installed",table,"recovery_grant_proof IS NULL")
+    op.create_check_constraint("ck_brc_recovery_grant_shape",table,
+        "recovery_grant_proof IS NULL OR (jsonb_typeof(recovery_grant_proof)='object' AND "
+        "selection_epoch_id<>'sor-v0' AND authority_outcome='FALLBACK_PREVIOUS' AND selection_mode='static_baseline')")
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))
     op.add_column(table, sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True))
@@ -352,14 +418,16 @@ def _authority_snapshot_epoch() -> None:
         f"(selection_epoch_id='sor-v0' AND ({old_time})) OR "
         "(selection_epoch_id<>'sor-v0' AND authority_sequence>0 AND owner_control_version>0 "
         "AND period_anchor_ms>0 AND decision_boundary_ms=period_anchor_ms+3600000 "
-        "AND effective_from_ms>=decision_boundary_ms AND created_at_ms=effective_from_ms AND created_at_ms<expires_at_ms)")
+        "AND effective_from_ms>=decision_boundary_ms AND created_at_ms<expires_at_ms "
+        "AND ((recovery_grant_proof IS NULL AND created_at_ms=effective_from_ms) OR "
+        "(recovery_grant_proof IS NOT NULL AND created_at_ms<=effective_from_ms AND created_at_ms>0)))")
     constraints = {c["name"]:c["sqltext"] for c in sa.inspect(op.get_bind()).get_check_constraints(table)}
-    for suffix in ("proof_kind_valid","proof_shape","grant_shape","active_new_shape"):
+    for suffix in ("proof_kind_valid","proof_shape","grant_shape","active_new_shape","fallback_shape"):
         name = "ck_brc_selection_session_authorities_"+suffix
         op.drop_constraint(name,table,type_="check")
         op.create_check_constraint(name,table,f"selection_epoch_id<>'sor-v0' OR COALESCE(({constraints[name]}),false)")
     op.create_check_constraint("ck_brc_generic_normal_grant_shape",table,
-        "selection_epoch_id='sor-v0' OR COALESCE(( "
+        "selection_epoch_id='sor-v0' OR recovery_grant_proof IS NOT NULL OR COALESCE(( "
         "(authority_outcome='VALID_EMPTY' AND first_eligible_close_time_ms IS NULL AND grant_proof_kind IS NULL "
         "AND grant_predecessor_authority_id IS NULL) OR "
         "(authority_outcome IN ('NO_CHANGE','ACTIVE_NEW') AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
@@ -373,7 +441,7 @@ def _authority_snapshot_epoch() -> None:
         "AND current_close_proof IS NOT NULL AND membership_freshness IS NOT NULL)),false)")
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_authority_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
-        DECLARE kind text; cadence integer; snapshot brc_instrument_selection_snapshots%ROWTYPE;
+        DECLARE kind text; cadence integer; snapshot brc_instrument_selection_snapshots%ROWTYPE; p jsonb;
         BEGIN
           SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF kind='sor_dynamic_v0' AND (NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL
@@ -386,6 +454,33 @@ def _authority_snapshot_epoch() -> None:
             RAISE EXCEPTION 'Generic Authority requires explicit epoch';
           END IF;
           IF kind='generic_dynamic_v1' THEN
+            IF NEW.recovery_grant_proof IS NOT NULL THEN
+              p:=NEW.recovery_grant_proof;
+              IF NOT brc_generic_static_recovery_proof_matches(p,NEW.created_at_ms) OR
+                NEW.selection_spec_id IS DISTINCT FROM p->>'selection_spec_id' OR
+                NEW.selection_epoch_id IS DISTINCT FROM p->>'selection_epoch_id' OR
+                NEW.selection_control_version IS DISTINCT FROM (p->>'selection_control_version')::bigint OR
+                NEW.owner_control_version IS DISTINCT FROM (p->>'owner_control_version')::bigint OR
+                NEW.created_at_ms IS DISTINCT FROM (p->>'committed_at_ms')::bigint OR
+                NEW.period_anchor_ms IS DISTINCT FROM (p->'recovery_close_plan'->'period'->>'feature_cutoff_at_ms')::bigint OR
+                NEW.decision_boundary_ms IS DISTINCT FROM (p->'recovery_close_plan'->'period'->>'scheduled_effective_at_ms')::bigint OR
+                NEW.effective_from_ms IS DISTINCT FROM greatest(NEW.created_at_ms,NEW.decision_boundary_ms) OR
+                NEW.expires_at_ms IS DISTINCT FROM (p->'recovery_close_plan'->'period'->>'period_expires_at_ms')::bigint OR
+                NEW.first_eligible_close_time_ms IS DISTINCT FROM (p->'recovery_close_plan'->>'first_eligible_close_time_ms')::bigint OR
+                NEW.materialization_generation_id IS DISTINCT FROM p->>'materialization_generation_id' OR
+                NEW.comparison_universe_id IS DISTINCT FROM p->>'comparison_universe_id' OR
+                NEW.comparison_transition_revision IS DISTINCT FROM (p->>'comparison_transition_revision')::bigint OR
+                NEW.reason_code IS DISTINCT FROM p->'recovery_close_plan'->>'reason' OR
+                NEW.selection_mode<>'static_baseline' OR NEW.authority_outcome<>'FALLBACK_PREVIOUS' OR
+                NEW.continuity_source_kind<>'STATIC_BASELINE' OR NEW.grant_proof_kind IS DISTINCT FROM 'FUTURE_CLOSE_REBASE_REQUIRED' OR
+                NEW.selection_snapshot_id IS NOT NULL OR NEW.selection_job_id IS NOT NULL OR NEW.selection_attempt_id IS NOT NULL OR
+                NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL OR
+                NEW.activation_authorization_id IS NOT NULL OR NEW.authority_gap_audit_id IS NOT NULL OR
+                NEW.continued_from_selection_authority_id IS NOT NULL OR NEW.grant_predecessor_authority_id IS NOT NULL THEN
+                RAISE EXCEPTION 'Static recovery proof differs from locked source facts';
+              END IF;
+              RETURN NEW;
+            END IF;
             IF NEW.authority_outcome NOT IN ('VALID_EMPTY','NO_CHANGE','ACTIVE_NEW') THEN
               RAISE EXCEPTION 'Generic trading Authority proof contract is not installed';
             END IF;

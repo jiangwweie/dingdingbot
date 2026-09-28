@@ -2928,15 +2928,37 @@ class PostgresInstrumentSelectionRepository:
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
     async def commit_generic_static_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
-        """Assemble recovery in one transaction; SQL grant gate remains authoritative.
+        """Commit first Static recovery with SQL pre/post guards in one transaction.
 
-        This entry cannot succeed until the recovery migration's pre/post-state
-        guards are installed. Never bypass those guards or commit a partial step.
+        ENTRY remains separately gated by the runtime recovery/rebase consumer.
         """
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
         if proof.selection_mode!="static_baseline" or proof.materialization_generation_id is None:
             raise SelectionJobConflict("Static recovery transaction requires failed first activation")
         async with self._connection.begin_nested():
+            owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+                strategy_entry_controls_current.c.strategy_group_id==proof.strategy_group_id).with_for_update())).mappings().one_or_none()
+            control = await self.get_selection_control(proof.strategy_group_id,for_update=True)
+            current = await self.get_current_generic_authority(proof.selection_spec_id,for_update=True)
+            if current is not None:
+                existing = current.authority
+                if not isinstance(existing,GenericRecoveryAuthority) or existing.recovery_proof!=proof:
+                    raise SelectionJobConflict("Static recovery idempotency identity changed")
+                vacuum_row = (await self._connection.execute(sa.select(strategy_entry_vacuums_current).where(
+                    strategy_entry_vacuums_current.c.entry_vacuum_id==proof.source_entry_vacuum_id).with_for_update())).mappings().one_or_none()
+                checked_at = await self.read_authority_clock_ms()
+                if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=proof.owner_control_version or (
+                    control is None or control.selection_mode is not SelectionMode.STATIC_BASELINE
+                    or control.control_version!=proof.selection_control_version or control.selection_epoch_id is not None
+                    or control.pending_selection_mode is not None or vacuum_row is None
+                    or vacuum_row["state"]!="RESOLVED_FALLBACK" or vacuum_row["resolved_at_ms"]!=existing.created_at_ms
+                    or not existing.created_at_ms<=checked_at<existing.expires_at_ms):
+                    raise SelectionJobConflict("Static recovery idempotency authority changed")
+                previous_current = await self._connection.scalar(sa.select(strategy_universe_current.c.universe_version_id).where(
+                    strategy_universe_current.c.event_spec_id==proof.event_binding.event_spec_id))
+                if previous_current!=proof.event_binding.universe_version_id:
+                    raise SelectionJobConflict("Static recovery idempotency Universe changed")
+                return existing
             checked_at = await self.require_generic_recovery_grant_proof(proof)
             # Grant facts freeze the actual verification boundary, not the time
             # a caller prepared the proposal. The immutable origin window stays.
