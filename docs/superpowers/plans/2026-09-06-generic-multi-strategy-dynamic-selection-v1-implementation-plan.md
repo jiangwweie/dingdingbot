@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+恢复Observation仓储收尾：Generic repository + 原Observation模块151 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。组合包括新增恢复checkpoint真实持久化与原观察并发回归，不替代Generic自然producer/ENTRY full-chain，生产未修改，GS-04～09保持IN_PROGRESS。
+
+恢复Observation原子仓储增量（基于`7d793b9e`）：新增advance_recovery_observation，以exact scope/current Recovery Authority读取Owner/Control/Policy、Vacuum、Universe成员、comparison及已初始化checkpoint，拒绝过期/错误birth/time/身份及中断历史；复用纯recovery+comparison+Episode reducer，在同savepoint内写普通Episode、comparison checkpoint和recovery版本CAS，末次DB时钟过期整段回滚。首个真实但被抑制的观察推进authority_rebase_required占位的last_observed与版本，仍无Episode ID/arm；与grant-time无观察占位明确区分。重复close不重复写入。
+
+四策略经正式恢复commit后首TRIGGERED抑制、重连读取、重复tick、错Authority、expiry中途回滚通过；4h策略另验证未来NOT_TRIGGERED→再后续TRIGGERED的ARMED及新Episode，1h窗口没有额外close时不延长period。该仓储入口尚未由observe_strategy_scope调用，Detector结果仍为显式typed前置，不是自然行情producer full-chain；hourly跨period接续、Dynamic恢复及四ENTRY边界继续未完成，runtime-not-installed门槛仍保留。相关专项4 passed，全源码Mypy及Ruff/diff通过。
+
 Static恢复幂等comparison补强（基于`bcb45dc9`）：RED证明已提交恢复后comparison revision变化，commit重试仍返回原Authority成功。现幂等分支锁定并校验comparison ID/revision及source_static_universe_version_id，漂移明确拒绝。四策略恢复PG专项4 passed（MPG/MI负例），全源码Mypy、相关Ruff/diff通过；该修正只保护已提交操作的重复读取，未开放Observation/ENTRY恢复消费，GS-04～09仍未完成，生产未修改。
 
 首次Static恢复Coordinator验证：Generic repository + SOR materialization组合211 passed；四策略专项4 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。测试证明正式Coordinator独立提交/重复tick及重连读取，不代表恢复Observation/ENTRY已开放，未执行完整R4，生产未修改。

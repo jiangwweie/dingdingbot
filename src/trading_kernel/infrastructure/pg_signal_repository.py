@@ -30,8 +30,11 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.authority_recovery_rebase import (
     AuthorityRecoveryCheckpoint,
+    RecoveryBoundExposureEpisodeTransition,
+    advance_recovery_bound_exposure_episode,
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBindingEpisodeState,
@@ -50,8 +53,10 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityGrantProofKind,
     AuthorityOutcome,
     ContinuitySourceKind,
+    GenericRecoveryAuthority,
     SelectionMode,
     SelectionSessionAuthority,
+    generic_recovery_entry_rejection,
 )
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
@@ -327,6 +332,109 @@ class PostgresSignalRepository:
             )
         if result.rowcount != 1:
             raise RuntimeError("Exposure Episode authority changed")
+
+    async def advance_recovery_observation(self, *, runtime_scope_id: str, selection_authority_id: str,
+        observed_at_ms: int, detector_status: DetectorStatus, occurred_at_ms: int | None,
+    ) -> RecoveryBoundExposureEpisodeTransition:
+        """Persist an authorized Detector result, Episode and both barriers together."""
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            PostgresInstrumentSelectionRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_repositories import (
+            PostgresEntryAdmissionRepository,
+            PostgresOwnerControlRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        selection = PostgresInstrumentSelectionRepository(self._connection)
+        scope = await self.get_runtime_scope(runtime_scope_id)
+        if scope is None or scope.lifecycle_state!="active" or not scope.entry_enabled:
+            raise RuntimeError("Recovery Observation active scope changed")
+        owner = await PostgresOwnerControlRepository(self._connection).get_strategy_control(scope.strategy_group_id,for_update=True)
+        control = await selection.get_selection_control(scope.strategy_group_id,for_update=True)
+        if owner is None or owner.entry_state.value!="enabled" or control is None:
+            raise RuntimeError("Recovery Observation Owner control blocked")
+        vacuum = await selection.get_current_entry_vacuum(strategy_group_id=scope.strategy_group_id,selection_spec_id=control.selection_spec_id,for_update=True)
+        current = await selection.get_current_generic_authority(control.selection_spec_id,for_update=True)
+        if vacuum is not None or current is None or not isinstance(current.authority,GenericRecoveryAuthority) or current.authority.selection_authority_id!=selection_authority_id:
+            raise RuntimeError("Recovery Observation current authority changed")
+        authority = current.authority
+        proof = authority.recovery_proof
+        now = await selection.read_authority_clock_ms()
+        rejection = generic_recovery_entry_rejection(authority=authority,selection_spec_id=control.selection_spec_id,
+            selection_epoch_id=control.selection_epoch_id,selection_mode=control.selection_mode.value,
+            selection_control_version=control.control_version,owner_control_version=owner.control_version,
+            event_spec_id=scope.event_spec_id,position_side=scope.position_side,universe_version_id=scope.universe_version_id,
+            exchange_instrument_id=scope.exchange_instrument_id,birth_selection_authority_id=selection_authority_id,
+            allow_current_as_birth=False,observed_close_time_ms=observed_at_ms,now_ms=now)
+        if rejection is not None:
+            raise RuntimeError(rejection)
+        policy = await PostgresEntryAdmissionRepository(self._connection).get_owner_policy(scope.owner_policy_id)
+        if policy is None or not policy.enabled or not policy.new_entry_submit_enabled or policy.scope is None or not policy.scope.authorizes(
+            event_spec_id=scope.event_spec_id,runtime_profile_id=scope.runtime_profile_id):
+            raise RuntimeError("Recovery Observation Policy blocked")
+        if await self.selection_authority_was_interrupted(strategy_group_id=scope.strategy_group_id,
+            selection_spec_id=proof.selection_spec_id,owner_policy_id=scope.owner_policy_id,
+            after_ms=authority.created_at_ms,through_ms=now):
+            raise RuntimeError("Recovery Observation authority interrupted")
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        actual = await universes.get_current(scope.event_spec_id)
+        members = await self.get_observation_universe_members(event_spec_id=scope.event_spec_id,universe_version_id=scope.universe_version_id)
+        from src.trading_kernel.domain.selection_authority import (
+            selected_member_set_digest,
+        )
+        if actual is None or members is None or actual.universe_version_id!=scope.universe_version_id or (
+            members.lifecycle_state!="active" or selected_member_set_digest(members.exchange_instrument_ids)!=proof.event_binding.member_set_digest):
+            raise RuntimeError("Recovery Observation Universe changed")
+        comparison = await selection.get_comparison_universe_binding(scope.event_spec_id,for_update=True) if proof.comparison_universe_id else None
+        if proof.comparison_universe_id is not None and (comparison is None or comparison.comparison_universe_id!=proof.comparison_universe_id
+            or comparison.comparison_transition_revision!=proof.comparison_transition_revision):
+            raise RuntimeError("Recovery Observation comparison changed")
+        key = build_episode_domain_key(event_spec_id=scope.event_spec_id,exchange_instrument_id=scope.exchange_instrument_id,position_side=scope.position_side)
+        episode = await self.lock_exposure_episode(key)
+        recovery = await self.get_authority_recovery_checkpoint(key)
+        if recovery is None or (recovery.recovery_id,recovery.recovery_revision,recovery.effective_from_ms,recovery.first_eligible_close_time_ms)!=(
+            proof.recovery_close_plan.recovery_id,proof.recovery_close_plan.recovery_revision,proof.committed_at_ms,proof.first_eligible_close_time_ms):
+            raise RuntimeError("Recovery Observation pending checkpoint changed")
+        checkpoint = await self.get_comparison_episode_checkpoint(key)
+        transition = advance_recovery_bound_exposure_episode(contract=strategy_contract_for(scope.event_spec_id),
+            current_episode=episode,current_recovery=recovery,current_comparison=checkpoint,
+            recovery_id=recovery.recovery_id,recovery_revision=recovery.recovery_revision,effective_from_ms=recovery.effective_from_ms,
+            first_eligible_close_time_ms=recovery.first_eligible_close_time_ms,detector_status=detector_status,occurred_at_ms=occurred_at_ms,
+            observed_at_ms=observed_at_ms,exchange_instrument_id=scope.exchange_instrument_id,selection_mode=proof.selection_mode,
+            universe_version_id=scope.universe_version_id,comparison_binding=comparison)
+        if transition.recovery_checkpoint==recovery:
+            return transition
+        async with self._connection.begin_nested():
+            if transition.comparison_checkpoint is not None and transition.comparison_checkpoint != checkpoint:
+                await self.save_comparison_episode_transition(ComparisonBoundExposureEpisodeTransition(
+                    checkpoint=transition.comparison_checkpoint,episode_transition=transition.episode_transition,
+                    signal_eligible=transition.signal_eligible,suppression_reason=transition.suppression_reason),
+                    event_spec_id=scope.event_spec_id,exchange_instrument_id=scope.exchange_instrument_id,position_side=scope.position_side,
+                    expected_episode_version=0 if episode is None else episode.projection_version,
+                    expected_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version)
+            elif transition.episode_transition is not None:
+                await self.save_exposure_episode(transition.episode_transition.current,expected_version=0 if episode is None else episode.projection_version)
+            nxt = transition.recovery_checkpoint
+            placeholder_values = {}
+            if transition.episode_transition is None and episode is not None and episode.state=="authority_rebase_required":
+                # This is now a real suppressed Observation, unlike grant-time
+                # initialization. Advance its cursor without minting an arm/ID.
+                placeholder_values = {"last_observed_at_ms":observed_at_ms,"projection_version":episode.projection_version+1}
+            changed = await self._connection.execute(sa.update(exposure_episode_current).where(
+                exposure_episode_current.c.episode_domain_key==key,
+                exposure_episode_current.c.authority_recovery_checkpoint_version==recovery.projection_version,
+                exposure_episode_current.c.authority_recovery_id==recovery.recovery_id,
+            ).values(**placeholder_values,authority_recovery_armed_at_ms=nxt.armed_at_close_time_ms,authority_recovery_last_observed_at_ms=nxt.last_observed_close_time_ms,
+                authority_recovery_last_detector_status=None if nxt.last_detector_status is None else nxt.last_detector_status.value,
+                authority_recovery_checkpoint_version=nxt.projection_version))
+            if changed.rowcount!=1:
+                raise RuntimeError("Recovery Observation checkpoint CAS changed")
+            if await selection.read_authority_clock_ms()>=authority.expires_at_ms:
+                raise RuntimeError("Recovery Observation authority expired during commit")
+        return transition
 
     async def get_authority_recovery_checkpoint(self, episode_domain_key: str) -> AuthorityRecoveryCheckpoint | None:
         row = (await self._connection.execute(sa.select(exposure_episode_current).where(
