@@ -30,7 +30,11 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallStatus,
     install_strategy_universe,
 )
-from src.trading_kernel.application.ports import KernelUnitOfWork, UnitOfWorkFactory
+from src.trading_kernel.application.ports import (
+    KernelUnitOfWork,
+    SelectionPersistenceConflict,
+    UnitOfWorkFactory,
+)
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
     build_current_final_close_grant_proof,
@@ -63,6 +67,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
     ContinuitySourceKind,
     CurrentSelectionAuthority,
+    GenericRecoveryAuthority,
     GenericSelectionAuthority,
     MaterializationGeneration,
     MaterializationGenerationClaimStatus,
@@ -1315,8 +1320,32 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
                 materialization_generation_id=initial.materialization_generation_id)
         if initial.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
+            control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
+            committed = await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)
+            if committed is not None and isinstance(committed.authority,GenericRecoveryAuthority) and (
+                committed.authority.materialization_generation_id==initial.materialization_generation_id):
+                try:
+                    recovered = await uow.instrument_selection.commit_generic_static_recovery(committed.authority.recovery_proof)
+                except SelectionPersistenceConflict as exc:
+                    return _blocked(str(exc))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
+                    selection_authority_id=recovered.selection_authority_id,materialization_generation_id=initial.materialization_generation_id)
             vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=initial.strategy_group_id,
                 selection_spec_id=initial.selection_spec_id,for_update=True)
+            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
+                control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and committed is None
+                and vacuum is not None and vacuum.source_generation_id==initial.materialization_generation_id):
+                try:
+                    recovery_proof = await uow.instrument_selection.prepare_generic_recovery_grant_proof(initial.materialization_generation_id)
+                except SelectionPersistenceConflict:
+                    # Existing failed attempt remains fenced. Retry readiness
+                    # later; preparation writes no facts and cannot grant Entry.
+                    recovery_proof = None
+                if recovery_proof is not None:
+                    recovered = await uow.instrument_selection.commit_generic_static_recovery(recovery_proof)
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
+                        selection_authority_id=recovered.selection_authority_id,materialization_generation_id=initial.materialization_generation_id,
+                        entry_vacuum_id=vacuum.entry_vacuum_id)
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
                 materialization_generation_id=initial.materialization_generation_id,selection_snapshot_id=initial.selection_snapshot_id,
                 entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,

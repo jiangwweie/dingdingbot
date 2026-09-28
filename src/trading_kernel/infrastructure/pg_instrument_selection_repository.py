@@ -11,7 +11,10 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.trading_kernel.application.ports import SelectionJobRecord
+from src.trading_kernel.application.ports import (
+    SelectionJobRecord,
+    SelectionPersistenceConflict,
+)
 from src.trading_kernel.application.recover_expired_dynamic_activation import (
     ExpiredDynamicActivationRecoveryBlocked,
     ExpiredDynamicActivationRecoveryStatus,
@@ -180,7 +183,7 @@ class SelectionAuthorityVersionConflict(RuntimeError):
     """The current Authority pointer differs from the caller's locked view."""
 
 
-class SelectionJobConflict(RuntimeError):
+class SelectionJobConflict(SelectionPersistenceConflict):
     """The exact Selection Job is already owned or has a conflicting result."""
 
 

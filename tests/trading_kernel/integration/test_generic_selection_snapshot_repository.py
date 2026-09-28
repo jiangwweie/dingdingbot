@@ -1921,8 +1921,17 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 for cursor in proposal.observation_cursors:
                     assert await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key) is None
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
-            async with PostgresKernelUnitOfWork(database) as recovery_uow:
-                committed_recovery = await recovery_uow.instrument_selection.commit_generic_static_recovery(proposal)
+            coordinated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda:now)
+        assert coordinated.disposition == MaterializationDisposition.FALLBACK_PREVIOUS
+        async with PostgresKernelUnitOfWork(database) as recovery_uow:
+            committed_current = await recovery_uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            assert committed_current is not None
+            committed_recovery = committed_current.authority
+            assert coordinated.selection_authority_id == committed_recovery.selection_authority_id
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)):
+            retried_coordinator = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+1)
+        assert retried_coordinator.selection_authority_id == coordinated.selection_authority_id
         await database.dispose()
         async with PostgresKernelUnitOfWork(database) as restarted:
             current = await restarted.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)

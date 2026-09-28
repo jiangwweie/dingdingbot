@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+首次Static恢复Coordinator验证：Generic repository + SOR materialization组合211 passed；四策略专项4 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。测试证明正式Coordinator独立提交/重复tick及重连读取，不代表恢复Observation/ENTRY已开放，未执行完整R4，生产未修改。
+
+首次Static恢复Coordinator接线（基于`829e4b4a`）：FAILED_CLOSED分支在Owner pause之后读取Control/current/Vacuum；exact Static pending且尚无current时调用DB prepare→atomic commit，返回FALLBACK_PREVIOUS及原Vacuum；已有同Generation Recovery current则走正式幂等commit读取原Authority。应用层新增SelectionPersistenceConflict端口异常基类，PG原SelectionJobConflict继承它，Coordinator不导入PG模块、不吞SQL错误。准备事实冲突不写grant，保留原failure blocker等待后续合法事实；Dynamic recovery仍保持原显式阻断。
+
+四策略首次recovery专项将原“直接仓储提交”改为正式Coordinator入口，独立UoW commit、重复tick同Authority、重连读回及不重复事件通过。ENTRY recovery消费者未接线，现有runtime-not-installed gate仍拒绝发单，不把DB恢复写入视为自然Signal→Ticket完成；计划GS-04～09仍IN_PROGRESS，生产未修改。
+
 Static恢复SQL提交最终验证：Docker恢复后Generic repository + Generic migration + SOR materialization组合223 passed；最终幂等Universe/expiry及事件不重复断言以四策略专项4 passed复验；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。成功入口已完成真实独立UoW提交并重连exact-read；负例在延迟约束处拒绝半提交。未完成Coordinator调用、recovery Observation/ENTRY消费及Dynamic恢复，不声明GS-08/09完成，不构成R4或部署授权。
 
 2026-09-28恢复提交接续验证：前轮PG进程handle已丢失，不能推定通过；重跑发现Docker daemon关闭/5432拒绝连接，启动本机Docker Desktop后既有dingdingbot-pg恢复healthy，未使用其他PG或生产数据库。首次环境错误批次（8 failed/213 errors）不作为代码验证结果，后续重新执行受影响组合。

@@ -133,6 +133,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityGapScopeResult,
     CurrentGenericSelectionAuthority,
     CurrentSelectionAuthority,
+    GenericRecoveryAuthority,
     GenericRecoveryGrantProof,
     GenericSelectionAuthority,
     MaterializationGeneration,
@@ -1538,7 +1539,12 @@ class SelectionJobRecord(BaseModel):
         return self
 
 
+class SelectionPersistenceConflict(RuntimeError):
+    """A Selection operation cannot proceed against current durable facts."""
+
+
 class InstrumentSelectionRepository(Protocol):
+    async def commit_generic_static_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority: ...
     async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof: ...
     async def require_generic_recovery_grant_proof(self, proof: GenericRecoveryGrantProof) -> int: ...
     async def read_authority_clock_ms(self) -> int: ...
