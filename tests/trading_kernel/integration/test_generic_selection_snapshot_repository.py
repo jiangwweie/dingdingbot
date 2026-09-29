@@ -129,6 +129,7 @@ from tests.trading_kernel.support.generic_selection import (
     shift_window,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
+    brf2_short_snapshot,
     cpm_flat_snapshot,
     cpm_long_snapshot,
     mi_long_snapshot,
@@ -1984,6 +1985,48 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         from src.trading_kernel.application.ingest_signal import (
             resolve_selection_observation_authority,
         )
+        template = {"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot,"BRF2-001":brf2_short_snapshot}[source.spec.strategy_group_id]()
+        delta = first_close-template.trigger_candle_close_time_ms
+        class FirstRecoveryMarket:
+            def __init__(self):
+                self.calls = []
+
+            async def fetch_closed_candles(self, request):
+                self.calls.append(request)
+                candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)
+
+        async with PostgresKernelUnitOfWork(database) as producer_uow:
+            assert producer_uow._connection is not None
+            probe = await producer_uow._connection.begin_nested()
+            @asynccontextmanager
+            async def borrowed_producer_transaction():
+                yield producer_uow
+            class MissingRecoveryMarket:
+                async def fetch_closed_candles(self, request):
+                    return ()
+            invalid_probe = await producer_uow._connection.begin_nested()
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+1)):
+                invalid = await observe_strategy_scope(borrowed_producer_transaction,MissingRecoveryMarket(),
+                    ObservationRequest(runtime_scope_id=recovery_scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                        trigger_candle_close_time_ms=first_close,attempted_at_ms=first_close+1))
+            assert invalid.status == ObservationStatus.INVALID
+            pending_checkpoint = await producer_uow.signals.get_authority_recovery_checkpoint(proposal.observation_cursors[0].episode_domain_key)
+            assert pending_checkpoint.last_observed_close_time_ms is None and pending_checkpoint.armed_at_close_time_ms is None
+            await invalid_probe.rollback()
+            market = FirstRecoveryMarket()
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+1)):
+                observed = await observe_strategy_scope(borrowed_producer_transaction,market,
+                    ObservationRequest(runtime_scope_id=recovery_scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                        trigger_candle_close_time_ms=first_close,attempted_at_ms=first_close+1))
+            assert observed.status == ObservationStatus.NO_SIGNAL, observed
+            assert observed.detector_reason == "RECOVERY_REBASE_REQUIRED", observed
+            assert market.calls
+            assert await producer_uow._connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 0
+            checkpoint = await producer_uow.signals.get_authority_recovery_checkpoint(proposal.observation_cursors[0].episode_domain_key)
+            assert checkpoint.last_detector_status is DetectorStatus.TRIGGERED
+            assert checkpoint.armed_at_close_time_ms is None
+            await probe.rollback()
         async with PostgresKernelUnitOfWork(database) as authorized_uow:
             recovered_scope = await authorized_uow.signals.get_runtime_scope(recovery_scope)
             args = {"runtime_scope":recovered_scope,"birth_selection_authority_id":None,

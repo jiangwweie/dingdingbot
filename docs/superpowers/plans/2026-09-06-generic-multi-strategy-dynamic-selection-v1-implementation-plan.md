@@ -361,6 +361,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+其余策略恢复行情证据（基于`c08c3832`）：MPG/MI/BRF2补充正式observe_strategy_scope + ClosedCandle source + 原Detector的首trigger抑制验证，读取原Static比较集合，保存REBASE_REQUIRED/triggered checkpoint且无Signal。缺失行情返回INVALID，checkpoint仍无观察/无arm，不能伪装NOT_TRIGGERED。三策略使用共享真实PG事务与savepoint回滚以保留后续仓储负例，不是独立持久化或真实网络事务边界证明；CPM原独立事务三close生成唯一Signal回归保留。四策略专项4 passed、相关Ruff/diff通过。此轮仅测试，不修改生产源码；MPG/MI跨period恢复与完整Selector→Ticket链仍未完成，生产未修改。
+
 恢复消费初步接线验证：Generic repository + 原Observation + Selection ENTRY authority组合155 passed；最终I/O后锁定再验证改动后CPM真实行情专项1 passed，BRF2 resolver补充专项1 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。组合启动后的小修订另以对应专项覆盖，不将其称为完整exact-R4；未执行自然Selector→Ticket→terminal全链，生产未修改。
 
 正式恢复Observation/ENTRY授权接线（基于`7179d566`）：新增独立observation授权入口，与ENTRY共享Owner/Control/Vacuum/current/scope/binding/time检查；Recovery observation只要求exact已初始化checkpoint，允许Detector产生NOT_TRIGGERED完成rebase，ENTRY额外要求同recovery identity/revision/commit/first-close下已ARMED且当前记录为Signal close的TRIGGERED。删除旧runtime-not-installed占位拒绝；过期Recovery仍明确拒绝，不落回裸Static。normal/SOR原入口继续走原规则。
