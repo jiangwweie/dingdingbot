@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+Recovery最新close修复收尾：Static recovery PG专项4 passed、Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed；未重复完整PG/Full-chain/R4。正式恢复Observation/ENTRY消费和其余GS-04～09交付仍未完成，生产未修改。
+
+Recovery Observation最新close补强（基于`c1ba6ac7`）：RED证明恢复仓储可在下一小时消费过时的NOT_TRIGGERED并arming；现入事务要求observed close等于数据库时钟的最新hourly close，写入后再次检查同close窗口与时间不倒退，越界/倒退由内部savepoint回滚。四策略恢复专项4 passed；4h策略覆盖过时close拒绝，四策略覆盖末次clock倒退回滚及无checkpoint副作用。此入口仍未接正式Observation producer，不修改普通切换05:00:08消费最新05:00的合法规则，生产未修改。
+
 恢复Observation仓储收尾：Generic repository + 原Observation模块151 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。组合包括新增恢复checkpoint真实持久化与原观察并发回归，不替代Generic自然producer/ENTRY full-chain，生产未修改，GS-04～09保持IN_PROGRESS。
 
 恢复Observation原子仓储增量（基于`7d793b9e`）：新增advance_recovery_observation，以exact scope/current Recovery Authority读取Owner/Control/Policy、Vacuum、Universe成员、comparison及已初始化checkpoint，拒绝过期/错误birth/time/身份及中断历史；复用纯recovery+comparison+Episode reducer，在同savepoint内写普通Episode、comparison checkpoint和recovery版本CAS，末次DB时钟过期整段回滚。首个真实但被抑制的观察推进authority_rebase_required占位的last_observed与版本，仍无Episode ID/arm；与grant-time无观察占位明确区分。重复close不重复写入。

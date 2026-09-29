@@ -363,6 +363,8 @@ class PostgresSignalRepository:
         authority = current.authority
         proof = authority.recovery_proof
         now = await selection.read_authority_clock_ms()
+        if observed_at_ms != now//3_600_000*3_600_000:
+            raise RuntimeError("Recovery Observation must consume the latest close")
         rejection = generic_recovery_entry_rejection(authority=authority,selection_spec_id=control.selection_spec_id,
             selection_epoch_id=control.selection_epoch_id,selection_mode=control.selection_mode.value,
             selection_control_version=control.control_version,owner_control_version=owner.control_version,
@@ -432,8 +434,11 @@ class PostgresSignalRepository:
                 authority_recovery_checkpoint_version=nxt.projection_version))
             if changed.rowcount!=1:
                 raise RuntimeError("Recovery Observation checkpoint CAS changed")
-            if await selection.read_authority_clock_ms()>=authority.expires_at_ms:
+            committed_at = await selection.read_authority_clock_ms()
+            if committed_at>=authority.expires_at_ms:
                 raise RuntimeError("Recovery Observation authority expired during commit")
+            if committed_at<now or observed_at_ms!=committed_at//3_600_000*3_600_000:
+                raise RuntimeError("Recovery Observation latest close changed during commit")
         return transition
 
     async def get_authority_recovery_checkpoint(self, episode_domain_key: str) -> AuthorityRecoveryCheckpoint | None:

@@ -1959,6 +1959,12 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='STATIC_RECOVERY_COMMITTED'"),{"gid":persisted.materialization_generation_id}) == 1
             recovery_scope = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":previous_uid})
         first_close = committed_recovery.first_eligible_close_time_ms
+        if first_close+HOUR+1<committed_recovery.expires_at_ms:
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+HOUR+1)), pytest.raises(RuntimeError,match="latest close"):
+                async with PostgresKernelUnitOfWork(database) as observed_uow:
+                    await observed_uow.signals.advance_recovery_observation(runtime_scope_id=recovery_scope,
+                        selection_authority_id=committed_recovery.selection_authority_id,observed_at_ms=first_close,
+                        detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None)
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+1)):
             async with PostgresKernelUnitOfWork(database) as observed_uow:
                 with pytest.raises(RuntimeError,match="current authority"):
@@ -1969,6 +1975,12 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                         selection_authority_id=committed_recovery.selection_authority_id,observed_at_ms=first_close,detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=first_close)
                 old_checkpoint = await observed_uow.signals.get_authority_recovery_checkpoint(proposal.observation_cursors[0].episode_domain_key)
                 assert old_checkpoint.last_observed_close_time_ms is None
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[first_close+1,first_close])), pytest.raises(RuntimeError,match="latest close changed"):
+                    await observed_uow.signals.advance_recovery_observation(runtime_scope_id=recovery_scope,
+                        selection_authority_id=committed_recovery.selection_authority_id,observed_at_ms=first_close,
+                        detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=first_close)
+                unchanged = await observed_uow.signals.get_authority_recovery_checkpoint(proposal.observation_cursors[0].episode_domain_key)
+                assert unchanged == old_checkpoint
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+1)):
             async with PostgresKernelUnitOfWork(database) as observed_uow:
                 transition = await observed_uow.signals.advance_recovery_observation(runtime_scope_id=recovery_scope,
