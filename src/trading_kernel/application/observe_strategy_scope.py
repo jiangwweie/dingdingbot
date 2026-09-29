@@ -11,7 +11,7 @@ from src.trading_kernel.application.ingest_signal import (
     IngestSignalRequest,
     IngestSignalStatus,
     ingest_signal,
-    resolve_selection_entry_authority,
+    resolve_selection_observation_authority,
 )
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
@@ -314,8 +314,9 @@ async def observe_strategy_scope(
                 reason="registry_scope_mismatch",
             )
         selection_authority_id = None
+        recovery_observation = False
         if scope.lifecycle_state == "active":
-            selection = await resolve_selection_entry_authority(
+            selection = await resolve_selection_observation_authority(
                 uow,
                 runtime_scope=scope,
                 birth_selection_authority_id=None,
@@ -337,6 +338,7 @@ async def observe_strategy_scope(
                     reason=selection.reason_code,
                 )
             selection_authority_id = selection.selection_authority_id
+            recovery_observation = selection.reason_code == "generic_recovery_observation"
         product_session: ProductSessionSnapshot | None = None
         comparison_lookback = comparative_lookback_bars(contract.event_spec_id)
         comparative_projection: ComparativeUniverseProjection | None = None
@@ -502,6 +504,14 @@ async def observe_strategy_scope(
                 reason="warm_facts_invalid",
             )
     async with uow_factory() as uow:
+        if recovery_observation:
+            # Revalidate under Owner/Control/current/Episode locks before the
+            # comparison lock or any Facts write. Market I/O happened outside.
+            refreshed_selection = await resolve_selection_observation_authority(uow,runtime_scope=scope,
+                birth_selection_authority_id=selection_authority_id,observed_close_time_ms=request.trigger_candle_close_time_ms,
+                now_ms=attempted_at_ms,allow_current_as_birth=False,lock_current=True)
+            if not refreshed_selection.allowed:
+                return _invalid_observation(request,event_spec_id=contract.event_spec_id,reason=refreshed_selection.reason_code)
         if comparative_source is not None:
             try:
                 current_comparison = await uow.strategy_universes.get_comparative_source(
@@ -584,7 +594,21 @@ async def observe_strategy_scope(
             )
         exposure_episode_id = None
         if contract.episode_policy == "rising_edge":
-            if comparison_revision > 0 and comparative_digest is not None:
+            if recovery_observation:
+                if selection_authority_id is None:
+                    raise RuntimeError("Recovery Observation lost Authority identity")
+                recovered = await uow.signals.advance_recovery_observation(runtime_scope_id=scope.runtime_scope_id,
+                    selection_authority_id=selection_authority_id,observed_at_ms=request.trigger_candle_close_time_ms,
+                    detector_status=detector_result.status,
+                    occurred_at_ms=detector_result.occurred_at_ms if detector_result.status is DetectorStatus.TRIGGERED else None)
+                if recovered.episode_transition is None:
+                    reason = recovered.suppression_reason or "RECOVERY_REBASE_REQUIRED"
+                    await _save_observation_blocker(uow,scope=scope,blocker=reason,detector_reason=reason,
+                        updated_at_ms=request.trigger_candle_close_time_ms)
+                    return ObservationResult(status=ObservationStatus.NO_SIGNAL,runtime_scope_id=scope.runtime_scope_id,
+                        event_spec_id=contract.event_spec_id,detector_reason=reason,signal_event_id=None,current_fact_count=len(persisted_facts))
+                episode_transition = recovered.episode_transition
+            elif comparison_revision > 0 and comparative_digest is not None:
                 checkpoint = await uow.signals.get_comparison_episode_checkpoint(
                     build_episode_domain_key(event_spec_id=contract.event_spec_id,
                         exchange_instrument_id=scope.exchange_instrument_id, position_side=contract.position_side))

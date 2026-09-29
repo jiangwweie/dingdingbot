@@ -129,6 +129,8 @@ from tests.trading_kernel.support.generic_selection import (
     shift_window,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
+    cpm_flat_snapshot,
+    cpm_long_snapshot,
     mi_long_snapshot,
     mpg_long_snapshot,
 )
@@ -1959,6 +1961,37 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='STATIC_RECOVERY_COMMITTED'"),{"gid":persisted.materialization_generation_id}) == 1
             recovery_scope = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":previous_uid})
         first_close = committed_recovery.first_eligible_close_time_ms
+        if source.spec.strategy_group_id == "CPM-RO-001":
+            for offset, template, expected_status in ((0,cpm_long_snapshot(),ObservationStatus.NO_SIGNAL),
+                (1,cpm_flat_snapshot(),ObservationStatus.NO_SIGNAL),(2,cpm_long_snapshot(),ObservationStatus.SIGNAL_CREATED)):
+                observation_close = first_close+offset*HOUR
+                delta = observation_close-template.trigger_candle_close_time_ms
+                class RecoveryMarket:
+                    async def fetch_closed_candles(self, request, template=template, delta=delta):
+                        candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                        return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=observation_close+1)):
+                    result = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),RecoveryMarket(),
+                        ObservationRequest(runtime_scope_id=recovery_scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                            trigger_candle_close_time_ms=observation_close,attempted_at_ms=observation_close+1))
+                assert result.status == expected_status, result
+                if offset == 0:
+                    assert result.detector_reason == "RECOVERY_REBASE_REQUIRED"
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            return
+        from src.trading_kernel.application.ingest_signal import (
+            resolve_selection_observation_authority,
+        )
+        async with PostgresKernelUnitOfWork(database) as authorized_uow:
+            recovered_scope = await authorized_uow.signals.get_runtime_scope(recovery_scope)
+            args = {"runtime_scope":recovered_scope,"birth_selection_authority_id":None,
+                "observed_close_time_ms":first_close,"now_ms":first_close+1,"allow_current_as_birth":True,"lock_current":True}
+            observation_permission = await resolve_selection_observation_authority(authorized_uow,**args)
+            assert observation_permission.allowed
+            entry_permission = await resolve_selection_entry_authority(authorized_uow,**args)
+            assert not entry_permission.allowed and entry_permission.reason_code == "RECOVERY_REBASE_REQUIRED"
         if first_close+HOUR+1<committed_recovery.expires_at_ms:
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+HOUR+1)), pytest.raises(RuntimeError,match="latest close"):
                 async with PostgresKernelUnitOfWork(database) as observed_uow:
@@ -2008,6 +2041,11 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                         detector_status=status,occurred_at_ms=close_time if status is DetectorStatus.TRIGGERED else None)
                     assert progressed.recovery_checkpoint.state == "ARMED"
                     assert progressed.signal_eligible == (status is DetectorStatus.TRIGGERED)
+                    current_scope = await observed_uow.signals.get_runtime_scope(recovery_scope)
+                    admitted = await resolve_selection_entry_authority(observed_uow,runtime_scope=current_scope,
+                        birth_selection_authority_id=committed_recovery.selection_authority_id,observed_close_time_ms=close_time,
+                        now_ms=close_time+1,allow_current_as_birth=False,lock_current=True)
+                    assert admitted.allowed == (status is DetectorStatus.TRIGGERED)
 
 
 async def _assert_generic_empty_handoff(database, source, original, vacuum):

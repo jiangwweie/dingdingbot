@@ -361,6 +361,12 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+恢复消费初步接线验证：Generic repository + 原Observation + Selection ENTRY authority组合155 passed；最终I/O后锁定再验证改动后CPM真实行情专项1 passed，BRF2 resolver补充专项1 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。组合启动后的小修订另以对应专项覆盖，不将其称为完整exact-R4；未执行自然Selector→Ticket→terminal全链，生产未修改。
+
+正式恢复Observation/ENTRY授权接线（基于`7179d566`）：新增独立observation授权入口，与ENTRY共享Owner/Control/Vacuum/current/scope/binding/time检查；Recovery observation只要求exact已初始化checkpoint，允许Detector产生NOT_TRIGGERED完成rebase，ENTRY额外要求同recovery identity/revision/commit/first-close下已ARMED且当前记录为Signal close的TRIGGERED。删除旧runtime-not-installed占位拒绝；过期Recovery仍明确拒绝，不落回裸Static。normal/SOR原入口继续走原规则。
+
+observe_strategy_scope在行情I/O前使用observation权限，I/O后按Owner/Control/current锁顺序再次核验，随后调用正式PG advance_recovery_observation；抑制结果仅更新Facts/readiness，不生成Signal；合法Episode继续原produce/ingest链。CPM真实ClosedCandle输入经正式Detector验证首TRIGGERED抑制→下一NOT_TRIGGERED→再TRIGGERED生成唯一Signal，零Exchange Command。原Static Universe/恢复前置仍由fixture建立，这不是自然Selector→Ticket full-chain；BRF2额外验证仓储推进后只有TRIGGERED的exact-birth ENTRY resolver通过。MPG/MI跨period接续、Dynamic recovery、四ENTRY边界与全部策略真实行情链继续未完成。
+
 Recovery最新close修复收尾：Static recovery PG专项4 passed、Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed；未重复完整PG/Full-chain/R4。正式恢复Observation/ENTRY消费和其余GS-04～09交付仍未完成，生产未修改。
 
 Recovery Observation最新close补强（基于`c1ba6ac7`）：RED证明恢复仓储可在下一小时消费过时的NOT_TRIGGERED并arming；现入事务要求observed close等于数据库时钟的最新hourly close，写入后再次检查同close窗口与时间不倒退，越界/倒退由内部savepoint回滚。四策略恢复专项4 passed；4h策略覆盖过时close拒绝，四策略覆盖末次clock倒退回滚及无checkpoint副作用。此入口仍未接正式Observation producer，不修改普通切换05:00:08消费最新05:00的合法规则，生产未修改。

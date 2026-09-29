@@ -238,12 +238,15 @@ async def test_current_recovery_cannot_fall_through_to_static_or_normal_entry(st
         control_version=proof.selection_control_version)
     scope = SimpleNamespace(strategy_group_id=proof.strategy_group_id,event_spec_id=proof.event_binding.event_spec_id,
         position_side=proof.event_binding.position_side,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
-        universe_version_id=proof.event_binding.universe_version_id,exchange_instrument_id=proof.observation_cursors[0].exchange_instrument_id)
+        universe_version_id=proof.event_binding.universe_version_id,universe_semantic_digest="digest:test",exchange_instrument_id=proof.observation_cursors[0].exchange_instrument_id)
     uow = SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control),
         get_current_entry_vacuum=AsyncMock(return_value=None),get_current_generic_authority=AsyncMock(return_value=CurrentGenericSelectionAuthority(authority=authority,projection_version=1))),
         owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=SimpleNamespace(entry_state=SimpleNamespace(value="enabled"),control_version=proof.owner_control_version))),
-        entry_admission=SimpleNamespace(get_owner_policy=AsyncMock(return_value=SimpleNamespace(enabled=True,new_entry_submit_enabled=True,scope=SimpleNamespace(authorizes=lambda **_:True)))))
+        entry_admission=SimpleNamespace(get_owner_policy=AsyncMock(return_value=SimpleNamespace(enabled=True,new_entry_submit_enabled=True,scope=SimpleNamespace(authorizes=lambda **_:True)))),
+        strategy_universes=SimpleNamespace(get_current=AsyncMock(return_value=SimpleNamespace(universe_version_id=proof.event_binding.universe_version_id,semantic_digest="digest:test"))),
+        signals=SimpleNamespace(get_observation_universe_members=AsyncMock(return_value=SimpleNamespace(lifecycle_state="active",semantic_digest="digest:test",exchange_instrument_ids=(scope.exchange_instrument_id,))),
+            selection_authority_was_interrupted=AsyncMock(return_value=False),get_authority_recovery_checkpoint=AsyncMock(return_value=None)))
     result = await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=None,
         observed_close_time_ms=authority.first_eligible_close_time_ms,now_ms=authority.expires_at_ms+1 if expired else authority.first_eligible_close_time_ms+1,
         allow_current_as_birth=True)
-    assert not result.allowed and result.reason_code == "selection_recovery_rebase_runtime_not_installed"
+    assert not result.allowed and result.reason_code == ("selection_recovery_not_effective" if expired else "RECOVERY_REBASE_AUTHORITY_CHANGED")

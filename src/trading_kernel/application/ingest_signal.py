@@ -8,6 +8,10 @@ from itertools import pairwise
 from pydantic import BaseModel, ConfigDict
 
 from src.trading_kernel.application.ports import KernelUnitOfWork, RuntimeScopeSnapshot
+from src.trading_kernel.domain.authority_recovery_rebase import (
+    recovery_rebase_entry_rejection,
+)
+from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
 from src.trading_kernel.domain.instrument_selection import (
     SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
@@ -21,6 +25,7 @@ from src.trading_kernel.domain.selection_authority import (
     UniverseAuthorityPair,
     authority_successor_is_compatible,
     generic_authority_entry_rejection,
+    generic_recovery_entry_rejection,
     selected_member_set_digest,
     selection_authority_allows_new_entry,
 )
@@ -312,6 +317,23 @@ async def resolve_selection_entry_authority(
     allow_current_as_birth: bool,
     lock_current: bool = False,
 ) -> SelectionEntryAuthorityDecision:
+    return await _resolve_selection_authority(uow,runtime_scope=runtime_scope,birth_selection_authority_id=birth_selection_authority_id,
+        observed_close_time_ms=observed_close_time_ms,now_ms=now_ms,allow_current_as_birth=allow_current_as_birth,lock_current=lock_current,
+        recovery_observation=False)
+
+
+async def resolve_selection_observation_authority(uow: KernelUnitOfWork, *, runtime_scope: RuntimeScopeSnapshot,
+    birth_selection_authority_id: str | None, observed_close_time_ms: int, now_ms: int,
+    allow_current_as_birth: bool, lock_current: bool = False) -> SelectionEntryAuthorityDecision:
+    """Allow authorized recovery observations to establish rebase, not new ENTRY."""
+    return await _resolve_selection_authority(uow,runtime_scope=runtime_scope,birth_selection_authority_id=birth_selection_authority_id,
+        observed_close_time_ms=observed_close_time_ms,now_ms=now_ms,allow_current_as_birth=allow_current_as_birth,lock_current=lock_current,
+        recovery_observation=True)
+
+
+async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: RuntimeScopeSnapshot,
+    birth_selection_authority_id: str | None, observed_close_time_ms: int, now_ms: int,
+    allow_current_as_birth: bool, lock_current: bool, recovery_observation: bool) -> SelectionEntryAuthorityDecision:
     """Read exact bounded PostgreSQL facts and apply the shared pure evaluator."""
 
     # Generic commits lock Owner before Selection Control. Keep action-time
@@ -346,7 +368,7 @@ async def resolve_selection_entry_authority(
     if control.strategy_group_id != "SOR-001":
         return await _resolve_generic_selection_authority(uow,control=control,runtime_scope=runtime_scope,
             birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current,
-            observed_close_time_ms=observed_close_time_ms,allow_current_as_birth=allow_current_as_birth)
+            observed_close_time_ms=observed_close_time_ms,allow_current_as_birth=allow_current_as_birth,recovery_observation=recovery_observation)
 
     current = await uow.instrument_selection.get_current_authority(
         control.selection_spec_id,
@@ -478,6 +500,7 @@ async def _resolve_generic_selection_authority(
     uow: KernelUnitOfWork, *, control: SelectionControl, runtime_scope: RuntimeScopeSnapshot,
     birth_selection_authority_id: str | None, now_ms: int, lock_current: bool,
     observed_close_time_ms: int, allow_current_as_birth: bool,
+    recovery_observation: bool = False,
 ) -> SelectionEntryAuthorityDecision:
     """Exact Generic birth grant plus bounded current Event-set authority facts."""
     current_id: str | None = None
@@ -503,9 +526,44 @@ async def _resolve_generic_selection_authority(
     authority = None if current is None else current.authority
     current_id = None if authority is None else authority.selection_authority_id
     if isinstance(authority, GenericRecoveryAuthority):
-        # Keep recovery fail-closed until Observation can persist the mandatory
-        # rebase and every ENTRY boundary can consume that exact checkpoint.
-        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_rebase_runtime_not_installed")
+        proof = authority.recovery_proof
+        reason = generic_recovery_entry_rejection(authority=authority,selection_spec_id=control.selection_spec_id,
+            selection_epoch_id=control.selection_epoch_id,selection_mode=control.selection_mode.value,
+            selection_control_version=control.control_version,owner_control_version=owner.control_version,
+            event_spec_id=runtime_scope.event_spec_id,position_side=runtime_scope.position_side,
+            universe_version_id=runtime_scope.universe_version_id,exchange_instrument_id=runtime_scope.exchange_instrument_id,
+            birth_selection_authority_id=birth_selection_authority_id,allow_current_as_birth=allow_current_as_birth,
+            observed_close_time_ms=observed_close_time_ms,now_ms=now_ms)
+        if reason is not None:
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+        universe = await uow.strategy_universes.get_current(runtime_scope.event_spec_id)
+        members = await uow.signals.get_observation_universe_members(event_spec_id=runtime_scope.event_spec_id,universe_version_id=runtime_scope.universe_version_id)
+        if universe is None or members is None or members.lifecycle_state!="active" or universe.universe_version_id!=runtime_scope.universe_version_id or (
+            universe.semantic_digest!=runtime_scope.universe_semantic_digest or members.semantic_digest!=runtime_scope.universe_semantic_digest
+            or selected_member_set_digest(members.exchange_instrument_ids)!=proof.event_binding.member_set_digest):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_universe_changed")
+        if proof.comparison_universe_id is not None:
+            comparison = await uow.instrument_selection.get_comparison_universe_binding(runtime_scope.event_spec_id,for_update=lock_current)
+            if comparison is None or comparison.comparison_universe_id!=proof.comparison_universe_id or comparison.comparison_transition_revision!=proof.comparison_transition_revision:
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_comparison_changed")
+        if await uow.signals.selection_authority_was_interrupted(strategy_group_id=control.strategy_group_id,selection_spec_id=control.selection_spec_id,
+            owner_policy_id=runtime_scope.owner_policy_id,after_ms=authority.created_at_ms,through_ms=now_ms):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_interrupted")
+        key = build_episode_domain_key(event_spec_id=runtime_scope.event_spec_id,exchange_instrument_id=runtime_scope.exchange_instrument_id,position_side=runtime_scope.position_side)
+        if lock_current:
+            await uow.signals.lock_exposure_episode(key)
+        checkpoint = await uow.signals.get_authority_recovery_checkpoint(key)
+        if checkpoint is None or (checkpoint.recovery_id,checkpoint.recovery_revision,checkpoint.effective_from_ms,checkpoint.first_eligible_close_time_ms)!=(
+            proof.recovery_close_plan.recovery_id,proof.recovery_close_plan.recovery_revision,proof.committed_at_ms,proof.first_eligible_close_time_ms):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"RECOVERY_REBASE_AUTHORITY_CHANGED")
+        if not recovery_observation:
+            reason = recovery_rebase_entry_rejection(checkpoint=checkpoint,episode_domain_key=key,recovery_id=proof.recovery_close_plan.recovery_id,
+                recovery_revision=proof.recovery_close_plan.recovery_revision,recovery_committed_at_ms=proof.committed_at_ms,
+                first_eligible_close_time_ms=proof.first_eligible_close_time_ms,signal_close_time_ms=observed_close_time_ms)
+            if reason is not None:
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+        return SelectionEntryAuthorityDecision(status=SelectionEntryAuthorityStatus.VALID,selection_authority_id=authority.selection_authority_id,
+            current_selection_authority_id=current_id,reason_code="generic_recovery_observation" if recovery_observation else "generic_recovery_rebased")
     if authority is not None and authority.effective_from_ms <= now_ms < authority.expires_at_ms:
         if authority.selection_epoch_id != control.selection_epoch_id or authority.selection_control_version != control.control_version:
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_control_changed")
@@ -532,11 +590,11 @@ async def _resolve_generic_selection_authority(
             or selected_member_set_digest(members.exchange_instrument_ids) != authority.event_binding.member_set_digest):
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_universe_changed")
         snapshot = await uow.instrument_selection.get_generic_snapshot(authority.selection_snapshot_id)
-        proof = authority.current_close_proof
-        if proof is None or snapshot.selection_spec_id != authority.selection_spec_id or snapshot.selection_epoch_id != authority.selection_epoch_id or (
+        close_proof = authority.current_close_proof
+        if close_proof is None or snapshot.selection_spec_id != authority.selection_spec_id or snapshot.selection_epoch_id != authority.selection_epoch_id or (
             snapshot.selected_members != members.exchange_instrument_ids
             or snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
-            or snapshot.committed_at_ms != proof.selection_committed_at_ms):
+            or snapshot.committed_at_ms != close_proof.selection_committed_at_ms):
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_snapshot_changed")
         if authority.materialization_generation_id is not None:
             generation = await uow.instrument_selection.get_generic_materialization_generation(authority.materialization_generation_id)

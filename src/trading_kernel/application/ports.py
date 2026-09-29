@@ -55,6 +55,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.arbitration import EntryCandidate
 from src.trading_kernel.domain.authority_recovery_rebase import (
     AuthorityRecoveryCheckpoint,
+    RecoveryBoundExposureEpisodeTransition,
 )
 from src.trading_kernel.domain.capacity import CapacityClaim, FamilyTicketLimits
 from src.trading_kernel.domain.commands import (
@@ -70,6 +71,7 @@ from src.trading_kernel.domain.comparison_universe import (
     ComparisonUniverseBinding,
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.detector import DetectorStatus
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
 )
@@ -1059,6 +1061,9 @@ class EntryAdmissionRepository(Protocol):
 
 
 class SignalRepository(Protocol):
+    async def advance_recovery_observation(self, *, runtime_scope_id: str, selection_authority_id: str,
+        observed_at_ms: int, detector_status: DetectorStatus, occurred_at_ms: int | None,
+    ) -> RecoveryBoundExposureEpisodeTransition: ...
     async def add(self, signal: StrategySignal) -> bool: ...
 
     async def get(self, signal_event_id: str) -> StrategySignal | None: ...
