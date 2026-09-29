@@ -102,6 +102,26 @@ def begin_authority_recovery_rebase(*, current: AuthorityRecoveryCheckpoint | No
         last_detector_status=None,projection_version=1 if current is None else current.projection_version+1)
 
 
+def recovery_comparison_entry_rejection(*, checkpoint: ComparisonBindingEpisodeCheckpoint | None,
+    binding: ComparisonUniverseBinding, episode_domain_key: str, signal_close_time_ms: int,
+) -> str | None:
+    """Recovery arming cannot substitute for an independent comparison barrier."""
+    binding = ComparisonUniverseBinding.model_validate(binding.model_dump())
+    if binding.comparison_transition_revision==0:
+        return None if checkpoint is None else "COMPARISON_REBASE_AUTHORITY_CHANGED"
+    if checkpoint is None:
+        return "COMPARISON_REBASE_AUTHORITY_CHANGED"
+    checkpoint = ComparisonBindingEpisodeCheckpoint.model_validate(checkpoint.model_dump())
+    if (checkpoint.episode_domain_key,checkpoint.comparison_binding_digest,checkpoint.comparison_transition_revision)!=(
+        episode_domain_key,binding.member_set_digest,binding.comparison_transition_revision):
+        return "COMPARISON_REBASE_AUTHORITY_CHANGED"
+    if checkpoint.state is not ComparisonBindingEpisodeState.ARMED_UNDER_BINDING or checkpoint.armed_at_ms is None:
+        return "COMPARISON_REBASE_REQUIRED"
+    if checkpoint.last_detector_status is not DetectorStatus.TRIGGERED or checkpoint.last_observed_at_ms!=signal_close_time_ms or signal_close_time_ms<=checkpoint.armed_at_ms:
+        return "COMPARISON_TRIGGER_NOT_CURRENT"
+    return None
+
+
 def recovery_rebase_entry_rejection(*, checkpoint: AuthorityRecoveryCheckpoint | None,
     episode_domain_key: str, recovery_id: str, recovery_revision: int,
     recovery_committed_at_ms: int, first_eligible_close_time_ms: int, signal_close_time_ms: int,

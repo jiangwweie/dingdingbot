@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+双barrier验证：Unit/Architecture1257 passed、四策略Static恢复PG专项4 passed、全源码Mypy、相关Ruff/diff、文档authority25 passed；positive comparison ENTRY拒绝矩阵来自pure组件，PG专项仍主要为Static revision0恢复，不将其扩称全部revision/full-chain认证。生产未修改，GS-04～09继续IN_PROGRESS。
+
+Recovery ENTRY双barrier补强（基于`cb0e8bdc`）：新增recovery_comparison_entry_rejection并接入共享ENTRY resolver的Recovery分支，恢复checkpoint已armed不能替代comparison checkpoint；positive revision必须exact binding digest/revision/key、已armed且同Signal close的真实TRIGGERED晚于arm。Static revision0要求没有矛盾的positive checkpoint，不制造rebase。Observation权限不被该ENTRY-only门槛阻挡，可继续取得合法false；原纯recovery/comparison矩阵验证新comparison抑制与正常触发两种结果。未改Detector/参数或增加authority表，跨period与全链仍未完成。
+
 其余策略恢复行情证据（基于`c08c3832`）：MPG/MI/BRF2补充正式observe_strategy_scope + ClosedCandle source + 原Detector的首trigger抑制验证，读取原Static比较集合，保存REBASE_REQUIRED/triggered checkpoint且无Signal。缺失行情返回INVALID，checkpoint仍无观察/无arm，不能伪装NOT_TRIGGERED。三策略使用共享真实PG事务与savepoint回滚以保留后续仓储负例，不是独立持久化或真实网络事务边界证明；CPM原独立事务三close生成唯一Signal回归保留。四策略专项4 passed、相关Ruff/diff通过。此轮仅测试，不修改生产源码；MPG/MI跨period恢复与完整Selector→Ticket链仍未完成，生产未修改。
 
 恢复消费初步接线验证：Generic repository + 原Observation + Selection ENTRY authority组合155 passed；最终I/O后锁定再验证改动后CPM真实行情专项1 passed，BRF2 resolver补充专项1 passed；Unit/Architecture1257 passed，全源码Mypy、相关Ruff/diff、文档authority25 passed。组合启动后的小修订另以对应专项覆盖，不将其称为完整exact-R4；未执行自然Selector→Ticket→terminal全链，生产未修改。

@@ -203,6 +203,16 @@ def test_recovery_composes_with_real_episode_and_comparison_barriers(group, old_
             occurred_at_ms=8*HOUR,observed_at_ms=8*HOUR)
         assert changed_comparison.suppression_reason == "COMPARISON_REBASE_REQUIRED"
         assert not changed_comparison.signal_eligible and changed_comparison.episode_transition is None
+        from src.trading_kernel.domain.authority_recovery_rebase import (
+            recovery_comparison_entry_rejection,
+        )
+        assert recovery_comparison_entry_rejection(checkpoint=changed_comparison.comparison_checkpoint,
+            binding=binding.model_copy(update={"comparison_transition_revision":2}),episode_domain_key=entry_args["episode_domain_key"],
+            signal_close_time_ms=8*HOUR) == "COMPARISON_REBASE_REQUIRED"
+        assert recovery_comparison_entry_rejection(checkpoint=triggered.comparison_checkpoint,binding=binding,
+            episode_domain_key=entry_args["episode_domain_key"],signal_close_time_ms=8*HOUR) is None
+        assert recovery_comparison_entry_rejection(checkpoint=None,binding=binding,
+            episode_domain_key=entry_args["episode_domain_key"],signal_close_time_ms=8*HOUR) == "COMPARISON_REBASE_AUTHORITY_CHANGED"
         with pytest.raises(ValueError,match="comparison barrier"):
             type(triggered).model_validate({**triggered.model_dump(),"comparison_checkpoint":changed_comparison.comparison_checkpoint})
 

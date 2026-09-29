@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.trading_kernel.application.ports import KernelUnitOfWork, RuntimeScopeSnapshot
 from src.trading_kernel.domain.authority_recovery_rebase import (
+    recovery_comparison_entry_rejection,
     recovery_rebase_entry_rejection,
 )
 from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
@@ -542,6 +543,7 @@ async def _resolve_generic_selection_authority(
             universe.semantic_digest!=runtime_scope.universe_semantic_digest or members.semantic_digest!=runtime_scope.universe_semantic_digest
             or selected_member_set_digest(members.exchange_instrument_ids)!=proof.event_binding.member_set_digest):
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_recovery_universe_changed")
+        comparison = None
         if proof.comparison_universe_id is not None:
             comparison = await uow.instrument_selection.get_comparison_universe_binding(runtime_scope.event_spec_id,for_update=lock_current)
             if comparison is None or comparison.comparison_universe_id!=proof.comparison_universe_id or comparison.comparison_transition_revision!=proof.comparison_transition_revision:
@@ -562,6 +564,12 @@ async def _resolve_generic_selection_authority(
                 first_eligible_close_time_ms=proof.first_eligible_close_time_ms,signal_close_time_ms=observed_close_time_ms)
             if reason is not None:
                 return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+            if comparison is not None:
+                comparison_checkpoint = await uow.signals.get_comparison_episode_checkpoint(key)
+                reason = recovery_comparison_entry_rejection(checkpoint=comparison_checkpoint,binding=comparison,
+                    episode_domain_key=key,signal_close_time_ms=observed_close_time_ms)
+                if reason is not None:
+                    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
         return SelectionEntryAuthorityDecision(status=SelectionEntryAuthorityStatus.VALID,selection_authority_id=authority.selection_authority_id,
             current_selection_authority_id=current_id,reason_code="generic_recovery_observation" if recovery_observation else "generic_recovery_rebased")
     if authority is not None and authority.effective_from_ms <= now_ms < authority.expires_at_ms:
