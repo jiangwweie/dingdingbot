@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+恢复CPM Signal→Ticket证据（基于`e067f728`）：在既有真实ClosedCandle→Detector→恢复rebase→Signal场景后，通过正式issue_ready_signal签发Claim/AdmissionDecision/Ticket及唯一prepared ENTRY Command；Signal、Claim、Decision、Ticket的selection_authority_id均等于已提交Recovery Authority。行动时certification、instrument rules及账户快照为明确测试前置，未直接插入Claim/Ticket/Command。注入recovery revision漂移时正式签发返回selection_authority_invalid，零Ticket/Command，回滚该测试故障后正常签发通过。
+
+四策略恢复专项4 passed（新增Claim/Ticket断言仅CPM）、相关Ruff/diff通过。此证据结束于prepared ENTRY，尚未dispatch、保护/退出/settlement/review；也未从Generic Selection Runner自然产生全部前置，不扩大为GS-09完整full-chain完成。生产未修改。
+
 双barrier验证：Unit/Architecture1257 passed、四策略Static恢复PG专项4 passed、全源码Mypy、相关Ruff/diff、文档authority25 passed；positive comparison ENTRY拒绝矩阵来自pure组件，PG专项仍主要为Static revision0恢复，不将其扩称全部revision/full-chain认证。生产未修改，GS-04～09继续IN_PROGRESS。
 
 Recovery ENTRY双barrier补强（基于`cb0e8bdc`）：新增recovery_comparison_entry_rejection并接入共享ENTRY resolver的Recovery分支，恢复checkpoint已armed不能替代comparison checkpoint；positive revision必须exact binding digest/revision/key、已armed且同Signal close的真实TRIGGERED晚于arm。Static revision0要求没有矛盾的positive checkpoint，不制造rebase。Observation权限不被该ENTRY-only门槛阻挡，可继续取得合法false；原纯recovery/comparison矩阵验证新comparison抑制与正常触发两种结果。未改Detector/参数或增加authority表，跨period与全链仍未完成。

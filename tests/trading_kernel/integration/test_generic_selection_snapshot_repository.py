@@ -1981,6 +1981,63 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             async with database.connect() as conn:
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            from src.trading_kernel.application.issue_ready_signal import (
+                IssueReadySignalRequest,
+                issue_ready_signal,
+            )
+            from src.trading_kernel.domain.cross_margin_stress import (
+                AccountRiskSnapshot,
+                MaintenanceMarginBracket,
+            )
+            from src.trading_kernel.domain.entry_admission_snapshot import (
+                EntryAdmissionSnapshot,
+            )
+            issued_at = first_close+2*HOUR+2
+            # Refresh explicit readonly certification prerequisites at action
+            # time; an expired setup certification is not Entry authority.
+            await make_warming_ready(database,universe_version_id=previous_uid,
+                warm_closed_bar_time_ms=first_close+2*HOUR,valid_until_ms=issued_at+60_000)
+            admission = EntryAdmissionSnapshot(account_risk_snapshot=AccountRiskSnapshot.create(
+                venue_id="binance-usdm",account_id="generic-snapshot",account_risk_mode="standard_usdm_single_asset",
+                settlement_asset="USDT",position_mode="independent_sides",margin_mode="cross",
+                exchange_instrument_id=proposal.observation_cursors[0].exchange_instrument_id,mark_price=Decimal(105),configured_leverage=5,
+                total_wallet_balance=Decimal(1000),total_margin_balance=Decimal(1000),total_initial_margin=Decimal(0),
+                total_maintenance_margin=Decimal(0),available_margin=Decimal(1000),account_positions=(),observed_at_ms=issued_at,valid_until_ms=issued_at+60_000),
+                best_bid_price=Decimal("104.99"),best_ask_price=Decimal(105),open_orders=(),observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
+            async with PostgresKernelUnitOfWork(database) as admission_uow:
+                brackets = (MaintenanceMarginBracket(bracket_id="recovery-test:1",notional_floor=Decimal(0),notional_cap=Decimal(20_000),
+                    maintenance_margin_rate=Decimal("0.005"),maintenance_amount=Decimal(0)),)
+                await admission_uow.signals.upsert_instrument_rules(venue_id="binance-usdm",exchange_instrument_id=proposal.observation_cursors[0].exchange_instrument_id,
+                    quantity_step=Decimal("0.001"),price_tick=Decimal("0.01"),min_quantity=Decimal("0.001"),min_notional=Decimal(5),exchange_max_leverage=5,
+                    maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
+                    notional_coefficient=Decimal(1),notional_coefficient_certified=True,
+                    observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
+                issue_request = IssueReadySignalRequest(signal_event_id=result.signal_event_id,
+                    admission_snapshot=admission,claim_owner="recovery-entry",runtime_commit="a"*40,
+                    schema_revision=CURRENT_SCHEMA_REVISION,now_ms=issued_at)
+                assert admission_uow._connection is not None
+                fault = await admission_uow._connection.begin_nested()
+                await admission_uow._connection.execute(sa.text("UPDATE brc_exposure_episode_current SET authority_recovery_revision=authority_recovery_revision+1 WHERE episode_domain_key=:key"),{"key":proposal.observation_cursors[0].episode_domain_key})
+                refused = await issue_ready_signal(admission_uow,issue_request)
+                assert refused.status.value == "selection_authority_invalid", refused
+                assert await admission_uow._connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+                assert await admission_uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+                await fault.rollback()
+                issued = await issue_ready_signal(admission_uow,issue_request)
+            assert issued.status.value == "issued", issued
+            async with PostgresKernelUnitOfWork(database) as lineage_uow:
+                ticket = await lineage_uow.tickets.get(issued.ticket_id)
+                claim = await lineage_uow.capacity_claims.get_for_signal(result.signal_event_id)
+                decision = await lineage_uow.admission_decisions.get_for_signal(result.signal_event_id)
+                assert ticket.selection_authority_id == committed_recovery.selection_authority_id
+                assert claim.selection_authority_id == ticket.selection_authority_id
+                assert decision.selection_authority_id == ticket.selection_authority_id
+                assert ticket.identity.signal_event_id == result.signal_event_id
+                assert decision.ticket_id == issued.ticket_id and decision.decision_status.value == "admitted"
+            async with database.connect() as conn:
+                commands = (await conn.execute(sa.text("SELECT * FROM brc_exchange_commands WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().all()
+                assert len(commands) == 1 and commands[0]["command_kind"] == "entry"
+                assert commands[0]["status"] == "prepared"
             return
         from src.trading_kernel.application.ingest_signal import (
             resolve_selection_observation_authority,
