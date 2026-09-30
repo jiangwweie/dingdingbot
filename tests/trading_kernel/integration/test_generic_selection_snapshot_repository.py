@@ -1205,6 +1205,11 @@ async def test_static_recovery_proposal_is_built_from_database_without_grant(dat
     await _exercise_generic_generation(database,group,False,failure_case="timeout_then_prepare",first_activation=True)
 
 
+@pytest.mark.asyncio
+async def test_recovered_entry_dispatch_rejects_changed_rebase_before_venue_call(database):
+    await _exercise_generic_generation(database,"CPM-RO-001",False,failure_case="timeout_then_prepare_dispatch_refusal",first_activation=True)
+
+
 async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None):
     source = inputs(group)
     if comparison_only:
@@ -1762,7 +1767,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"),{"uid":uid}) == 0
     if failure_case == "timeout_then_empty":
         await _assert_generic_empty_handoff(database,source,persisted,vacuum)
-    if failure_case == "timeout_then_prepare":
+    if failure_case.startswith("timeout_then_prepare"):
         previous_uid = persisted.previous_events[0].universe_version_id
         now = at+1
         close = now//HOUR*HOUR
@@ -2038,6 +2043,61 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 commands = (await conn.execute(sa.text("SELECT * FROM brc_exchange_commands WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().all()
                 assert len(commands) == 1 and commands[0]["command_kind"] == "entry"
                 assert commands[0]["status"] == "prepared"
+            from src.trading_kernel.application.dispatch_exchange_command import (
+                DispatchCommandRequest,
+                dispatch_one_command,
+            )
+            from src.trading_kernel.application.runtime_facts import (
+                InstrumentRulesFacts,
+            )
+            from src.trading_kernel.domain.commands import (
+                ExchangeCommandResult,
+                ExchangeCommandStatus,
+            )
+            class RecoveryEntryFacts:
+                async def read_entry_admission_snapshot(self, request):
+                    risk = AccountRiskSnapshot.create(**{**admission.account_risk_snapshot.model_dump(exclude={"snapshot_digest"}),
+                        "observed_at_ms":request.observed_at_ms,"valid_until_ms":request.observed_at_ms+request.valid_for_ms})
+                    return admission.model_copy(update={"account_risk_snapshot":risk,"observed_at_ms":request.observed_at_ms,
+                        "valid_until_ms":request.observed_at_ms+request.valid_for_ms})
+
+                async def read_instrument_rules(self, request):
+                    return InstrumentRulesFacts(exchange_instrument_id=request.exchange_instrument_id,quantity_step=Decimal("0.001"),
+                        price_tick=Decimal("0.01"),min_quantity=Decimal("0.001"),min_notional=Decimal(5),exchange_max_leverage=5,
+                        maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
+                        notional_coefficient=Decimal(1),notional_coefficient_certified=True,
+                        observed_at_ms=request.observed_at_ms,valid_until_ms=request.observed_at_ms+request.valid_for_ms)
+            class RecoveryVenue:
+                def __init__(self):
+                    self.calls = []
+
+                async def execute(self, request):
+                    async with PostgresKernelUnitOfWork(database) as durable_uow:
+                        durable = await durable_uow.exchange_commands.get(request.command_id)
+                        assert durable.status is ExchangeCommandStatus.CLAIMED
+                    self.calls.append(request)
+                    return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,observed_at_ms=issued_at+10,exchange_order_id="recovery-entry-test")
+            async with database.begin() as conn:
+                # Local capability prerequisite only; no production promotion.
+                await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
+            venue = RecoveryVenue()
+            if failure_case.endswith("dispatch_refusal"):
+                async with database.begin() as conn:
+                    await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET authority_recovery_revision=authority_recovery_revision+1 WHERE episode_domain_key=:key"),{"key":proposal.observation_cursors[0].episode_domain_key})
+            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                DispatchCommandRequest(worker_id="recovery-dispatch",ticket_id=issued.ticket_id,now_ms=issued_at+5,
+                    lease_until_ms=issued_at+30_000,timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                    admission_snapshot_validity_ms=60_000),entry_facts_source=RecoveryEntryFacts())
+            if failure_case.endswith("dispatch_refusal"):
+                assert dispatched.status.value == "superseded", dispatched
+                assert venue.calls == []
+                async with database.connect() as conn:
+                    row = (await conn.execute(sa.text("SELECT status,result_payload FROM brc_exchange_commands WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().one()
+                    assert row["status"] == "rejected"
+                    assert "selection" in str(row["result_payload"])
+            else:
+                assert dispatched.status.value == "accepted", dispatched
+                assert len(venue.calls) == 1
             return
         from src.trading_kernel.application.ingest_signal import (
             resolve_selection_observation_authority,

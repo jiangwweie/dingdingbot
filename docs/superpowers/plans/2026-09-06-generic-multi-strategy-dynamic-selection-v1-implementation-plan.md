@@ -361,6 +361,10 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+恢复CPM ENTRY dispatch证据（基于`402ab039`）：原真实行情→恢复Signal→Claim/Ticket测试继续调用正式dispatch_one_command，typed readonly账户/rules source与本地enabled capability为明确前置，recording venue通过独立UoW先读到durable CLAIMED再接受ENTRY。另起隔离case在Ticket签发后改变recovery revision，正式dispatch返回SUPERSEDED、durable Command REJECTED、venue调用为0，证明不能以Ticket已签发跳过行动时恢复权限。未调用真实交易所，未伪造Command或绕过dispatcher。
+
+四策略恢复与新增CPM dispatch拒绝组合5 passed，相关Ruff/diff通过；本轮仅测试，不修改生产源码。证据止于ENTRY accepted/rejected，不含实际fill、Initial Stop、TP1/Runner、settlement/review，也不是所有策略自然Selector完整链，GS-04～09仍未完成，生产未修改。
+
 恢复CPM Signal→Ticket证据（基于`e067f728`）：在既有真实ClosedCandle→Detector→恢复rebase→Signal场景后，通过正式issue_ready_signal签发Claim/AdmissionDecision/Ticket及唯一prepared ENTRY Command；Signal、Claim、Decision、Ticket的selection_authority_id均等于已提交Recovery Authority。行动时certification、instrument rules及账户快照为明确测试前置，未直接插入Claim/Ticket/Command。注入recovery revision漂移时正式签发返回selection_authority_invalid，零Ticket/Command，回滚该测试故障后正常签发通过。
 
 四策略恢复专项4 passed（新增Claim/Ticket断言仅CPM）、相关Ruff/diff通过。此证据结束于prepared ENTRY，尚未dispatch、保护/退出/settlement/review；也未从Generic Selection Runner自然产生全部前置，不扩大为GS-09完整full-chain完成。生产未修改。
