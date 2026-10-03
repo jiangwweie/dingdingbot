@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from decimal import Decimal
+from email.utils import parsedate_to_datetime
+from math import ceil
 from typing import Protocol
 
 from ccxt.base import errors as ccxt_errors  # type: ignore[import-untyped]
@@ -295,7 +298,14 @@ def _public_retry_after_ms(error: Exception, exchange: _CcxtPublicExchange) -> i
     try:
         seconds = int(str(raw))
     except (TypeError, ValueError):
-        return None
+        try:
+            until = parsedate_to_datetime(str(raw))
+        except (TypeError, ValueError, IndexError):
+            return None
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        delay_ms = ceil((until-datetime.now(timezone.utc)).total_seconds()*1000)
+        return delay_ms if 0 <= delay_ms <= 600_000 else None
     return seconds * 1000 if 0 <= seconds <= 600 else None
 
 

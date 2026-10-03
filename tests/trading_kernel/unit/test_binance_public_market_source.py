@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from typing import cast
 
 import pytest
@@ -273,6 +275,27 @@ async def test_generic_public_rate_limit_is_typed_retryable_source_failure(path:
                 product_profiles=tuple(w.qualification.product_profile for w in selection_input.member_windows),
                 observed_at_ms=CUTOFF+1)
     assert error.value.retry_after_ms == 45_000
+
+
+@pytest.mark.asyncio
+async def test_generic_public_http_date_retry_after_is_bounded() -> None:
+    class RateLimitedExchange(RawKlineExchange):
+        def __init__(self):
+            super().__init__([])
+            self.last_response_headers = {"Retry-After":format_datetime(
+                datetime.now(timezone.utc)+timedelta(seconds=45),usegmt=True)}
+
+        async def fapiPublicGetKlines(self, params=None):
+            raise ccxt_errors.RateLimitExceeded("public limit")
+
+    source = CcxtBinancePublicMarketSource(exchange=RateLimitedExchange(),timeout_seconds=1)
+    spec = inputs("MPG-001").spec
+    with pytest.raises(GenericSelectionSourceTemporarilyUnavailable) as error:
+        await source.fetch_generic_selection_klines(GenericSelectionKlineRequest(
+            exchange_instrument_id=spec.candidate_ids[0],feature_cutoff_at_ms=CUTOFF,
+            expected_bars=spec.window_bars))
+    assert error.value.retry_after_ms is not None
+    assert 40_000 <= error.value.retry_after_ms <= 45_000
 
 
 @pytest.mark.asyncio
