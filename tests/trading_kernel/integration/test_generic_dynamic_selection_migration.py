@@ -297,7 +297,9 @@ def exact_0007_reference(tmp_path_factory: pytest.TempPathFactory) -> Path:
     destination = tmp_path_factory.mktemp("exact-0007-observation")
     archive = subprocess.run(
         ["git", "archive", EXACT_0007_REFERENCE, "src",
-         "tests/trading_kernel/unit/detectors/fixtures.py"],
+         "tests/trading_kernel/unit/detectors/fixtures.py",
+         "tests/trading_kernel/support",
+         "tests/trading_kernel/full_chain/test_ticket_lifecycle.py"],
         cwd=Path(__file__).resolve().parents[3],
         check=True, capture_output=True,
     )
@@ -320,6 +322,60 @@ def _run_exact_0007_observation(
         check=True, capture_output=True, text=True, timeout=60,
     )
     return json.loads(result.stdout)
+
+
+def _run_exact_0007_terminal_ticket(checkout: Path, *, database_url: str) -> dict[str, object]:
+    helper = Path(__file__).resolve().parent / "source_0007_terminal_ticket_probe.py"
+    result = subprocess.run(
+        [sys.executable, str(helper), "--database-url", database_url],
+        cwd=checkout,
+        env={**os.environ, "PYTHONPATH": str(checkout)},
+        check=True, capture_output=True, text=True, timeout=90,
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.asyncio
+async def test_0007_terminal_ticket_lineage_survives_0008_logical_preservation(
+    exact_0007_reference: Path,
+) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+    )
+
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        terminal = await asyncio.to_thread(
+            _run_exact_0007_terminal_ticket, exact_0007_reference, database_url=url,
+        )
+        assert terminal["ticket_status"] == "terminal"
+        assert terminal["aggregate_status"] == "terminal"
+        assert terminal["command_count"] >= 4
+        assert terminal["review_count"] >= 1
+        async with engine.connect() as conn:
+            source_manifest = await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_trade_tickets WHERE ticket_id=:ticket AND status='terminal'"
+            ), {"ticket":terminal["ticket_id"]}) == 1
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_trade_reviews WHERE ticket_id=:ticket"
+            ), {"ticket":terminal["ticket_id"]}) == terminal["review_count"]
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_exchange_commands WHERE ticket_id=:ticket"
+            ), {"ticket":terminal["ticket_id"]}) == terminal["command_count"]
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_strategy_universe_materialization_generations"
+            )) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 @pytest.mark.asyncio

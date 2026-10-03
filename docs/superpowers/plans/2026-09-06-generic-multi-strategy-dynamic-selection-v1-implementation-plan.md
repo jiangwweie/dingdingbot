@@ -291,6 +291,8 @@ GS-MIG-COMP-01 source/target差分增量（基于`a1ab134c`）：测试只读归
 
 Owner角色及非交易Authority保全增量（基于`84484ffb`）：0008 migration只在角色已预配置时对七张新增Generic/Comparison/Event表授予`brc_owner_console`、`brc_owner_control`的SELECT，不授予INSERT/UPDATE；Docker PG测试核对真实ACL，临时Control角色在测试结束后清理。0007来源覆盖`OWNER_PAUSED_NOT_MATERIALIZED`与24-member/zero-ready Snapshot的`VALID_EMPTY`两种非交易Authority；0008迁移将每条Authority的两个方向显式归一化为EMPTY Event行，父行旧semantic digest和逐record 0007 manifest完全保持，Snapshot仍有24条原始Decision，零新增Job/Command。当前迁移/Owner PG组合24 passed、Unit/Architecture1257 passed、生产源码Mypy158 files、相关Ruff/diff通过；不是完整R4。现仍缺FALLBACK及terminal Ticket等更完整的production-shaped来源矩阵，GS-04保持IN_PROGRESS，生产未修改。
 
+0007 terminal Ticket历史保全增量（基于`d5b3420c`）：本地只读归档冻结0007执行代码及原Full-chain fixture，在可处置Docker PG/recording venue经正式Ticket→durable ENTRY/保护/退出→Reconciliation→Settlement→Review形成一条已终态历史；再运行真实0007→0008 Alembic，目标对原0007逐record logical manifest digest完全一致，Terminal Ticket与原Command/Review数量及身份保留，迁移零新增Generation。该probe只存在于tests/integration，不作为生产旧schema adapter；最初放于tests/support触发测试资产架构RED，已迁移并复验。terminal Ticket专项1 passed，与四策略Static差分组合5 passed；受影响PG/Full-chain组合32 passed，Unit/Architecture1257 passed、相关Ruff、生产源码Mypy158 files与diff通过。仍需FALLBACK_PREVIOUS及相关Gap Audit/Generation等来源分支、Owner epoch控制转换和完整R4，GS-04继续IN_PROGRESS，生产未修改。
+
 **目标**：在原authority表上落地已验证domain，保全source逻辑身份。
 
 **允许**：唯一forward migration（起草前核对head）、PG metadata/repository结构、exact source preservation/revision verifier及integration tests。**禁止**：migration内启动Selector、写Job/Snapshot/Generation/Vacuum/Authority parent、运行Owner activation、Tokyo migration。
