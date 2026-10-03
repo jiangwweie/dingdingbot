@@ -41,7 +41,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RUNTIME_PROFILE_ID,
     ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
+    RuntimeAuthorityTransitionRefused,
     arm_acceptance_policy,
+    deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
@@ -60,6 +62,77 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_entry_enabled", [False, True])
+async def test_0007_to_0008_identity_rotation_preserves_static_authority(
+    source_entry_enabled: bool,
+) -> None:
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    source_commit = "a" * 40
+    target_commit = "b" * 40
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+                account_id="generic-upgrade", runtime_commit=source_commit,
+                schema_revision="0007_exit_profile_authority_v1",
+                seeded_at_ms=NOW_MS - 1000,
+            ))
+        if source_entry_enabled:
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await arm_acceptance_policy(
+                    uow, ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 500)
+                )
+        async with engine.connect() as conn:
+            source_policy = (await conn.execute(sa.text(
+                "SELECT policy_version, new_entry_submit_enabled FROM brc_owner_policy_current"
+            ))).mappings().one()
+            source_static = (await conn.execute(sa.text(
+                "SELECT strategy_group_id, entry_state FROM brc_strategy_entry_controls_current ORDER BY strategy_group_id"
+            ))).mappings().all()
+        with pytest.raises(RuntimeAuthorityTransitionRefused, match="exact 0008 schema"):
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await deploy_compatible_upgrade_identity(uow,
+                    RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
+                        runtime_commit=target_commit,schema_revision=TARGET_REVISION,
+                        seeded_at_ms=NOW_MS+1000))
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        with pytest.raises(RuntimeAuthorityTransitionRefused, match="exact 0008 target"):
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await deploy_compatible_upgrade_identity(uow,
+                    RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
+                        runtime_commit=target_commit,schema_revision="0006_sor_dynamic_selection_v0",
+                        seeded_at_ms=NOW_MS+1000))
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            rotated = await deploy_compatible_upgrade_identity(uow,
+                RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
+                    runtime_commit=target_commit,schema_revision=TARGET_REVISION,
+                    seeded_at_ms=NOW_MS+1000))
+        assert rotated.schema_revision == TARGET_REVISION
+        assert rotated.runtime_commit == target_commit
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text(
+                "SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='schema_revision'"
+            )) == TARGET_REVISION
+            policy = (await conn.execute(sa.text(
+                "SELECT policy_version, new_entry_submit_enabled FROM brc_owner_policy_current"
+            ))).mappings().one()
+            assert policy["new_entry_submit_enabled"] is False
+            assert policy["policy_version"] == source_policy["policy_version"] + int(source_entry_enabled)
+            assert (await conn.execute(sa.text(
+                "SELECT strategy_group_id, entry_state FROM brc_strategy_entry_controls_current ORDER BY strategy_group_id"
+            ))).mappings().all() == source_static
+            for table in ("brc_instrument_selection_jobs_current", "brc_instrument_selection_snapshots",
+                          "brc_strategy_universe_materialization_generations", "brc_strategy_entry_vacuums_current",
+                          "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
+                assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 @pytest.mark.asyncio

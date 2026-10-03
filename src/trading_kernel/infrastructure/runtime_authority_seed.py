@@ -59,6 +59,7 @@ OWNER_CONTROL_SOURCE_SCHEMA_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION = "0004_owner_control_plane"
 DYNAMIC_SELECTION_SOURCE_SCHEMA_REVISION = "0005_tradfi_instrument_center"
 EXIT_PROFILE_SOURCE_SCHEMA_REVISION = "0006_sor_dynamic_selection_v0"
+GENERIC_SELECTION_SOURCE_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
 _PRESERVATION_METADATA_KEYS = frozenset(
@@ -512,9 +513,20 @@ async def deploy_compatible_upgrade_identity(
             allow_compatible_runtime_fence=True,
         )
     source_schema_revision = metadata_rows.get("schema_revision")
+    if source_schema_revision == GENERIC_SELECTION_SOURCE_SCHEMA_REVISION:
+        if request.schema_revision != "0008_generic_dynamic_selection_v1":
+            raise RuntimeAuthorityTransitionRefused(
+                "Generic Selection upgrade requires exact 0008 target"
+            )
+        alembic_revision = await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+        if alembic_revision != request.schema_revision:
+            raise RuntimeAuthorityTransitionRefused(
+                "Generic Selection upgrade requires exact 0008 schema"
+            )
     if source_schema_revision in {
         DYNAMIC_SELECTION_SOURCE_SCHEMA_REVISION,
         EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
+        GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
     }:
         return await _deploy_capability_compatible_identity(
             uow,
@@ -790,7 +802,7 @@ async def _deploy_capability_compatible_identity(
     metadata_rows: Mapping[str, str],
     source_schema_revision: str,
 ) -> RuntimeDeploymentIdentityResult:
-    """Rotate a flat 0005/0006 capability release without changing Policy scope.
+    """Rotate a flat capability release without changing Policy scope.
 
     Dynamic Selection and ExitProfile add durable authority surfaces while the
     full Crypto/TradFi Registry, Policy scope, RuntimeProfiles and existing
@@ -843,7 +855,10 @@ async def _deploy_capability_compatible_identity(
         uow,
         seeded_at_ms=request.seeded_at_ms,
         include_exit_profile_authority=(
-            source_schema_revision == EXIT_PROFILE_SOURCE_SCHEMA_REVISION
+            source_schema_revision in {
+                EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
+                GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
+            }
         ),
     )
     expected_policy_version = int(str(current_policy["policy_version"]))
