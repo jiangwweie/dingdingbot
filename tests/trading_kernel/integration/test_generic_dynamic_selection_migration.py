@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import io
 import json
+import os
+import subprocess
+import sys
+import tarfile
 from pathlib import Path
+from uuid import uuid4
 
+import asyncpg
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
@@ -59,6 +66,9 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.support.postgres import (
+    SAFE_TEST_DATABASE,
+    TEST_POSTGRES_ADMIN_DSN,
+    async_database_url,
     create_empty_database,
     drop_disposable_database,
     run_alembic,
@@ -73,6 +83,38 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 )
 
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
+EXACT_0007_REFERENCE = "ee539609560fb006c77099efeb06ab01ad7cda22"
+
+
+@pytest.fixture(scope="module")
+def exact_0007_reference(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Archive frozen source execution code without adding an old runtime reader."""
+    destination = tmp_path_factory.mktemp("exact-0007-observation")
+    archive = subprocess.run(
+        ["git", "archive", EXACT_0007_REFERENCE, "src",
+         "tests/trading_kernel/unit/detectors/fixtures.py"],
+        cwd=Path(__file__).resolve().parents[3],
+        check=True, capture_output=True,
+    )
+    with tarfile.open(fileobj=io.BytesIO(archive.stdout), mode="r:") as bundle:
+        bundle.extractall(destination, filter="data")
+    return destination
+
+
+def _run_exact_0007_observation(
+    checkout: Path, *, database_url: str, scope_id: str,
+    group: str, first_close_ms: int,
+) -> dict[str, object]:
+    helper = Path(__file__).resolve().parents[1] / "support/source_0007_observation_probe.py"
+    result = subprocess.run(
+        [sys.executable, str(helper), "--database-url", database_url,
+         "--scope-id", scope_id, "--group", group,
+         "--first-close-ms", str(first_close_ms)],
+        cwd=checkout,
+        env={**os.environ, "PYTHONPATH": str(checkout)},
+        check=True, capture_output=True, text=True, timeout=60,
+    )
+    return json.loads(result.stdout)
 
 
 @pytest.mark.asyncio
@@ -246,7 +288,9 @@ async def _insert_0007_comparison_source(
                 "universe": projection.universe_version_id,
                 "closed": projection.closed_bar_time_ms,
                 "digest": projection.member_set_digest,
-                "payload": json.dumps(projection.model_dump(mode="json")),
+                "payload": json.dumps(projection.model_dump(
+                    mode="json", exclude={"comparison_transition_revision"},
+                )),
                 "observed": projection.observed_at_ms,
                 "valid": projection.valid_until_ms,
             },
@@ -440,7 +484,7 @@ def test_generic_dynamic_selection_is_the_single_current_schema_head() -> None:
 )
 @pytest.mark.parametrize("triggered", [True, False])
 async def test_0007_static_comparison_source_requires_exact_contemporaneous_evidence(
-    group: str, event: str, triggered: bool
+    group: str, event: str, triggered: bool, exact_0007_reference: Path,
 ) -> None:
     from scripts.trading_kernel.verify_schema import (
         _generic_source_preservation_manifest,
@@ -449,6 +493,8 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
 
     name, url = await create_empty_database()
     engine = create_async_engine(url)
+    target_name: str | None = None
+    target_engine: AsyncEngine | None = None
     try:
         await asyncio.to_thread(
             run_alembic, url, "upgrade", "0007_exit_profile_authority_v1"
@@ -631,17 +677,49 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
         async with engine.connect() as conn:
             assert await conn.scalar(sa.text("SELECT to_regclass('brc_comparison_universe_definitions')")) is None
         await _insert_0007_comparison_source(engine, projection)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            strategy_control = await uow.owner_controls.get_strategy_control(group)
+            assert strategy_control is not None
+            await set_strategy_entry_state(uow,strategy_group_id=group,
+                target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=strategy_control.control_version,
+                    reason="test_source_target_parity",idempotency_key=f"strategy-parity:{group}:{triggered}",
+                    owner_identity="migration-test-owner",now_ms=NOW_MS+1),
+                authentication_strength="totp_step_up")
+        async with engine.begin() as conn:
+            # Isolated reference and target must start with the same certified
+            # instrument, not the installer's pending_certification placeholder.
+            await conn.execute(sa.text(
+                "UPDATE brc_instruments SET status='active' WHERE exchange_instrument_id=:instrument"
+            ), {"instrument":ETH})
         async with engine.connect() as conn:
             source_manifest = await _generic_source_preservation_manifest(conn)
-        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
-        await engine.dispose()  # Stopped cutover discards source prepared statements.
-        async with engine.connect() as conn:
+        await engine.dispose()
+        target_name = f"brc_kernel_test_{uuid4().hex[:12]}"
+        assert SAFE_TEST_DATABASE.fullmatch(target_name)
+        admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
+        try:
+            await admin.execute(f'CREATE DATABASE "{target_name}" TEMPLATE "{name}"')
+        finally:
+            await admin.close()
+        target_url = async_database_url(target_name)
+        reference = await asyncio.to_thread(_run_exact_0007_observation,
+            exact_0007_reference,database_url=url,scope_id=scope_id,
+            group=group,first_close_ms=NOW_MS)
+        assert [item["status"] for item in reference["results"]] == [
+            "no_signal", "signal_created",
+        ], reference["results"]
+        await asyncio.to_thread(run_alembic, target_url, "upgrade", TARGET_REVISION)
+        target_engine = create_async_engine(target_url)
+        async with target_engine.connect() as conn:
             preserved_cache = (await conn.execute(sa.text(
                 "SELECT * FROM brc_comparative_projection_current"
             ))).mappings().one()
             assert preserved_cache["universe_version_id"] == universe.universe_version_id
             assert preserved_cache["member_set_digest"] == projection.member_set_digest
-            assert preserved_cache["projection"] == projection.model_dump(mode="json")
+            assert preserved_cache["projection"] == projection.model_dump(
+                mode="json", exclude={"comparison_transition_revision"},
+            )
             assert preserved_cache["comparison_transition_revision"] == 0
             assert preserved_cache["projection_version"] == 1
             target_manifest = await _generic_source_preservation_manifest(conn)
@@ -656,12 +734,12 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             assert await conn.scalar(sa.text("SELECT comparison_transition_revision FROM brc_comparison_binding_current WHERE event_spec_id=:event"), {"event":contract.event_spec_id}) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
-        async with PostgresKernelUnitOfWork(engine) as uow:
+        async with PostgresKernelUnitOfWork(target_engine) as uow:
             await deploy_compatible_upgrade_identity(uow, RuntimeAuthoritySeedRequest(
                 account_id="source-neutrality",runtime_commit="b"*40,
                 schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS+100,
             ))
-        async with PostgresKernelUnitOfWork(engine) as uow:
+        async with PostgresKernelUnitOfWork(target_engine) as uow:
             policy = await uow.entry_admission.get_owner_policy(OWNER_POLICY_ID)
             assert policy is not None and not policy.new_entry_submit_enabled
             await set_global_entry_state(uow,owner_policy_id=OWNER_POLICY_ID,enabled=True,
@@ -669,60 +747,102 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
                     reason="test_source_target_parity",idempotency_key=f"parity:{group}:{triggered}",
                     owner_identity="migration-test-owner",now_ms=NOW_MS+200),
                 authentication_strength="totp_step_up")
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            strategy_control = await uow.owner_controls.get_strategy_control(group)
-            assert strategy_control is not None
-            await set_strategy_entry_state(uow,strategy_group_id=group,
-                target_state=StrategyEntryState.ENABLED,
-                request=ControlMutationRequest(expected_version=strategy_control.control_version,
-                    reason="test_source_target_parity",idempotency_key=f"strategy-parity:{group}:{triggered}",
-                    owner_identity="migration-test-owner",now_ms=NOW_MS+201),
-                authentication_strength="totp_step_up")
-        async with engine.begin() as conn:
-            # The source fixture installed the member but did not run product
-            # certification. Make this test-only prerequisite explicit.
-            await conn.execute(sa.text(
-                "UPDATE brc_instruments SET status='active' "
-                "WHERE exchange_instrument_id=:instrument"
-            ), {"instrument":ETH})
         class ClosedMarket:
             def __init__(self, template, delta):
                 self.template = template
                 self.delta = delta
+                self.calls = []
 
             async def fetch_closed_candles(self, request):
                 candles = self.template.candles_1h if request.timeframe == "1h" else self.template.candles_4h
-                return tuple(c.model_copy(update={
+                response = tuple(c.model_copy(update={
                     "open_time_ms":c.open_time_ms+self.delta,
                     "close_time_ms":c.close_time_ms+self.delta,
                 }) for c in candles)
+                self.calls.append({
+                    "request": request.model_dump(mode="json"),
+                    "response": [c.model_dump(mode="json") for c in response],
+                })
+                return response
 
         next_template = (mpg_flat_snapshot if group == "MPG-001" else mi_flat_snapshot)()
         delta = 3_600_000
+        first_market = ClosedMarket(next_template,delta)
         resumed = await observe_strategy_scope(
-            lambda: PostgresKernelUnitOfWork(engine),ClosedMarket(next_template,delta),
+            lambda: PostgresKernelUnitOfWork(target_engine),first_market,
             ObservationRequest(runtime_scope_id=scope_id,runtime_commit="b"*40,
                 schema_revision=TARGET_REVISION,
                 trigger_candle_close_time_ms=NOW_MS+delta,attempted_at_ms=NOW_MS+delta+1),
         )
         assert resumed.status is ObservationStatus.NO_SIGNAL, resumed
         assert resumed.detector_reason != "COMPARISON_REBASE_REQUIRED", resumed
+        async with target_engine.connect() as conn:
+            first_episode = (await conn.execute(sa.text(
+                "SELECT * FROM brc_exposure_episode_current ORDER BY episode_domain_key"
+            ))).mappings().one()
+            assert {
+                key: first_episode[key] for key in reference["episode_transitions"][0]
+            } == reference["episode_transitions"][0]
         trigger_template = (mpg_long_snapshot if group == "MPG-001" else mi_long_snapshot)()
+        second_market = ClosedMarket(trigger_template,2*delta)
         later = await observe_strategy_scope(
-            lambda: PostgresKernelUnitOfWork(engine),ClosedMarket(trigger_template,2*delta),
+            lambda: PostgresKernelUnitOfWork(target_engine),second_market,
             ObservationRequest(runtime_scope_id=scope_id,runtime_commit="b"*40,
                 schema_revision=TARGET_REVISION,
                 trigger_candle_close_time_ms=NOW_MS+2*delta,attempted_at_ms=NOW_MS+2*delta+1),
         )
-        async with engine.connect() as conn:
+        async with target_engine.connect() as conn:
             blocker = await conn.scalar(sa.text(
                 "SELECT first_blocker FROM brc_readiness_current WHERE runtime_scope_id=:scope"
             ), {"scope":scope_id})
         assert later.status is ObservationStatus.SIGNAL_CREATED, blocker
-        async with engine.connect() as conn:
-            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
+        async with target_engine.connect() as conn:
+            target_signals = (await conn.execute(sa.text(
+                "SELECT signal_event_id, exposure_episode_id, occurred_at_ms, fact_digest "
+                "FROM brc_signal_events ORDER BY signal_event_id"
+            ))).mappings().all()
+            target_episode = (await conn.execute(sa.text(
+                "SELECT * FROM brc_exposure_episode_current ORDER BY episode_domain_key"
+            ))).mappings().one()
+            target_comparisons = (await conn.execute(sa.text(
+                "SELECT closed_bar_time_ms, member_set_digest, projection "
+                "FROM brc_comparative_projection_current ORDER BY closed_bar_time_ms"
+            ))).mappings().all()
+            assert first_market.calls + second_market.calls == reference["market_reads"]
+            assert len(target_comparisons) == len(reference["comparisons"])
+            for actual, expected in zip(target_comparisons, reference["comparisons"], strict=True):
+                assert actual["closed_bar_time_ms"] == expected["closed_bar_time_ms"]
+                assert actual["member_set_digest"] == expected["member_set_digest"]
+                assert {key:actual["projection"][key] for key in expected["projection"]} == expected["projection"]
+                assert set(actual["projection"]) - set(expected["projection"]) <= {
+                    "comparison_transition_revision",
+                }
+            assert [item["status"] for item in reference["results"]] == [
+                resumed.status.value, later.status.value,
+            ]
+            assert [item["detector_reason"] for item in reference["results"]] == [
+                resumed.detector_reason, later.detector_reason,
+            ]
+            assert [item["signal_event_id"] for item in reference["results"]] == [
+                resumed.signal_event_id, later.signal_event_id,
+            ]
+            assert [dict(row) for row in target_signals] == reference["signals"]
+            assert {key: target_episode[key] for key in reference["episode_transitions"][1]} == reference["episode_transitions"][1]
+            assert await conn.scalar(sa.text(
+                "SELECT comparison_transition_revision FROM brc_comparison_binding_current WHERE event_spec_id=:event"
+            ), {"event":contract.event_spec_id}) == 0
+            assert await conn.scalar(sa.text(
+                "SELECT comparison_transition_revision FROM brc_exposure_episode_current"
+            )) == 0
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_strategy_trigger_suppressions"
+            )) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
     finally:
+        if target_engine is not None:
+            await target_engine.dispose()
+        if target_name is not None:
+            await drop_disposable_database(target_name)
         await engine.dispose()
         await drop_disposable_database(name)
 
