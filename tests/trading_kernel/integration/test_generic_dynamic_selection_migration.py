@@ -114,6 +114,30 @@ async def test_authority_schema_binds_snapshot_epoch(head_template_engine) -> No
                 "VALUES('authority:wrong-proof','sor-dynamic-selection-v0','{}'::jsonb)"))
 
 
+@pytest.mark.asyncio
+async def test_generic_job_terminal_states_cannot_expand_sor_contract(head_template_engine) -> None:
+    anchor = 86_400_000
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="sor-job-terminal",runtime_commit="a"*40,
+            schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS))
+    async with head_template_engine.begin() as conn:
+        await conn.execute(sa.text("INSERT INTO brc_instrument_selection_specs "
+            "(selection_spec_id,strategy_group_id,strategy_version_id,selection_version,selection_kind,algorithm_semantic_digest,status,installed_at_ms) "
+            "VALUES('sor-dynamic-selection-v0','SOR-001','sgv:SOR-001:v4',1,'sor_dynamic_v0',:digest,'active',:now) ON CONFLICT DO NOTHING"),
+            {"digest":"sha256:"+"a"*64,"now":NOW_MS})
+    with pytest.raises(sa.exc.DBAPIError, match="generic_terminal_state"):
+        async with head_template_engine.begin() as conn:
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_jobs_current
+                (selection_job_id,selection_spec_id,selection_epoch_id,period_anchor_ms,
+                 scheduled_at_ms,feature_cutoff_at_ms,state,first_blocker,
+                 attempt_count,projection_version,updated_at_ms)
+                VALUES(:job,'sor-dynamic-selection-v0','sor-v0',:anchor,
+                       :cutoff,:cutoff,'EXPIRED','SELECTION_PERIOD_EXPIRED',0,1,:cutoff)
+            """), {"job":f"selection-job:sor-dynamic-selection-v0:{anchor}",
+                    "anchor":anchor,"cutoff":anchor+3_600_000})
+
+
 async def _insert_0007_comparison_source(
     engine: AsyncEngine, projection: ComparativeUniverseProjection
 ) -> None:

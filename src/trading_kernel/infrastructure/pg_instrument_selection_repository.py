@@ -536,9 +536,181 @@ class PostgresInstrumentSelectionRepository:
         spec = await self.get_generic_spec(selection_spec_id)
         period = build_generic_selection_period(feature_cutoff_at_ms=feature_cutoff_at_ms, cadence_hours=spec.cadence_hours)
         control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
-        if not self._generic_control_allows(control, selection_spec_id, selection_epoch_id, feature_cutoff_at_ms) or now_ms >= period.period_expires_at_ms:
+        if not self._generic_control_allows(control, selection_spec_id, selection_epoch_id, feature_cutoff_at_ms):
             return None
         assert control is not None
+        if now_ms < feature_cutoff_at_ms or lease_duration_ms <= 0:
+            raise ValueError("Generic Selection Job claim timing or lease is invalid")
+        prior_epoch_job_id = await self._connection.scalar(
+            sa.select(instrument_selection_jobs_current.c.selection_job_id)
+            .where(
+                instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id != selection_epoch_id,
+                instrument_selection_jobs_current.c.selection_epoch_id != "sor-v0",
+                instrument_selection_jobs_current.c.state.in_(("DUE", "CLAIMED")),
+            )
+            .order_by(instrument_selection_jobs_current.c.updated_at_ms.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if prior_epoch_job_id is not None:
+            await self._connection.execute(
+                sa.update(instrument_selection_jobs_current)
+                .where(instrument_selection_jobs_current.c.selection_job_id == prior_epoch_job_id)
+                .values(
+                    state="SUPERSEDED",
+                    first_blocker="SUPERSEDED_BY_SELECTION_EPOCH",
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=instrument_selection_jobs_current.c.projection_version + 1,
+                    updated_at_ms=now_ms,
+                )
+            )
+        older_job_id = await self._connection.scalar(
+            sa.select(instrument_selection_jobs_current.c.selection_job_id)
+            .where(
+                instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms < feature_cutoff_at_ms,
+                instrument_selection_jobs_current.c.state.in_(("DUE", "CLAIMED")),
+            )
+            .order_by(instrument_selection_jobs_current.c.period_anchor_ms.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if older_job_id is not None:
+            await self._connection.execute(
+                sa.update(instrument_selection_jobs_current)
+                .where(instrument_selection_jobs_current.c.selection_job_id == older_job_id)
+                .values(
+                    state="SUPERSEDED",
+                    first_blocker="SUPERSEDED_BY_NEWER_DUE_PERIOD",
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=instrument_selection_jobs_current.c.projection_version + 1,
+                    updated_at_ms=now_ms,
+                )
+            )
+        newer_job_exists = await self._connection.scalar(
+            sa.select(instrument_selection_jobs_current.c.selection_job_id)
+            .where(
+                instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms > feature_cutoff_at_ms,
+            )
+            .order_by(instrument_selection_jobs_current.c.period_anchor_ms)
+            .limit(1)
+        )
+        if newer_job_exists is not None:
+            await self._connection.execute(
+                pg_insert(instrument_selection_jobs_current)
+                .values(
+                    selection_job_id=selection_job_identity(selection_spec_id, feature_cutoff_at_ms, selection_epoch_id),
+                    selection_spec_id=selection_spec_id,
+                    selection_epoch_id=selection_epoch_id,
+                    selection_control_version=control.control_version,
+                    period_anchor_ms=feature_cutoff_at_ms,
+                    scheduled_at_ms=feature_cutoff_at_ms,
+                    feature_cutoff_at_ms=feature_cutoff_at_ms,
+                    state="SUPERSEDED",
+                    selection_snapshot_id=None,
+                    first_blocker="SUPERSEDED_BY_NEWER_DUE_PERIOD",
+                    attempt_count=0,
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=1,
+                    updated_at_ms=now_ms,
+                )
+                .on_conflict_do_nothing(index_elements=[
+                    instrument_selection_jobs_current.c.selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms,
+                ])
+            )
+            await self._connection.execute(
+                sa.update(instrument_selection_jobs_current)
+                .where(
+                    instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms == feature_cutoff_at_ms,
+                    instrument_selection_jobs_current.c.state.in_(("DUE", "CLAIMED")),
+                )
+                .values(
+                    state="SUPERSEDED",
+                    first_blocker="SUPERSEDED_BY_NEWER_DUE_PERIOD",
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=instrument_selection_jobs_current.c.projection_version + 1,
+                    updated_at_ms=now_ms,
+                )
+            )
+            return None
+        if now_ms >= period.period_expires_at_ms:
+            await self._connection.execute(
+                pg_insert(instrument_selection_jobs_current)
+                .values(
+                    selection_job_id=selection_job_identity(selection_spec_id, feature_cutoff_at_ms, selection_epoch_id),
+                    selection_spec_id=selection_spec_id,
+                    selection_epoch_id=selection_epoch_id,
+                    selection_control_version=control.control_version,
+                    predecessor_snapshot_id=None,
+                    predecessor_member_digest=None,
+                    period_anchor_ms=feature_cutoff_at_ms,
+                    scheduled_at_ms=feature_cutoff_at_ms,
+                    feature_cutoff_at_ms=feature_cutoff_at_ms,
+                    state="EXPIRED",
+                    selection_snapshot_id=None,
+                    first_blocker="SELECTION_PERIOD_EXPIRED",
+                    attempt_count=0,
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=1,
+                    updated_at_ms=now_ms,
+                )
+                .on_conflict_do_nothing(index_elements=[
+                    instrument_selection_jobs_current.c.selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms,
+                ])
+            )
+            await self._connection.execute(
+                sa.update(instrument_selection_jobs_current)
+                .where(
+                    instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms == feature_cutoff_at_ms,
+                    instrument_selection_jobs_current.c.state.in_(
+                        ("DUE", "CLAIMED", "SOURCE_FAILED", "COMPUTE_FAILED")
+                    ),
+                )
+                .values(
+                    state="EXPIRED",
+                    selection_snapshot_id=None,
+                    first_blocker="SELECTION_PERIOD_EXPIRED",
+                    next_retry_at_ms=None,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=instrument_selection_jobs_current.c.projection_version + 1,
+                    updated_at_ms=now_ms,
+                )
+            )
+            return None
+        existing_state = await self._connection.scalar(
+            sa.select(instrument_selection_jobs_current.c.state)
+            .where(
+                instrument_selection_jobs_current.c.selection_spec_id == selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id == selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms == feature_cutoff_at_ms,
+            )
+            .limit(1)
+        )
+        if existing_state in {"EXPIRED", "SUPERSEDED"}:
+            return None
         previous_id = await self._connection.scalar(sa.select(instrument_selection_snapshots.c.selection_snapshot_id).where(
             instrument_selection_snapshots.c.selection_spec_id == selection_spec_id,
             instrument_selection_snapshots.c.selection_epoch_id == selection_epoch_id,
@@ -576,9 +748,22 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Generic Snapshot differs from claimed epoch/period/predecessor/time")
         row = await self._locked_job(claim)
         if row["state"] == "SNAPSHOT_READY":
-            if (await self.get_generic_snapshot(row["selection_snapshot_id"])) == snapshot:
+            newer_ready = await self.get_generic_snapshot(row["selection_snapshot_id"])
+            if newer_ready == snapshot:
                 return
             raise SelectionJobConflict("Generic Snapshot digest conflicts")
+        newer_job_exists = await self._connection.scalar(
+            sa.select(instrument_selection_jobs_current.c.selection_job_id)
+            .where(
+                instrument_selection_jobs_current.c.selection_spec_id == claim.selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id == claim.selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms > claim.period_anchor_ms,
+            )
+            .order_by(instrument_selection_jobs_current.c.period_anchor_ms)
+            .limit(1)
+        )
+        if newer_job_exists is not None:
+            raise SelectionJobConflict("newer Generic Selection Job supersedes claimed period")
         self._require_live_claim(row, claim, completed_at_ms=completed_at_ms)
         await self.save_generic_snapshot(snapshot, decision_at_ms=job_period_anchor(claim), source_observed_at_ms=source_observed_at_ms)
         await self._append_attempt(claim=claim, outcome=SelectionAttemptOutcome.SNAPSHOT_READY, reason_code=None,
@@ -645,6 +830,8 @@ class PostgresInstrumentSelectionRepository:
             if snapshot_id is None:
                 raise SelectionJobConflict("ready Selection Job has no Snapshot")
             return str(snapshot_id)
+        if state in {"EXPIRED", "SUPERSEDED"}:
+            raise SelectionJobConflict("terminal Generic Selection Job cannot be reclaimed")
         if state in {"SOURCE_FAILED", "COMPUTE_FAILED"} and row[
             "next_retry_at_ms"
         ] is None:
@@ -808,8 +995,40 @@ class PostgresInstrumentSelectionRepository:
         normalized_reason = reason_code.strip()
         if not normalized_reason:
             raise ValueError("Selection failure requires a reason code")
+        if isinstance(claim, GenericSelectionJobClaim):
+            spec = await self.get_generic_spec(claim.selection_spec_id)
+            control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
+            if (
+                not self._generic_control_allows(
+                    control, claim.selection_spec_id, claim.selection_epoch_id,
+                    claim.period_anchor_ms,
+                )
+                or control is None
+                or control.control_version != claim.selection_control_version
+            ):
+                raise SelectionJobConflict("Generic Selection control or epoch changed before failure completion")
+            newer_job_exists = await self._connection.scalar(
+                sa.select(instrument_selection_jobs_current.c.selection_job_id)
+                .where(
+                    instrument_selection_jobs_current.c.selection_spec_id == claim.selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id == claim.selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms > claim.period_anchor_ms,
+                )
+                .order_by(instrument_selection_jobs_current.c.period_anchor_ms)
+                .limit(1)
+            )
+            if newer_job_exists is not None:
+                raise SelectionJobConflict("newer Generic Selection Job supersedes failure attempt")
         row = await self._locked_job(claim)
         self._require_live_claim(row, claim, completed_at_ms=completed_at_ms)
+        if isinstance(claim, GenericSelectionJobClaim):
+            spec = await self.get_generic_spec(claim.selection_spec_id)
+            period = build_generic_selection_period(
+                feature_cutoff_at_ms=claim.period_anchor_ms,
+                cadence_hours=spec.cadence_hours,
+            )
+            if completed_at_ms >= period.period_expires_at_ms:
+                raise SelectionJobConflict("Generic Selection period expired before failure completion")
         await self._append_attempt(
             claim=claim,
             outcome=outcome,

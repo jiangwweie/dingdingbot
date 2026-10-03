@@ -323,6 +323,8 @@ source expected结果由隔离、可处置的exact0007 reference环境实际取�
 
 ### GS-05 — Selection Plane / Snapshot handoff
 
+Job终态增量（基于`46b23b5f`）：未部署的0008为Generic Job增加`EXPIRED/SUPERSEDED`状态、带blocker/无Snapshot/无lease的结果形状，并用partial unique index保证同Spec/epoch最多一条`DUE/CLAIMED`；SOR旧状态集合仍由DB约束禁止使用新增终态。Generic领取入口在合法Dynamic控制下对过期period记录无source attempt的EXPIRED，对已有CLAIMED/可重试Job原子释放lease并标EXPIRED；新due period在同一Control锁域内将旧actionable claim标SUPERSEDED，旧Worker之后不能提交Snapshot；倒序请求旧period也只能得到SUPERSEDED，epoch切换终止旧live claim。Source/Compute失败完成不得超过period expiry，且重新核对current Control/epoch；Runner在市场I/O跨expiry时终止该Job并返回EXPIRED，不提交Snapshot或迟到失败，Static无pending继续零Job。RED先证明过期CLAIMED仍可留存、旧claim未被新due终止、晚到SOURCE_FAILED可落库、网络I/O跨expiry异常及倒序请求违反单actionable约束，随后Docker PG定向测试转绿。当前候选的迁移/SOR Selection/Generic Snapshot组合159 passed，Unit/Architecture1257 passed，生产源码Mypy 158 files、相关Ruff及diff通过；这些是受影响切片而非完整R4。此增量仅关闭Job终态，不代替source retry、Worker调度及GS-05整卡Done，生产未修改。
+
 **目标**：每Spec按冻结cutoff产生immutable决定，结束于`SNAPSHOT_READY`。
 
 **允许**：`run_instrument_selection.py`、market ports/adapters、PG Selection jobs/spec/snapshot/member repository、selection unit/integration/architecture tests。**禁止**：Runner读取current Universe、Claim/Ticket、Generation/Vacuum或调用warming。

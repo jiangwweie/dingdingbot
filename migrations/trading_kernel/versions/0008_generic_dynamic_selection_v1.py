@@ -803,6 +803,15 @@ def _selection_job_epochs() -> None:
     jobs = "brc_instrument_selection_jobs_current"
     attempts = "brc_instrument_selection_attempts"
     snapshots = "brc_instrument_selection_snapshots"
+    op.drop_constraint("ck_brc_instrument_selection_jobs_current_state_valid", jobs, type_="check")
+    op.drop_constraint("ck_brc_instrument_selection_jobs_current_result_shape", jobs, type_="check")
+    op.create_check_constraint("ck_brc_instrument_selection_jobs_current_state_valid", jobs,
+        "state IN ('DUE', 'CLAIMED', 'SNAPSHOT_READY', 'SOURCE_FAILED', 'COMPUTE_FAILED', 'EXPIRED', 'SUPERSEDED')")
+    op.create_check_constraint("ck_brc_instrument_selection_jobs_current_result_shape", jobs,
+        "(state = 'SNAPSHOT_READY' AND selection_snapshot_id IS NOT NULL AND first_blocker IS NULL) OR "
+        "(state IN ('SOURCE_FAILED', 'COMPUTE_FAILED', 'EXPIRED', 'SUPERSEDED') "
+        "AND selection_snapshot_id IS NULL AND first_blocker IS NOT NULL) OR "
+        "(state IN ('DUE', 'CLAIMED') AND selection_snapshot_id IS NULL)")
     op.add_column(control, sa.Column("selection_epoch_id", ID, nullable=True))
     for table in (jobs, attempts):
         op.add_column(table, sa.Column("selection_epoch_id", ID, nullable=False, server_default="sor-v0"))
@@ -817,8 +826,13 @@ def _selection_job_epochs() -> None:
             "((predecessor_snapshot_id IS NULL AND predecessor_member_digest IS NULL) OR "
             "(predecessor_snapshot_id IS NOT NULL AND predecessor_member_digest IS NOT NULL AND predecessor_member_digest ~ '^sha256:[0-9a-f]{64}$')))")
     op.drop_constraint("uq_brc_instrument_selection_jobs_current_period", jobs, type_="unique")
+    op.create_check_constraint("ck_brc_instrument_selection_jobs_current_generic_terminal_state", jobs,
+        "state NOT IN ('EXPIRED', 'SUPERSEDED') OR selection_epoch_id <> 'sor-v0'")
     op.create_unique_constraint("uq_brc_instrument_selection_jobs_current_period", jobs,
         ["selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
+    op.create_index("uq_brc_generic_selection_jobs_one_actionable_epoch", jobs,
+        ["selection_spec_id", "selection_epoch_id"], unique=True,
+        postgresql_where=sa.text("selection_epoch_id <> 'sor-v0' AND state IN ('DUE', 'CLAIMED')"))
     op.drop_constraint("uq_brc_instrument_selection_attempts_period_number", attempts, type_="unique")
     op.create_unique_constraint("uq_brc_instrument_selection_attempts_period_number", attempts,
         ["selection_spec_id", "selection_epoch_id", "period_anchor_ms", "attempt_number"])

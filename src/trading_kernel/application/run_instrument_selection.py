@@ -14,9 +14,12 @@ from src.trading_kernel.application.market_ports import (
     InstrumentSelectionMarketSource,
     SelectionKlineRequest,
 )
-from src.trading_kernel.application.ports import UnitOfWorkFactory
+from src.trading_kernel.application.ports import SelectionJobRecord, UnitOfWorkFactory
 from src.trading_kernel.domain.dynamic_selection_numeric import (
     DynamicSelectionNumericError,
+)
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    build_generic_selection_period,
 )
 from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionInput,
@@ -82,6 +85,8 @@ class RunInstrumentSelectionResult(BaseModel):
         "COMPUTE_FAILED",
         "NOT_DUE",
         "NOT_INSTALLED",
+        "EXPIRED",
+        "SUPERSEDED",
     ]
     selection_job_id: str
     selection_snapshot_id: str | None = None
@@ -283,6 +288,23 @@ async def _run_generic_selection_once(
             selection_epoch_id=request.selection_epoch_id, feature_cutoff_at_ms=request.period_anchor_ms,
             worker_id=request.worker_id, now_ms=clock_ms(), lease_duration_ms=request.lease_duration_ms)
         if claimed is None:
+            terminal = await uow.instrument_selection.get_selection_job(
+                selection_spec_id=spec.selection_spec_id,
+                selection_epoch_id=request.selection_epoch_id,
+                period_anchor_ms=request.period_anchor_ms,
+            )
+            if terminal is not None and terminal.state == "EXPIRED":
+                return RunInstrumentSelectionResult(
+                    outcome="EXPIRED",
+                    selection_job_id=job_id,
+                    reason_code=terminal.first_blocker,
+                )
+            if terminal is not None and terminal.state == "SUPERSEDED":
+                return RunInstrumentSelectionResult(
+                    outcome="SUPERSEDED",
+                    selection_job_id=job_id,
+                    reason_code=terminal.first_blocker,
+                )
             return RunInstrumentSelectionResult(outcome="NOT_DUE", selection_job_id=job_id)
         if isinstance(claimed, GenericSelectionSnapshotV1):
             return RunInstrumentSelectionResult(outcome="ALREADY_READY", selection_job_id=job_id,
@@ -292,8 +314,14 @@ async def _run_generic_selection_once(
         claim = claimed
         predecessor = None if claim.predecessor_snapshot_id is None else await uow.instrument_selection.get_generic_snapshot(claim.predecessor_snapshot_id)
         product_profiles = await uow.instrument_selection.get_selection_product_profiles(spec.selection_spec_id)
+    period_expires_at_ms = build_generic_selection_period(
+        feature_cutoff_at_ms=request.period_anchor_ms,
+        cadence_hours=spec.cadence_hours,
+    ).period_expires_at_ms
     windows: dict[str, GenericSelectionMemberWindow] = {}
     errors: dict[str, Exception] = {}
+    source: GenericSelectionInput | None = None
+    source_expired_at_ms: int | None = None
     try:
         qualifications = await market_source.fetch_generic_selection_qualifications(
             event_spec_id=spec.event_spec_id, product_profiles=product_profiles, observed_at_ms=clock_ms())
@@ -319,29 +347,105 @@ async def _run_generic_selection_once(
         if errors:
             raise SelectionSourceIntegrityError(_source_failure_reason(errors))
         observed_at_ms = clock_ms()
-        source = GenericSelectionInput(spec=spec, selection_epoch_id=request.selection_epoch_id,
-            feature_cutoff_at_ms=request.period_anchor_ms, decision_at_ms=request.period_anchor_ms,
-            source_observed_at_ms=observed_at_ms, committed_at_ms=observed_at_ms,
-            member_windows=tuple(windows[m] for m in spec.candidate_ids), predecessor_snapshot=predecessor)
+        if observed_at_ms >= period_expires_at_ms:
+            source_expired_at_ms = observed_at_ms
+        else:
+            source = GenericSelectionInput(spec=spec, selection_epoch_id=request.selection_epoch_id,
+                feature_cutoff_at_ms=request.period_anchor_ms, decision_at_ms=request.period_anchor_ms,
+                source_observed_at_ms=observed_at_ms, committed_at_ms=observed_at_ms,
+                member_windows=tuple(windows[m] for m in spec.candidate_ids), predecessor_snapshot=predecessor)
     except Exception as exc:  # noqa: BLE001 - no source failure may become EMPTY
         reason = _source_failure_reason(errors) if errors else f"SOURCE_INTEGRITY:{type(exc).__name__}"
+        failed_at_ms = clock_ms()
+        if failed_at_ms >= period_expires_at_ms:
+            return await _expire_generic_selection_run(
+                uow_factory=uow_factory, request=request, now_ms=failed_at_ms,
+            )
         await _persist_failure(uow_factory=uow_factory, claim=claim, outcome=SelectionAttemptOutcome.SOURCE_FAILED,
-            reason_code=reason, source_member_count=len(windows), completed_at_ms=clock_ms())
+            reason_code=reason, source_member_count=len(windows), completed_at_ms=failed_at_ms)
         return _failure_result(claim, "SOURCE_FAILED", reason)
+    if source_expired_at_ms is not None:
+        return await _expire_generic_selection_run(
+            uow_factory=uow_factory, request=request, now_ms=source_expired_at_ms,
+        )
+    assert source is not None
     try:
         snapshot = compute_generic_selection(source)
     except (DynamicSelectionNumericError, DecimalException) as exc:
         reason = f"COMPUTE_UNDEFINED:{type(exc).__name__}:{exc}"[:512]
+        failed_at_ms = clock_ms()
+        if failed_at_ms >= period_expires_at_ms:
+            return await _expire_generic_selection_run(
+                uow_factory=uow_factory, request=request, now_ms=failed_at_ms,
+            )
         await _persist_failure(uow_factory=uow_factory, claim=claim, outcome=SelectionAttemptOutcome.COMPUTE_FAILED,
-            reason_code=reason, source_member_count=24, completed_at_ms=clock_ms(), source_digest=source.source_semantic_digest)
+            reason_code=reason, source_member_count=24, completed_at_ms=failed_at_ms, source_digest=source.source_semantic_digest)
         return _failure_result(claim, "COMPUTE_FAILED", reason)
     async with uow_factory() as uow:
         completed_at_ms = clock_ms()
+        if completed_at_ms >= period_expires_at_ms:
+            await uow.instrument_selection.claim_generic_selection_job(
+                selection_spec_id=request.selection_spec_id,
+                selection_epoch_id=request.selection_epoch_id,
+                feature_cutoff_at_ms=request.period_anchor_ms,
+                worker_id=request.worker_id,
+                now_ms=completed_at_ms,
+                lease_duration_ms=request.lease_duration_ms,
+            )
+            terminal = await uow.instrument_selection.get_selection_job(
+                selection_spec_id=request.selection_spec_id,
+                selection_epoch_id=request.selection_epoch_id,
+                period_anchor_ms=request.period_anchor_ms,
+            )
+            return _generic_elapsed_result(job_id, terminal)
         snapshot = snapshot.model_copy(update={"committed_at_ms": completed_at_ms})
         await uow.instrument_selection.complete_generic_selection_snapshot(claim=claim, snapshot=snapshot,
             source_observed_at_ms=source.source_observed_at_ms, completed_at_ms=completed_at_ms)
     return RunInstrumentSelectionResult(outcome="SNAPSHOT_READY", selection_job_id=job_id,
         selection_snapshot_id=snapshot.selection_snapshot_id, ready_count=snapshot.ready_count, selected_count=len(snapshot.selected_members))
+
+
+async def _expire_generic_selection_run(
+    *, uow_factory: UnitOfWorkFactory, request: RunInstrumentSelectionRequest,
+    now_ms: int,
+) -> RunInstrumentSelectionResult:
+    async with uow_factory() as uow:
+        await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=request.selection_spec_id,
+            selection_epoch_id=request.selection_epoch_id,
+            feature_cutoff_at_ms=request.period_anchor_ms,
+            worker_id=request.worker_id,
+            now_ms=now_ms,
+            lease_duration_ms=request.lease_duration_ms,
+        )
+        terminal = await uow.instrument_selection.get_selection_job(
+            selection_spec_id=request.selection_spec_id,
+            selection_epoch_id=request.selection_epoch_id,
+            period_anchor_ms=request.period_anchor_ms,
+        )
+    return _generic_elapsed_result(
+        selection_job_identity(request.selection_spec_id, request.period_anchor_ms, request.selection_epoch_id),
+        terminal,
+    )
+
+
+def _generic_elapsed_result(job_id: str, terminal: SelectionJobRecord | None) -> RunInstrumentSelectionResult:
+    if terminal is not None and terminal.state == "EXPIRED":
+        return RunInstrumentSelectionResult(
+            outcome="EXPIRED",
+            selection_job_id=job_id,
+            reason_code=terminal.first_blocker,
+        )
+    if terminal is not None and terminal.state == "SUPERSEDED":
+        return RunInstrumentSelectionResult(
+            outcome="SUPERSEDED",
+            selection_job_id=job_id,
+            reason_code=terminal.first_blocker,
+        )
+    return RunInstrumentSelectionResult(
+        outcome="NOT_DUE", selection_job_id=job_id,
+        reason_code="SELECTION_AUTHORITY_CHANGED_DURING_SOURCE_READ",
+    )
 
 
 def _source_failure_reason(errors: dict[str, Exception]) -> str:

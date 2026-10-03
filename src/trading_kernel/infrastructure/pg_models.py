@@ -692,8 +692,20 @@ instrument_selection_jobs_current = sa.Table(
     sa.UniqueConstraint("selection_spec_id", "selection_epoch_id", "period_anchor_ms"),
     sa.CheckConstraint(
         "state IN ('DUE', 'CLAIMED', 'SNAPSHOT_READY', 'SOURCE_FAILED', "
-        "'COMPUTE_FAILED')",
+        "'COMPUTE_FAILED', 'EXPIRED', 'SUPERSEDED')",
         name="state_valid",
+    ),
+    sa.CheckConstraint(
+        "state NOT IN ('EXPIRED', 'SUPERSEDED') OR selection_epoch_id <> 'sor-v0'",
+        name="generic_terminal_state",
+    ),
+    sa.CheckConstraint(
+        "(state = 'SNAPSHOT_READY' AND selection_snapshot_id IS NOT NULL "
+        "AND first_blocker IS NULL) OR "
+        "(state IN ('SOURCE_FAILED', 'COMPUTE_FAILED', 'EXPIRED', 'SUPERSEDED') "
+        "AND selection_snapshot_id IS NULL AND first_blocker IS NOT NULL) OR "
+        "(state IN ('DUE', 'CLAIMED') AND selection_snapshot_id IS NULL)",
+        name="result_shape",
     ),
 )
 sa.Index(
@@ -704,6 +716,16 @@ sa.Index(
     instrument_selection_jobs_current.c.lease_expires_at_ms,
     postgresql_where=instrument_selection_jobs_current.c.state.in_(
         ("DUE", "CLAIMED", "SOURCE_FAILED", "COMPUTE_FAILED")
+    ),
+)
+sa.Index(
+    "uq_brc_generic_selection_jobs_one_actionable_epoch",
+    instrument_selection_jobs_current.c.selection_spec_id,
+    instrument_selection_jobs_current.c.selection_epoch_id,
+    unique=True,
+    postgresql_where=sa.and_(
+        instrument_selection_jobs_current.c.selection_epoch_id != "sor-v0",
+        instrument_selection_jobs_current.c.state.in_(("DUE", "CLAIMED")),
     ),
 )
 

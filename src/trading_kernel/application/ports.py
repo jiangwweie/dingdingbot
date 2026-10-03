@@ -1505,6 +1505,8 @@ class SelectionJobRecord(BaseModel):
         "SNAPSHOT_READY",
         "SOURCE_FAILED",
         "COMPUTE_FAILED",
+        "EXPIRED",
+        "SUPERSEDED",
     ]
     selection_snapshot_id: str | None
     first_blocker: str | None
@@ -1536,7 +1538,9 @@ class SelectionJobRecord(BaseModel):
                 raise ValueError("ready Selection Job requires only its Snapshot")
         elif self.selection_snapshot_id is not None:
             raise ValueError("non-ready Selection Job cannot reference a Snapshot")
-        if self.state in {"SOURCE_FAILED", "COMPUTE_FAILED"}:
+        if self.state in {"EXPIRED", "SUPERSEDED"} and self.selection_epoch_id == "sor-v0":
+            raise ValueError("SOR Selection Job cannot use Generic terminal states")
+        if self.state in {"SOURCE_FAILED", "COMPUTE_FAILED", "EXPIRED", "SUPERSEDED"}:
             if self.first_blocker is None:
                 raise ValueError("failed Selection Job requires its first blocker")
         elif self.first_blocker is not None:
