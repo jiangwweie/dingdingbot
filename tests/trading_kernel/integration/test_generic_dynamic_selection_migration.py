@@ -299,7 +299,9 @@ def exact_0007_reference(tmp_path_factory: pytest.TempPathFactory) -> Path:
         ["git", "archive", EXACT_0007_REFERENCE, "src",
          "tests/trading_kernel/unit/detectors/fixtures.py",
          "tests/trading_kernel/support",
-         "tests/trading_kernel/full_chain/test_ticket_lifecycle.py"],
+         "tests/trading_kernel/full_chain/test_ticket_lifecycle.py",
+         "tests/trading_kernel/integration/test_selection_materialization_repository.py",
+         "tests/trading_kernel/integration/universe_activation_support.py"],
         cwd=Path(__file__).resolve().parents[3],
         check=True, capture_output=True,
     )
@@ -333,6 +335,69 @@ def _run_exact_0007_terminal_ticket(checkout: Path, *, database_url: str) -> dic
         check=True, capture_output=True, text=True, timeout=90,
     )
     return json.loads(result.stdout)
+
+
+def _run_exact_0007_fallback(checkout: Path, *, database_url: str) -> dict[str, object]:
+    helper = Path(__file__).resolve().parent / "source_0007_fallback_probe.py"
+    result = subprocess.run(
+        [sys.executable, str(helper), "--database-url", database_url],
+        cwd=checkout,
+        env={**os.environ, "PYTHONPATH": str(checkout)},
+        check=True, capture_output=True, text=True, timeout=90,
+    )
+    return json.loads(result.stdout)
+
+
+@pytest.mark.asyncio
+async def test_0007_fallback_generation_and_gap_audit_survive_0008(
+    exact_0007_reference: Path,
+) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+    )
+
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        fallback = await asyncio.to_thread(
+            _run_exact_0007_fallback, exact_0007_reference, database_url=url,
+        )
+        assert fallback["authority_outcome"] == "FALLBACK_PREVIOUS"
+        assert fallback["gap_audit_count"] >= 1
+        assert fallback["generation_count"] >= 1
+        async with engine.connect() as conn:
+            source_manifest = await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
+            authority = (await conn.execute(sa.text(
+                "SELECT semantic_digest,authority_outcome FROM brc_selection_session_authorities "
+                "WHERE selection_authority_id=:id"
+            ), {"id":fallback["selection_authority_id"]})).mappings().one()
+            assert authority["semantic_digest"] == fallback["semantic_digest"]
+            assert authority["authority_outcome"] == "FALLBACK_PREVIOUS"
+            bindings = (await conn.execute(sa.text(
+                "SELECT position_side,grant_state,universe_version_id "
+                "FROM brc_selection_authority_event_bindings WHERE selection_authority_id=:id"
+            ), {"id":fallback["selection_authority_id"]})).mappings().all()
+            assert len(bindings) == 2
+            assert {item["position_side"] for item in bindings} == {"long", "short"}
+            assert all(item["grant_state"] == "ACTIVE" for item in bindings)
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_selection_authority_gap_audits_current"
+            )) == fallback["gap_audit_count"]
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_strategy_universe_materialization_generations"
+            )) == fallback["generation_count"]
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_materialization_generation_event_baselines"
+            )) == 2
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 @pytest.mark.asyncio
