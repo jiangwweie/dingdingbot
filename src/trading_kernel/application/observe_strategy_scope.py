@@ -690,7 +690,7 @@ async def observe_strategy_scope(
                 signal=signal,
                 runtime_commit=request.runtime_commit,
                 schema_revision=request.schema_revision,
-                now_ms=request.trigger_candle_close_time_ms,
+                now_ms=attempted_at_ms,
             ),
         )
         if (

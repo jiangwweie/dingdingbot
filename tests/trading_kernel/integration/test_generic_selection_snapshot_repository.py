@@ -1583,6 +1583,280 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_owner_staged_runner_materializes_without_fixture_snapshot(database: AsyncEngine, group: str) -> None:
+    await _exercise_generic_generation(database, group, False,
+        durable=True, first_activation=True, natural_selection=True)
+    if group not in {"CPM-RO-001", "BRF2-001"}:
+        return
+    source = inputs(group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert current is not None and current.authority.authority_outcome == "ACTIVE_NEW"
+        close = current.authority.current_close_proof.current_final_close_time_ms
+    async with database.connect() as conn:
+        scope_id = await conn.scalar(sa.text(
+            "SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"
+        ), {"uid":current.authority.event_binding.universe_version_id})
+    template = cpm_long_snapshot() if group == "CPM-RO-001" else brf2_short_snapshot()
+    delta = close-template.trigger_candle_close_time_ms
+
+    class SignalMarket:
+        async def fetch_closed_candles(self, request):
+            candles = template.candles_1h if request.timeframe == "1h" else template.candles_4h
+            return tuple(c.model_copy(update={
+                "open_time_ms":c.open_time_ms+delta,
+                "close_time_ms":c.close_time_ms+delta,
+            }) for c in candles)
+
+    observed = await observe_strategy_scope(
+        lambda:PostgresKernelUnitOfWork(database),SignalMarket(),
+        ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,
+            schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=close,
+            attempted_at_ms=close+30_005),
+    )
+    async with database.connect() as conn:
+        blocker = await conn.scalar(sa.text(
+            "SELECT first_blocker FROM brc_readiness_current WHERE runtime_scope_id=:scope"
+        ), {"scope":scope_id})
+        member = await conn.scalar(sa.text(
+            "SELECT exchange_instrument_id FROM brc_runtime_scopes_current WHERE runtime_scope_id=:scope"
+        ), {"scope":scope_id})
+        instrument_status = await conn.scalar(sa.text(
+            "SELECT status FROM brc_instruments WHERE exchange_instrument_id=:member"
+        ), {"member":member})
+    assert observed.status == ObservationStatus.SIGNAL_CREATED, (observed,blocker,member,instrument_status)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+    from src.trading_kernel.application.issue_ready_signal import (
+        IssueReadySignalRequest,
+        issue_ready_signal,
+    )
+    from src.trading_kernel.domain.cross_margin_stress import (
+        AccountRiskSnapshot,
+        MaintenanceMarginBracket,
+    )
+    from src.trading_kernel.domain.entry_admission_snapshot import (
+        EntryAdmissionSnapshot,
+    )
+
+    issued_at = close+30_006
+    await make_warming_ready(database,
+        universe_version_id=current.authority.event_binding.universe_version_id,
+        warm_closed_bar_time_ms=close,valid_until_ms=issued_at+60_000)
+    risk = AccountRiskSnapshot.create(
+        venue_id="binance-usdm",account_id="generic-snapshot",
+        account_risk_mode="standard_usdm_single_asset",settlement_asset="USDT",
+        position_mode="independent_sides",margin_mode="cross",
+        exchange_instrument_id=member,mark_price=Decimal(105),configured_leverage=5,
+        total_wallet_balance=Decimal(1000),total_margin_balance=Decimal(1000),
+        total_initial_margin=Decimal(0),total_maintenance_margin=Decimal(0),
+        available_margin=Decimal(1000),account_positions=(),
+        observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
+    admission = EntryAdmissionSnapshot(account_risk_snapshot=risk,
+        best_bid_price=Decimal("104.99"),best_ask_price=Decimal(105),open_orders=(),
+        observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
+    brackets = (MaintenanceMarginBracket(bracket_id=f"natural-{group}:1",notional_floor=Decimal(0),
+        notional_cap=Decimal(20_000),maintenance_margin_rate=Decimal("0.005"),
+        maintenance_amount=Decimal(0)),)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.signals.upsert_instrument_rules(venue_id="binance-usdm",exchange_instrument_id=member,
+            quantity_step=Decimal("0.001"),price_tick=Decimal("0.01"),min_quantity=Decimal("0.001"),
+            min_notional=Decimal(5),exchange_max_leverage=5,
+            maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
+            notional_coefficient=Decimal(1),notional_coefficient_certified=True,
+            observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
+        issued = await issue_ready_signal(uow,IssueReadySignalRequest(
+            signal_event_id=observed.signal_event_id,admission_snapshot=admission,
+            claim_owner=f"natural-{group}-entry",runtime_commit="a"*40,
+            schema_revision=CURRENT_SCHEMA_REVISION,now_ms=issued_at))
+    assert issued.status.value == "issued", issued
+    async with PostgresKernelUnitOfWork(database) as uow:
+        ticket = await uow.tickets.get(issued.ticket_id)
+        claim = await uow.capacity_claims.get_for_signal(observed.signal_event_id)
+        decision = await uow.admission_decisions.get_for_signal(observed.signal_event_id)
+        assert ticket is not None and claim is not None and decision is not None
+        assert ticket.selection_authority_id == current.authority.selection_authority_id
+        assert claim.selection_authority_id == ticket.selection_authority_id
+        assert decision.selection_authority_id == ticket.selection_authority_id
+    async with database.connect() as conn:
+        commands = (await conn.execute(sa.text(
+            "SELECT command_kind,status FROM brc_exchange_commands WHERE ticket_id=:ticket"
+        ), {"ticket":issued.ticket_id})).mappings().all()
+        assert len(commands) == 1 and commands[0]["command_kind"] == "entry"
+        assert commands[0]["status"] == "prepared"
+    from src.trading_kernel.application.dispatch_exchange_command import (
+        DispatchCommandRequest,
+        dispatch_one_command,
+    )
+    from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
+    from src.trading_kernel.domain.commands import (
+        ExchangeCommandResult,
+        ExchangeCommandStatus,
+    )
+
+    class NaturalEntryFacts:
+        async def read_entry_admission_snapshot(self, request):
+            fresh_risk = AccountRiskSnapshot.create(**{
+                **risk.model_dump(exclude={"snapshot_digest"}),
+                "observed_at_ms":request.observed_at_ms,
+                "valid_until_ms":request.observed_at_ms+request.valid_for_ms,
+            })
+            return admission.model_copy(update={
+                "account_risk_snapshot":fresh_risk,
+                "observed_at_ms":request.observed_at_ms,
+                "valid_until_ms":request.observed_at_ms+request.valid_for_ms,
+            })
+
+        async def read_instrument_rules(self, request):
+            return InstrumentRulesFacts(exchange_instrument_id=request.exchange_instrument_id,
+                quantity_step=Decimal("0.001"),price_tick=Decimal("0.01"),min_quantity=Decimal("0.001"),
+                min_notional=Decimal(5),exchange_max_leverage=5,
+                maintenance_margin_brackets=brackets,
+                maintenance_margin_brackets_digest=canonical_digest(brackets),
+                notional_coefficient=Decimal(1),notional_coefficient_certified=True,
+                observed_at_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms+request.valid_for_ms)
+
+    class RecordingVenue:
+        def __init__(self):
+            self.calls = []
+            self.now_ms = issued_at+5
+
+        async def execute(self, request):
+            async with PostgresKernelUnitOfWork(database) as durable_uow:
+                durable = await durable_uow.exchange_commands.get(request.command_id)
+                assert durable.status is ExchangeCommandStatus.CLAIMED
+            self.calls.append(request)
+            return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
+                observed_at_ms=self.now_ms+1,
+                exchange_order_id=f"natural-{request.kind.value}-{len(self.calls)}")
+
+    async with database.begin() as conn:
+        await conn.execute(sa.text(
+            "UPDATE brc_runtime_capabilities_current SET enabled=true "
+            "WHERE capability_key='exchange_commands'"
+        ))
+    venue = RecordingVenue()
+    dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        DispatchCommandRequest(worker_id=f"natural-{group}-dispatch",ticket_id=issued.ticket_id,
+            now_ms=issued_at+5,lease_until_ms=issued_at+30_000,timeout_seconds=1,
+            runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+            admission_snapshot_validity_ms=60_000),entry_facts_source=NaturalEntryFacts())
+    assert dispatched.status.value == "accepted", dispatched
+    assert len(venue.calls) == 1
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT status FROM brc_exchange_commands WHERE ticket_id=:ticket AND command_kind='entry'"
+        ), {"ticket":issued.ticket_id}) == "accepted"
+    from src.trading_kernel.application.maintain_ticket_lifecycle import (
+        LifecycleMaintenanceRequest,
+        TicketLifecycleFacts,
+        maintain_ticket_lifecycle,
+    )
+    from src.trading_kernel.application.reconcile_ticket import (
+        ReconcileTicketRequest,
+        reconcile_ticket,
+    )
+    from src.trading_kernel.application.settle_ticket import (
+        RecordTradeReviewRequest,
+        SettleTicketRequest,
+        record_trade_review,
+        settle_ticket,
+    )
+    from src.trading_kernel.domain.aggregate import AggregateStatus
+    from src.trading_kernel.domain.events import PostFillStressAssessed
+    from src.trading_kernel.domain.position import PositionSnapshot
+    from src.trading_kernel.domain.reducer import reduce_event
+    from tests.trading_kernel.support.capacity_claims import make_stress_evidence
+
+    async with PostgresKernelUnitOfWork(database) as uow:
+        filled = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
+            snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                quantity=ticket.quantity,average_entry_price=ticket.entry_reference_price,
+                venue_reported_liquidation_price=Decimal(0),open_orders=(),
+                observed_at_ms=issued_at+100)))
+    assert filled.status.value == "entry_fill_recorded"
+
+    async def dispatch_safety(step):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            pending = await uow.aggregates.get(issued.ticket_id)
+            if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
+                event = PostFillStressAssessed(
+                    event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
+                    ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
+                    occurred_at_ms=issued_at+step-1,status="passed",
+                    evidence=make_stress_evidence(pending.ticket),
+                    owner_policy_id=pending.ticket.owner_policy_id,
+                    owner_policy_version=pending.ticket.owner_policy_version,
+                    filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
+                    initial_stop_price=pending.ticket.initial_stop_price,
+                    initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+                await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
+                    expected_version=pending.version)
+        venue.now_ms = issued_at+step
+        result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            DispatchCommandRequest(worker_id=f"natural-{group}-lifecycle",ticket_id=issued.ticket_id,
+                now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1))
+        assert result.status.value == "accepted", result
+
+    await dispatch_safety(200)
+    await dispatch_safety(300)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        protected = await uow.aggregates.get(issued.ticket_id)
+    assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
+    assert protected.initial_stop_exchange_order_id is not None
+    assert protected.tp1_exchange_order_id is not None
+    async with PostgresKernelUnitOfWork(database) as uow:
+        runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(
+            ticket_id=issued.ticket_id,
+            facts=TicketLifecycleFacts(position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
+                tp1_filled_quantity=ticket.take_profit_quantities[0],
+                tp1_average_fill_price=ticket.take_profit_prices[0],
+                allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
+                price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=issued_at+400),
+            now_ms=issued_at+400))
+    assert runner.status.value == "break_even_requested"
+    await dispatch_safety(500)
+    await dispatch_safety(600)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=issued.ticket_id,
+            snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                observed_at_ms=issued_at+700)))
+    assert external_flat.status.value == "external_flat_incident"
+    await dispatch_safety(800)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        matched = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=issued.ticket_id,
+            snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                observed_at_ms=issued_at+900)))
+        settled = await settle_ticket(uow,SettleTicketRequest(
+            ticket_id=issued.ticket_id,settled_at_ms=issued_at+1000))
+        reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
+            ticket_id=issued.ticket_id,review_id=f"review:natural-{group}",
+            outcome="closed",metrics={"realized_pnl":"1.25"},
+            decision_impact={"strategy_action":"keep"},recorded_at_ms=issued_at+1100))
+        terminal = await uow.aggregates.get(issued.ticket_id)
+        frozen_ticket = await uow.tickets.get(issued.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(issued.ticket_id)
+        active_domain = await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+        commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+    assert matched.status.value == "matched"
+    assert settled.status.value == "budget_settled" and reviewed.status.value == "review_recorded"
+    assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+    assert frozen_ticket is not None and frozen_ticket.selection_authority_id == current.authority.selection_authority_id
+    assert reservation is not None and reservation.status == "released"
+    assert incident is None and not active_domain
+    assert len(commands) == len(venue.calls)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
 async def test_first_activation_same_members_still_materializes_changed_comparison(database: AsyncEngine, group: str) -> None:
     await _exercise_generic_generation(database, group, True, durable=True, first_activation=True)
@@ -1614,17 +1888,57 @@ async def test_recovered_entry_dispatch_rejects_changed_rebase_before_venue_call
     await _exercise_generic_generation(database,"CPM-RO-001",False,failure_case="timeout_then_prepare_dispatch_refusal",first_activation=True)
 
 
-async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None):
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False):
     source = inputs(group)
     if comparison_only:
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
             w.model_copy(update={"candles":source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0])
             for w in source.member_windows)})
-    snapshot = compute_generic_selection(source)
+    if natural_selection:
+        assert first_activation and not comparison_only and failure_case is None
+        async with PostgresKernelUnitOfWork(database) as owner_uow:
+            staged = await stage_generic_dynamic_selection_mode(owner_uow,
+                strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,
+                    reason="natural_first_selection",idempotency_key=f"owner:natural:first:{group}",
+                    owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up")
+        source = source.model_copy(update={"selection_epoch_id":staged.selection_epoch_id})
+
+        class SelectionMarket:
+            async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+                assert event_spec_id == source.spec.event_spec_id and len(product_profiles) == 24
+                return tuple(member.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                    for member in source.member_windows)
+
+            async def fetch_generic_selection_klines(self, request):
+                return next(member.candles for member in source.member_windows
+                    if member.exchange_instrument_id == request.exchange_instrument_id)
+
+        tick = CUTOFF
+
+        def selection_clock():
+            nonlocal tick
+            tick += 1
+            return tick
+
+        selected = await run_instrument_selection_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectionMarket(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+                selection_epoch_id=staged.selection_epoch_id,period_anchor_ms=CUTOFF,
+                worker_id=f"natural-{group}-selector"),clock_ms=selection_clock)
+        assert selected.outcome == "SNAPSHOT_READY"
+        async with PostgresKernelUnitOfWork(database) as selection_uow:
+            snapshot = await selection_uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+            assert snapshot.selection_epoch_id == staged.selection_epoch_id
+            assert len(snapshot.members) == 24
+    else:
+        snapshot = compute_generic_selection(source)
     if comparison_only:
         assert snapshot.selected_members == source.spec.candidate_ids[:1]
     async with PostgresKernelUnitOfWork(database) as uow:
-        await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
+        if not natural_selection:
+            await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
         installed = await install_strategy_universe(uow, UniverseInstallRequest(
             event_spec_id=source.spec.event_spec_id, runtime_profile_id="tiny-live-v1", owner_policy_id="policy-main",
             exchange_instrument_ids=source.spec.candidate_ids[:1], installed_at_ms=CUTOFF-1,
@@ -1647,7 +1961,8 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:cid,:member)"), {"cid": comparison_id, "member": source.spec.candidate_ids[0]})
             await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,0,:uid)"),
                 {"event":source.spec.event_spec_id,"cid":comparison_id,"uid":uid})
-    await enable_epoch(database, group, pending=first_activation)
+    if not natural_selection:
+        await enable_epoch(database, group, pending=first_activation)
     generation = GenericMaterializationGeneration.build(snapshot=snapshot, selection_control_version=2, created_at_ms=CUTOFF+HOUR+1,
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
             grant_state="ACTIVE",universe_version_id=uid,member_set_digest=selected_member_set_digest(source.spec.candidate_ids[:1]),

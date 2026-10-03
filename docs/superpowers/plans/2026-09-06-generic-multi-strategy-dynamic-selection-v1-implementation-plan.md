@@ -379,6 +379,8 @@ Job终态增量（基于`46b23b5f`）：未部署的0008为Generic Job增加`EXP
 
 ### GS-08 — Continuity / Vacuum / Atomic Authority
 
+NORMAL current-close行动时间修复（基于`646aedd8`）：正式Owner→Generic Runner→Snapshot→Activation测试在`close+30s`获得precommitted正常Authority后，`observe_strategy_scope`成功产生trigger但原Signal ingestion错误传入原close作为行动时间，导致FinalGate误判Authority尚未生效。RED先证明`selection_authority_invalid`且零Signal，随后统一以Observation的`attempted_at_ms`传给正式Signal ingestion；Signal自身trigger close仍冻结原closed bar，不追认gap/Recovery的过去close。CPM正常路径转绿，随后Generic/Observation/SOR集成切片176 passed、完整既有Full-chain51 passed、Unit/Architecture1257 passed、生产源码Mypy158 files及相关Ruff/diff通过；这仍不代替GS-08双时钟整卡验收或R4。
+
 CPM首次Static恢复后的Ticket生命周期增量（接续`09ba3b8b`）：既有真实ClosedCandle→Detector→Recovery rebase→Signal→Claim/Ticket→durable ENTRY→recording venue acceptance测试，继续通过正式Reconciliation记录ENTRY fill，提交与该Ticket时钟一致的Post-fill Stress证据，派发Initial Stop/TP1，再推进TP1/Runner保护替换、外部flat的受控残单取消、Reconciliation matched、Settlement与Review。每次recording venue执行前独立UoW验证Command已durable CLAIMED；终态断言冻结Recovery Authority不变、Reservation释放、Netting Domain无active Ticket、无open Incident及Command种类/venue调用一一对应。旧测试helper硬编码`2_200ms`会制造当前恢复时钟下已过期的TP1 Command，故此处使用当前Ticket时间构造测试Post-fill Stress事件，而不修改生产代码。该增量只证明CPM首次Static恢复的本地闭环；模拟外部flat不是自然策略Exit，也不能替代Dynamic恢复、四策略完整Selection或GS-09全链验收。四策略Static恢复加dispatch拒绝专项5 passed，相关SOR旧Universe终态full-chain 1 passed，Unit/Architecture 1257 passed，文档authority 25 passed，Ruff、生产源码Mypy（158 files）及diff通过；完整PG/Full-chain/R4未运行，生产未修改，GS-04～09保持IN_PROGRESS。首次Unit/Architecture命令使用系统Python，因缺少`pyotp`在collect阶段中断，随后用仓库`.venv`重跑通过，不将前一次中断计为产品缺陷。
 
 恢复CPM ENTRY dispatch证据（基于`402ab039`）：原真实行情→恢复Signal→Claim/Ticket测试继续调用正式dispatch_one_command，typed readonly账户/rules source与本地enabled capability为明确前置，recording venue通过独立UoW先读到durable CLAIMED再接受ENTRY。另起隔离case在Ticket签发后改变recovery revision，正式dispatch返回SUPERSEDED、durable Command REJECTED、venue调用为0，证明不能以Ticket已签发跳过行动时恢复权限。未调用真实交易所，未伪造Command或绕过dispatcher。
@@ -659,6 +661,8 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 **Done**：全部新authority可trace proof/source/epoch/Event set，positive grant不能绕过rebase/stale/EMPTY/Owner；existing Ticket未变；§3.4相关SOR子集PASS。
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
+
+自然Selection→terminal增量（基于`646aedd8`）：四策略首次Owner staging的exact epoch由正式Selection Runner读取24 Candidate并提交immutable Snapshot，再由现有Coordinator完成Generation、Vacuum、Warming和ACTIVE_NEW，测试不直接写Snapshot；旧Static Universe与认证仍是明确测试前置。CPM LONG及BRF2 SHORT进一步在同一真实签发链上产生原Detector Signal、CapacityClaim、AdmissionDecision、唯一prepared ENTRY，经独立UoW确认durable CLAIMED后由recording venue接受，随后正式Reconciliation/Initial Stop/TP1/Runner/外部flat/Settlement/Review到TERMINAL，冻结Selection Authority、Reservation、Netting Domain和Incident断言一致。模拟flat、Post-fill Stress与Review经济值是fixture事实，不是真实交易收益。相关集成/部分Full-chain切片176 passed、既有完整Full-chain51 passed、Unit/Architecture1257 passed；计数有重叠，不相加为R4。MPG/MI完成Owner→Runner→Active及Candidate24 Warming，但rebase后跨hourly period的自然Signal/Ticket、四边界攻击矩阵与Live Evidence projector仍未完成；GS-09不能标Done，生产未修改。
 
 **目标**：所有新入口真实使用GS-08权限，维持既有保护、退出和unknown恢复。
 
