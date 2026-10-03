@@ -1639,6 +1639,7 @@ class InstrumentSelectionRepository(Protocol):
         source_member_count: int,
         source_digest: str | None,
         completed_at_ms: int,
+        next_retry_at_ms: int | None = None,
     ) -> None: ...
 
     async def get_selection_job(

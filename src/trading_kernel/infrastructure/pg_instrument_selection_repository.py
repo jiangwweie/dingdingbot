@@ -46,6 +46,8 @@ from src.trading_kernel.domain.generic_selection_core import (
     GenericSelectionSnapshotV1,
 )
 from src.trading_kernel.domain.generic_selection_jobs import (
+    GENERIC_SOURCE_MAX_ATTEMPTS,
+    GENERIC_SOURCE_RETRY_BACKOFF_MS,
     GenericSelectionJobClaim,
     SelectionJobLease,
     job_period_anchor,
@@ -852,6 +854,12 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Selection Job already has a live lease")
         next_retry_at_ms = row["next_retry_at_ms"]
         if next_retry_at_ms is not None and int(next_retry_at_ms) > now_ms:
+            if selection_epoch_id != "sor-v0" and state in {"SOURCE_FAILED", "COMPUTE_FAILED"}:
+                return SelectionJobFailure(
+                    selection_job_id=job_id,
+                    outcome="SOURCE_FAILED" if state == "SOURCE_FAILED" else "COMPUTE_FAILED",
+                    reason_code=str(row["first_blocker"]),
+                )
             raise SelectionJobConflict("Selection Job retry is not due")
         attempt_number = int(row["attempt_count"]) + 1
         next_version = int(row["projection_version"]) + 1
@@ -989,6 +997,7 @@ class PostgresInstrumentSelectionRepository:
         source_member_count: int,
         source_digest: str | None,
         completed_at_ms: int,
+        next_retry_at_ms: int | None = None,
     ) -> None:
         if outcome is SelectionAttemptOutcome.SNAPSHOT_READY:
             raise ValueError("failure completion requires a failure outcome")
@@ -1029,6 +1038,15 @@ class PostgresInstrumentSelectionRepository:
             )
             if completed_at_ms >= period.period_expires_at_ms:
                 raise SelectionJobConflict("Generic Selection period expired before failure completion")
+            if next_retry_at_ms is not None and (
+                outcome is not SelectionAttemptOutcome.SOURCE_FAILED
+                or claim.attempt_number >= GENERIC_SOURCE_MAX_ATTEMPTS
+                or next_retry_at_ms < completed_at_ms + GENERIC_SOURCE_RETRY_BACKOFF_MS
+                or next_retry_at_ms >= period.period_expires_at_ms
+            ):
+                raise SelectionJobConflict("Generic Selection source retry budget is invalid")
+        elif next_retry_at_ms is not None:
+            raise SelectionJobConflict("SOR failure cannot use Generic source retry")
         await self._append_attempt(
             claim=claim,
             outcome=outcome,
@@ -1051,7 +1069,7 @@ class PostgresInstrumentSelectionRepository:
                 state=outcome.value,
                 selection_snapshot_id=None,
                 first_blocker=normalized_reason,
-                next_retry_at_ms=None,
+                next_retry_at_ms=next_retry_at_ms,
                 lease_owner=None,
                 lease_expires_at_ms=None,
                 projection_version=claim.projection_version + 1,

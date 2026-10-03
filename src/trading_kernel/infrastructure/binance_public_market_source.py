@@ -8,10 +8,15 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Protocol
 
+from ccxt.base import errors as ccxt_errors  # type: ignore[import-untyped]
+
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
     GenericSelectionKlineRequest,
     SelectionKlineRequest,
+)
+from src.trading_kernel.domain.generic_selection_jobs import (
+    GenericSelectionSourceTemporarilyUnavailable,
 )
 from src.trading_kernel.domain.generic_selection_source import (
     GenericSelectionCandle,
@@ -161,10 +166,15 @@ class CcxtBinancePublicMarketSource:
     async def fetch_generic_selection_klines(self, request: GenericSelectionKlineRequest) -> tuple[GenericSelectionCandle, ...]:
         request = GenericSelectionKlineRequest.model_validate(request.model_dump())
         identity = parse_binance_usdm_instrument_id(request.exchange_instrument_id)
-        response = await self._raw_public(self._exchange.fapiPublicGetKlines, {
-            "symbol": identity.symbol, "interval": "1h", "startTime": request.input_window_start_ms,
-            "endTime": request.feature_cutoff_at_ms - 1, "limit": request.expected_bars,
-        })
+        try:
+            response = await self._raw_public(self._exchange.fapiPublicGetKlines, {
+                "symbol": identity.symbol, "interval": "1h", "startTime": request.input_window_start_ms,
+                "endTime": request.feature_cutoff_at_ms - 1, "limit": request.expected_bars,
+            })
+        except ccxt_errors.NetworkError as exc:
+            reason = "public_market_rate_limited" if isinstance(exc, ccxt_errors.RateLimitExceeded) else "public_market_network_unavailable"
+            raise GenericSelectionSourceTemporarilyUnavailable(reason,
+                retry_after_ms=_public_retry_after_ms(exc, self._exchange)) from exc
         if not isinstance(response, list) or len(response) != request.expected_bars:
             raise SelectionSourceIntegrityError("Generic Selection source window is incomplete")
         candles = tuple(_parse_generic_selection_row(row) for row in response)
@@ -177,7 +187,12 @@ class CcxtBinancePublicMarketSource:
     ) -> tuple[GenericSelectionQualification, ...]:
         if len(product_profiles) != 24 or len({p.exchange_instrument_id for p in product_profiles}) != 24:
             raise SelectionSourceIntegrityError("Generic qualification requires complete Candidate24 profiles")
-        response = await self._raw_public(self._exchange.fapiPublicGetExchangeInfo, {})
+        try:
+            response = await self._raw_public(self._exchange.fapiPublicGetExchangeInfo, {})
+        except ccxt_errors.NetworkError as exc:
+            reason = "public_market_rate_limited" if isinstance(exc, ccxt_errors.RateLimitExceeded) else "public_market_network_unavailable"
+            raise GenericSelectionSourceTemporarilyUnavailable(reason,
+                retry_after_ms=_public_retry_after_ms(exc, self._exchange)) from exc
         if not isinstance(response, Mapping) or not isinstance(response.get("symbols"), list):
             raise SelectionSourceIntegrityError("Generic qualification lacks venue product facts")
         requested = {parse_binance_usdm_instrument_id(p.exchange_instrument_id).symbol for p in product_profiles}
@@ -266,6 +281,22 @@ class CcxtBinancePublicMarketSource:
             timeout=self._timeout_seconds,
         )
         return await response if inspect.isawaitable(response) else response
+
+
+def _public_retry_after_ms(error: Exception, exchange: _CcxtPublicExchange) -> int | None:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if not isinstance(headers, Mapping):
+        headers = getattr(exchange, "last_response_headers", None)
+    if not isinstance(headers, Mapping):
+        return None
+    raw = next((value for key, value in headers.items()
+        if str(key).lower() == "retry-after"), None)
+    try:
+        seconds = int(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return seconds * 1000 if 0 <= seconds <= 600 else None
 
 
 def _parse_row(row: object, duration_ms: int) -> ClosedCandle:

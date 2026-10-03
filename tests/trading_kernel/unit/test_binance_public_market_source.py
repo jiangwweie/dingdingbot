@@ -6,11 +6,15 @@ from collections.abc import Callable
 from typing import cast
 
 import pytest
+from ccxt.base import errors as ccxt_errors  # type: ignore[import-untyped]
 
 from src.trading_kernel.application.market_ports import (
     ClosedCandleRequest,
     GenericSelectionKlineRequest,
     SelectionKlineRequest,
+)
+from src.trading_kernel.domain.generic_selection_jobs import (
+    GenericSelectionSourceTemporarilyUnavailable,
 )
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
@@ -237,6 +241,38 @@ async def test_generic_selection_reads_exact_raw_hourly_ohlcv(defect: str | None
     assert exchange.raw_calls[0]["interval"] == "1h"
     assert exchange.raw_calls[0]["startTime"] == CUTOFF - 25 * HOUR
     assert exchange.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["klines", "qualification"])
+@pytest.mark.parametrize("failure_type", ["rate_limit", "network"])
+async def test_generic_public_rate_limit_is_typed_retryable_source_failure(path: str, failure_type: str) -> None:
+    class RateLimitedExchange(RawKlineExchange):
+        def __init__(self):
+            super().__init__([])
+            self.last_response_headers = {"Retry-After": "45"}
+
+        async def fapiPublicGetKlines(self, params=None):
+            error = ccxt_errors.RateLimitExceeded if failure_type == "rate_limit" else ccxt_errors.NetworkError
+            raise error("public temporarily unavailable")
+
+        async def fapiPublicGetExchangeInfo(self, params=None):
+            error = ccxt_errors.RateLimitExceeded if failure_type == "rate_limit" else ccxt_errors.NetworkError
+            raise error("public temporarily unavailable")
+
+    selection_input = inputs("MPG-001")
+    source = CcxtBinancePublicMarketSource(exchange=RateLimitedExchange(), timeout_seconds=1)
+    with pytest.raises(GenericSelectionSourceTemporarilyUnavailable, match="rate_limited" if failure_type == "rate_limit" else "network_unavailable") as error:
+        if path == "klines":
+            await source.fetch_generic_selection_klines(GenericSelectionKlineRequest(
+                exchange_instrument_id=selection_input.spec.candidate_ids[0],
+                feature_cutoff_at_ms=CUTOFF,expected_bars=selection_input.spec.window_bars))
+        else:
+            await source.fetch_generic_selection_qualifications(
+                event_spec_id=selection_input.spec.event_spec_id,
+                product_profiles=tuple(w.qualification.product_profile for w in selection_input.member_windows),
+                observed_at_ms=CUTOFF+1)
+    assert error.value.retry_after_ms == 45_000
 
 
 @pytest.mark.asyncio

@@ -1266,6 +1266,212 @@ async def test_generic_failed_source_is_not_empty_and_does_not_advance_desired(d
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["qualification", "one_member", "rate_limited"])
+async def test_generic_temporary_source_timeout_retries_without_shrinking_candidate24(
+    database: AsyncEngine, failure_kind: str,
+) -> None:
+    source = inputs("MI-001")
+    await enable_epoch(database,"MI-001")
+    calls = 0
+    from src.trading_kernel.domain.generic_selection_jobs import (
+        GenericSelectionSourceTemporarilyUnavailable,
+    )
+
+    class FlakyMarket:
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            nonlocal calls
+            calls += 1
+            assert event_spec_id == source.spec.event_spec_id and len(product_profiles) == 24
+            if calls == 1 and failure_kind == "qualification":
+                raise TimeoutError("bounded public source timeout")
+            if calls == 1 and failure_kind == "rate_limited":
+                raise GenericSelectionSourceTemporarilyUnavailable(
+                    "public_market_rate_limited",retry_after_ms=45_000)
+            return tuple(member.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                for member in source.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            if (calls == 1 and failure_kind == "one_member"
+                and request.exchange_instrument_id == source.spec.candidate_ids[0]):
+                raise TimeoutError("one Candidate read timed out")
+            return next(member.candles for member in source.member_windows
+                if member.exchange_instrument_id == request.exchange_instrument_id)
+
+    now = CUTOFF
+
+    def clock():
+        nonlocal now
+        now += 1
+        return now
+
+    request = RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+        selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF,
+        worker_id="generic:timeout-retry",lease_duration_ms=60_000)
+    market = FlakyMarket()
+    first = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert first.outcome == "SOURCE_FAILED" and calls == 1
+    async with PostgresKernelUnitOfWork(database) as uow:
+        job = await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id,
+            selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF)
+        assert job is not None and job.next_retry_at_ms is not None
+        assert job.next_retry_at_ms>=job.updated_at_ms+(45_000 if failure_kind=="rate_limited" else 30_000)
+        assert job.lease_owner is None and job.attempt_count == 1
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT source_member_count FROM brc_instrument_selection_attempts"
+        )) == (23 if failure_kind == "one_member" else 0)
+    now = job.next_retry_at_ms-2
+    waiting = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert waiting.outcome == "SOURCE_FAILED" and calls == 1
+    now = job.next_retry_at_ms-1
+    retried = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert retried.outcome == "SNAPSHOT_READY" and calls == 2
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts")) == 2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_member_decisions")) == 24
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots")) == 1
+
+
+@pytest.mark.asyncio
+async def test_generic_temporary_source_retry_budget_ends_after_three_attempts(database: AsyncEngine) -> None:
+    source = inputs("MI-001")
+    await enable_epoch(database,"MI-001")
+    calls = 0
+
+    class UnavailableMarket:
+        async def fetch_generic_selection_qualifications(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise TimeoutError("bounded public source timeout")
+
+    now = CUTOFF
+
+    def clock():
+        nonlocal now
+        now += 1
+        return now
+
+    request = RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+        selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF,
+        worker_id="generic:timeout-budget",lease_duration_ms=60_000)
+    market = UnavailableMarket()
+    for attempt in range(1,4):
+        failed = await run_instrument_selection_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+            request=request,clock_ms=clock)
+        assert failed.outcome == "SOURCE_FAILED"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            job = await uow.instrument_selection.get_selection_job(
+                selection_spec_id=source.spec.selection_spec_id,
+                selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF)
+            assert job is not None and job.attempt_count == attempt
+            assert (job.next_retry_at_ms is None) == (attempt == 3)
+        if job.next_retry_at_ms is not None:
+            now = job.next_retry_at_ms-1
+    again = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert again.outcome == "SOURCE_FAILED" and calls == 3
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts")) == 3
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots")) == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_source_retry_is_not_extended_past_period_expiry(database: AsyncEngine) -> None:
+    source = inputs("MI-001")
+    await enable_epoch(database,"MI-001")
+    expiry = build_generic_selection_period(feature_cutoff_at_ms=CUTOFF,
+        cadence_hours=source.spec.cadence_hours).period_expires_at_ms
+    calls = 0
+
+    class TimedOutMarket:
+        async def fetch_generic_selection_qualifications(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise TimeoutError("market temporarily unavailable")
+
+    tick = expiry-30_000
+
+    def clock():
+        nonlocal tick
+        tick += 1
+        return tick
+
+    request = RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+        selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF,
+        worker_id="generic:near-expiry",lease_duration_ms=60_000)
+    failed = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=TimedOutMarket(),
+        request=request,clock_ms=clock)
+    assert failed.outcome == "SOURCE_FAILED" and calls == 1
+    async with PostgresKernelUnitOfWork(database) as uow:
+        job = await uow.instrument_selection.get_selection_job(
+            selection_spec_id=source.spec.selection_spec_id,
+            selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF)
+        assert job is not None and job.next_retry_at_ms is None
+    tick = expiry
+    expired = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=TimedOutMarket(),
+        request=request,clock_ms=clock)
+    assert expired.outcome == "EXPIRED" and calls == 1
+
+
+@pytest.mark.asyncio
+async def test_generic_source_integrity_gap_never_enters_retry(database: AsyncEngine) -> None:
+    source = inputs("MI-001")
+    await enable_epoch(database,"MI-001")
+    calls = 0
+
+    class MissingMarket:
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            nonlocal calls
+            calls += 1
+            return tuple(member.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                for member in source.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            candles = next(member.candles for member in source.member_windows
+                if member.exchange_instrument_id == request.exchange_instrument_id)
+            return candles[:-1] if request.exchange_instrument_id == source.spec.candidate_ids[0] else candles
+
+    now = CUTOFF
+
+    def clock():
+        nonlocal now
+        now += 1
+        return now
+
+    request = RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+        selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF,
+        worker_id="generic:integrity-fail",lease_duration_ms=60_000)
+    market = MissingMarket()
+    failed = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert failed.outcome == "SOURCE_FAILED"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        job = await uow.instrument_selection.get_selection_job(
+            selection_spec_id=source.spec.selection_spec_id,
+            selection_epoch_id=source.selection_epoch_id,period_anchor_ms=CUTOFF)
+        assert job is not None and job.next_retry_at_ms is None
+        assert job.attempt_count == 1 and job.first_blocker is not None
+    now += 31_000
+    repeated = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert repeated.outcome == "SOURCE_FAILED" and calls == 1
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots")) == 0
+
+
+@pytest.mark.asyncio
 async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(database: AsyncEngine) -> None:
     source = inputs("MPG-001")
     await enable_epoch(database, "MPG-001")

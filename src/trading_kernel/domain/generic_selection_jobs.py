@@ -7,6 +7,19 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_selection import SelectionJobClaim
 
+GENERIC_SOURCE_RETRY_BACKOFF_MS = 30_000
+GENERIC_SOURCE_MAX_ATTEMPTS = 3
+
+
+class GenericSelectionSourceTemporarilyUnavailable(RuntimeError):
+    """Typed source transport/rate-limit failure, never a qualification result."""
+
+    def __init__(self, reason_code: str, *, retry_after_ms: int | None = None) -> None:
+        if retry_after_ms is not None and retry_after_ms < 0:
+            raise ValueError("Selection Retry-After cannot be negative")
+        super().__init__(reason_code)
+        self.retry_after_ms = retry_after_ms
+
 
 def selection_job_identity(selection_spec_id: str, period_anchor_ms: int, selection_epoch_id: str = "sor-v0") -> str:
     if selection_epoch_id == "sor-v0":

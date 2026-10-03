@@ -27,6 +27,9 @@ from src.trading_kernel.domain.generic_selection_core import (
     compute_generic_selection,
 )
 from src.trading_kernel.domain.generic_selection_jobs import (
+    GENERIC_SOURCE_MAX_ATTEMPTS,
+    GENERIC_SOURCE_RETRY_BACKOFF_MS,
+    GenericSelectionSourceTemporarilyUnavailable,
     SelectionJobLease,
     selection_job_identity,
 )
@@ -262,6 +265,7 @@ async def _persist_failure(
     source_member_count: int,
     completed_at_ms: int,
     source_digest: str | None = None,
+    next_retry_at_ms: int | None = None,
 ) -> None:
     async with uow_factory() as uow:
         await uow.instrument_selection.complete_selection_failure(
@@ -271,6 +275,7 @@ async def _persist_failure(
             source_member_count=source_member_count,
             source_digest=source_digest,
             completed_at_ms=completed_at_ms,
+            next_retry_at_ms=next_retry_at_ms,
         )
 
 
@@ -361,8 +366,23 @@ async def _run_generic_selection_once(
             return await _expire_generic_selection_run(
                 uow_factory=uow_factory, request=request, now_ms=failed_at_ms,
             )
+        transient = (
+            isinstance(exc, (TimeoutError, ConnectionError, GenericSelectionSourceTemporarilyUnavailable))
+            or bool(errors) and all(isinstance(error, (TimeoutError, ConnectionError, GenericSelectionSourceTemporarilyUnavailable)) for error in errors.values())
+        )
+        retry_after = max((error.retry_after_ms or 0 for error in (
+            (exc,) if not errors else tuple(errors.values())
+        ) if isinstance(error, GenericSelectionSourceTemporarilyUnavailable)), default=0)
+        retry_delay_ms = max(GENERIC_SOURCE_RETRY_BACKOFF_MS,retry_after)
+        retry_at_ms = (
+            failed_at_ms + retry_delay_ms
+            if transient and claim.attempt_number < GENERIC_SOURCE_MAX_ATTEMPTS
+            and failed_at_ms + retry_delay_ms < period_expires_at_ms
+            else None
+        )
         await _persist_failure(uow_factory=uow_factory, claim=claim, outcome=SelectionAttemptOutcome.SOURCE_FAILED,
-            reason_code=reason, source_member_count=len(windows), completed_at_ms=failed_at_ms)
+            reason_code=reason, source_member_count=len(windows), completed_at_ms=failed_at_ms,
+            next_retry_at_ms=retry_at_ms)
         return _failure_result(claim, "SOURCE_FAILED", reason)
     if source_expired_at_ms is not None:
         return await _expire_generic_selection_run(
