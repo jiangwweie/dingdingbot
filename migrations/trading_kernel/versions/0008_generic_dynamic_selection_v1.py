@@ -58,6 +58,27 @@ def upgrade() -> None:
     _generic_normal_binding_guard()
     _generic_static_recovery_proof_function()
     _generic_static_recovery_commit_guard()
+    _grant_existing_owner_read_roles(bind)
+
+
+def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
+    """Preserve pre-provisioned Owner read surfaces across new 0008 tables."""
+    tables = (
+        "brc_generic_dynamic_selection_specs_v1",
+        "brc_comparison_universe_definitions",
+        "brc_comparison_universe_members",
+        "brc_comparison_binding_current",
+        "brc_selection_authority_event_bindings",
+        "brc_materialization_generation_event_baselines",
+        "brc_selection_rollback_baseline_events",
+    )
+    for role in ("brc_owner_console", "brc_owner_control"):
+        if bind.scalar(sa.text(
+            "SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=:role)"
+        ), {"role":role}):
+            bind.execute(sa.text(
+                f"GRANT SELECT ON TABLE {', '.join(tables)} TO {role}"
+            ))
 
 
 def _generic_static_recovery_commit_guard() -> None:

@@ -84,6 +84,126 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 
 TARGET_REVISION = "0008_generic_dynamic_selection_v1"
 EXACT_0007_REFERENCE = "ee539609560fb006c77099efeb06ab01ad7cda22"
+NEW_OWNER_READ_TABLES = (
+    "brc_generic_dynamic_selection_specs_v1",
+    "brc_comparison_universe_definitions",
+    "brc_comparison_universe_members",
+    "brc_comparison_binding_current",
+    "brc_selection_authority_event_bindings",
+    "brc_materialization_generation_event_baselines",
+    "brc_selection_rollback_baseline_events",
+)
+
+
+@pytest.mark.asyncio
+async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> None:
+    admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
+    created_roles: list[str] = []
+    name: str | None = None
+    engine: AsyncEngine | None = None
+    try:
+        for role in ("brc_owner_console", "brc_owner_control"):
+            if not await admin.fetchval("SELECT 1 FROM pg_roles WHERE rolname=$1", role):
+                await admin.execute(f'CREATE ROLE "{role}" NOLOGIN')
+                created_roles.append(role)
+        name, url = await create_empty_database()
+        engine = create_async_engine(url)
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            for role in ("brc_owner_console", "brc_owner_control"):
+                for table in NEW_OWNER_READ_TABLES:
+                    assert await conn.scalar(sa.text(
+                        "SELECT has_table_privilege(:role,:table,'SELECT')"
+                    ), {"role":role,"table":table}), (role,table)
+                    assert not await conn.scalar(sa.text(
+                        "SELECT has_table_privilege(:role,:table,'INSERT')"
+                    ), {"role":role,"table":table}), (role,table)
+                    assert not await conn.scalar(sa.text(
+                        "SELECT has_table_privilege(:role,:table,'UPDATE')"
+                    ), {"role":role,"table":table}), (role,table)
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        if name is not None:
+            await drop_disposable_database(name)
+        for role in reversed(created_roles):
+            await admin.execute(f'DROP ROLE "{role}"')
+        await admin.close()
+
+
+@pytest.mark.asyncio
+async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+    )
+
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    session = 1_704_067_200_000
+    authority_id = "authority:source-owner-paused"
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+                account_id="paused-source",runtime_commit="a"*40,
+                schema_revision="0007_exit_profile_authority_v1",seeded_at_ms=session,
+            ))
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_specs
+                (selection_spec_id,strategy_group_id,strategy_version_id,
+                 selection_version,selection_kind,algorithm_semantic_digest,status,installed_at_ms)
+                VALUES('sor-dynamic-selection-v0','SOR-001','sgv:SOR-001:v4',
+                       1,'sor_dynamic_v0',:digest,'active',:session)
+            """), {"digest":"sha256:"+"a"*64,"session":session})
+            for side in ("long", "short"):
+                await conn.execute(sa.text("""
+                    INSERT INTO brc_instrument_selection_spec_events
+                    (selection_spec_id,event_spec_id,position_side)
+                    VALUES('sor-dynamic-selection-v0',:event,:side)
+                """), {"event":f"event_spec:SOR-001:SOR-{side.upper()}:v4","side":side})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_selection_session_authorities
+                (selection_authority_id,selection_spec_id,session_start_ms,decision_boundary_ms,
+                 authority_sequence,selection_mode,continuity_source_kind,owner_control_version,
+                 authority_outcome,grant_proof_kind,effective_from_ms,expires_at_ms,
+                 reason_code,semantic_digest,created_at_ms)
+                VALUES(:id,'sor-dynamic-selection-v0',:session,:decision,
+                       1,'static_baseline','NONE',1,
+                       'OWNER_PAUSED_NOT_MATERIALIZED',NULL,:decision,:expires,
+                       'OWNER_PAUSED',:digest,:decision)
+            """), {"id":authority_id,"session":session,"decision":session+3_600_000,
+                    "expires":session+90_000_000,"digest":"sha256:"+"c"*64})
+            source_authority = dict((await conn.execute(sa.text(
+                "SELECT * FROM brc_selection_session_authorities WHERE selection_authority_id=:id"
+            ), {"id":authority_id})).mappings().one())
+            source_manifest = await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
+            parent = (await conn.execute(sa.text(
+                "SELECT * FROM brc_selection_session_authorities WHERE selection_authority_id=:id"
+            ), {"id":authority_id})).mappings().one()
+            assert parent["semantic_digest"] == source_authority["semantic_digest"]
+            assert parent["authority_outcome"] == "OWNER_PAUSED_NOT_MATERIALIZED"
+            assert parent["selection_epoch_id"] == "sor-v0"
+            assert parent["period_anchor_ms"] == source_authority["session_start_ms"]
+            rows = (await conn.execute(sa.text(
+                "SELECT event_spec_id,position_side,grant_state,universe_version_id "
+                "FROM brc_selection_authority_event_bindings "
+                "WHERE selection_authority_id=:id ORDER BY position_side"
+            ), {"id":authority_id})).mappings().all()
+            assert len(rows) == 2
+            assert {row["position_side"] for row in rows} == {"long", "short"}
+            assert all(row["grant_state"] == "EMPTY" and row["universe_version_id"] is None for row in rows)
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 @pytest.fixture(scope="module")
