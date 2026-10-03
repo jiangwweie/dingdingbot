@@ -15,6 +15,16 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
     install_strategy_universe,
 )
+from src.trading_kernel.application.observe_strategy_scope import (
+    ObservationRequest,
+    ObservationStatus,
+    observe_strategy_scope,
+)
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    set_global_entry_state,
+    set_strategy_entry_state,
+)
 from src.trading_kernel.application.produce_strategy_signal import (
     evaluate_strategy_snapshot,
 )
@@ -30,6 +40,7 @@ from src.trading_kernel.domain.generic_selection_spec import (
     generic_selection_spec,
 )
 from src.trading_kernel.domain.market import MarketSnapshot
+from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
     SourceProvenanceInsufficient,
@@ -644,6 +655,72 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             assert target_row["comparison_source_evidence_digest"] == proofs[0].source_evidence_digest
             assert await conn.scalar(sa.text("SELECT comparison_transition_revision FROM brc_comparison_binding_current WHERE event_spec_id=:event"), {"event":contract.event_spec_id}) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await deploy_compatible_upgrade_identity(uow, RuntimeAuthoritySeedRequest(
+                account_id="source-neutrality",runtime_commit="b"*40,
+                schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS+100,
+            ))
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            policy = await uow.entry_admission.get_owner_policy(OWNER_POLICY_ID)
+            assert policy is not None and not policy.new_entry_submit_enabled
+            await set_global_entry_state(uow,owner_policy_id=OWNER_POLICY_ID,enabled=True,
+                request=ControlMutationRequest(expected_version=policy.policy_version,
+                    reason="test_source_target_parity",idempotency_key=f"parity:{group}:{triggered}",
+                    owner_identity="migration-test-owner",now_ms=NOW_MS+200),
+                authentication_strength="totp_step_up")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            strategy_control = await uow.owner_controls.get_strategy_control(group)
+            assert strategy_control is not None
+            await set_strategy_entry_state(uow,strategy_group_id=group,
+                target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=strategy_control.control_version,
+                    reason="test_source_target_parity",idempotency_key=f"strategy-parity:{group}:{triggered}",
+                    owner_identity="migration-test-owner",now_ms=NOW_MS+201),
+                authentication_strength="totp_step_up")
+        async with engine.begin() as conn:
+            # The source fixture installed the member but did not run product
+            # certification. Make this test-only prerequisite explicit.
+            await conn.execute(sa.text(
+                "UPDATE brc_instruments SET status='active' "
+                "WHERE exchange_instrument_id=:instrument"
+            ), {"instrument":ETH})
+        class ClosedMarket:
+            def __init__(self, template, delta):
+                self.template = template
+                self.delta = delta
+
+            async def fetch_closed_candles(self, request):
+                candles = self.template.candles_1h if request.timeframe == "1h" else self.template.candles_4h
+                return tuple(c.model_copy(update={
+                    "open_time_ms":c.open_time_ms+self.delta,
+                    "close_time_ms":c.close_time_ms+self.delta,
+                }) for c in candles)
+
+        next_template = (mpg_flat_snapshot if group == "MPG-001" else mi_flat_snapshot)()
+        delta = 3_600_000
+        resumed = await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(engine),ClosedMarket(next_template,delta),
+            ObservationRequest(runtime_scope_id=scope_id,runtime_commit="b"*40,
+                schema_revision=TARGET_REVISION,
+                trigger_candle_close_time_ms=NOW_MS+delta,attempted_at_ms=NOW_MS+delta+1),
+        )
+        assert resumed.status is ObservationStatus.NO_SIGNAL, resumed
+        assert resumed.detector_reason != "COMPARISON_REBASE_REQUIRED", resumed
+        trigger_template = (mpg_long_snapshot if group == "MPG-001" else mi_long_snapshot)()
+        later = await observe_strategy_scope(
+            lambda: PostgresKernelUnitOfWork(engine),ClosedMarket(trigger_template,2*delta),
+            ObservationRequest(runtime_scope_id=scope_id,runtime_commit="b"*40,
+                schema_revision=TARGET_REVISION,
+                trigger_candle_close_time_ms=NOW_MS+2*delta,attempted_at_ms=NOW_MS+2*delta+1),
+        )
+        async with engine.connect() as conn:
+            blocker = await conn.scalar(sa.text(
+                "SELECT first_blocker FROM brc_readiness_current WHERE runtime_scope_id=:scope"
+            ), {"scope":scope_id})
+        assert later.status is ObservationStatus.SIGNAL_CREATED, blocker
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
     finally:
         await engine.dispose()

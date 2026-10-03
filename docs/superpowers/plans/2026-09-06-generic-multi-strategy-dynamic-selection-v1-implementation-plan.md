@@ -285,6 +285,8 @@ candidate的installed Spec集合、Spec digests及证据绑定在release freeze�
 
 0007→0008 Runtime Identity增量（基于`b7e55782`）：正式`deploy_compatible_upgrade_identity`原先拒绝0007来源，Docker PG的RED覆盖Entry原本disabled/enabled两种Flat source，并暴露迁移前越级旋转与0007来源请求错误目标修订；现将0007作为第三种exact capability source，要求Alembic已是0008且请求目标恰为0008，复用flat/quiescence、Registry/Policy/Seed/Capability核对，保留ExitProfile Catalog且不安装/激活Generic Selection。若源Policy允许新ENTRY，目标身份提交前沿既有受控升级路径fence Entry；已关闭则保持关闭。两种定向测试均证明Schema/Commit目标身份一致、Strategy Control不变，且零Job/Snapshot/Generation/Vacuum/Authority/Ticket/Command。Generic/ExitProfile迁移组合20 passed、Unit/Architecture1257 passed、生产源码Mypy158 files、相关Ruff/diff通过；不是R4。此为本地目标身份能力，不构成生产部署或GS-04整卡Done；迁移后的确切provenance、role grants及真实Static producer差分仍待验证。
 
+Static迁移后producer续跑增量（基于`8e32bb02`）：0007来源先以MPG/MI×已有ARMED/TRIGGERED四种Episode状态及完整Comparison缓存形成可认证来源；0008迁移后经正式Runtime Identity旋转，测试显式执行Owner Global/Strategy Resume并将本地测试Instrument认证为active，再调用正式`observe_strategy_scope`。同一Static binding revision 0下，下一根NOT_TRIGGERED不产生假rebase或Signal，再下一根TRIGGERED只生成一条Signal、零Exchange Command。上述Owner/Instrument动作仅是隔离测试前置，不是migration副作用。迁移/Observation组合33 passed，Unit/Architecture1257 passed、Ruff、生产源码Mypy158 files及diff通过；不是完整R4。此证据尚未独立运行exact0007 source producer的相同后续输入、比较两边Detector/Episode/Signal逐字段结果，因此GS-MIG-COMP-01仍未闭合，GS-04继续IN_PROGRESS。
+
 **目标**：在原authority表上落地已验证domain，保全source逻辑身份。
 
 **允许**：唯一forward migration（起草前核对head）、PG metadata/repository结构、exact source preservation/revision verifier及integration tests。**禁止**：migration内启动Selector、写Job/Snapshot/Generation/Vacuum/Authority parent、运行Owner activation、Tokyo migration。
