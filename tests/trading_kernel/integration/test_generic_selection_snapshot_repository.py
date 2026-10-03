@@ -1860,7 +1860,10 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-async def test_hourly_natural_selection_no_change_successor_is_eligible(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch"])
+async def test_hourly_natural_selection_no_change_successor_is_eligible(
+    database: AsyncEngine, group: str, fault_stage: str | None,
+) -> None:
     await _exercise_generic_generation(database,group,True,
         durable=True,first_activation=True,natural_selection=True)
     spec = inputs(group).spec
@@ -2037,11 +2040,13 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(database
         signal_event_id=third_observed.signal_event_id,
         selection_authority_id=third_grant.selection_authority_id,
         member=first.selected_members[0],universe_version_id=current_uid,
-        closed_at_ms=third.effective_from_ms,now_ms=third_grant_at+2)
+        closed_at_ms=third.effective_from_ms,now_ms=third_grant_at+2,
+        fault_stage=fault_stage)
 
 
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,
-    selection_authority_id, member, universe_version_id, closed_at_ms, now_ms):
+    selection_authority_id, member, universe_version_id, closed_at_ms, now_ms,
+    fault_stage: str | None):
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
         dispatch_one_command,
@@ -2050,6 +2055,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         IssueReadySignalRequest,
         issue_ready_signal,
     )
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
     from src.trading_kernel.domain.commands import (
         ExchangeCommandResult,
@@ -2062,6 +2068,18 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     from src.trading_kernel.domain.entry_admission_snapshot import (
         EntryAdmissionSnapshot,
     )
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+
+    async def owner_pause(at_ms):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            control = await uow.owner_controls.get_strategy_control(group)
+            assert control is not None
+            await set_strategy_entry_state(uow,strategy_group_id=group,
+                target_state=StrategyEntryState.PAUSED,
+                request=ControlMutationRequest(expected_version=control.control_version,
+                    reason="hourly_entry_fault_test",idempotency_key=f"pause:{group}:{fault_stage}",
+                    owner_identity="owner",now_ms=at_ms),
+                authentication_strength="totp_step_up")
 
     await make_warming_ready(database,universe_version_id=universe_version_id,
         warm_closed_bar_time_ms=closed_at_ms,valid_until_ms=now_ms+60_000)
@@ -2085,6 +2103,64 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
             notional_coefficient=Decimal(1),notional_coefficient_certified=True,
             observed_at_ms=now_ms,valid_until_ms=now_ms+60_000)
+    if fault_stage == "comparison_switch_before_claim":
+        async with database.begin() as conn:
+            await conn.execute(sa.text("""
+                UPDATE brc_comparison_binding_current
+                SET comparison_transition_revision=comparison_transition_revision+1
+                WHERE event_spec_id=:event
+            """), {"event":inputs(group).spec.event_spec_id})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            refused = await issue_ready_signal(uow,IssueReadySignalRequest(
+                signal_event_id=signal_event_id,admission_snapshot=admission,
+                claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
+        assert refused.status.value == "selection_authority_invalid", refused
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        return
+    if fault_stage == "before_issue":
+        await owner_pause(now_ms+1)
+        refused_admission = admission.model_copy(update={
+            "account_risk_snapshot":AccountRiskSnapshot.create(**{
+                **risk.model_dump(exclude={"snapshot_digest"}),
+                "observed_at_ms":now_ms+2,"valid_until_ms":now_ms+60_002}),
+            "observed_at_ms":now_ms+2,"valid_until_ms":now_ms+60_002})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            refused = await issue_ready_signal(uow,IssueReadySignalRequest(
+                signal_event_id=signal_event_id,admission_snapshot=refused_admission,
+                claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms+2))
+        assert refused.status.value == "scope_or_policy_mismatch", refused
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        return
+    assert fault_stage in {None,"between_claim_ticket","before_dispatch"}
+    if fault_stage == "between_claim_ticket":
+        from src.trading_kernel.application.issue_ticket import (
+            issue_ticket as actual_issue_ticket,
+        )
+
+        async def pause_after_claim(uow, issue_request):
+            assert issue_request.capacity_claim.selection_authority_id == selection_authority_id
+            await owner_pause(now_ms+1)
+            return await actual_issue_ticket(uow,issue_request)
+
+        with patch("src.trading_kernel.application.issue_ready_signal.issue_ticket",
+            new=pause_after_claim):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                refused = await issue_ready_signal(uow,IssueReadySignalRequest(
+                    signal_event_id=signal_event_id,admission_snapshot=admission,
+                    claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
+                    schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
+        assert refused.status.value == "strategy_paused", refused
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        return
+    async with PostgresKernelUnitOfWork(database) as uow:
         issued = await issue_ready_signal(uow,IssueReadySignalRequest(
             signal_event_id=signal_event_id,admission_snapshot=admission,
             claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
@@ -2133,12 +2209,22 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
 
     async with database.begin() as conn:
         await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
+    if fault_stage == "before_dispatch":
+        await owner_pause(now_ms+1)
     venue = Venue()
     dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
         DispatchCommandRequest(worker_id=f"hourly-{group}-dispatch",ticket_id=issued.ticket_id,
             now_ms=now_ms+5,lease_until_ms=now_ms+30_000,timeout_seconds=1,
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=60_000),entry_facts_source=ActionFacts())
+    if fault_stage == "before_dispatch":
+        assert dispatched.status.value == "superseded", dispatched
+        assert venue.calls == []
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text(
+                "SELECT status FROM brc_exchange_commands WHERE ticket_id=:ticket AND command_kind='entry'"
+            ), {"ticket":issued.ticket_id}) == "superseded"
+        return
     assert dispatched.status.value == "accepted", dispatched
     assert len(venue.calls) == 1
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
