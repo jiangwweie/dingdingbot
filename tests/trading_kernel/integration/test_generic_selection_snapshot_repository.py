@@ -2070,13 +2070,14 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             class RecoveryVenue:
                 def __init__(self):
                     self.calls = []
+                    self.observed_at_ms = issued_at + 6
 
                 async def execute(self, request):
                     async with PostgresKernelUnitOfWork(database) as durable_uow:
                         durable = await durable_uow.exchange_commands.get(request.command_id)
                         assert durable.status is ExchangeCommandStatus.CLAIMED
                     self.calls.append(request)
-                    return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,observed_at_ms=issued_at+10,exchange_order_id="recovery-entry-test")
+                    return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,observed_at_ms=self.observed_at_ms,exchange_order_id=f"recovery-{request.kind.value}-{len(self.calls)}")
             async with database.begin() as conn:
                 # Local capability prerequisite only; no production promotion.
                 await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
@@ -2098,6 +2099,125 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             else:
                 assert dispatched.status.value == "accepted", dispatched
                 assert len(venue.calls) == 1
+                from src.trading_kernel.application.maintain_ticket_lifecycle import (
+                    LifecycleMaintenanceRequest,
+                    TicketLifecycleFacts,
+                    maintain_ticket_lifecycle,
+                )
+                from src.trading_kernel.application.reconcile_ticket import (
+                    ReconcileTicketRequest,
+                    reconcile_ticket,
+                )
+                from src.trading_kernel.application.settle_ticket import (
+                    RecordTradeReviewRequest,
+                    SettleTicketRequest,
+                    record_trade_review,
+                    settle_ticket,
+                )
+                from src.trading_kernel.domain.aggregate import AggregateStatus
+                from src.trading_kernel.domain.commands import ExchangeCommandKind
+                from src.trading_kernel.domain.events import PostFillStressAssessed
+                from src.trading_kernel.domain.position import PositionSnapshot
+                from src.trading_kernel.domain.reducer import reduce_event
+                from tests.trading_kernel.support.capacity_claims import (
+                    make_stress_evidence,
+                )
+
+                async with PostgresKernelUnitOfWork(database) as lifecycle_uow:
+                    filled = await reconcile_ticket(lifecycle_uow, ReconcileTicketRequest(
+                        ticket_id=issued.ticket_id,
+                        snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                            quantity=ticket.quantity,average_entry_price=ticket.entry_reference_price,
+                            venue_reported_liquidation_price=Decimal(0),open_orders=(),
+                            observed_at_ms=issued_at+100),
+                    ))
+                assert filled.status.value == "entry_fill_recorded"
+                async def dispatch_safety(step):
+                    async with PostgresKernelUnitOfWork(database) as stress_uow:
+                        pending = await stress_uow.aggregates.get(issued.ticket_id)
+                        if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
+                            event = PostFillStressAssessed(
+                                event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
+                                ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
+                                occurred_at_ms=issued_at+step-1,status="passed",
+                                evidence=make_stress_evidence(pending.ticket),
+                                owner_policy_id=pending.ticket.owner_policy_id,
+                                owner_policy_version=pending.ticket.owner_policy_version,
+                                filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
+                                initial_stop_price=pending.ticket.initial_stop_price,
+                                initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+                            await stress_uow.commit_reduction(event=event,
+                                reduction=reduce_event(pending,event),expected_version=pending.version)
+                    venue.observed_at_ms = issued_at + step + 1
+                    outcome = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                        DispatchCommandRequest(worker_id="recovery-lifecycle",ticket_id=issued.ticket_id,
+                            now_ms=issued_at+step,lease_until_ms=issued_at+step+30_000,
+                            timeout_seconds=1))
+                    assert outcome.status.value == "accepted", outcome
+                    return outcome
+
+                await dispatch_safety(200)
+                await dispatch_safety(300)
+                async with PostgresKernelUnitOfWork(database) as lifecycle_uow:
+                    protected = await lifecycle_uow.aggregates.get(issued.ticket_id)
+                assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
+                assert protected.initial_stop_exchange_order_id is not None
+                assert protected.tp1_exchange_order_id is not None
+                async with PostgresKernelUnitOfWork(database) as lifecycle_uow:
+                    runner = await maintain_ticket_lifecycle(lifecycle_uow, LifecycleMaintenanceRequest(
+                        ticket_id=issued.ticket_id,
+                        facts=TicketLifecycleFacts(position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
+                            tp1_filled_quantity=ticket.take_profit_quantities[0],
+                            tp1_average_fill_price=ticket.take_profit_prices[0],
+                            allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
+                            price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=issued_at+400),
+                        now_ms=issued_at+400))
+                assert runner.status.value == "break_even_requested"
+                await dispatch_safety(500)
+                await dispatch_safety(600)
+                async with PostgresKernelUnitOfWork(database) as lifecycle_uow:
+                    flat = await reconcile_ticket(lifecycle_uow, ReconcileTicketRequest(
+                        ticket_id=issued.ticket_id,
+                        snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                            quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                            observed_at_ms=issued_at+700),
+                    ))
+                assert flat.status.value == "external_flat_incident"
+                await dispatch_safety(800)
+                async with PostgresKernelUnitOfWork(database) as lifecycle_uow:
+                    matched = await reconcile_ticket(lifecycle_uow, ReconcileTicketRequest(
+                        ticket_id=issued.ticket_id,
+                        snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                            quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                            observed_at_ms=issued_at+900),
+                    ))
+                    settled = await settle_ticket(lifecycle_uow, SettleTicketRequest(
+                        ticket_id=issued.ticket_id,settled_at_ms=issued_at+1000))
+                    reviewed = await record_trade_review(lifecycle_uow, RecordTradeReviewRequest(
+                        ticket_id=issued.ticket_id,review_id="review:recovered-cpm",
+                        outcome="closed",metrics={"realized_pnl":"1.25"},
+                        decision_impact={"strategy_action":"keep"},recorded_at_ms=issued_at+1100))
+                    terminal = await lifecycle_uow.aggregates.get(issued.ticket_id)
+                    frozen = await lifecycle_uow.tickets.get(issued.ticket_id)
+                    review = await lifecycle_uow.reviews.get_for_ticket(issued.ticket_id)
+                    reservation = await lifecycle_uow.budgets.get_for_ticket(issued.ticket_id)
+                    active_in_domain = await lifecycle_uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+                    incident = await lifecycle_uow.incidents.get_open_for_ticket(issued.ticket_id)
+                    commands = await lifecycle_uow.exchange_commands.list_for_ticket(issued.ticket_id)
+                assert matched.status.value == "matched"
+                assert settled.status.value == "budget_settled"
+                assert reviewed.status.value == "review_recorded"
+                assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+                assert frozen is not None and frozen.selection_authority_id == committed_recovery.selection_authority_id
+                assert review is not None and review.review_id == "review:recovered-cpm"
+                assert reservation is not None and reservation.status == "released"
+                assert not active_in_domain and incident is None
+                assert [command.kind for command in commands] == [
+                    ExchangeCommandKind.ENTRY,ExchangeCommandKind.INITIAL_STOP,
+                    ExchangeCommandKind.TAKE_PROFIT,ExchangeCommandKind.REPLACE_PROTECTION,
+                    ExchangeCommandKind.CANCEL_ORDER,ExchangeCommandKind.CANCEL_ORDER,
+                ], [command.kind.value for command in commands]
+                assert len(venue.calls) == len(commands)
             return
         from src.trading_kernel.application.ingest_signal import (
             resolve_selection_observation_authority,
