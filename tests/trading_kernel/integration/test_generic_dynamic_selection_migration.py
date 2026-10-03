@@ -46,6 +46,9 @@ from src.trading_kernel.domain.generic_selection_spec import (
     SpecNumericInstallationEvidence,
     generic_selection_spec,
 )
+from src.trading_kernel.domain.instrument_selection import (
+    CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
+)
 from src.trading_kernel.domain.market import MarketSnapshot
 from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
@@ -134,7 +137,7 @@ async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> No
 
 
 @pytest.mark.asyncio
-async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> None:
+async def test_0007_nontrading_authorities_preserve_empty_event_grants() -> None:
     from scripts.trading_kernel.verify_schema import (
         _generic_source_preservation_manifest,
     )
@@ -143,6 +146,8 @@ async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> Non
     engine = create_async_engine(url)
     session = 1_704_067_200_000
     authority_id = "authority:source-owner-paused"
+    valid_empty_id = "authority:source-valid-empty"
+    snapshot_id = f"selection:sor-dynamic-selection-v0:{session}"
     try:
         await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
         async with PostgresKernelUnitOfWork(engine) as uow:
@@ -165,6 +170,56 @@ async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> Non
                     VALUES('sor-dynamic-selection-v0',:event,:side)
                 """), {"event":f"event_spec:SOR-001:SOR-{side.upper()}:v4","side":side})
             await conn.execute(sa.text("""
+                INSERT INTO brc_sor_dynamic_selection_specs_v0
+                (selection_spec_id,decision_offset_utc_seconds,feature_cutoff_offset_utc_seconds,
+                 eligibility_not_before_offset_utc_seconds,valid_until_next_decision_offset_seconds,
+                 candidate_count,selected_count_max,near_count_max,activity_floor_quote_usdt,
+                 materialization_timeout_seconds)
+                VALUES('sor-dynamic-selection-v0',3600,3600,4500,86400,24,7,7,20000000,1800)
+            """))
+            for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS:
+                await conn.execute(sa.text("""
+                    INSERT INTO brc_instruments
+                    (exchange_instrument_id,venue_id,asset_class,venue_symbol,contract_kind,status)
+                    VALUES(:instrument,'binance-usdm','crypto',:symbol,'perpetual','pending_certification')
+                    ON CONFLICT(exchange_instrument_id) DO NOTHING
+                """), {"instrument":instrument_id,"symbol":instrument_id.split(":")[1]})
+                await conn.execute(sa.text("""
+                    INSERT INTO brc_instrument_selection_spec_members
+                    (selection_spec_id,exchange_instrument_id)
+                    VALUES('sor-dynamic-selection-v0',:instrument)
+                """), {"instrument":instrument_id})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_snapshots
+                (selection_snapshot_id,selection_spec_id,strategy_group_id,strategy_version_id,
+                 session_start_ms,decision_at_ms,feature_cutoff_at_ms,eligibility_not_before_ms,
+                 expires_at_ms,candidate_count,ready_count,selected_count,source_observed_at_ms,
+                 source_semantic_digest,selection_semantic_digest,created_at_ms)
+                VALUES(:snapshot,'sor-dynamic-selection-v0','SOR-001','sgv:SOR-001:v4',
+                       :session,:decision,:decision,:eligible,:expires,24,0,0,:decision,
+                       :source_digest,:selection_digest,:decision)
+            """), {"snapshot":snapshot_id,"session":session,"decision":session+3_600_000,
+                    "eligible":session+4_500_000,"expires":session+90_000_000,
+                    "source_digest":"sha256:"+"1"*64,"selection_digest":"sha256:"+"2"*64})
+            for index, instrument_id in enumerate(CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS):
+                await conn.execute(sa.text("""
+                    INSERT INTO brc_instrument_selection_member_decisions
+                    (selection_snapshot_id,member_decision_id,selection_spec_id,session_start_ms,
+                     feature_cutoff_at_ms,input_window_start_ms,input_window_end_ms,
+                     exchange_instrument_id,input_window_digest,source_status,or_high,or_low,
+                     or_width,pre_or_atr14,pre_or_width_atr14,trailing_24h_quote_volume,
+                     or_geometry_valid,atr_valid,activity_valid,selection_ready,primary_reason,
+                     secondary_reasons,stable_rank,member_state,selected,member_semantic_digest)
+                    VALUES(:snapshot,:member,'sor-dynamic-selection-v0',:session,
+                           :cutoff,:window_start,:cutoff,:instrument,:window_digest,'READY',
+                           101,99,2,1,:ratio,0,true,true,false,false,'LOW_ACTIVITY',
+                           '[]'::jsonb,NULL,'INELIGIBLE',false,:member_digest)
+                """), {"snapshot":snapshot_id,"member":f"member:empty:{index}",
+                        "session":session,"cutoff":session+3_600_000,
+                        "window_start":session-82_800_000,"instrument":instrument_id,
+                        "window_digest":"sha256:"+"3"*64,"ratio":index+1,
+                        "member_digest":"sha256:"+f"{index:064x}"})
+            await conn.execute(sa.text("""
                 INSERT INTO brc_selection_session_authorities
                 (selection_authority_id,selection_spec_id,session_start_ms,decision_boundary_ms,
                  authority_sequence,selection_mode,continuity_source_kind,owner_control_version,
@@ -176,6 +231,18 @@ async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> Non
                        'OWNER_PAUSED',:digest,:decision)
             """), {"id":authority_id,"session":session,"decision":session+3_600_000,
                     "expires":session+90_000_000,"digest":"sha256:"+"c"*64})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_selection_session_authorities
+                (selection_authority_id,selection_spec_id,session_start_ms,decision_boundary_ms,
+                 authority_sequence,selection_mode,selection_snapshot_id,continuity_source_kind,
+                 owner_control_version,authority_outcome,effective_from_ms,expires_at_ms,
+                 reason_code,semantic_digest,created_at_ms)
+                VALUES(:id,'sor-dynamic-selection-v0',:session,:decision,
+                       2,'dynamic_selection',:snapshot,'NONE',1,'VALID_EMPTY',
+                       :decision,:expires,'NO_READY_MEMBERS',:digest,:decision)
+            """), {"id":valid_empty_id,"snapshot":snapshot_id,"session":session,
+                    "decision":session+3_600_000,"expires":session+90_000_000,
+                    "digest":"sha256:"+"d"*64})
             source_authority = dict((await conn.execute(sa.text(
                 "SELECT * FROM brc_selection_session_authorities WHERE selection_authority_id=:id"
             ), {"id":authority_id})).mappings().one())
@@ -200,6 +267,24 @@ async def test_0007_owner_paused_authority_preserves_empty_event_grants() -> Non
             assert len(rows) == 2
             assert {row["position_side"] for row in rows} == {"long", "short"}
             assert all(row["grant_state"] == "EMPTY" and row["universe_version_id"] is None for row in rows)
+            empty_parent = (await conn.execute(sa.text(
+                "SELECT * FROM brc_selection_session_authorities WHERE selection_authority_id=:id"
+            ), {"id":valid_empty_id})).mappings().one()
+            assert empty_parent["authority_outcome"] == "VALID_EMPTY"
+            assert empty_parent["selection_snapshot_id"] == snapshot_id
+            assert empty_parent["semantic_digest"] == "sha256:"+"d"*64
+            empty_rows = (await conn.execute(sa.text(
+                "SELECT position_side,grant_state,universe_version_id FROM brc_selection_authority_event_bindings "
+                "WHERE selection_authority_id=:id ORDER BY position_side"
+            ), {"id":valid_empty_id})).mappings().all()
+            assert len(empty_rows) == 2
+            assert {row["position_side"] for row in empty_rows} == {"long", "short"}
+            assert all(row["grant_state"] == "EMPTY" and row["universe_version_id"] is None for row in empty_rows)
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_instrument_selection_member_decisions WHERE selection_snapshot_id=:snapshot"
+            ), {"snapshot":snapshot_id}) == 24
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 2
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
     finally:
         await engine.dispose()
