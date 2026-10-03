@@ -281,6 +281,8 @@ candidate的installed Spec集合、Spec digests及证据绑定在release freeze�
 
 ### GS-04 — Forward Schema / PostgreSQL constraints
 
+0007→0008 source-preservation增量（基于`6a28b680`）：`verify_schema.py`新增exact0007物理表/列inventory与逐record logical manifest；0008侧只对period列重命名、Generation previous pair、Rollback baseline pair及Authority pair做可核验反投影，新Generic表/字段不伪装源数据。`--compatible-source-revision 0007_exit_profile_authority_v1`在只读事务内组合source shape、flat/quiescence gate、runtime/Registry/Policy/Control identity及所有Static MPG/MI Comparison provenance；缺证据返回FAIL，不触发migration。`--preserve-source-revision`可用原digest复核0008目标，篡改一条旧SOR Job即FAIL。Docker PG验证空/旧SOR Job+Attempt、Static rollback baseline、MPG/MI ARMED/TRIGGERED四种来源的迁移前后逐record digest相同；0007 inventory同真实Schema一致，缺Comparison来源在目标DDL前STOP。相关迁移/Source verifier组合20 passed，Unit/Architecture1257 passed，verify_schema Mypy、相关Ruff/diff通过；不是完整R4。该增量未证明完整GS-MIG-COMP-01的source/target首根与后续Signal差分、所有History与非交易Authority的production-shaped样本、role grants及Owner epoch控制转换，GS-04仍IN_PROGRESS，生产未修改。
+
 **目标**：在原authority表上落地已验证domain，保全source逻辑身份。
 
 **允许**：唯一forward migration（起草前核对head）、PG metadata/repository结构、exact source preservation/revision verifier及integration tests。**禁止**：migration内启动Selector、写Job/Snapshot/Generation/Vacuum/Authority parent、运行Owner activation、Tokyo migration。

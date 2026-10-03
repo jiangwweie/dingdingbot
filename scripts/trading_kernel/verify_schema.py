@@ -32,6 +32,10 @@ from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
+from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
+    SourceProvenanceInsufficient,
+    certify_0007_static_comparison_sources,
+)
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
@@ -51,6 +55,7 @@ OWNER_CONTROL_SOURCE_REVISION = "0003_portfolio_admission_observability"
 TRADFI_INSTRUMENT_SOURCE_REVISION = "0004_owner_control_plane"
 DYNAMIC_SELECTION_SOURCE_REVISION = "0005_tradfi_instrument_center"
 EXIT_PROFILE_SOURCE_REVISION = "0006_sor_dynamic_selection_v0"
+GENERIC_SELECTION_SOURCE_REVISION = "0007_exit_profile_authority_v1"
 HISTORICAL_PRESERVATION_TARGET_REVISION = "0003_portfolio_admission_observability"
 _OWNER_CONTROL_TABLES = frozenset(
     {
@@ -391,6 +396,8 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
+    if source_revision == GENERIC_SELECTION_SOURCE_REVISION:
+        return await _verify_generic_selection_source(database_url, source_revision)
     if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
         return await _verify_dynamic_selection_source(
             database_url,
@@ -484,6 +491,7 @@ async def _verify_preservation(
         TRADFI_INSTRUMENT_SOURCE_REVISION,
         DYNAMIC_SELECTION_SOURCE_REVISION,
         EXIT_PROFILE_SOURCE_REVISION,
+        GENERIC_SELECTION_SOURCE_REVISION,
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -495,7 +503,9 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
+            if source_revision == GENERIC_SELECTION_SOURCE_REVISION:
+                manifest = await _generic_source_preservation_manifest(connection)
+            elif source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
                 manifest = await _dynamic_selection_preservation_manifest(connection)
             elif source_revision == EXIT_PROFILE_SOURCE_REVISION:
                 manifest = await _exit_profile_source_preservation_manifest(
@@ -546,6 +556,9 @@ async def _verify_preservation(
         ),
         EXIT_PROFILE_SOURCE_REVISION: frozenset(
             {"0007_exit_profile_authority_v1"}
+        ),
+        GENERIC_SELECTION_SOURCE_REVISION: frozenset(
+            {GENERIC_SELECTION_SOURCE_REVISION, EXPECTED_ALEMBIC_REVISION}
         ),
     }
     allowed_target_revisions = allowed_targets_by_source[source_revision]
@@ -888,6 +901,79 @@ async def _verify_exit_profile_source(
         "capabilities": capabilities,
         "account_mode": account_mode,
         "migration_gate": migration_gate,
+        "preservation_manifest": manifest,
+    }
+
+
+async def _verify_generic_selection_source(
+    database_url: str,
+    source_revision: str,
+) -> dict[str, object]:
+    """Readonly, pre-write source gate for the exact 0007 -> 0008 revision."""
+    engine = _create_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            revision = await _alembic_revision(connection)
+            shape = await _verify_exact_metadata_shape(
+                connection, expected_columns=_source_0007_table_columns(),
+            )
+            migration_gate = await _migration_gate(connection)
+            migration_gate.update({
+                "warming_or_staged_universes": int((await connection.scalar(text(
+                    "SELECT count(*) FROM brc_strategy_universe_versions "
+                    "WHERE lifecycle_state IN ('warming','staged')"
+                ))) or 0),
+                "nonterminal_generations": int((await connection.scalar(text(
+                    "SELECT count(*) FROM brc_strategy_universe_materialization_generations "
+                    "WHERE lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')"
+                ))) or 0),
+                "open_selection_vacuums": int((await connection.scalar(text(
+                    "SELECT count(*) FROM brc_strategy_entry_vacuums_current WHERE resolved_at_ms IS NULL"
+                ))) or 0),
+            })
+            manifest = await _generic_source_preservation_manifest(connection)
+            runtime_identity = await _runtime_identity(connection)
+            registry_identity = await _target_registry_identity(connection)
+            owner_policy = await _current_owner_policy(connection)
+            runtime_profile = await _current_runtime_profile(connection)
+            controls = await _target_strategy_controls(connection)
+            capabilities = await _current_capabilities(
+                connection, runtime_identity=runtime_identity,
+            )
+            try:
+                proofs = await certify_0007_static_comparison_sources(connection)
+                provenance = {"status": "pass", "proof_count": len(proofs)}
+            except SourceProvenanceInsufficient as exc:
+                provenance = {"status": "fail", "reason_code": str(exc)}
+            await connection.rollback()
+    finally:
+        await engine.dispose()
+    passed = bool(
+        revision == source_revision
+        and shape["status"] == "pass"
+        and all(int(value) == 0 for value in migration_gate.values())
+        and runtime_identity["schema_revision"] == source_revision
+        and provenance["status"] == "pass"
+        and registry_identity["status"] == "pass"
+        and owner_policy["status"] == "pass"
+        and runtime_profile["status"] == "pass"
+        and controls["status"] == "pass"
+        and capabilities["status"] == "pass"
+    )
+    return {
+        "schema": SCHEMA,
+        "status": "pass" if passed else "fail",
+        "alembic_revision": revision,
+        "source_shape": shape,
+        "runtime_identity": runtime_identity,
+        "registry_identity": registry_identity,
+        "owner_policy": owner_policy,
+        "runtime_profile": runtime_profile,
+        "strategy_controls": controls,
+        "capabilities": capabilities,
+        "migration_gate": migration_gate,
+        "provenance": provenance,
         "preservation_manifest": manifest,
     }
 
@@ -1577,6 +1663,65 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
     }
 
 
+def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
+    """Exact physical 0007 inventory, including fields normalized by 0008."""
+    added = {
+        **_GENERIC_PRE_DYNAMIC_ADDED_COLUMNS,
+        "brc_selection_session_authorities": (
+            "selection_epoch_id", "selection_control_version", "current_close_proof",
+            "recovery_grant_proof", "membership_freshness", "comparison_universe_id",
+            "comparison_transition_revision", "activation_authorization_id",
+        ),
+        "brc_strategy_selection_control_current": ("selection_epoch_id",),
+        "brc_instrument_selection_jobs_current": (
+            "selection_epoch_id", "selection_control_version", "predecessor_snapshot_id",
+            "predecessor_member_digest",
+        ),
+        "brc_instrument_selection_attempts": (
+            "selection_epoch_id", "selection_control_version", "predecessor_snapshot_id",
+            "predecessor_member_digest",
+        ),
+        "brc_instrument_selection_snapshots": (
+            "selection_family", "selection_epoch_id", "predecessor_snapshot_id",
+            "predecessor_member_digest",
+        ),
+        "brc_instrument_selection_member_decisions": (
+            "selection_family", "feature_value", "retained", "qualification_fact",
+            "qualification_semantic_digest",
+        ),
+        "brc_strategy_universe_materialization_generations": (
+            "selection_epoch_id", "selection_control_version", "lease_epoch",
+        ),
+    }
+    removed = {
+        "brc_strategy_universe_materialization_generations": (
+            "previous_long_universe_version_id", "previous_short_universe_version_id",
+        ),
+        "brc_strategy_selection_rollback_baselines": (
+            "source_long_universe_version_id", "source_short_universe_version_id",
+        ),
+        "brc_selection_session_authorities": (
+            "authorized_long_universe_version_id", "authorized_short_universe_version_id",
+        ),
+    }
+    renamed = {
+        "period_anchor_ms": "session_start_ms",
+        "pending_effective_period_anchor_ms": "pending_effective_session_start_ms",
+    }
+    return {
+        table.name: (
+            *tuple(
+                renamed.get(column.name, column.name)
+                for column in table.c
+                if column.name not in added.get(table.name, ())
+            ),
+            *removed.get(table.name, ()),
+        )
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name not in _GENERIC_SELECTION_TABLES
+    }
+
+
 def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
     columns = tuple(column.name for column in table.c
         if column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ()))
@@ -1779,6 +1924,93 @@ async def _exit_profile_source_preservation_manifest(
     payload = {
         "schema": "brc.trading_kernel.0006_preservation.v1",
         "source_revision": EXIT_PROFILE_SOURCE_REVISION,
+        "tables": table_entries,
+        "table_count": len(table_entries),
+        "row_count": total_rows,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
+async def _generic_source_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    """Hash every 0007 row in its source shape on either side of 0008.
+
+    The target projection reconstructs only the three parent pair references
+    that 0008 normalizes into exact Event rows. No target-only fact contributes
+    to the source manifest.
+    """
+    revision = await _alembic_revision(connection)
+    if revision not in {GENERIC_SELECTION_SOURCE_REVISION, EXPECTED_ALEMBIC_REVISION}:
+        raise ValueError("Generic preservation requires exact 0007 or current 0008")
+    target = revision == EXPECTED_ALEMBIC_REVISION
+    renamed = {
+        "session_start_ms": "period_anchor_ms",
+        "pending_effective_session_start_ms": "pending_effective_period_anchor_ms",
+    }
+    normalized = {
+        "brc_strategy_universe_materialization_generations": (
+            "brc_materialization_generation_event_baselines", "materialization_generation_id",
+            "previous_", "_universe_version_id",
+        ),
+        "brc_strategy_selection_rollback_baselines": (
+            "brc_selection_rollback_baseline_events", "rollback_baseline_id",
+            "source_", "_universe_version_id",
+        ),
+        "brc_selection_session_authorities": (
+            "brc_selection_authority_event_bindings", "selection_authority_id",
+            "authorized_", "_universe_version_id",
+        ),
+    }
+    table_entries: list[dict[str, object]] = []
+    total_rows = 0
+    for table_name, source_columns in sorted(_source_0007_table_columns().items()):
+        pair = normalized.get(table_name) if target else None
+        pair_columns = (
+            tuple(f"{pair[2]}{side}{pair[3]}" for side in ("long", "short"))
+            if pair is not None else ()
+        )
+        physical = {
+            source_name: renamed.get(source_name, source_name) if target else source_name
+            for source_name in source_columns if source_name not in pair_columns
+        }
+        table = sa.table(table_name, *(sa.column(name) for name in physical.values()))
+        rows = (
+            (await connection.execute(sa.select(*(table.c[name] for name in physical.values()))))
+            .mappings().all()
+        )
+        canonical_rows: list[dict[str, object]] = []
+        for stored in rows:
+            projected = {source_name: stored[physical_name] for source_name, physical_name in physical.items()}
+            if pair is not None:
+                event_table, identity_column, prefix, suffix = pair
+                bindings = (
+                    (await connection.execute(
+                        sa.text(
+                            f"SELECT position_side, universe_version_id FROM {event_table} "
+                            f"WHERE {identity_column}=:identity ORDER BY position_side"
+                        ),
+                        {"identity": projected[identity_column]},
+                    )).mappings().all()
+                )
+                by_side = {str(binding["position_side"]): binding["universe_version_id"] for binding in bindings}
+                if len(bindings) != 2 or set(by_side) != {"long", "short"}:
+                    raise ValueError(f"Generic preservation Event mapping is invalid for {table_name}")
+                for side in ("long", "short"):
+                    projected[f"{prefix}{side}{suffix}"] = by_side.get(side)
+            canonical_rows.append(_row_manifest(source_columns, projected))
+        canonical_rows.sort(key=lambda row: str(row["digest"]))
+        table_payload = {
+            "table": table_name,
+            "columns": list(source_columns),
+            "row_count": len(canonical_rows),
+            "rows": canonical_rows,
+        }
+        table_entries.append({**table_payload, "digest": _sha256_json(table_payload)})
+        total_rows += len(canonical_rows)
+    payload = {
+        "schema": "brc.trading_kernel.0007_preservation.v1",
+        "source_revision": GENERIC_SELECTION_SOURCE_REVISION,
         "tables": table_entries,
         "table_count": len(table_entries),
         "row_count": total_rows,

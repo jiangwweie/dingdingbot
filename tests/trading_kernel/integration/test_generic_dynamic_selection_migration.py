@@ -39,7 +39,9 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
+    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
+    arm_acceptance_policy,
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
@@ -169,6 +171,10 @@ async def _insert_0007_comparison_source(
 
 @pytest.mark.asyncio
 async def test_period_column_rename_preserves_existing_sor_job_and_attempt_facts() -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+    )
+
     name, url = await create_empty_database()
     engine = create_async_engine(url)
     anchor = 1_704_067_200_000
@@ -194,6 +200,7 @@ async def test_period_column_rename_preserves_existing_sor_job_and_attempt_facts
             """), {"jid":jid,"anchor":anchor,"start":anchor+3600000,"done":anchor+3600010})
             before = {table: dict((await conn.execute(sa.text(f"SELECT * FROM {table}"))).mappings().one()) for table in (
                 "brc_instrument_selection_jobs_current", "brc_instrument_selection_attempts")}
+            source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()
         async with engine.connect() as conn:
@@ -203,6 +210,58 @@ async def test_period_column_rename_preserves_existing_sor_job_and_attempt_facts
                 assert row["selection_epoch_id"] == "sor-v0"
                 assert "session_start_ms" not in row
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots")) == 0
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
+async def test_generic_source_manifest_detects_target_job_corruption() -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+        _verify_preservation,
+    )
+
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    anchor = 1_704_067_200_000
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0005_tradfi_instrument_center")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+                account_id="manifest-source", runtime_commit="a" * 40,
+                schema_revision="0005_tradfi_instrument_center", seeded_at_ms=anchor,
+            ))
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_jobs_current
+                (selection_job_id, selection_spec_id, session_start_ms, scheduled_at_ms,
+                 feature_cutoff_at_ms, state, first_blocker, attempt_count,
+                 projection_version, updated_at_ms)
+                VALUES (:job, 'sor-dynamic-selection-v0', :anchor, :cutoff,
+                        :cutoff, 'SOURCE_FAILED', 'SOURCE_INCOMPLETE', 1, 2, :done)
+            """), {"job":f"selection-job:sor-dynamic-selection-v0:{anchor}",
+                    "anchor":anchor, "cutoff":anchor+3_600_000, "done":anchor+3_600_010})
+            source = await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        verified = await _verify_preservation(url,
+            source_revision="0007_exit_profile_authority_v1",
+            expected_digest=source["digest"])
+        assert verified["status"] == "pass"
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("""
+                UPDATE brc_instrument_selection_jobs_current
+                SET first_blocker='SOURCE_CHANGED'
+                WHERE period_anchor_ms=:anchor
+            """), {"anchor":anchor})
+        corrupted = await _verify_preservation(url,
+            source_revision="0007_exit_profile_authority_v1",
+            expected_digest=source["digest"])
+        assert corrupted["status"] == "fail"
     finally:
         await engine.dispose()
         await drop_disposable_database(name)
@@ -211,6 +270,10 @@ async def test_period_column_rename_preserves_existing_sor_job_and_attempt_facts
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_source", [False, True])
 async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_migration(invalid_source: bool) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+    )
+
     name, url = await create_empty_database()
     engine = create_async_engine(url)
     try:
@@ -253,6 +316,8 @@ async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_
                 assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0007_exit_profile_authority_v1"
                 assert await conn.scalar(sa.text("SELECT to_regclass('brc_materialization_generation_event_baselines')")) is None
             return
+        async with engine.connect() as conn:
+            source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()
         async with engine.connect() as conn:
@@ -262,6 +327,8 @@ async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_
             reconstructed = {**after, **{f"source_{row['position_side']}_universe_version_id":row["universe_version_id"] for row in rows}}
             assert reconstructed == before
             assert all(row["comparison_universe_id"] is None for row in rows)
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
             for table in ("brc_strategy_universe_materialization_generations", "brc_instrument_selection_snapshots", "brc_selection_session_authorities"):
                 assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
     finally:
@@ -291,6 +358,11 @@ def test_generic_dynamic_selection_is_the_single_current_schema_head() -> None:
 async def test_0007_static_comparison_source_requires_exact_contemporaneous_evidence(
     group: str, event: str, triggered: bool
 ) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+        _verify_compatible_source,
+    )
+
     name, url = await create_empty_database()
     engine = create_async_engine(url)
     try:
@@ -308,6 +380,16 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
                     seeded_at_ms=NOW_MS - 10000,
                 ),
             )
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await arm_acceptance_policy(
+                uow, ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 9000)
+            )
+        async with engine.begin() as conn:
+            await conn.execute(sa.text(
+                "UPDATE brc_owner_policy_current SET policy_version=4 "
+                "WHERE owner_policy_id='policy-main'"
+            ))
+        async with PostgresKernelUnitOfWork(engine) as uow:
             installed = await install_strategy_universe(
                 uow,
                 UniverseInstallRequest(
@@ -409,6 +491,20 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
                 updated_at_ms=NOW_MS,
             )
         await _insert_0007_comparison_source(engine, projection)
+        source_gate = await _verify_compatible_source(
+            url, "0007_exit_profile_authority_v1"
+        )
+        assert source_gate["status"] == "pass", (
+            source_gate["source_shape"]["status"],
+            source_gate["migration_gate"],
+            source_gate["registry_identity"]["status"],
+            source_gate["owner_policy"],
+            source_gate["runtime_profile"]["status"],
+            source_gate["strategy_controls"]["status"],
+            source_gate["capabilities"]["status"],
+            source_gate["provenance"]["status"],
+        )
+        assert source_gate["provenance"]["status"] == "pass"
         async with engine.connect() as conn:
             await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
             proofs = await certify_0007_static_comparison_sources(conn)
@@ -431,6 +527,11 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             await conn.execute(
                 sa.text("DELETE FROM brc_comparative_projection_current")
             )
+        missing_gate = await _verify_compatible_source(
+            url, "0007_exit_profile_authority_v1"
+        )
+        assert missing_gate["status"] == "fail"
+        assert missing_gate["provenance"]["status"] == "fail"
         async with engine.connect() as conn:
             await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
             with pytest.raises(
@@ -446,6 +547,8 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
         async with engine.connect() as conn:
             assert await conn.scalar(sa.text("SELECT to_regclass('brc_comparison_universe_definitions')")) is None
         await _insert_0007_comparison_source(engine, projection)
+        async with engine.connect() as conn:
+            source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()  # Stopped cutover discards source prepared statements.
         async with engine.connect() as conn:
@@ -457,6 +560,8 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             assert preserved_cache["projection"] == projection.model_dump(mode="json")
             assert preserved_cache["comparison_transition_revision"] == 0
             assert preserved_cache["projection_version"] == 1
+            target_manifest = await _generic_source_preservation_manifest(conn)
+            assert target_manifest["digest"] == source_manifest["digest"]
             target_row = (await conn.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().one()
             recovery_fields = {key:value for key,value in target_row.items() if key.startswith("authority_recovery_")}
             assert len(recovery_fields) == 8 and all(value is None for value in recovery_fields.values())
