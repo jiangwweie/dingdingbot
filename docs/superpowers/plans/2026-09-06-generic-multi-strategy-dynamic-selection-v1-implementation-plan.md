@@ -353,6 +353,8 @@ Job终态增量（基于`46b23b5f`）：未部署的0008为Generic Job增加`EXP
 
 ### GS-06 — Comparison / Observation Episode barrier
 
+MPG/MI三期自然rebase链增量（基于`d28fe872`）：首次Owner→Runner→Snapshot→ACTIVE_NEW后，第一根真实Hourly Detector TRIGGERED由正comparison revision suppress；下一due Snapshot由正式Runner沿同epoch前驱计算，NO_CHANGE只复用相同成员、不制造Generation，最新未消费close上的合法NOT_TRIGGERED完成rebase/arming；再下一due Snapshot同样正式提交并获得NO_CHANGE，后续TRIGGERED只产生一个Signal。两策略均经真实PostgreSQL比较缓存、Episode checkpoint与Observation producer，未把第一根抑制当作可交易信号，也未用超期close追认。该增量仍需旧Ticket持续保护、A→B→A及故障/rollback攻击矩阵等整卡验收。
+
 **目标**：fixed24和GS-01 barrier接入真实producer，不只domain模拟。
 
 **允许**：`project_comparative_universe.py`、`observe_strategy_scope.py`、PG comparison/Episode repository与ports、对应integration/producer tests。**禁止**：缩比较集合、Detector条件变更、给Excluded/STAGED创建可交易Signal、平行Episode键。
@@ -661,6 +663,8 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 **Done**：全部新authority可trace proof/source/epoch/Event set，positive grant不能绕过rebase/stale/EMPTY/Owner；existing Ticket未变；§3.4相关SOR子集PASS。
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
+
+MPG/MI小时策略自然终态增量（基于`d28fe872`）：在上述三期正式Selection/NO_CHANGE/rebase序列后，第三期Signal各自通过正式CapacityClaim、AdmissionDecision、Ticket与唯一durable ENTRY Command；recording venue独立UoW确认CLAIMED后接受，随后同源Ticket经Reconciliation、Initial Stop、TP1、Runner、外部flat、Settlement、Review到TERMINAL，冻结Authority及Budget/Netting Domain/Incident闭合。测试账户、Post-fill Stress、模拟flat及Review数值为本地事实，不代表经济结论。受影响Generic/Observation/Full-chain组合222 passed，Unit/Architecture1257 passed、生产源码Mypy158 files、相关Ruff/diff通过；不是完整R4。四策略自然交易链已有正向样本，但GS-08/09四边界异常、Unknown/partial、Existing Ticket与Live Evidence projector仍不能由正向样本替代。
 
 自然Selection→terminal增量（基于`646aedd8`）：四策略首次Owner staging的exact epoch由正式Selection Runner读取24 Candidate并提交immutable Snapshot，再由现有Coordinator完成Generation、Vacuum、Warming和ACTIVE_NEW，测试不直接写Snapshot；旧Static Universe与认证仍是明确测试前置。CPM LONG及BRF2 SHORT进一步在同一真实签发链上产生原Detector Signal、CapacityClaim、AdmissionDecision、唯一prepared ENTRY，经独立UoW确认durable CLAIMED后由recording venue接受，随后正式Reconciliation/Initial Stop/TP1/Runner/外部flat/Settlement/Review到TERMINAL，冻结Selection Authority、Reservation、Netting Domain和Incident断言一致。模拟flat、Post-fill Stress与Review经济值是fixture事实，不是真实交易收益。相关集成/部分Full-chain切片176 passed、既有完整Full-chain51 passed、Unit/Architecture1257 passed；计数有重叠，不相加为R4。MPG/MI完成Owner→Runner→Active及Candidate24 Warming，但rebase后跨hourly period的自然Signal/Ticket、四边界攻击矩阵与Live Evidence projector仍未完成；GS-09不能标Done，生产未修改。
 
