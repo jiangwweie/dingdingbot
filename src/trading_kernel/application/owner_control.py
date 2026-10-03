@@ -30,7 +30,7 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
     build_event_exit_binding,
 )
-from src.trading_kernel.domain.instrument_selection import DAY_MS, INTERVAL_MS
+from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS, INTERVAL_MS
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
     OwnerAuthorization,
@@ -361,6 +361,94 @@ def _next_dynamic_selection_session_start_ms(now_ms: int) -> int:
     return (
         session_start_ms if now_ms < decision_boundary_ms else session_start_ms + DAY_MS
     )
+
+
+async def stage_generic_dynamic_selection_mode(
+    uow: KernelUnitOfWork,
+    *,
+    strategy_group_id: str,
+    effective_period_anchor_ms: int,
+    request: ControlMutationRequest,
+    authentication_strength: Literal["session", "totp_step_up"],
+) -> SelectionControl:
+    """Schedule one installed Generic Spec under a durable Owner-owned epoch."""
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("selection_mode_change_requires_step_up")
+    current = await uow.instrument_selection.get_selection_control(
+        strategy_group_id, for_update=True,
+    )
+    if current is None or strategy_group_id == "SOR-001":
+        raise OwnerControlBlocked("generic_selection_control_missing")
+    try:
+        spec = await uow.instrument_selection.get_generic_spec(current.selection_spec_id)
+    except LookupError as exc:
+        raise OwnerControlBlocked("generic_selection_spec_not_installed") from exc
+    if spec.strategy_group_id != strategy_group_id:
+        raise OwnerControlBlocked("generic_selection_spec_group_mismatch")
+    epoch_payload = {
+        "strategy_group_id": strategy_group_id,
+        "selection_spec_id": spec.selection_spec_id,
+        "idempotency_key": request.idempotency_key,
+    }
+    selection_epoch_id = "epoch:" + sha256(
+        json.dumps(epoch_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    target_scope: dict[str, JsonValue] = {
+        "strategy_group_id": strategy_group_id,
+        "selection_spec_id": spec.selection_spec_id,
+        "target_selection_mode": SelectionMode.DYNAMIC_SELECTION.value,
+        "effective_period_anchor_ms": effective_period_anchor_ms,
+        "selection_epoch_id": selection_epoch_id,
+    }
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    if existing is not None:
+        _require_matching_authorization(
+            existing, purpose="selection_mode_change", request=request,
+            target_scope=target_scope,
+        )
+        if existing.authentication_strength != "totp_step_up":
+            raise OwnerControlConflict("selection_authorization_strength_conflict")
+        if (
+            current.selection_epoch_id != selection_epoch_id
+            or not (
+                current.pending_authorization_id == existing.authorization_id
+                or (
+                    current.selection_mode is SelectionMode.DYNAMIC_SELECTION
+                    and current.pending_selection_mode is None
+                )
+            )
+        ):
+            raise OwnerControlConflict("selection_authorization_no_longer_current")
+        return current
+    if current.control_version != request.expected_version:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    if current.selection_mode is not SelectionMode.STATIC_BASELINE:
+        raise OwnerControlBlocked("selection_mode_not_static_baseline")
+    if current.pending_selection_mode is not None:
+        raise OwnerControlBlocked("selection_mode_transition_already_pending")
+    cadence_ms = spec.cadence_hours * HOUR_MS
+    next_anchor_ms = (request.now_ms // cadence_ms + 1) * cadence_ms
+    if effective_period_anchor_ms != next_anchor_ms:
+        raise OwnerControlBlocked("selection_effective_period_not_next")
+    authorization = _authorization(
+        purpose="selection_mode_change", request=request,
+        authentication_strength="totp_step_up", target_scope=target_scope,
+    )
+    await uow.owner_controls.add_authorization(authorization)
+    staged = await uow.instrument_selection.stage_pending_generic_selection_mode(
+        strategy_group_id=strategy_group_id,
+        selection_spec_id=spec.selection_spec_id,
+        expected_control_version=current.control_version,
+        selection_epoch_id=selection_epoch_id,
+        effective_period_anchor_ms=effective_period_anchor_ms,
+        authorization_id=authorization.authorization_id,
+        updated_at_ms=request.now_ms,
+    )
+    if staged is None:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    return staged
 
 
 async def switch_event_exit_profile(

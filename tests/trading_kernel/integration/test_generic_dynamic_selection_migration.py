@@ -1213,3 +1213,67 @@ async def test_certified_spec_installation_is_static_and_does_not_create_runtime
     finally:
         await engine.dispose()
         await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
+async def test_failed_brf2_certificate_cannot_install_selection_authority() -> None:
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+                account_id="brf2-cert-fail",runtime_commit="b"*40,
+                schema_revision=TARGET_REVISION,seeded_at_ms=NOW_MS,
+            ))
+        async with engine.connect() as conn:
+            before_control = (await conn.execute(sa.text(
+                "SELECT * FROM brc_strategy_entry_controls_current WHERE strategy_group_id='BRF2-001'"
+            ))).mappings().one()
+        for group in ("CPM-RO-001", "MPG-001", "MI-001"):
+            spec = generic_selection_spec(group)
+            evidence = SpecNumericInstallationEvidence(
+                selection_spec_id=spec.selection_spec_id,
+                algorithm_semantic_digest=spec.algorithm_semantic_digest,
+                checked_cutoffs=463 if spec.cadence_hours == 4 else 1852,
+                mismatch_count=0,source_archive_count=96,
+                reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb",
+                common_numeric_authority="PASS",sor_golden="PASS",spec_cert="PASS",
+            )
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await uow.instrument_selection.install_generic_spec(
+                    spec,installed_at_ms=NOW_MS+1,certification=evidence,
+                )
+        brf2 = generic_selection_spec("BRF2-001")
+        valid = SpecNumericInstallationEvidence(
+            selection_spec_id=brf2.selection_spec_id,
+            algorithm_semantic_digest=brf2.algorithm_semantic_digest,
+            checked_cutoffs=463,mismatch_count=0,source_archive_count=96,
+            reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb",
+            common_numeric_authority="PASS",sor_golden="PASS",spec_cert="PASS",
+        )
+        with pytest.raises(ValueError, match="spec_cert"):
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await uow.instrument_selection.install_generic_spec(
+                    brf2,installed_at_ms=NOW_MS+2,
+                    certification=valid.model_copy(update={"spec_cert":"FAIL"}),
+                )
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_generic_dynamic_selection_specs_v1"
+            )) == 3
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_instrument_selection_specs WHERE strategy_group_id='BRF2-001'"
+            )) == 0
+            assert await conn.scalar(sa.text(
+                "SELECT count(*) FROM brc_strategy_selection_control_current WHERE strategy_group_id='BRF2-001'"
+            )) == 0
+            assert (await conn.execute(sa.text(
+                "SELECT * FROM brc_strategy_entry_controls_current WHERE strategy_group_id='BRF2-001'"
+            ))).mappings().one() == before_control
+            for table in ("brc_instrument_selection_jobs_current", "brc_instrument_selection_snapshots",
+                          "brc_strategy_universe_materialization_generations", "brc_selection_session_authorities"):
+                assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)

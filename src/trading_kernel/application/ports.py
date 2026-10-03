@@ -1698,6 +1698,18 @@ class InstrumentSelectionRepository(Protocol):
         updated_at_ms: int,
     ) -> SelectionControl | None: ...
 
+    async def stage_pending_generic_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        expected_control_version: int,
+        selection_epoch_id: str,
+        effective_period_anchor_ms: int,
+        authorization_id: str,
+        updated_at_ms: int,
+    ) -> SelectionControl | None: ...
+
     async def recover_expired_dynamic_activation(
         self,
         request: RecoverExpiredDynamicActivationRequest,

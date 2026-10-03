@@ -46,6 +46,12 @@ from src.trading_kernel.application.observe_strategy_scope import (
     ObservationStatus,
     observe_strategy_scope,
 )
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    OwnerControlBlocked,
+    OwnerControlConflict,
+    stage_generic_dynamic_selection_mode,
+)
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeMemberWindow,
     ComparativeProjectionAuthorityChanged,
@@ -950,15 +956,34 @@ async def test_pg_decimal_representation_does_not_change_semantic_identity(datab
 async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1", *, pending=False, pending_anchor_ms=CUTOFF) -> None:
     # Isolated repository prerequisite, not an Owner API/activation acceptance.
     async with database.begin() as conn:
+        row = (await conn.execute(sa.select(strategy_selection_control_current).where(
+            strategy_selection_control_current.c.strategy_group_id == group,
+        ))).mappings().one()
+        if row["selection_mode"] == "dynamic_selection":
+            await conn.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == group,
+            ).values(selection_mode="static_baseline",selection_epoch_id=None,
+                control_version=int(row["control_version"])+1))
+            row = (await conn.execute(sa.select(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == group,
+            ))).mappings().one()
+        auth_id = "owner:first:"+group if epoch == "epoch:1" else f"owner:first:{group}:{epoch}"
+        await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
+            {"id":auth_id,"digest":"sha256:"+"8"*64,"at":pending_anchor_ms-1,
+             "scope":json.dumps({"strategy_group_id":group,"selection_spec_id":inputs(group).spec.selection_spec_id,
+                 "target_selection_mode":"dynamic_selection","effective_period_anchor_ms":pending_anchor_ms,
+                 "selection_epoch_id":epoch})})
         await conn.execute(sa.update(strategy_selection_control_current).where(
             strategy_selection_control_current.c.strategy_group_id == group,
-        ).values(selection_mode="dynamic_selection", selection_epoch_id=epoch, control_version=2))
-        if pending:
-            await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
-                {"id":"owner:first:"+group,"digest":"sha256:"+"8"*64,"at":pending_anchor_ms-1,
-                 "scope":json.dumps({"strategy_group_id":group,"target_selection_mode":"dynamic_selection","effective_period_anchor_ms":pending_anchor_ms})})
-            await conn.execute(sa.update(strategy_selection_control_current).where(strategy_selection_control_current.c.strategy_group_id==group).values(
-                selection_mode="static_baseline",pending_selection_mode="dynamic_selection",pending_effective_period_anchor_ms=pending_anchor_ms,pending_authorization_id="owner:first:"+group))
+        ).values(selection_mode="static_baseline",pending_selection_mode="dynamic_selection",
+            pending_effective_period_anchor_ms=pending_anchor_ms,pending_authorization_id=auth_id,
+            selection_epoch_id=epoch,control_version=int(row["control_version"])+int(pending)))
+        if not pending:
+            await conn.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id == group,
+            ).values(selection_mode="dynamic_selection",pending_selection_mode=None,
+                pending_effective_period_anchor_ms=None,pending_authorization_id=None,
+                control_version=int(row["control_version"])+1))
 
 
 @pytest.mark.asyncio
@@ -971,6 +996,134 @@ async def test_static_generic_selection_claim_short_circuits_without_job(databas
         ) is None
     async with database.connect() as conn:
         assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_jobs_current)) == 0
+
+
+@pytest.mark.asyncio
+async def test_generic_static_control_cannot_jump_directly_to_dynamic(database: AsyncEngine) -> None:
+    with pytest.raises(sa.exc.DBAPIError, match="Generic activation requires pending Owner epoch"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("""
+                UPDATE brc_strategy_selection_control_current
+                SET selection_mode='dynamic_selection',selection_epoch_id='epoch:rogue',
+                    control_version=control_version+1
+                WHERE strategy_group_id='MPG-001'
+            """))
+    async with database.connect() as conn:
+        row = (await conn.execute(sa.text(
+            "SELECT selection_mode,selection_epoch_id,pending_selection_mode "
+            "FROM brc_strategy_selection_control_current WHERE strategy_group_id='MPG-001'"
+        ))).mappings().one()
+        assert row["selection_mode"] == "static_baseline"
+        assert row["selection_epoch_id"] is None
+        assert row["pending_selection_mode"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_first_activation_stages_exact_owner_epoch_without_runtime_work(
+    database: AsyncEngine, group: str,
+) -> None:
+    source = inputs(group)
+    request = ControlMutationRequest(
+        expected_version=1,reason="first_generic_shadow_live",
+        idempotency_key=f"owner:generic:first:{group}",owner_identity="owner",
+        now_ms=CUTOFF-1,
+    )
+    with pytest.raises(OwnerControlBlocked, match="step_up"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(
+                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=request,authentication_strength="session",
+            )
+    with pytest.raises(OwnerControlBlocked, match="next"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(
+                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF+HOUR,
+                request=request,authentication_strength="totp_step_up",
+            )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        staged = await stage_generic_dynamic_selection_mode(
+            uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=request,authentication_strength="totp_step_up",
+        )
+    assert staged.selection_mode.value == "static_baseline"
+    assert staged.pending_selection_mode.value == "dynamic_selection"
+    assert staged.pending_effective_period_anchor_ms == CUTOFF
+    assert staged.selection_epoch_id is not None
+    async with PostgresKernelUnitOfWork(database) as uow:
+        authorization = await uow.owner_controls.get_authorization_by_idempotency_key(
+            request.idempotency_key
+        )
+        assert authorization is not None
+        assert authorization.purpose == "selection_mode_change"
+        assert authorization.authentication_strength == "totp_step_up"
+        assert staged.selection_epoch_id == authorization.target_scope["selection_epoch_id"]
+        assert authorization.target_scope == {
+            "strategy_group_id":group,
+            "selection_spec_id":source.spec.selection_spec_id,
+            "target_selection_mode":"dynamic_selection",
+            "effective_period_anchor_ms":CUTOFF,
+            "selection_epoch_id":staged.selection_epoch_id,
+        }
+        repeated = await stage_generic_dynamic_selection_mode(
+            uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=request,authentication_strength="totp_step_up",
+        )
+        assert repeated == staged
+    with pytest.raises(OwnerControlConflict, match="idempotency"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(
+                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=request.model_copy(update={"reason":"different_reason"}),
+                authentication_strength="totp_step_up",
+            )
+    with pytest.raises(sa.exc.DBAPIError, match="Generic pending Owner epoch"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("""
+                UPDATE brc_strategy_selection_control_current
+                SET selection_epoch_id='epoch:forged'
+                WHERE strategy_group_id=:group
+            """), {"group":group})
+    async with database.connect() as conn:
+        for table in ("brc_instrument_selection_jobs_current", "brc_instrument_selection_snapshots",
+                      "brc_strategy_universe_materialization_generations",
+                      "brc_strategy_entry_vacuums_current", "brc_selection_session_authorities",
+                      "brc_trade_tickets", "brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+    async with PostgresKernelUnitOfWork(database) as uow:
+        claim = await uow.instrument_selection.claim_generic_selection_job(
+            selection_spec_id=source.spec.selection_spec_id,
+            selection_epoch_id=staged.selection_epoch_id,
+            feature_cutoff_at_ms=CUTOFF,
+            worker_id="selection:owner-authorized",
+            now_ms=CUTOFF+1,
+            lease_duration_ms=1000,
+        )
+    assert isinstance(claim, GenericSelectionJobClaim)
+    assert claim.selection_epoch_id == staged.selection_epoch_id
+    assert claim.predecessor_snapshot_id is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current")) == 1
+        for table in ("brc_instrument_selection_snapshots", "brc_strategy_universe_materialization_generations",
+                      "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+    # A later successful materialization clears pending fields. Replaying the
+    # same Owner idempotency key must still resolve to this exact epoch.
+    async with database.begin() as conn:
+        await conn.execute(sa.text("""
+            UPDATE brc_strategy_selection_control_current
+            SET selection_mode='dynamic_selection',pending_selection_mode=NULL,
+                pending_effective_period_anchor_ms=NULL,pending_authorization_id=NULL,
+                control_version=control_version+1
+            WHERE strategy_group_id=:group
+        """), {"group":group})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        activated_replay = await stage_generic_dynamic_selection_mode(
+            uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=request,authentication_strength="totp_step_up",
+        )
+    assert activated_replay.selection_mode.value == "dynamic_selection"
+    assert activated_replay.selection_epoch_id == staged.selection_epoch_id
 
 
 @pytest.mark.asyncio
@@ -1047,11 +1200,13 @@ async def test_generic_completion_revalidates_claim_control_epoch_and_predecesso
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
             feature_cutoff_at_ms=source.feature_cutoff_at_ms, worker_id="selection:old", now_ms=source.feature_cutoff_at_ms + 1, lease_duration_ms=1000,
         )
-    if defect in {"epoch_changed", "control_changed"}:
+    if defect == "epoch_changed":
+        await enable_epoch(database, "MPG-001", "epoch:2")
+    elif defect == "control_changed":
         async with database.begin() as conn:
             await conn.execute(sa.update(strategy_selection_control_current).where(
                 strategy_selection_control_current.c.strategy_group_id == "MPG-001",
-            ).values(control_version=3, selection_epoch_id="epoch:2" if defect == "epoch_changed" else "epoch:1"))
+            ).values(control_version=3))
     elif defect == "lease_reclaimed":
         async with PostgresKernelUnitOfWork(database) as uow:
             await uow.instrument_selection.claim_generic_selection_job(
@@ -2662,19 +2817,14 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
     assert original_control is not None
 
     if original_control.pending_authorization_id is not None:
-        @asynccontextmanager
-        async def invalid_owner_proof():
-            async with PostgresKernelUnitOfWork(database) as uow:
-                conn = uow._require_connection()
-                # A wrong-purpose proof is present in the same transaction; it
-                # must not become sufficient merely because the FK exists.
+        # A wrong-purpose proof cannot even replace the pending pointer now;
+        # the DB boundary rejects it before Coordinator can see it.
+        with pytest.raises(sa.exc.DBAPIError, match="Generic pending Owner epoch"):
+            async with database.begin() as conn:
                 await conn.execute(sa.text("INSERT INTO brc_owner_authorizations SELECT authorization_id||:suffix, 'universe_configure', owner_identity, authentication_strength, request_digest, target_scope, idempotency_key||:suffix, authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"), {"id":original_control.pending_authorization_id,"suffix":":wrong"})
                 await conn.execute(sa.text("UPDATE brc_strategy_selection_control_current SET pending_authorization_id=:id WHERE strategy_group_id=:group"), {"id":original_control.pending_authorization_id+":wrong", "group":source.spec.strategy_group_id})
-                yield uow
-        with pytest.raises(UniverseInstallConflict, match="ACTIVATION_AUTHORIZATION_CHANGED"), patch.object(
-            PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)
-        ):
-            await coordinate_selection_materialization_once(uow_factory=invalid_owner_proof, request=request, clock_ms=lambda:now)
+        async with factory() as uow:
+            assert await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id) == original_control
         # Omitting the mode write must fail at actual transaction commit, not
         # merely rely on application validation before the authority insert.
         with pytest.raises(sa.exc.DBAPIError, match="atomic authorized mode transition"), patch.object(

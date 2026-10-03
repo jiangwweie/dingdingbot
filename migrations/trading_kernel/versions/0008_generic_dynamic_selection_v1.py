@@ -179,7 +179,8 @@ def _generic_static_recovery_proof_function() -> None:
         SELECT * INTO a FROM brc_owner_authorizations WHERE authorization_id=c.pending_authorization_id;
         IF NOT FOUND OR a.purpose<>'selection_mode_change' OR a.authentication_strength<>'totp_step_up'
           OR a.authorized_at_ms>g.created_at_ms OR a.target_scope<>jsonb_build_object(
-            'strategy_group_id',g.strategy_group_id,'target_selection_mode','dynamic_selection',
+            'strategy_group_id',g.strategy_group_id,'selection_spec_id',g.selection_spec_id,
+            'selection_epoch_id',g.selection_epoch_id,'target_selection_mode','dynamic_selection',
             'effective_period_anchor_ms',g.period_anchor_ms) THEN RETURN false; END IF;
         SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
         IF NOT FOUND OR v.source_generation_id IS DISTINCT FROM g.materialization_generation_id
@@ -283,6 +284,7 @@ def _generic_normal_binding_guard() -> None:
           WHERE o.authorization_id=a.activation_authorization_id AND o.purpose='selection_mode_change'
             AND o.authentication_strength='totp_step_up' AND o.authorized_at_ms<=a.created_at_ms
             AND o.target_scope=jsonb_build_object('strategy_group_id',s.strategy_group_id,
+              'selection_spec_id',a.selection_spec_id,'selection_epoch_id',a.selection_epoch_id,
               'target_selection_mode','dynamic_selection','effective_period_anchor_ms',a.period_anchor_ms)
             AND c.selection_spec_id=a.selection_spec_id AND c.selection_epoch_id=a.selection_epoch_id
             AND c.selection_mode='dynamic_selection' AND c.control_version=a.selection_control_version
@@ -870,6 +872,7 @@ def _selection_job_epochs() -> None:
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_selection_control_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE kind text; spec_group text; cadence integer; needs_epoch boolean;
+          owner_proof brc_owner_authorizations%ROWTYPE;
         BEGIN
           SELECT selection_kind,strategy_group_id INTO kind,spec_group FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF spec_group IS DISTINCT FROM NEW.strategy_group_id THEN RAISE EXCEPTION 'Selection Control parent Spec mismatch'; END IF;
@@ -883,6 +886,36 @@ def _selection_job_epochs() -> None:
               RAISE EXCEPTION 'Generic Dynamic Control requires epoch';
             END IF;
           ELSIF NEW.selection_epoch_id IS NOT NULL THEN RAISE EXCEPTION 'Static Generic Control cannot retain epoch'; END IF;
+          IF NEW.pending_selection_mode='dynamic_selection' THEN
+            SELECT * INTO owner_proof FROM brc_owner_authorizations
+              WHERE authorization_id=NEW.pending_authorization_id;
+            IF NOT FOUND OR owner_proof.purpose<>'selection_mode_change'
+               OR owner_proof.authentication_strength<>'totp_step_up'
+               OR owner_proof.target_scope->>'strategy_group_id' IS DISTINCT FROM NEW.strategy_group_id
+               OR owner_proof.target_scope->>'selection_spec_id' IS DISTINCT FROM NEW.selection_spec_id
+               OR owner_proof.target_scope->>'target_selection_mode' IS DISTINCT FROM 'dynamic_selection'
+               OR owner_proof.target_scope->>'effective_period_anchor_ms' IS DISTINCT FROM NEW.pending_effective_period_anchor_ms::text
+               OR owner_proof.target_scope->>'selection_epoch_id' IS DISTINCT FROM NEW.selection_epoch_id THEN
+              RAISE EXCEPTION 'Generic pending Owner epoch proof mismatch';
+            END IF;
+          END IF;
+          IF TG_OP='UPDATE' AND OLD.selection_mode='static_baseline'
+             AND NEW.selection_mode='dynamic_selection' THEN
+            IF OLD.pending_selection_mode IS DISTINCT FROM 'dynamic_selection'
+               OR OLD.pending_authorization_id IS NULL
+               OR OLD.selection_epoch_id IS DISTINCT FROM NEW.selection_epoch_id
+               OR NEW.pending_selection_mode IS NOT NULL
+               OR NEW.pending_authorization_id IS NOT NULL
+               OR NEW.pending_effective_period_anchor_ms IS NOT NULL
+               OR NEW.control_version<>OLD.control_version+1 THEN
+              RAISE EXCEPTION 'Generic activation requires pending Owner epoch';
+            END IF;
+          END IF;
+          IF TG_OP='UPDATE' AND OLD.selection_mode='dynamic_selection'
+             AND NEW.selection_mode='dynamic_selection'
+             AND OLD.selection_epoch_id IS DISTINCT FROM NEW.selection_epoch_id THEN
+            RAISE EXCEPTION 'Generic epoch rotation requires Static transition';
+          END IF;
           SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
           IF NEW.pending_effective_period_anchor_ms IS NOT NULL AND NEW.pending_effective_period_anchor_ms % (cadence*3600000::bigint)<>0 THEN
             RAISE EXCEPTION 'Generic pending Control requires exact period';

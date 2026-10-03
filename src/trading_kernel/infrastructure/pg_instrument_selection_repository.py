@@ -1254,6 +1254,40 @@ class PostgresInstrumentSelectionRepository:
         row = result.mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
 
+    async def stage_pending_generic_selection_mode(
+        self,
+        *,
+        strategy_group_id: str,
+        selection_spec_id: str,
+        expected_control_version: int,
+        selection_epoch_id: str,
+        effective_period_anchor_ms: int,
+        authorization_id: str,
+        updated_at_ms: int,
+    ) -> SelectionControl | None:
+        result = await self._connection.execute(
+            sa.update(strategy_selection_control_current)
+            .where(
+                strategy_selection_control_current.c.strategy_group_id == strategy_group_id,
+                strategy_selection_control_current.c.selection_spec_id == selection_spec_id,
+                strategy_selection_control_current.c.control_version == expected_control_version,
+                strategy_selection_control_current.c.selection_mode == "static_baseline",
+                strategy_selection_control_current.c.pending_selection_mode.is_(None),
+                strategy_selection_control_current.c.selection_epoch_id.is_(None),
+            )
+            .values(
+                pending_selection_mode="dynamic_selection",
+                pending_effective_period_anchor_ms=effective_period_anchor_ms,
+                pending_authorization_id=authorization_id,
+                selection_epoch_id=selection_epoch_id,
+                control_version=expected_control_version + 1,
+                updated_at_ms=updated_at_ms,
+            )
+            .returning(strategy_selection_control_current)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else _selection_control_from_row(row)
+
     async def recover_expired_dynamic_activation(
         self,
         request: RecoverExpiredDynamicActivationRequest,
@@ -3371,7 +3405,10 @@ class PostgresInstrumentSelectionRepository:
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":control.pending_authorization_id})).mappings().one_or_none()
-        expected_scope = {"strategy_group_id":generation.strategy_group_id,"target_selection_mode":"dynamic_selection",
+        expected_scope = {"strategy_group_id":generation.strategy_group_id,
+            "selection_spec_id":generation.selection_spec_id,
+            "selection_epoch_id":generation.selection_epoch_id,
+            "target_selection_mode":"dynamic_selection",
             "effective_period_anchor_ms":generation.period_anchor_ms}
         if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or (
             authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>generation.created_at_ms):
@@ -3448,7 +3485,10 @@ class PostgresInstrumentSelectionRepository:
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":authority.activation_authorization_id})).mappings().one_or_none()
-        expected_scope = {"strategy_group_id":authority.strategy_group_id,"target_selection_mode":"dynamic_selection",
+        expected_scope = {"strategy_group_id":authority.strategy_group_id,
+            "selection_spec_id":authority.selection_spec_id,
+            "selection_epoch_id":authority.selection_epoch_id,
+            "target_selection_mode":"dynamic_selection",
             "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
         return authorization is not None and authorization["purpose"]=="selection_mode_change" and authorization["authentication_strength"]=="totp_step_up" and authorization["target_scope"]==expected_scope and authorization["authorized_at_ms"]<=authority.created_at_ms
 
