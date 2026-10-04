@@ -85,18 +85,21 @@ def _generic_static_recovery_commit_guard() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_validate_static_recovery_commit() RETURNS trigger LANGUAGE plpgsql AS $$
       DECLARE a brc_selection_session_authorities%ROWTYPE; p jsonb; b jsonb;
-        n integer; actual jsonb; expected jsonb;
+        n integer; actual jsonb; expected jsonb; dynamic_recovery boolean;
       BEGIN
         SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
         IF NOT FOUND OR a.recovery_grant_proof IS NULL THEN RETURN NULL; END IF;
         p:=a.recovery_grant_proof; b:=p->'event_binding';
+        dynamic_recovery := a.selection_mode='dynamic_selection';
         IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current
           WHERE selection_spec_id=a.selection_spec_id AND selection_authority_id=a.selection_authority_id AND updated_at_ms=a.created_at_ms)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current
             WHERE strategy_group_id=p->>'strategy_group_id' AND selection_spec_id=a.selection_spec_id
-              AND selection_mode='static_baseline' AND selection_epoch_id IS NULL
+              AND selection_mode=a.selection_mode
+              AND selection_epoch_id IS NOT DISTINCT FROM CASE WHEN dynamic_recovery THEN a.selection_epoch_id ELSE NULL END
               AND pending_selection_mode IS NULL AND pending_effective_period_anchor_ms IS NULL AND pending_authorization_id IS NULL
-              AND control_version=a.selection_control_version AND updated_at_ms=a.created_at_ms)
+              AND control_version=a.selection_control_version
+              AND (dynamic_recovery OR updated_at_ms=a.created_at_ms))
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_controls_current
             WHERE strategy_group_id=p->>'strategy_group_id' AND entry_state='enabled' AND control_version=a.owner_control_version)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current
@@ -105,8 +108,12 @@ def _generic_static_recovery_commit_guard() -> None:
               AND drained_at_ms IS NOT NULL AND resolved_at_ms=a.created_at_ms)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations
             WHERE materialization_generation_id=a.materialization_generation_id AND lifecycle_state='FAILED_CLOSED'
-              AND selection_epoch_id=a.selection_epoch_id AND selection_control_version=a.selection_control_version-1)
-          THEN RAISE EXCEPTION 'Static recovery requires atomic Control Vacuum Authority'; END IF;
+              AND selection_epoch_id=a.selection_epoch_id AND
+              selection_control_version=a.selection_control_version-CASE WHEN dynamic_recovery THEN 0 ELSE 1 END)
+          THEN
+            IF dynamic_recovery THEN RAISE EXCEPTION 'Dynamic recovery requires atomic Control Vacuum Authority'; END IF;
+            RAISE EXCEPTION 'Static recovery requires atomic Control Vacuum Authority';
+          END IF;
         IF a.comparison_universe_id IS NOT NULL AND NOT EXISTS (
           SELECT 1 FROM brc_comparison_binding_current WHERE event_spec_id=b->>'event_spec_id'
             AND comparison_universe_id=a.comparison_universe_id AND comparison_transition_revision=a.comparison_transition_revision
@@ -136,8 +143,9 @@ def _generic_static_recovery_commit_guard() -> None:
         IF NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events WHERE entry_vacuum_id=p->>'source_entry_vacuum_id'
           AND event_type='RESOLVED_FALLBACK' AND payload->>'selection_authority_id'=a.selection_authority_id)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=a.materialization_generation_id
-          AND event_type='STATIC_RECOVERY_COMMITTED' AND payload->>'selection_authority_id'=a.selection_authority_id) THEN
-          RAISE EXCEPTION 'Static recovery requires durable commit events'; END IF;
+          AND event_type=CASE WHEN dynamic_recovery THEN 'DYNAMIC_RECOVERY_COMMITTED' ELSE 'STATIC_RECOVERY_COMMITTED' END
+          AND payload->>'selection_authority_id'=a.selection_authority_id) THEN
+          RAISE EXCEPTION 'Generic recovery requires durable commit events'; END IF;
         RETURN NULL;
       END; $$
     """))
@@ -157,7 +165,9 @@ def _generic_static_recovery_proof_function() -> None:
         o brc_strategy_entry_controls_current%ROWTYPE;
         a brc_owner_authorizations%ROWTYPE;
         b brc_materialization_generation_event_baselines%ROWTYPE;
-        n integer; cadence integer; evaluated bigint; committed bigint;
+        source_authority brc_selection_session_authorities%ROWTYPE;
+        n integer; cadence integer; rank_limit integer; evaluated bigint; committed bigint;
+        missed integer; dynamic_recovery boolean; freshness jsonb; source_id text;
         cutoff bigint; effective bigint; expiry bigint; first_close bigint;
         ids text; members_digest text; cursors jsonb; revision bigint;
         future_cursor boolean; failure jsonb; reason text; expected jsonb;
@@ -171,17 +181,32 @@ def _generic_static_recovery_proof_function() -> None:
           OR g.fenced_at_ms IS NULL OR g.terminal_at_ms IS NULL THEN RETURN false; END IF;
         SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id=g.strategy_group_id;
         IF NOT FOUND OR c.selection_spec_id<>g.selection_spec_id OR c.selection_epoch_id IS DISTINCT FROM g.selection_epoch_id
-          OR c.control_version<>g.selection_control_version OR c.selection_mode<>'static_baseline'
+          OR c.control_version<>g.selection_control_version THEN RETURN false; END IF;
+        dynamic_recovery := c.selection_mode='dynamic_selection';
+        IF NOT dynamic_recovery AND (c.selection_mode<>'static_baseline'
           OR c.pending_selection_mode IS DISTINCT FROM 'dynamic_selection'
-          OR c.pending_effective_period_anchor_ms IS DISTINCT FROM g.period_anchor_ms THEN RETURN false; END IF;
+          OR c.pending_effective_period_anchor_ms IS DISTINCT FROM g.period_anchor_ms) THEN RETURN false; END IF;
+        IF dynamic_recovery AND (c.pending_selection_mode IS NOT NULL OR c.pending_authorization_id IS NOT NULL
+          OR c.pending_effective_period_anchor_ms IS NOT NULL) THEN RETURN false; END IF;
         SELECT * INTO o FROM brc_strategy_entry_controls_current WHERE strategy_group_id=g.strategy_group_id;
         IF NOT FOUND OR o.entry_state<>'enabled' THEN RETURN false; END IF;
-        SELECT * INTO a FROM brc_owner_authorizations WHERE authorization_id=c.pending_authorization_id;
-        IF NOT FOUND OR a.purpose<>'selection_mode_change' OR a.authentication_strength<>'totp_step_up'
-          OR a.authorized_at_ms>g.created_at_ms OR a.target_scope<>jsonb_build_object(
-            'strategy_group_id',g.strategy_group_id,'selection_spec_id',g.selection_spec_id,
-            'selection_epoch_id',g.selection_epoch_id,'target_selection_mode','dynamic_selection',
-            'effective_period_anchor_ms',g.period_anchor_ms) THEN RETURN false; END IF;
+        IF NOT dynamic_recovery THEN
+          SELECT * INTO a FROM brc_owner_authorizations WHERE authorization_id=c.pending_authorization_id;
+          IF NOT FOUND OR a.purpose<>'selection_mode_change' OR a.authentication_strength<>'totp_step_up'
+            OR a.authorized_at_ms>g.created_at_ms OR a.target_scope<>jsonb_build_object(
+              'strategy_group_id',g.strategy_group_id,'selection_spec_id',g.selection_spec_id,
+              'selection_epoch_id',g.selection_epoch_id,'target_selection_mode','dynamic_selection',
+              'effective_period_anchor_ms',g.period_anchor_ms) THEN RETURN false; END IF;
+        ELSE
+          SELECT x.* INTO source_authority FROM brc_selection_authority_current current_auth
+            JOIN brc_selection_session_authorities x ON x.selection_authority_id=current_auth.selection_authority_id
+            WHERE current_auth.selection_spec_id=g.selection_spec_id;
+          IF NOT FOUND OR source_authority.selection_mode<>'dynamic_selection'
+            OR source_authority.selection_epoch_id<>g.selection_epoch_id
+            OR source_authority.selection_control_version<>c.control_version
+            OR source_authority.owner_control_version<>o.control_version
+            OR source_authority.membership_freshness IS NULL THEN RETURN false; END IF;
+        END IF;
         SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
         IF NOT FOUND OR v.source_generation_id IS DISTINCT FROM g.materialization_generation_id
           OR v.strategy_group_id<>g.strategy_group_id OR v.selection_spec_id<>g.selection_spec_id
@@ -194,7 +219,7 @@ def _generic_static_recovery_proof_function() -> None:
           OR failure->>'reason_code' IS DISTINCT FROM v.first_blocker THEN RETURN false; END IF;
         IF v.first_blocker NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
           'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
-        IF EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id)
+        IF (NOT dynamic_recovery AND EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id))
           OR EXISTS (SELECT 1 FROM brc_strategy_universe_versions WHERE materialization_generation_id=g.materialization_generation_id AND lifecycle_state<>'abandoned') THEN RETURN false; END IF;
         SELECT count(*) INTO n FROM brc_materialization_generation_event_baselines WHERE materialization_generation_id=g.materialization_generation_id;
         IF n<>1 THEN RETURN false; END IF;
@@ -204,6 +229,12 @@ def _generic_static_recovery_proof_function() -> None:
           WHERE u.event_spec_id=b.event_spec_id AND u.universe_version_id=b.universe_version_id
             AND u.lifecycle_state='active' AND x.lifecycle_state='active' AND u.semantic_digest=x.semantic_digest
             AND x.event_spec_id=b.event_spec_id AND x.strategy_group_id=g.strategy_group_id) THEN RETURN false; END IF;
+        IF dynamic_recovery AND NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings sb
+          WHERE sb.selection_authority_id=source_authority.selection_authority_id
+            AND sb.event_spec_id=b.event_spec_id AND sb.position_side=b.position_side
+            AND sb.universe_version_id=b.universe_version_id AND sb.member_set_digest=b.member_set_digest
+            AND sb.grant_state='ACTIVE' AND source_authority.comparison_universe_id IS NOT DISTINCT FROM b.comparison_universe_id
+            AND source_authority.comparison_transition_revision IS NOT DISTINCT FROM b.comparison_transition_revision) THEN RETURN false; END IF;
         IF NOT EXISTS (SELECT 1 FROM brc_runtime_scopes_current WHERE universe_version_id=b.universe_version_id)
           OR EXISTS (SELECT 1 FROM brc_runtime_scopes_current s JOIN brc_owner_policy_current q USING(owner_policy_id)
             WHERE s.universe_version_id=b.universe_version_id AND (NOT q.enabled OR NOT q.new_entry_submit_enabled)) THEN RETURN false; END IF;
@@ -211,7 +242,7 @@ def _generic_static_recovery_proof_function() -> None:
           SELECT 1 FROM brc_comparison_binding_current WHERE event_spec_id=b.event_spec_id
             AND comparison_universe_id=b.comparison_universe_id AND comparison_transition_revision=b.comparison_transition_revision
             AND source_static_universe_version_id=b.universe_version_id) THEN RETURN false; END IF;
-        SELECT z.cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 z
+        SELECT z.cadence_hours,z.retain_rank INTO cadence,rank_limit FROM brc_generic_dynamic_selection_specs_v1 z
           JOIN brc_instrument_selection_specs s USING(selection_spec_id)
           JOIN brc_instrument_selection_spec_events e USING(selection_spec_id)
           WHERE z.selection_spec_id=g.selection_spec_id AND s.status='active' AND s.selection_kind='generic_dynamic_v1'
@@ -233,6 +264,15 @@ def _generic_static_recovery_proof_function() -> None:
         effective:=cutoff+3600000; expiry:=effective+cadence*3600000::bigint;
         first_close:=greatest(first_close,effective);
         IF evaluated<cutoff OR checked_at>=first_close OR first_close>=expiry THEN RETURN false; END IF;
+        IF dynamic_recovery THEN
+          freshness:=source_authority.membership_freshness;
+          missed:=(effective-(freshness->>'source_snapshot_effective_at_ms')::bigint)/(cadence*3600000::bigint);
+          IF missed NOT IN (0,1) OR freshness->>'source_member_set_digest' IS DISTINCT FROM b.member_set_digest
+            OR (freshness->>'membership_valid_until_ms')::bigint<=first_close THEN RETURN false; END IF;
+          freshness:=freshness || jsonb_build_object('consecutive_missed_periods',missed,
+            'state',CASE WHEN missed=0 THEN 'ACTIVE' ELSE 'GRACE' END);
+          source_id:=source_authority.selection_authority_id;
+        END IF;
         WITH members AS (
           SELECT exchange_instrument_id,
             'episode-domain:' || encode(sha256(convert_to('{"event_spec_id":' || to_json(b.event_spec_id)::text ||
@@ -247,20 +287,22 @@ def _generic_static_recovery_proof_function() -> None:
           coalesce(max(e.authority_recovery_revision),0)+1,
           coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)>evaluated),false)
           INTO n,ids,cursors,revision,future_cursor FROM members m LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
-        IF n<1 OR n>10 OR future_cursor THEN RETURN false; END IF;
+        IF n<1 OR n>(CASE WHEN dynamic_recovery THEN rank_limit ELSE 10 END) OR future_cursor THEN RETURN false; END IF;
         members_digest:='sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' || ids || ']}','UTF8')),'hex');
         IF members_digest<>b.member_set_digest THEN RETURN false; END IF;
         reason:=CASE WHEN v.first_blocker IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED') THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
         expected:=jsonb_build_object('proof_kind','FUTURE_CLOSE_REBASE_REQUIRED',
           'selection_spec_id',g.selection_spec_id,'strategy_group_id',g.strategy_group_id,'selection_epoch_id',g.selection_epoch_id,
-          'selection_mode','static_baseline','source_entry_vacuum_id',v.entry_vacuum_id,'vacuum_fenced_at_ms',v.fenced_at_ms,
-          'materialization_generation_id',g.materialization_generation_id,'source_selection_authority_id',NULL,
-          'failed_activation_authorization_id',a.authorization_id,'owner_control_version',o.control_version,'selection_control_version',c.control_version+1,
+          'selection_mode',CASE WHEN dynamic_recovery THEN 'dynamic_selection' ELSE 'static_baseline' END,
+          'source_entry_vacuum_id',v.entry_vacuum_id,'vacuum_fenced_at_ms',v.fenced_at_ms,
+          'materialization_generation_id',g.materialization_generation_id,'source_selection_authority_id',source_id,
+          'failed_activation_authorization_id',CASE WHEN dynamic_recovery THEN NULL ELSE a.authorization_id END,
+          'owner_control_version',o.control_version,'selection_control_version',c.control_version+CASE WHEN dynamic_recovery THEN 0 ELSE 1 END,
           'event_binding',jsonb_build_object('event_spec_id',b.event_spec_id,'position_side',b.position_side,'grant_state','ACTIVE','universe_version_id',b.universe_version_id,'member_set_digest',members_digest),
           'recovery_close_plan',jsonb_build_object('recovery_id','recovery:' || encode(sha256(convert_to('{"entry_vacuum_id":' || to_json(v.entry_vacuum_id)::text || '}','UTF8')),'hex'),
             'recovery_revision',revision,'reason',reason,'period',jsonb_build_object('feature_cutoff_at_ms',cutoff,'cadence_hours',cadence,'scheduled_effective_at_ms',effective,'period_expires_at_ms',expiry),
             'evaluated_at_ms',evaluated,'status','FUTURE_CLOSE_REBASE_REQUIRED','first_eligible_close_time_ms',first_close,'episode_rebase_required',true),
-          'membership_freshness',NULL,'comparison_universe_id',b.comparison_universe_id,'comparison_transition_revision',b.comparison_transition_revision,
+          'membership_freshness',freshness,'comparison_universe_id',b.comparison_universe_id,'comparison_transition_revision',b.comparison_transition_revision,
           'observation_cursors',cursors,'committed_at_ms',committed,'episode_rebase_required',true);
         RETURN coalesce(p=expected,false);
       EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
@@ -414,7 +456,7 @@ def _authority_snapshot_epoch() -> None:
     op.add_column(table, sa.Column("recovery_grant_proof", sa.dialects.postgresql.JSONB(), nullable=True))
     op.create_check_constraint("ck_brc_recovery_grant_shape",table,
         "recovery_grant_proof IS NULL OR (jsonb_typeof(recovery_grant_proof)='object' AND "
-        "selection_epoch_id<>'sor-v0' AND authority_outcome='FALLBACK_PREVIOUS' AND selection_mode='static_baseline')")
+        "selection_epoch_id<>'sor-v0' AND authority_outcome='FALLBACK_PREVIOUS' AND selection_mode IN ('static_baseline','dynamic_selection'))")
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))
     op.add_column(table, sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True))
@@ -494,13 +536,19 @@ def _authority_snapshot_epoch() -> None:
                 NEW.comparison_universe_id IS DISTINCT FROM p->>'comparison_universe_id' OR
                 NEW.comparison_transition_revision IS DISTINCT FROM (p->>'comparison_transition_revision')::bigint OR
                 NEW.reason_code IS DISTINCT FROM p->'recovery_close_plan'->>'reason' OR
-                NEW.selection_mode<>'static_baseline' OR NEW.authority_outcome<>'FALLBACK_PREVIOUS' OR
-                NEW.continuity_source_kind<>'STATIC_BASELINE' OR NEW.grant_proof_kind IS DISTINCT FROM 'FUTURE_CLOSE_REBASE_REQUIRED' OR
-                NEW.selection_snapshot_id IS NOT NULL OR NEW.selection_job_id IS NOT NULL OR NEW.selection_attempt_id IS NOT NULL OR
-                NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL OR
+                NEW.selection_mode IS DISTINCT FROM p->>'selection_mode' OR NEW.authority_outcome<>'FALLBACK_PREVIOUS' OR
+                NEW.continuity_source_kind IS DISTINCT FROM (CASE WHEN NEW.selection_mode='static_baseline' THEN 'STATIC_BASELINE' ELSE 'SELECTION_AUTHORITY' END) OR
+                NEW.grant_proof_kind IS DISTINCT FROM 'FUTURE_CLOSE_REBASE_REQUIRED' OR
+                NEW.selection_snapshot_id IS DISTINCT FROM p->'membership_freshness'->>'source_snapshot_id' OR
+                NEW.selection_job_id IS NOT NULL OR NEW.selection_attempt_id IS NOT NULL OR
+                NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS DISTINCT FROM nullif(p->'membership_freshness','null'::jsonb) OR
                 NEW.activation_authorization_id IS NOT NULL OR NEW.authority_gap_audit_id IS NOT NULL OR
-                NEW.continued_from_selection_authority_id IS NOT NULL OR NEW.grant_predecessor_authority_id IS NOT NULL THEN
-                RAISE EXCEPTION 'Static recovery proof differs from locked source facts';
+                NEW.continued_from_selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+                OR NEW.grant_predecessor_authority_id IS NOT NULL THEN
+                IF NEW.selection_mode='static_baseline' THEN
+                  RAISE EXCEPTION 'Static recovery proof differs from locked source facts';
+                END IF;
+                RAISE EXCEPTION 'Dynamic recovery proof differs from locked source facts';
               END IF;
               RETURN NEW;
             END IF;

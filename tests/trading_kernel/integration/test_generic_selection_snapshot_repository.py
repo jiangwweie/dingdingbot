@@ -316,7 +316,7 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                         async with conn.begin_nested():
                             await conn.execute(sa.insert(selection_session_authorities).values(**{
                                 **generic_authority_storage_values(authority),**changes}))
-                with pytest.raises(sa.exc.DBAPIError,match="Static recovery proof differs"):
+                with pytest.raises(sa.exc.DBAPIError,match="recovery proof differs"):
                     async with conn.begin_nested():
                         await conn.execute(sa.insert(selection_session_authorities).values(**{
                             **generic_authority_storage_values(authority),"recovery_grant_proof":{}}))
@@ -2065,6 +2065,114 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 
 
 @pytest.mark.asyncio
+async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(database: AsyncEngine) -> None:
+    first_result = await _exercise_generic_generation(database,"CPM-RO-001",False,
+        durable=True,first_activation=True,natural_selection=True)
+    first_source,first_snapshot,_,previous_uid = first_result
+    async with PostgresKernelUnitOfWork(database) as uow:
+        previous_authority = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        assert previous_authority is not None
+        control = await uow.instrument_selection.get_selection_control("CPM-RO-001")
+        assert control is not None and control.selection_mode.value == "dynamic_selection"
+    shifted_source = next_input(first_source)
+    successor_source = shifted_source.model_copy(update={
+        "predecessor_snapshot":first_snapshot,
+        "member_windows":tuple(qualify_window(
+            window.model_copy(update={"candles":shifted_source.member_windows[0].candles}),
+            window.exchange_instrument_id==first_source.spec.candidate_ids[0])
+            for window in shifted_source.member_windows),
+    })
+    successor = compute_generic_selection(successor_source)
+    assert successor.selected_members != first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(successor,
+            decision_at_ms=successor_source.decision_at_ms,
+            source_observed_at_ms=successor_source.source_observed_at_ms)
+    start = successor.effective_from_ms+1
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=successor.selection_snapshot_id,
+        worker_id="dynamic-second-failure")
+    steps = []
+    for offset in range(6):
+        at = start+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda at=at:at)
+        steps.append(step)
+        if step.disposition is MaterializationDisposition.GENERATION_MATERIALIZING:
+            break
+    assert steps[-1].disposition is MaterializationDisposition.GENERATION_MATERIALIZING, steps
+    generation_id = steps[-1].materialization_generation_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        materializing = await uow.instrument_selection.get_generic_materialization_generation(generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+    assert materializing is not None and materializing.fenced_at_ms is not None
+    assert vacuum is not None and vacuum.state.value == "RECONFIGURING"
+    fail_at = materializing.fenced_at_ms+first_source.spec.materialization_timeout_ms
+    generation_request = CoordinateGenericGenerationRequest(
+        materialization_generation_id=generation_id,worker_id="dynamic-failure-coordinator")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=fail_at)):
+        failed = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=generation_request,
+            clock_ms=lambda:fail_at)
+    assert failed.reason_code == "MATERIALIZATION_TIMEOUT", failed
+    await make_warming_ready(database,universe_version_id=previous_uid,
+        warm_closed_bar_time_ms=fail_at//HOUR*HOUR,
+        valid_until_ms=fail_at+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=fail_at+1)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            proposal = await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
+    assert proposal.selection_mode == "dynamic_selection"
+    assert proposal.source_selection_authority_id == previous_authority.authority.selection_authority_id
+    assert proposal.membership_freshness is not None
+    assert proposal.membership_freshness.source_snapshot_id == first_snapshot.selection_snapshot_id
+    assert proposal.membership_freshness.state.value == "GRACE"
+    assert proposal.membership_freshness.membership_valid_until_ms == (
+        previous_authority.authority.membership_freshness.membership_valid_until_ms)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=fail_at+1)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises(SelectionJobConflict,match="Generic recovery proof changed"):
+                await uow.instrument_selection.require_generic_recovery_grant_proof(
+                    proposal.model_copy(update={"source_selection_authority_id":"authority:wrong-source"}))
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=fail_at+1)):
+        recovered = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=generation_request,
+            clock_ms=lambda:fail_at+1)
+    assert recovered.disposition is MaterializationDisposition.FALLBACK_PREVIOUS, recovered
+    async with PostgresKernelUnitOfWork(database) as uow:
+        active = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        current_universe = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
+        refreshed_control = await uow.instrument_selection.get_selection_control("CPM-RO-001")
+        open_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+    assert active is not None and active.authority.authority_outcome == "FALLBACK_PREVIOUS"
+    assert active.authority.event_binding.universe_version_id == previous_uid
+    assert active.authority.recovery_proof.source_selection_authority_id == previous_authority.authority.selection_authority_id
+    assert active.authority.recovery_proof.membership_freshness.source_snapshot_id == first_snapshot.selection_snapshot_id
+    assert current_universe is not None and current_universe.universe_version_id == previous_uid
+    assert refreshed_control is not None and refreshed_control.selection_mode.value == "dynamic_selection"
+    assert open_vacuum is None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=fail_at+1)):
+        repeated = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=generation_request,
+            clock_ms=lambda:fail_at+1)
+    assert repeated.disposition is MaterializationDisposition.FALLBACK_PREVIOUS
+    assert repeated.selection_authority_id == active.authority.selection_authority_id
+    async with database.connect() as conn:
+        checkpoint_count = await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+            "WHERE authority_recovery_id=:id AND authority_recovery_first_eligible_close_time_ms=:first"),
+            {"id":active.authority.recovery_proof.recovery_close_plan.recovery_id,
+             "first":active.authority.first_eligible_close_time_ms})
+    assert checkpoint_count == len(proposal.observation_cursors) == 16
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
 @pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch"])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
@@ -2895,7 +3003,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             await conn.execute(sa.text("DELETE FROM brc_comparative_projection_current"))
         await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable, failure_case=failure_case)
         if durable or failure_case:
-            return
+            return (source, snapshot, generation, target.universe.universe_version_id) if durable and not failure_case else None
         candles = mpg_long_snapshot().candles_1h if group=="MPG-001" else mi_long_snapshot().candles_1h
         close = candles[-1].close_time_ms
         for members in (source.spec.candidate_ids,snapshot.selected_members):
@@ -2955,7 +3063,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     else:
         await _assert_generic_target_stages(database, source, generation, target.universe.universe_version_id, durable=durable, failure_case=failure_case)
         if durable or failure_case:
-            return
+            return (source, snapshot, generation, target.universe.universe_version_id) if durable and not failure_case else None
     if comparison_only:
         with pytest.raises(sa.exc.DBAPIError,match="uq_brc_strategy_universe_versions_current_digest"):
             async with database.begin() as conn:
@@ -3195,7 +3303,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert proposal.selection_control_version == control.control_version+1
                 assert uow._connection is not None
                 recovery_savepoint = await uow._connection.begin_nested()
-                recovered = await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                recovered = await uow.instrument_selection.commit_generic_recovery(proposal)
                 await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 committed = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
                 assert committed is not None and committed.authority == recovered
@@ -3218,7 +3326,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     with pytest.raises(sa.exc.DBAPIError,match="Static recovery requires"):
                         async with uow._connection.begin_nested():
                             await uow._connection.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
-                            await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                            await uow.instrument_selection.commit_generic_recovery(proposal)
                             await uow._connection.execute(sa.text(broken),{"spec":source.spec.selection_spec_id,"key":proposal.observation_cursors[0].episode_domain_key})
                             await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
@@ -3229,7 +3337,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     with pytest.raises(sa.exc.DBAPIError,match="unchanged comparison"):
                         async with uow._connection.begin_nested():
                             await uow._connection.execute(sa.text("SET CONSTRAINTS ALL DEFERRED"))
-                            await uow.instrument_selection.commit_generic_static_recovery(proposal)
+                            await uow.instrument_selection.commit_generic_recovery(proposal)
                             await uow._connection.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=comparison_transition_revision+1 WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
                             await uow._connection.execute(sa.text("SET CONSTRAINTS ALL IMMEDIATE"))
                 assert uow._connection is not None
@@ -3345,19 +3453,19 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             current = await restarted.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
             assert current is not None and current.authority == committed_recovery
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)):
-                repeated_recovery = await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+                repeated_recovery = await restarted.instrument_selection.commit_generic_recovery(committed_recovery.recovery_proof)
             assert repeated_recovery == committed_recovery
             if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
                 assert restarted._connection is not None
                 checkpoint = await restarted._connection.begin_nested()
                 await restarted._connection.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=comparison_transition_revision+1 WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
                 with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+1)), pytest.raises(SelectionJobConflict,match="comparison changed"):
-                    await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+                    await restarted.instrument_selection.commit_generic_recovery(committed_recovery.recovery_proof)
                 await checkpoint.rollback()
             with pytest.raises(SelectionJobConflict,match="idempotency"):
-                await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof.model_copy(update={"owner_control_version":999}))
+                await restarted.instrument_selection.commit_generic_recovery(committed_recovery.recovery_proof.model_copy(update={"owner_control_version":999}))
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=committed_recovery.expires_at_ms)), pytest.raises(SelectionJobConflict,match="idempotency"):
-                await restarted.instrument_selection.commit_generic_static_recovery(committed_recovery.recovery_proof)
+                await restarted.instrument_selection.commit_generic_recovery(committed_recovery.recovery_proof)
             for cursor in proposal.observation_cursors:
                 checkpoint = await restarted.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
                 assert checkpoint is not None and checkpoint.state == "REBASE_REQUIRED"

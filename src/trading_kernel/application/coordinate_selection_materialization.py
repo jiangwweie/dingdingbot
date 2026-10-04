@@ -1325,16 +1325,19 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             if committed is not None and isinstance(committed.authority,GenericRecoveryAuthority) and (
                 committed.authority.materialization_generation_id==initial.materialization_generation_id):
                 try:
-                    recovered = await uow.instrument_selection.commit_generic_static_recovery(committed.authority.recovery_proof)
+                    recovered = await uow.instrument_selection.commit_generic_recovery(committed.authority.recovery_proof)
                 except SelectionPersistenceConflict as exc:
                     return _blocked(str(exc))
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
                     selection_authority_id=recovered.selection_authority_id,materialization_generation_id=initial.materialization_generation_id)
             vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=initial.strategy_group_id,
                 selection_spec_id=initial.selection_spec_id,for_update=True)
-            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
-                control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and committed is None
-                and vacuum is not None and vacuum.source_generation_id==initial.materialization_generation_id):
+            first_static = (control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE
+                and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and committed is None)
+            previous_dynamic = (control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION
+                and control.pending_selection_mode is None and committed is not None)
+            if (first_static or previous_dynamic) and vacuum is not None and (
+                vacuum.source_generation_id==initial.materialization_generation_id):
                 try:
                     recovery_proof = await uow.instrument_selection.prepare_generic_recovery_grant_proof(initial.materialization_generation_id)
                 except SelectionPersistenceConflict:
@@ -1342,7 +1345,7 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     # later; preparation writes no facts and cannot grant Entry.
                     recovery_proof = None
                 if recovery_proof is not None:
-                    recovered = await uow.instrument_selection.commit_generic_static_recovery(recovery_proof)
+                    recovered = await uow.instrument_selection.commit_generic_recovery(recovery_proof)
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
                         selection_authority_id=recovered.selection_authority_id,materialization_generation_id=initial.materialization_generation_id,
                         entry_vacuum_id=vacuum.entry_vacuum_id)

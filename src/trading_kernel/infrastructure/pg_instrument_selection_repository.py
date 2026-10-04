@@ -29,6 +29,7 @@ from src.trading_kernel.domain.authority_recovery_rebase import (
 from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
+    DynamicMembershipState,
     build_generic_selection_period,
     plan_hourly_recovery_close,
     require_current_close_commit,
@@ -3201,20 +3202,20 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
-    async def commit_generic_static_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
-        """Commit first Static recovery with SQL pre/post guards in one transaction.
+    async def commit_generic_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
+        """Commit Static-first or Dynamic previous-active recovery atomically.
 
         ENTRY remains separately gated by the runtime recovery/rebase consumer.
         """
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
-        if proof.selection_mode!="static_baseline" or proof.materialization_generation_id is None:
-            raise SelectionJobConflict("Static recovery transaction requires failed first activation")
+        if proof.materialization_generation_id is None:
+            raise SelectionJobConflict("Recovery transaction requires failed Generation")
         async with self._connection.begin_nested():
             owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
                 strategy_entry_controls_current.c.strategy_group_id==proof.strategy_group_id).with_for_update())).mappings().one_or_none()
             control = await self.get_selection_control(proof.strategy_group_id,for_update=True)
             current = await self.get_current_generic_authority(proof.selection_spec_id,for_update=True)
-            if current is not None:
+            if current is not None and current.authority.materialization_generation_id==proof.materialization_generation_id:
                 existing = current.authority
                 if not isinstance(existing,GenericRecoveryAuthority) or existing.recovery_proof!=proof:
                     raise SelectionJobConflict("Static recovery idempotency identity changed")
@@ -3222,8 +3223,8 @@ class PostgresInstrumentSelectionRepository:
                     strategy_entry_vacuums_current.c.entry_vacuum_id==proof.source_entry_vacuum_id).with_for_update())).mappings().one_or_none()
                 checked_at = await self.read_authority_clock_ms()
                 if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=proof.owner_control_version or (
-                    control is None or control.selection_mode is not SelectionMode.STATIC_BASELINE
-                    or control.control_version!=proof.selection_control_version or control.selection_epoch_id is not None
+                    control is None or control.selection_mode.value!=proof.selection_mode
+                    or control.control_version!=proof.selection_control_version or control.selection_epoch_id!=(None if proof.selection_mode=="static_baseline" else proof.selection_epoch_id)
                     or control.pending_selection_mode is not None or vacuum_row is None
                     or vacuum_row["state"]!="RESOLVED_FALLBACK" or vacuum_row["resolved_at_ms"]!=existing.created_at_ms
                     or not existing.created_at_ms<=checked_at<existing.expires_at_ms):
@@ -3253,16 +3254,17 @@ class PostgresInstrumentSelectionRepository:
             await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
                 selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
             await self.initialize_generic_recovery_checkpoints(proof)
-            changed = await self._connection.execute(sa.update(strategy_selection_control_current).where(
-                strategy_selection_control_current.c.strategy_group_id==proof.strategy_group_id,
-                strategy_selection_control_current.c.control_version==proof.selection_control_version-1,
-                strategy_selection_control_current.c.selection_mode=="static_baseline",
-                strategy_selection_control_current.c.pending_authorization_id==proof.failed_activation_authorization_id,
-                strategy_selection_control_current.c.selection_epoch_id==proof.selection_epoch_id).values(
-                    pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
-                    selection_epoch_id=None,control_version=proof.selection_control_version,updated_at_ms=proof.committed_at_ms))
-            if changed.rowcount!=1:
-                raise SelectionJobConflict("Static recovery Control CAS changed")
+            if proof.selection_mode=="static_baseline":
+                changed = await self._connection.execute(sa.update(strategy_selection_control_current).where(
+                    strategy_selection_control_current.c.strategy_group_id==proof.strategy_group_id,
+                    strategy_selection_control_current.c.control_version==proof.selection_control_version-1,
+                    strategy_selection_control_current.c.selection_mode=="static_baseline",
+                    strategy_selection_control_current.c.pending_authorization_id==proof.failed_activation_authorization_id,
+                    strategy_selection_control_current.c.selection_epoch_id==proof.selection_epoch_id).values(
+                        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
+                        selection_epoch_id=None,control_version=proof.selection_control_version,updated_at_ms=proof.committed_at_ms))
+                if changed.rowcount!=1:
+                    raise SelectionJobConflict("Static recovery Control CAS changed")
             vacuum = await self.get_current_entry_vacuum(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,for_update=True)
             if vacuum is None or vacuum.entry_vacuum_id!=proof.source_entry_vacuum_id:
                 raise SelectionJobConflict("Static recovery Vacuum changed")
@@ -3272,8 +3274,16 @@ class PostgresInstrumentSelectionRepository:
                     state="RESOLVED_FALLBACK",resolved_at_ms=proof.committed_at_ms,projection_version=vacuum.projection_version+1))
             if changed.rowcount!=1:
                 raise SelectionJobConflict("Static recovery Vacuum CAS changed")
-            changed = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=proof.selection_spec_id,
-                selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=proof.committed_at_ms).on_conflict_do_nothing())
+            current_version = 0 if current is None else current.projection_version
+            if current is None:
+                changed = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=proof.selection_spec_id,
+                    selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=proof.committed_at_ms).on_conflict_do_nothing())
+            else:
+                changed = await self._connection.execute(sa.update(selection_authority_current).where(
+                    selection_authority_current.c.selection_spec_id==proof.selection_spec_id,
+                    selection_authority_current.c.selection_authority_id==proof.source_selection_authority_id,
+                    selection_authority_current.c.projection_version==current_version).values(
+                    selection_authority_id=authority.selection_authority_id,projection_version=current_version+1,updated_at_ms=proof.committed_at_ms))
             if changed.rowcount!=1:
                 raise SelectionJobConflict("Static recovery current CAS changed")
             await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
@@ -3284,7 +3294,8 @@ class PostgresInstrumentSelectionRepository:
                 strategy_universe_materialization_events.c.materialization_generation_id==proof.materialization_generation_id)) or 0)+1
             await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
                 materialization_event_id=f"materialization-event:{proof.materialization_generation_id}:{seq}",materialization_generation_id=proof.materialization_generation_id,
-                event_sequence=seq,event_type="STATIC_RECOVERY_COMMITTED",payload={"selection_authority_id":authority.selection_authority_id},occurred_at_ms=proof.committed_at_ms))
+                event_sequence=seq,event_type="STATIC_RECOVERY_COMMITTED" if proof.selection_mode=="static_baseline" else "DYNAMIC_RECOVERY_COMMITTED",
+                payload={"selection_authority_id":authority.selection_authority_id},occurred_at_ms=proof.committed_at_ms))
             require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=await self.read_authority_clock_ms())
         return authority
 
@@ -3344,8 +3355,8 @@ class PostgresInstrumentSelectionRepository:
     async def require_generic_recovery_grant_proof(self, proof: GenericRecoveryGrantProof) -> int:
         """Recheck every frozen reference under the preparation locks; grant nothing."""
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
-        if proof.selection_mode!="static_baseline" or proof.materialization_generation_id is None:
-            raise SelectionJobConflict("Dynamic recovery commit contract is not installed")
+        if proof.materialization_generation_id is None:
+            raise SelectionJobConflict("Recovery requires failed Generation")
         now = await self.read_authority_clock_ms()
         if now<proof.committed_at_ms:
             raise ValueError("Recovery verification clock moved backwards")
@@ -3368,7 +3379,7 @@ class PostgresInstrumentSelectionRepository:
         return fresh.committed_at_ms
 
     async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof:
-        """Prepare first-activation Static recovery from locked DB facts; write nothing.
+        """Prepare Static-first or Dynamic previous-active recovery; write nothing.
 
         This is not a grant. The eventual commit must revalidate this evidence
         and atomically install Authority/rebase, resolve Vacuum and clear pending.
@@ -3398,9 +3409,14 @@ class PostgresInstrumentSelectionRepository:
             or control.selection_spec_id!=generation.selection_spec_id or control.selection_epoch_id!=generation.selection_epoch_id
             or control.control_version!=generation.selection_control_version):
             raise SelectionJobConflict("Recovery Owner Control or failed Generation changed")
-        if control.selection_mode is not SelectionMode.STATIC_BASELINE or control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION or (
-            control.pending_effective_period_anchor_ms!=generation.period_anchor_ms or control.pending_authorization_id is None):
-            raise SelectionJobConflict("Static recovery requires exact failed first activation")
+        static_first = control.selection_mode is SelectionMode.STATIC_BASELINE and (
+            control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+            and control.pending_effective_period_anchor_ms==generation.period_anchor_ms
+            and control.pending_authorization_id is not None)
+        dynamic = control.selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+            control.pending_selection_mode is None and control.pending_authorization_id is None)
+        if not static_first and not dynamic:
+            raise SelectionJobConflict("Recovery requires exact Static-first or Dynamic control")
         now = await self.read_authority_clock_ms()
         if now<generation.terminal_at_ms:
             raise SelectionJobConflict("Recovery failure time is in the future")
@@ -3420,17 +3436,18 @@ class PostgresInstrumentSelectionRepository:
         ).order_by(instrument_selection_snapshots.c.period_anchor_ms.desc()).limit(1))
         if newer is not None:
             raise SelectionJobConflict("Recovery superseded by newer effective Selection")
-        authorization = (await self._connection.execute(sa.text(
-            "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
-            {"id":control.pending_authorization_id})).mappings().one_or_none()
-        expected_scope = {"strategy_group_id":generation.strategy_group_id,
-            "selection_spec_id":generation.selection_spec_id,
-            "selection_epoch_id":generation.selection_epoch_id,
-            "target_selection_mode":"dynamic_selection",
-            "effective_period_anchor_ms":generation.period_anchor_ms}
-        if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or (
-            authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>generation.created_at_ms):
-            raise SelectionJobConflict("Static recovery Owner authorization differs")
+        if static_first:
+            authorization = (await self._connection.execute(sa.text(
+                "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
+                {"id":control.pending_authorization_id})).mappings().one_or_none()
+            expected_scope = {"strategy_group_id":generation.strategy_group_id,
+                "selection_spec_id":generation.selection_spec_id,
+                "selection_epoch_id":generation.selection_epoch_id,
+                "target_selection_mode":"dynamic_selection",
+                "effective_period_anchor_ms":generation.period_anchor_ms}
+            if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or (
+                authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>generation.created_at_ms):
+                raise SelectionJobConflict("Static recovery Owner authorization differs")
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
         if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or (
             vacuum.fenced_at_ms!=generation.fenced_at_ms or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
@@ -3444,13 +3461,22 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Static recovery failure provenance differs")
         reason: Literal["MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT"] = (
             "MATERIALIZATION_TIMEOUT" if vacuum.first_blocker in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED"} else "MATERIALIZATION_FAILURE")
-        if await self.get_current_generic_authority(generation.selection_spec_id,for_update=True) is not None:
+        source_authority = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
+        if static_first and source_authority is not None:
             raise SelectionJobConflict("Static recovery cannot replace a Dynamic Authority")
+        if dynamic and (source_authority is None or source_authority.authority.selection_epoch_id!=generation.selection_epoch_id
+            or source_authority.authority.selection_control_version!=control.control_version
+            or source_authority.authority.owner_control_version!=owner["control_version"]):
+            raise SelectionJobConflict("Dynamic recovery source Authority changed")
         universes = PostgresStrategyUniverseRepository(self._connection)
         targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)
         if any(target.lifecycle_state.value!="abandoned" for target in targets):
             raise SelectionJobConflict("Static recovery has unfinished targets")
         previous = generation.previous_events[0]
+        if dynamic and (source_authority is None or source_authority.authority.event_binding.universe_version_id!=previous.universe_version_id
+            or source_authority.authority.event_binding.member_set_digest!=previous.member_set_digest
+            or source_authority.authority.event_binding.event_spec_id!=previous.event_spec_id):
+            raise SelectionJobConflict("Dynamic recovery previous Authority differs")
         current = await universes.get_current(previous.event_spec_id)
         if current is None or current.universe_version_id!=previous.universe_version_id:
             raise SelectionJobConflict("Static recovery previous current changed")
@@ -3462,6 +3488,10 @@ class PostgresInstrumentSelectionRepository:
             comparison = await self.get_comparison_universe_binding(previous.event_spec_id,for_update=True)
             if comparison is None or comparison.comparison_universe_id!=previous.comparison_universe_id or comparison.comparison_transition_revision!=previous.comparison_transition_revision:
                 raise SelectionJobConflict("Static recovery comparison changed")
+        if dynamic and source_authority is not None and (
+            source_authority.authority.comparison_universe_id!=previous.comparison_universe_id or
+            source_authority.authority.comparison_transition_revision!=previous.comparison_transition_revision):
+            raise SelectionJobConflict("Dynamic recovery source comparison changed")
         ready = await universes.try_activate(UniverseActivationRequest(universe_version_id=current.universe_version_id,
             attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
         if ready.status is not UniverseActivationStatus.ALREADY_ACTIVE:
@@ -3471,7 +3501,7 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Static recovery Policy blocks ENTRY")
         spec = await self.get_generic_spec(generation.selection_spec_id)
         coverage = await signals.lock_recovery_close_coverage(event_spec_id=previous.event_spec_id,
-            exchange_instrument_ids=members.exchange_instrument_ids,selection_mode="static_baseline",evaluated_at_ms=now)
+            exchange_instrument_ids=members.exchange_instrument_ids,selection_mode="static_baseline" if static_first else "dynamic_selection",evaluated_at_ms=now)
         revision = 1
         for cursor in coverage:
             checkpoint = await signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
@@ -3489,13 +3519,31 @@ class PostgresInstrumentSelectionRepository:
                 reason=reason,period=period,evaluated_at_ms=now)
         committed = await self.read_authority_clock_ms()
         require_hourly_recovery_commit(plan,committed_at_ms=committed)
+        freshness = None
+        if dynamic:
+            assert source_authority is not None
+            source_value = source_authority.authority
+            source_freshness = (source_value.recovery_proof.membership_freshness
+                if isinstance(source_value,GenericRecoveryAuthority) else source_value.membership_freshness)
+            if source_freshness is None:
+                raise SelectionJobConflict("Dynamic recovery source freshness missing")
+            missed = (period.scheduled_effective_at_ms-source_freshness.source_snapshot_effective_at_ms)//cadence
+            if missed not in {0,1}:
+                raise SelectionJobConflict("Dynamic recovery source membership stale")
+            freshness = source_freshness.model_copy(update={
+                "consecutive_missed_periods":missed,
+                "state":DynamicMembershipState.ACTIVE if missed==0 else DynamicMembershipState.GRACE,
+            })
+            if plan.first_eligible_close_time_ms is None or not freshness.allows_new_entry_at(plan.first_eligible_close_time_ms):
+                raise SelectionJobConflict("Dynamic recovery leaves no eligible close before stale deadline")
         return GenericRecoveryGrantProof(selection_spec_id=generation.selection_spec_id,strategy_group_id=generation.strategy_group_id,
-            selection_epoch_id=generation.selection_epoch_id,selection_mode="static_baseline",source_entry_vacuum_id=vacuum.entry_vacuum_id,
+            selection_epoch_id=generation.selection_epoch_id,selection_mode="static_baseline" if static_first else "dynamic_selection",source_entry_vacuum_id=vacuum.entry_vacuum_id,
             vacuum_fenced_at_ms=vacuum.fenced_at_ms,materialization_generation_id=materialization_generation_id,
-            source_selection_authority_id=None,failed_activation_authorization_id=control.pending_authorization_id,
-            owner_control_version=owner["control_version"],selection_control_version=control.control_version+1,
+            source_selection_authority_id=None if source_authority is None else source_authority.authority.selection_authority_id,
+            failed_activation_authorization_id=control.pending_authorization_id if static_first else None,
+            owner_control_version=owner["control_version"],selection_control_version=control.control_version+int(static_first),
             event_binding=AuthorityEventBinding.model_validate(previous.model_dump(exclude={"comparison_universe_id","comparison_transition_revision"})),
-            recovery_close_plan=plan,membership_freshness=None,comparison_universe_id=previous.comparison_universe_id,
+            recovery_close_plan=plan,membership_freshness=freshness,comparison_universe_id=previous.comparison_universe_id,
             comparison_transition_revision=previous.comparison_transition_revision,observation_cursors=coverage,committed_at_ms=committed)
 
     async def generic_activation_authorization_matches(self, authority: GenericSelectionAuthority) -> bool:
