@@ -2065,14 +2065,15 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 
 
 @pytest.mark.asyncio
-async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(database: AsyncEngine) -> None:
-    first_result = await _exercise_generic_generation(database,"CPM-RO-001",False,
+@pytest.mark.parametrize("group",("CPM-RO-001","MPG-001","MI-001","BRF2-001"))
+async def test_failed_second_dynamic_generation_respects_previous_freshness(database: AsyncEngine,group: str) -> None:
+    first_result = await _exercise_generic_generation(database,group,False,
         durable=True,first_activation=True,natural_selection=True)
     first_source,first_snapshot,_,previous_uid = first_result
     async with PostgresKernelUnitOfWork(database) as uow:
         previous_authority = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert previous_authority is not None
-        control = await uow.instrument_selection.get_selection_control("CPM-RO-001")
+        control = await uow.instrument_selection.get_selection_control(group)
         assert control is not None and control.selection_mode.value == "dynamic_selection"
     shifted_source = next_input(first_source)
     successor_source = shifted_source.model_copy(update={
@@ -2106,7 +2107,7 @@ async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(data
     async with PostgresKernelUnitOfWork(database) as uow:
         materializing = await uow.instrument_selection.get_generic_materialization_generation(generation_id)
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(
-            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+            strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
     assert materializing is not None and materializing.fenced_at_ms is not None
     assert vacuum is not None and vacuum.state.value == "RECONFIGURING"
     fail_at = materializing.fenced_at_ms+first_source.spec.materialization_timeout_ms
@@ -2121,10 +2122,44 @@ async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(data
     await make_warming_ready(database,universe_version_id=previous_uid,
         warm_closed_bar_time_ms=fail_at//HOUR*HOUR,
         valid_until_ms=fail_at+HOUR)
+    if group in {"MPG-001","MI-001"}:
+        template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+        closed = fail_at//HOUR*HOUR
+        delta = closed-template.trigger_candle_close_time_ms
+        candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta})
+            for c in template.candles_1h)
+        projection = build_comparative_universe_projection(event_spec_id=first_source.spec.event_spec_id,
+            universe_version_id=previous_uid,strategy_group_id=group,
+            exchange_instrument_ids=first_source.spec.candidate_ids,closed_bar_time_ms=closed,
+            lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+            member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles)
+                for member in first_source.spec.candidate_ids)).model_copy(update={
+                    "comparison_transition_revision":previous_authority.authority.comparison_transition_revision})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
         new=AsyncMock(return_value=fail_at+1)):
         async with PostgresKernelUnitOfWork(database) as uow:
-            proposal = await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
+            if group in {"MPG-001","MI-001"}:
+                with pytest.raises(SelectionJobConflict,match="Dynamic recovery source membership stale"):
+                    await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
+            else:
+                proposal = await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
+    if group in {"MPG-001","MI-001"}:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=fail_at+1)):
+            refused = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=generation_request,
+                clock_ms=lambda:fail_at+1)
+        assert refused.disposition is MaterializationDisposition.BLOCKED
+        async with PostgresKernelUnitOfWork(database) as uow:
+            still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+            still_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
+        assert still_previous is not None
+        assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
+        assert still_vacuum is not None and still_vacuum.state.value == "RECONFIGURING"
+        return
     assert proposal.selection_mode == "dynamic_selection"
     assert proposal.source_selection_authority_id == previous_authority.authority.selection_authority_id
     assert proposal.membership_freshness is not None
@@ -2132,6 +2167,18 @@ async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(data
     assert proposal.membership_freshness.state.value == "GRACE"
     assert proposal.membership_freshness.membership_valid_until_ms == (
         previous_authority.authority.membership_freshness.membership_valid_until_ms)
+    for statement,parameters in (
+        (("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' "
+            "WHERE strategy_group_id=:group_id"),{"group_id":group}),
+        (("UPDATE brc_strategy_entry_vacuums_current SET state='DRAINING_ENTRY',drained_at_ms=NULL "
+            "WHERE entry_vacuum_id=:vacuum_id"),{"vacuum_id":vacuum.entry_vacuum_id}),
+    ):
+        async with database.connect() as conn:
+            await conn.execute(sa.text(statement),parameters)
+            with (patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=fail_at+1)),pytest.raises(SelectionJobConflict)):
+                await PostgresInstrumentSelectionRepository(conn).prepare_generic_recovery_grant_proof(generation_id)
+            await conn.rollback()
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
         new=AsyncMock(return_value=fail_at+1)):
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -2147,9 +2194,9 @@ async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(data
     async with PostgresKernelUnitOfWork(database) as uow:
         active = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         current_universe = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
-        refreshed_control = await uow.instrument_selection.get_selection_control("CPM-RO-001")
+        refreshed_control = await uow.instrument_selection.get_selection_control(group)
         open_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
-            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+            strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
     assert active is not None and active.authority.authority_outcome == "FALLBACK_PREVIOUS"
     assert active.authority.event_binding.universe_version_id == previous_uid
     assert active.authority.recovery_proof.source_selection_authority_id == previous_authority.authority.selection_authority_id
@@ -2169,7 +2216,7 @@ async def test_failed_second_dynamic_generation_restores_exact_previous_cpm(data
             "WHERE authority_recovery_id=:id AND authority_recovery_first_eligible_close_time_ms=:first"),
             {"id":active.authority.recovery_proof.recovery_close_plan.recovery_id,
              "first":active.authority.first_eligible_close_time_ms})
-    assert checkpoint_count == len(proposal.observation_cursors) == 16
+    assert checkpoint_count == len(proposal.observation_cursors)
 
 
 @pytest.mark.asyncio
