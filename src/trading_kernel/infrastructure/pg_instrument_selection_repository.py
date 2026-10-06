@@ -4919,7 +4919,7 @@ def generic_recovery_authority_storage_values(authority: GenericRecoveryAuthorit
         "continued_from_selection_authority_id":proof.source_selection_authority_id,
         "continuity_source_kind":"STATIC_BASELINE" if proof.selection_mode=="static_baseline" else "SELECTION_AUTHORITY",
         "authority_gap_audit_id":None,"materialization_generation_id":proof.materialization_generation_id,
-        "owner_control_version":proof.owner_control_version,"authority_outcome":"FALLBACK_PREVIOUS",
+        "owner_control_version":proof.owner_control_version,"authority_outcome":authority.authority_outcome,
         "grant_proof_kind":"FUTURE_CLOSE_REBASE_REQUIRED","grant_predecessor_authority_id":None,
         "current_close_proof":None,"recovery_grant_proof":proof.model_dump(mode="json"),
         "membership_freshness":None if proof.membership_freshness is None else proof.membership_freshness.model_dump(mode="json"),

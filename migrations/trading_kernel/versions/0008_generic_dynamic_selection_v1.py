@@ -292,6 +292,7 @@ def _generic_static_recovery_proof_function() -> None:
         IF members_digest<>b.member_set_digest THEN RETURN false; END IF;
         reason:=CASE WHEN v.first_blocker IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED') THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
         expected:=jsonb_build_object('proof_kind','FUTURE_CLOSE_REBASE_REQUIRED',
+          'authority_outcome','FALLBACK_PREVIOUS','target_snapshot_id',NULL,
           'selection_spec_id',g.selection_spec_id,'strategy_group_id',g.strategy_group_id,'selection_epoch_id',g.selection_epoch_id,
           'selection_mode',CASE WHEN dynamic_recovery THEN 'dynamic_selection' ELSE 'static_baseline' END,
           'source_entry_vacuum_id',v.entry_vacuum_id,'vacuum_fenced_at_ms',v.fenced_at_ms,

@@ -113,6 +113,40 @@ def test_recovery_cannot_refresh_old_membership_past_its_absolute_deadline():
         GenericRecoveryGrantProof(**values)
 
 
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+def test_recovered_new_target_requires_snapshot_and_future_rebase(group):
+    from src.trading_kernel.domain.selection_authority import (
+        GenericRecoveryAuthority,
+        GenericRecoveryGrantProof,
+    )
+
+    values = recovery_payload(group,False)
+    fresh = values["membership_freshness"]
+    values.update({
+        "authority_outcome":"ACTIVE_NEW",
+        "target_snapshot_id":fresh.source_snapshot_id,
+        "materialization_generation_id":"generation:new-target",
+        "event_binding":values["event_binding"].model_copy(update={"universe_version_id":"universe:new-target"}),
+    })
+    proof = GenericRecoveryGrantProof(**values)
+    authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
+    assert authority.authority_outcome == "ACTIVE_NEW"
+    assert authority.selection_snapshot_id == proof.target_snapshot_id
+    assert authority.first_eligible_close_time_ms > authority.created_at_ms
+    assert authority.event_binding.universe_version_id == "universe:new-target"
+    assert GenericRecoveryAuthority.model_validate_json(authority.model_dump_json()) == authority
+    for changes in (
+        {"target_snapshot_id":None},
+        {"target_snapshot_id":"snapshot:wrong"},
+        {"materialization_generation_id":None},
+        {"selection_mode":"static_baseline"},
+        {"source_selection_authority_id":None},
+        {"recovery_close_plan":proof.recovery_close_plan.model_copy(update={"first_eligible_close_time_ms":proof.committed_at_ms})},
+    ):
+        with pytest.raises(ValueError):
+            GenericRecoveryGrantProof.model_validate({**proof.model_dump(),**changes})
+
+
 def test_no_eligible_close_is_a_miss_not_a_recovery_grant():
     from src.trading_kernel.domain.selection_authority import GenericRecoveryGrantProof
     values = recovery_payload("MI-001",True)

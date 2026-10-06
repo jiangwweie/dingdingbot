@@ -955,6 +955,8 @@ class GenericRecoveryGrantProof(BaseModel):
     """
     model_config = ConfigDict(frozen=True, extra="forbid")
     proof_kind: Literal["FUTURE_CLOSE_REBASE_REQUIRED"] = "FUTURE_CLOSE_REBASE_REQUIRED"
+    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW"] = "FALLBACK_PREVIOUS"
+    target_snapshot_id: str | None = None
     selection_spec_id: str
     strategy_group_id: str
     selection_epoch_id: str
@@ -975,7 +977,7 @@ class GenericRecoveryGrantProof(BaseModel):
     committed_at_ms: int = Field(gt=0)
     episode_rebase_required: Literal[True] = True
 
-    @field_validator("selection_spec_id", "strategy_group_id", "selection_epoch_id", "source_entry_vacuum_id",
+    @field_validator("selection_spec_id", "strategy_group_id", "selection_epoch_id", "source_entry_vacuum_id", "target_snapshot_id",
         "materialization_generation_id", "source_selection_authority_id", "failed_activation_authorization_id", "comparison_universe_id")
     @classmethod
     def _canonical_reference(cls, value: str | None) -> str | None:
@@ -1022,18 +1024,35 @@ class GenericRecoveryGrantProof(BaseModel):
         static = self.selection_mode == "static_baseline"
         if not 1<=len(members)<=(10 if static else spec.retain_rank) or tuple(sorted(set(members)))!=members or (
             selected_member_set_digest(members)!=binding.member_set_digest or (not static and not set(members).issubset(spec.candidate_ids))):
-            raise ValueError("recovery previous member coverage differs")
+            raise ValueError("recovery member coverage differs")
         for cursor in self.observation_cursors:
             LockedObservationCursor.model_validate(cursor.model_dump())
             if cursor.episode_domain_key!=build_episode_domain_key(event_spec_id=spec.event_spec_id,
                 exchange_instrument_id=cursor.exchange_instrument_id,position_side=spec.position_side) or (
                 cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>self.committed_at_ms):
                 raise ValueError("recovery cursor scope or time differs")
-        if static:
+        if self.authority_outcome == "ACTIVE_NEW":
+            fresh = self.membership_freshness
+            if static or self.target_snapshot_id is None or fresh is None or self.source_selection_authority_id is None or (
+                self.materialization_generation_id is None or self.failed_activation_authorization_id is not None):
+                raise ValueError("recovered activation requires exact Dynamic target and source Authority")
+            fresh = DynamicMembershipFreshness.model_validate(fresh.model_dump())
+            missed = (plan.period.scheduled_effective_at_ms-fresh.source_snapshot_effective_at_ms)//(spec.cadence_hours*HOUR_MS)
+            if self.target_snapshot_id!=fresh.source_snapshot_id or fresh.source_member_set_digest!=binding.member_set_digest or (
+                fresh.cadence_hours!=spec.cadence_hours or fresh.source_snapshot_effective_at_ms>self.committed_at_ms
+                or missed not in {0,1} or fresh.consecutive_missed_periods!=missed
+                or fresh.state is not (DynamicMembershipState.ACTIVE if missed==0 else DynamicMembershipState.GRACE)
+                or not fresh.allows_new_entry_at(self.first_eligible_close_time_ms)):
+                raise ValueError("recovered activation Snapshot freshness differs")
+        elif static:
+            if self.target_snapshot_id is not None:
+                raise ValueError("Static fallback cannot claim a new target Snapshot")
             if self.membership_freshness is not None or self.source_selection_authority_id is not None or (
                 self.failed_activation_authorization_id is None or self.materialization_generation_id is None):
                 raise ValueError("first Static fallback requires failed activation provenance, not Dynamic freshness")
         else:
+            if self.target_snapshot_id is not None:
+                raise ValueError("fallback cannot claim a new target Snapshot")
             fresh = self.membership_freshness
             if fresh is None or self.source_selection_authority_id is None or self.failed_activation_authorization_id is not None:
                 raise ValueError("Dynamic recovery requires existing source Authority and freshness")
@@ -1065,14 +1084,14 @@ class GenericRecoveryAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     selection_authority_id: str
     authority_sequence: int = Field(gt=0)
-    authority_outcome: Literal["FALLBACK_PREVIOUS"] = "FALLBACK_PREVIOUS"
+    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW"] = "FALLBACK_PREVIOUS"
     recovery_proof: GenericRecoveryGrantProof
 
     @classmethod
     def build(cls, *, proof: GenericRecoveryGrantProof, authority_sequence: int) -> GenericRecoveryAuthority:
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
         return cls(selection_authority_id=cls._identity(proof,authority_sequence),
-            authority_sequence=authority_sequence,recovery_proof=proof)
+            authority_sequence=authority_sequence,authority_outcome=proof.authority_outcome,recovery_proof=proof)
 
     @staticmethod
     def _identity(proof: GenericRecoveryGrantProof, sequence: int) -> str:
@@ -1081,7 +1100,7 @@ class GenericRecoveryAuthority(BaseModel):
     @model_validator(mode="after")
     def _validate_identity(self) -> GenericRecoveryAuthority:
         proof = GenericRecoveryGrantProof.model_validate(self.recovery_proof.model_dump())
-        if self.selection_authority_id!=self._identity(proof,self.authority_sequence):
+        if self.selection_authority_id!=self._identity(proof,self.authority_sequence) or self.authority_outcome!=proof.authority_outcome:
             raise ValueError("Recovery Authority identity differs from its frozen proof and sequence")
         return self
 
@@ -1131,6 +1150,8 @@ class GenericRecoveryAuthority(BaseModel):
 
     @property
     def selection_snapshot_id(self) -> str | None:
+        if self.recovery_proof.authority_outcome == "ACTIVE_NEW":
+            return self.recovery_proof.target_snapshot_id
         fresh = self.recovery_proof.membership_freshness
         return None if fresh is None else fresh.source_snapshot_id
 
