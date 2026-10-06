@@ -2232,6 +2232,32 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(data
         assert staged.disposition is MaterializationDisposition.GENERATION_STAGED
         assert no_normal_grant.disposition is MaterializationDisposition.BLOCKED
         assert no_normal_grant.reason_code == "GENERIC_RECOVERY_AUTHORITY_REQUIRED"
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=next_at+3)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                recovery_proof = await uow.instrument_selection.prepare_generic_recovered_activation_proof(
+                    handoff.materialization_generation_id)
+        assert recovery_proof.authority_outcome == "ACTIVE_NEW"
+        assert recovery_proof.target_snapshot_id == next_snapshot.selection_snapshot_id
+        assert recovery_proof.source_selection_authority_id == previous_authority.authority.selection_authority_id
+        assert recovery_proof.event_binding.universe_version_id == target_uid
+        assert recovery_proof.recovery_close_plan.period.scheduled_effective_at_ms == (
+            next_snapshot.effective_from_ms+HOUR)
+        assert recovery_proof.first_eligible_close_time_ms > recovery_proof.committed_at_ms
+        assert recovery_proof.membership_freshness is not None
+        assert recovery_proof.membership_freshness.membership_valid_until_ms == (
+            next_snapshot.effective_from_ms+2*HOUR)
+        async with database.connect() as conn:
+            before = await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))
+            await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' "
+                "WHERE strategy_group_id=:group"),{"group":group})
+            with (patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=next_at+3)),pytest.raises(SelectionJobConflict)):
+                await PostgresInstrumentSelectionRepository(conn).prepare_generic_recovered_activation_proof(
+                    handoff.materialization_generation_id)
+            await conn.rollback()
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == before
         async with PostgresKernelUnitOfWork(database) as uow:
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
