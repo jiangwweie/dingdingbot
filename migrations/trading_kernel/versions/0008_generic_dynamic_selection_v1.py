@@ -57,6 +57,7 @@ def upgrade() -> None:
     _generic_close_proof_function()
     _generic_normal_binding_guard()
     _generic_static_recovery_proof_function()
+    _generic_recovered_activation_proof_function()
     _generic_static_recovery_commit_guard()
     _grant_existing_owner_read_roles(bind)
 
@@ -304,6 +305,181 @@ def _generic_static_recovery_proof_function() -> None:
             'recovery_revision',revision,'reason',reason,'period',jsonb_build_object('feature_cutoff_at_ms',cutoff,'cadence_hours',cadence,'scheduled_effective_at_ms',effective,'period_expires_at_ms',expiry),
             'evaluated_at_ms',evaluated,'status','FUTURE_CLOSE_REBASE_REQUIRED','first_eligible_close_time_ms',first_close,'episode_rebase_required',true),
           'membership_freshness',freshness,'comparison_universe_id',b.comparison_universe_id,'comparison_transition_revision',b.comparison_transition_revision,
+          'observation_cursors',cursors,'committed_at_ms',committed,'episode_rebase_required',true);
+        RETURN coalesce(p=expected,false);
+      EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
+      END; $$
+    """))
+
+
+def _generic_recovered_activation_proof_function() -> None:
+    """Independently derive one staged target's future-close recovery proof."""
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_recovered_activation_proof_matches(p jsonb, checked_at bigint)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE;
+        v brc_strategy_entry_vacuums_current%ROWTYPE;
+        c brc_strategy_selection_control_current%ROWTYPE;
+        o brc_strategy_entry_controls_current%ROWTYPE;
+        s brc_instrument_selection_snapshots%ROWTYPE;
+        t brc_strategy_universe_versions%ROWTYPE;
+        oldg brc_strategy_universe_materialization_generations%ROWTYPE;
+        src brc_selection_session_authorities%ROWTYPE;
+        b brc_materialization_generation_event_baselines%ROWTYPE;
+        cb brc_comparison_binding_current%ROWTYPE;
+        old_event jsonb; failure jsonb; expected jsonb; cursors jsonb; freshness jsonb;
+        cadence integer; n integer; missed integer; comparison_revision bigint; revision bigint;
+        evaluated bigint; committed bigint; cutoff bigint; effective bigint; expiry bigint;
+        first_close bigint; cadence_ms bigint; future_cursor boolean;
+        target_digest text; comparison_id text; member_ids text; selected_ids text; comparison_ids text; reason text;
+      BEGIN
+        IF p IS NULL OR jsonb_typeof(p)<>'object' OR checked_at IS NULL
+          OR p->>'authority_outcome'<>'ACTIVE_NEW' OR p->>'selection_mode'<>'dynamic_selection' THEN RETURN false; END IF;
+        SELECT * INTO g FROM brc_strategy_universe_materialization_generations
+          WHERE materialization_generation_id=p->>'materialization_generation_id';
+        IF NOT FOUND OR g.selection_epoch_id='sor-v0' OR g.lifecycle_state<>'STAGED'
+          OR g.fenced_at_ms IS NULL OR g.rollback_baseline_id IS NOT NULL THEN RETURN false; END IF;
+        SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=g.selection_snapshot_id;
+        SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id=g.strategy_group_id;
+        SELECT * INTO o FROM brc_strategy_entry_controls_current WHERE strategy_group_id=g.strategy_group_id;
+        SELECT z.cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 z
+          JOIN brc_instrument_selection_specs spec USING(selection_spec_id)
+          WHERE z.selection_spec_id=g.selection_spec_id AND spec.status='active' AND spec.selection_kind='generic_dynamic_v1';
+        IF s.selection_snapshot_id IS NULL OR cadence IS NULL OR c.strategy_group_id IS NULL OR o.strategy_group_id IS NULL
+          OR c.selection_mode<>'dynamic_selection' OR c.pending_selection_mode IS NOT NULL
+          OR c.selection_spec_id<>g.selection_spec_id OR c.selection_epoch_id<>g.selection_epoch_id
+          OR c.control_version<>g.selection_control_version OR o.entry_state<>'enabled'
+          OR s.selection_epoch_id<>g.selection_epoch_id OR s.period_anchor_ms<>g.period_anchor_ms
+          OR s.selected_count<>g.desired_member_count OR p->>'target_snapshot_id' IS DISTINCT FROM s.selection_snapshot_id
+          THEN RETURN false; END IF;
+        SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
+        IF NOT FOUND OR v.source_generation_id<>g.materialization_generation_id OR v.state<>'RECONFIGURING'
+          OR v.strategy_group_id<>g.strategy_group_id OR v.selection_spec_id<>g.selection_spec_id
+          OR v.period_anchor_ms<>g.period_anchor_ms OR v.fenced_at_ms>=g.fenced_at_ms
+          OR v.drained_at_ms IS NULL OR v.resolved_at_ms IS NOT NULL THEN RETURN false; END IF;
+        SELECT payload INTO old_event FROM brc_strategy_entry_vacuum_events
+          WHERE entry_vacuum_id=v.entry_vacuum_id AND event_type='SUPERSEDED'
+          ORDER BY event_sequence DESC LIMIT 1;
+        IF old_event IS NULL OR old_event->>'replacement_generation_id' IS DISTINCT FROM g.materialization_generation_id
+          THEN RETURN false; END IF;
+        SELECT * INTO oldg FROM brc_strategy_universe_materialization_generations
+          WHERE materialization_generation_id=old_event->>'previous_generation_id';
+        IF NOT FOUND OR oldg.lifecycle_state<>'FAILED_CLOSED' OR oldg.fenced_at_ms<>v.fenced_at_ms
+          OR oldg.terminal_at_ms>g.created_at_ms OR oldg.selection_epoch_id<>g.selection_epoch_id THEN RETURN false; END IF;
+        SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
+          WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='FAILED_CLOSED'
+          ORDER BY event_sequence DESC LIMIT 1;
+        IF failure IS NULL OR failure->>'entry_vacuum_id' IS DISTINCT FROM v.entry_vacuum_id
+          OR failure->>'reason_code' IS NULL OR failure->>'reason_code' NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
+            'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
+        reason:=CASE WHEN failure->>'reason_code' IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED')
+          THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
+        SELECT * INTO b FROM brc_materialization_generation_event_baselines
+          WHERE materialization_generation_id=g.materialization_generation_id;
+        IF NOT FOUND OR (SELECT count(*) FROM brc_materialization_generation_event_baselines
+          WHERE materialization_generation_id=g.materialization_generation_id)<>1 OR b.grant_state<>'ACTIVE'
+          OR NOT EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines oldb
+            WHERE oldb.materialization_generation_id=oldg.materialization_generation_id
+              AND oldb.event_spec_id=b.event_spec_id AND oldb.position_side=b.position_side
+              AND oldb.universe_version_id=b.universe_version_id AND oldb.member_set_digest=b.member_set_digest
+              AND oldb.comparison_universe_id IS NOT DISTINCT FROM b.comparison_universe_id
+              AND oldb.comparison_transition_revision IS NOT DISTINCT FROM b.comparison_transition_revision)
+          THEN RETURN false; END IF;
+        SELECT a.* INTO src FROM brc_selection_authority_current current_a
+          JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_a.selection_authority_id
+          WHERE current_a.selection_spec_id=g.selection_spec_id;
+        IF NOT FOUND OR src.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+          OR src.selection_epoch_id<>g.selection_epoch_id OR src.selection_control_version<>c.control_version
+          OR src.owner_control_version<>o.control_version OR src.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
+          OR src.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision
+          OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings sb
+            WHERE sb.selection_authority_id=src.selection_authority_id AND sb.event_spec_id=b.event_spec_id
+              AND sb.position_side=b.position_side AND sb.universe_version_id=b.universe_version_id
+              AND sb.member_set_digest=b.member_set_digest AND sb.grant_state='ACTIVE') THEN RETURN false; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_strategy_universe_current u
+          JOIN brc_strategy_universe_versions x ON x.universe_version_id=u.universe_version_id
+          WHERE u.event_spec_id=b.event_spec_id AND u.universe_version_id=b.universe_version_id
+            AND u.lifecycle_state='active' AND x.lifecycle_state='active') THEN RETURN false; END IF;
+        SELECT x.* INTO t FROM brc_strategy_universe_versions x WHERE x.materialization_generation_id=g.materialization_generation_id;
+        IF NOT FOUND OR (SELECT count(*) FROM brc_strategy_universe_versions x
+          WHERE x.materialization_generation_id=g.materialization_generation_id)<>1
+          OR t.lifecycle_state<>'staged' OR t.event_spec_id<>b.event_spec_id OR t.strategy_group_id<>g.strategy_group_id
+          THEN RETURN false; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_runtime_scopes_current scope
+          JOIN brc_owner_policy_current policy USING(owner_policy_id)
+          WHERE scope.universe_version_id=t.universe_version_id AND policy.enabled AND policy.new_entry_submit_enabled)
+          OR EXISTS (SELECT 1 FROM brc_runtime_scopes_current scope
+            JOIN brc_owner_policy_current policy USING(owner_policy_id)
+            WHERE scope.universe_version_id=t.universe_version_id AND (NOT policy.enabled OR NOT policy.new_entry_submit_enabled))
+          THEN RETURN false; END IF;
+        SELECT count(*),string_agg(to_json(m.exchange_instrument_id)::text,',' ORDER BY m.exchange_instrument_id COLLATE "C")
+          INTO n,member_ids FROM brc_strategy_universe_members m WHERE m.universe_version_id=t.universe_version_id;
+        IF n<>s.selected_count OR n<1 OR n>16 THEN RETURN false; END IF;
+        target_digest:='sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' || member_ids || ']}','UTF8')),'hex');
+        SELECT string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id COLLATE "C")
+          INTO selected_ids FROM brc_instrument_selection_member_decisions
+          WHERE selection_snapshot_id=s.selection_snapshot_id AND selected;
+        IF selected_ids IS DISTINCT FROM member_ids THEN RETURN false; END IF;
+        comparison_id:=NULL; comparison_revision:=NULL;
+        IF g.strategy_group_id IN ('MPG-001','MI-001') THEN
+          SELECT * INTO cb FROM brc_comparison_binding_current WHERE event_spec_id=b.event_spec_id;
+          IF NOT FOUND OR cb.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
+            OR cb.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision THEN RETURN false; END IF;
+          SELECT string_agg(to_json(exchange_instrument_id)::text,',' ORDER BY exchange_instrument_id COLLATE "C")
+            INTO comparison_ids FROM brc_instrument_selection_spec_members WHERE selection_spec_id=g.selection_spec_id;
+          comparison_id:='comparison:' || encode(sha256(convert_to('{"exchange_instrument_ids":[' || comparison_ids || ']}','UTF8')),'hex');
+          comparison_revision:=cb.comparison_transition_revision+CASE WHEN cb.comparison_universe_id=comparison_id THEN 0 ELSE 1 END;
+        ELSIF b.comparison_universe_id IS NOT NULL THEN RETURN false; END IF;
+        evaluated:=(p->'recovery_close_plan'->>'evaluated_at_ms')::bigint;
+        committed:=(p->>'committed_at_ms')::bigint;
+        cadence_ms:=cadence*3600000::bigint;
+        IF evaluated IS NULL OR committed IS NULL OR evaluated<g.fenced_at_ms OR evaluated<o.updated_at_ms
+          OR evaluated<c.updated_at_ms OR committed<evaluated OR checked_at<committed OR committed>=g.fenced_at_ms+1800000
+          OR NOT (s.eligibility_not_before_ms<=committed AND committed<s.expires_at_ms) THEN RETURN false; END IF;
+        cutoff:=g.period_anchor_ms;
+        effective:=cutoff+3600000; expiry:=effective+cadence_ms;
+        first_close:=greatest(effective,(evaluated/3600000+1)*3600000);
+        IF first_close>=expiry THEN
+          cutoff:=cutoff+cadence_ms; effective:=cutoff+3600000; expiry:=effective+cadence_ms;
+          first_close:=greatest(effective,(evaluated/3600000+1)*3600000);
+        END IF;
+        missed:=(effective-s.eligibility_not_before_ms)/cadence_ms;
+        IF evaluated<cutoff OR checked_at>=first_close OR first_close>=expiry OR missed NOT IN (0,1)
+          OR first_close>=s.eligibility_not_before_ms+2*cadence_ms THEN RETURN false; END IF;
+        WITH members AS (SELECT exchange_instrument_id,
+          'episode-domain:' || encode(sha256(convert_to('{"event_spec_id":' || to_json(b.event_spec_id)::text ||
+            ',"exchange_instrument_id":' || to_json(exchange_instrument_id)::text || ',"position_side":' ||
+            to_json(b.position_side)::text || '}','UTF8')),'hex') AS domain_key
+          FROM brc_strategy_universe_members WHERE universe_version_id=t.universe_version_id)
+        SELECT jsonb_agg(jsonb_build_object('episode_domain_key',m.domain_key,'exchange_instrument_id',m.exchange_instrument_id,
+            'episode_version',coalesce(e.projection_version,0),'comparison_checkpoint_version',coalesce(e.comparison_checkpoint_version,0),
+            'authority_recovery_checkpoint_version',coalesce(e.authority_recovery_checkpoint_version,0),
+            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms))
+            ORDER BY m.exchange_instrument_id COLLATE "C"),
+          coalesce(max(e.authority_recovery_revision),0)+1,
+          coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)>evaluated),false)
+          INTO cursors,revision,future_cursor FROM members m LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
+        IF future_cursor THEN RETURN false; END IF;
+        freshness:=jsonb_build_object('source_snapshot_id',s.selection_snapshot_id,'source_member_set_digest',target_digest,
+          'source_snapshot_cutoff_at_ms',s.period_anchor_ms,'source_snapshot_effective_at_ms',s.eligibility_not_before_ms,
+          'cadence_hours',cadence,'membership_valid_until_ms',s.eligibility_not_before_ms+2*cadence_ms,
+          'consecutive_missed_periods',missed,'state',CASE WHEN missed=0 THEN 'ACTIVE' ELSE 'GRACE' END);
+        expected:=jsonb_build_object('proof_kind','FUTURE_CLOSE_REBASE_REQUIRED','authority_outcome','ACTIVE_NEW',
+          'target_snapshot_id',s.selection_snapshot_id,'selection_spec_id',g.selection_spec_id,'strategy_group_id',g.strategy_group_id,
+          'selection_epoch_id',g.selection_epoch_id,'selection_mode','dynamic_selection','source_entry_vacuum_id',v.entry_vacuum_id,
+          'vacuum_fenced_at_ms',v.fenced_at_ms,'materialization_generation_id',g.materialization_generation_id,
+          'source_selection_authority_id',src.selection_authority_id,'failed_activation_authorization_id',NULL,
+          'owner_control_version',o.control_version,'selection_control_version',c.control_version,
+          'event_binding',jsonb_build_object('event_spec_id',b.event_spec_id,'position_side',b.position_side,'grant_state','ACTIVE',
+            'universe_version_id',t.universe_version_id,'member_set_digest',target_digest),
+          'recovery_close_plan',jsonb_build_object('recovery_id','recovery:' || encode(sha256(convert_to(
+              '{"entry_vacuum_id":' || to_json(v.entry_vacuum_id)::text || ',"materialization_generation_id":' ||
+              to_json(g.materialization_generation_id)::text || '}','UTF8')),'hex'),
+            'recovery_revision',revision,'reason',reason,'period',jsonb_build_object('feature_cutoff_at_ms',cutoff,
+              'cadence_hours',cadence,'scheduled_effective_at_ms',effective,'period_expires_at_ms',expiry),
+            'evaluated_at_ms',evaluated,'status','FUTURE_CLOSE_REBASE_REQUIRED','first_eligible_close_time_ms',first_close,
+            'episode_rebase_required',true),
+          'membership_freshness',freshness,'comparison_universe_id',comparison_id,'comparison_transition_revision',comparison_revision,
           'observation_cursors',cursors,'committed_at_ms',committed,'episode_rebase_required',true);
         RETURN coalesce(p=expected,false);
       EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;

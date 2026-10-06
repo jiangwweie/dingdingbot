@@ -2247,10 +2247,39 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(data
         assert recovery_proof.membership_freshness is not None
         assert recovery_proof.membership_freshness.membership_valid_until_ms == (
             next_snapshot.effective_from_ms+2*HOUR)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=next_at+3)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.require_generic_recovered_activation_proof(recovery_proof) == next_at+3
+                with pytest.raises(SelectionJobConflict,match="proof changed"):
+                    await uow.instrument_selection.require_generic_recovered_activation_proof(
+                        recovery_proof.model_copy(update={"source_selection_authority_id":"authority:forged"}))
+        from src.trading_kernel.domain.selection_authority import (
+            GenericRecoveryAuthority,
+        )
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            generic_recovery_authority_storage_values,
+        )
+        proposed_new_authority = GenericRecoveryAuthority.build(proof=recovery_proof,authority_sequence=1)
+        async with database.connect() as conn:
+            proof_check = sa.text("SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)")
+            assert await conn.scalar(proof_check,{"proof":recovery_proof.model_dump_json(),"checked_at":next_at+3}) is True
+            assert await conn.scalar(proof_check,{"proof":recovery_proof.model_dump_json(),
+                "checked_at":recovery_proof.first_eligible_close_time_ms}) is False
+            for changes in ({"source_selection_authority_id":"authority:forged"},
+                {"target_snapshot_id":"selection:forged"},{"owner_control_version":999},
+                {"observation_cursors":()}):
+                forged = recovery_proof.model_copy(update=changes)
+                assert await conn.scalar(proof_check,{"proof":forged.model_dump_json(),"checked_at":next_at+3}) is False
+        with pytest.raises(sa.exc.DBAPIError,match="recovery proof differs|ck_brc_recovery_grant_shape"):
+            async with database.begin() as conn:
+                await conn.execute(sa.insert(selection_session_authorities).values(
+                    **generic_recovery_authority_storage_values(proposed_new_authority)))
         async with database.connect() as conn:
             before = await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))
             await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' "
                 "WHERE strategy_group_id=:group"),{"group":group})
+            assert await conn.scalar(proof_check,{"proof":recovery_proof.model_dump_json(),"checked_at":next_at+3}) is False
             with (patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=next_at+3)),pytest.raises(SelectionJobConflict)):
                 await PostgresInstrumentSelectionRepository(conn).prepare_generic_recovered_activation_proof(

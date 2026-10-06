@@ -3476,6 +3476,27 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Generic recovery PostgreSQL proof differs")
         return fresh.committed_at_ms
 
+    async def require_generic_recovered_activation_proof(self, proof: GenericRecoveryGrantProof) -> int:
+        """Revalidate every locked reference before any recovered target grant."""
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        if proof.authority_outcome!="ACTIVE_NEW" or proof.materialization_generation_id is None:
+            raise SelectionJobConflict("Recovered activation requires exact target proof")
+        checked_at = await self.read_authority_clock_ms()
+        require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=checked_at)
+        fresh = await self.prepare_generic_recovered_activation_proof(proof.materialization_generation_id)
+        expected = proof.model_dump(mode="json")
+        actual = fresh.model_dump(mode="json")
+        expected["committed_at_ms"] = actual["committed_at_ms"]
+        expected["recovery_close_plan"]["evaluated_at_ms"] = actual["recovery_close_plan"]["evaluated_at_ms"]
+        if expected!=actual:
+            raise SelectionJobConflict("Recovered activation proof changed")
+        matches = await self._connection.scalar(sa.text(
+            "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof":proof.model_dump_json(),"checked_at":fresh.committed_at_ms})
+        if matches is not True:
+            raise SelectionJobConflict("Recovered activation PostgreSQL proof changed")
+        return fresh.committed_at_ms
+
     async def prepare_generic_recovered_activation_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof:
         """Freeze a newer staged target's future-close recovery inputs without writing."""
         from src.trading_kernel.infrastructure.pg_signal_repository import (
