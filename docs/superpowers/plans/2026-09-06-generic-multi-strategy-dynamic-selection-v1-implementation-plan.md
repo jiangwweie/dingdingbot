@@ -387,7 +387,11 @@ Dynamic post-fence fallback增量（接续`58775726`）：本地Docker PostgreSQ
 
 四策略次期失败差分补充：CPM/BRF2在4h周期内经原名单freshness证明可恢复；MPG/MI在1h周期的30min materialization timeout后，无`< expiry`的未来合法close，顺延到下一period又超过一次miss预算，正式仓储拒绝恢复，Coordinator保持`BLOCKED`与未解决Vacuum，旧Authority虽保留历史指针却不取得新ENTRY权。四组真实Docker PG用例4 passed。这是已冻结future-close-only与绝对freshness的必然fail-closed结果，不通过延长deadline或重放过去close使hourly策略假恢复；后续新Snapshot/period的正式恢复链仍需单独认证。
 
-后续待闭合：当前Generic Snapshot Coordinator遇到prior open Vacuum明确返回`GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION`，因此上述hourly fail-closed不能被误称为已具备下一期自动接续。GS-08还需RED证明新有效Snapshot正式supersede已失败Generation/旧Vacuum、保留原fence/drain及missed-close ledger、重新建立本期Authority且不重用过期名单；在此之前不可宣布GS-08完成或部署准备。
+此前待闭合项：原Generic Snapshot Coordinator遇到prior open Vacuum会返回`GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION`。下段增量已关闭“已失败Generation之后的新非空Snapshot无法接管旧Vacuum”这一局部卡点；其余未完成的Desired/Staged supersession、missed-close ledger、恢复型positive Authority及Episode rebase仍保留为GS-08验收项，不可宣布部署准备。
+
+后续已实施的局部修复：新effective非空Snapshot可在同一PG事务接管先前`FAILED_CLOSED` Generation所留的已drain Vacuum；旧Generation仍终态，原Vacuum fence/drain时间不变，新Generation以本次接管时间计自己的固定1800秒期限，旧回调不再匹配Vacuum。四策略本地测试证明目标可进入warming；MPG/MI还能staged，但跨gap明确返回`GENERIC_RECOVERY_AUTHORITY_REQUIRED`，不能降级为普通current-close grant，原Authority指针仍无新交易权。Generic仓储172 passed，迁移/SOR materialization 98 passed，既有Full-chain51 passed，Unit/Architecture1262 passed，全源码Mypy158 files及相关Ruff/diff通过；这些组合不构成exact R4。**此切片未完成跨period future-close recovery grant、恢复型Episode rebase及missed-close ledger，仍不能解除Vacuum或宣称GS-08 Done。**冻结设计§6.2及本计划的05:30→下一period预规划提供后续恢复时钟输入；不新增提前Warming或追认过去close的业务例外。
+
+重复失败后的有效空集补强：新Generation再次超时仍保留原Vacuum；下一个合法`VALID_EMPTY` Snapshot可以在同一Vacuum上终止失败目标、完成既有drain并提交空Authority，不fallback previous，也不授予过期旧名单交易权。MPG/MI真实PG定向两组通过。该非交易接续不替代非空新目标所需的跨period恢复型positive grant。
 
 NORMAL current-close行动时间修复（基于`646aedd8`）：正式Owner→Generic Runner→Snapshot→Activation测试在`close+30s`获得precommitted正常Authority后，`observe_strategy_scope`成功产生trigger但原Signal ingestion错误传入原close作为行动时间，导致FinalGate误判Authority尚未生效。RED先证明`selection_authority_invalid`且零Signal，随后统一以Observation的`attempted_at_ms`传给正式Signal ingestion；Signal自身trigger close仍冻结原closed bar，不追认gap/Recovery的过去close。CPM正常路径转绿，随后Generic/Observation/SOR集成切片176 passed、完整既有Full-chain51 passed、Unit/Architecture1257 passed、生产源码Mypy158 files及相关Ruff/diff通过；这仍不代替GS-08双时钟整卡验收或R4。
 

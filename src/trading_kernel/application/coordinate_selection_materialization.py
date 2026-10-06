@@ -1161,7 +1161,9 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     owner_control_version=owner.control_version,now_ms=now_ms)
             prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                 strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
-            if prior_vacuum is not None:
+            if prior_vacuum is not None and (prior_vacuum.source_generation_id is None
+                or prior_vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
+                or prior_vacuum.drained_at_ms is None or prior_vacuum.period_anchor_ms>=snapshot.feature_cutoff_at_ms):
                 return _blocked("GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION")
             spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
             current = await uow.strategy_universes.get_current(spec.event_spec_id)
@@ -1177,6 +1179,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
             if generic_input_is_unchanged(snapshot,current_members=members.exchange_instrument_ids,comparison=comparison):
+                if prior_vacuum is not None:
+                    return _blocked("GENERIC_GAP_NO_CHANGE_REBASE_REQUIRED")
                 first_activation = control.selection_mode is SelectionMode.STATIC_BASELINE
                 prior = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id,for_update=True)
                 now = await uow.instrument_selection.read_authority_clock_ms()
@@ -1215,6 +1219,12 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     member_set_digest=selected_member_set_digest(members.exchange_instrument_ids),
                     comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
                     comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
+            if prior_vacuum is not None:
+                await uow.instrument_selection.retarget_failed_generic_vacuum_with_generation(generation,
+                    entry_vacuum_id=prior_vacuum.entry_vacuum_id)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_MATERIALIZING,
+                    selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id,
+                    entry_vacuum_id=prior_vacuum.entry_vacuum_id)
             await uow.instrument_selection.add_generic_pending_materialization_generation(generation)
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
                 selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id)
@@ -1452,6 +1462,14 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
                     reason_code=staged.reason_code,entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
             if generation.lifecycle_state is MaterializationGenerationState.STAGED:
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
+                if vacuum is None or vacuum.source_generation_id!=generation.materialization_generation_id:
+                    return _blocked("GENERIC_STAGED_VACUUM_CHANGED")
+                if generation.fenced_at_ms is None or vacuum.fenced_at_ms!=generation.fenced_at_ms:
+                    # A retargeted Vacuum is a real authority gap. It can be
+                    # certified/staged, but never receives a normal current-close grant.
+                    return _blocked("GENERIC_RECOVERY_AUTHORITY_REQUIRED")
                 control = await uow.instrument_selection.get_selection_control(generation.strategy_group_id,for_update=True)
                 first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
                     control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION

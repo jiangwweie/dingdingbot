@@ -1568,6 +1568,10 @@ class InstrumentSelectionRepository(Protocol):
     async def add_generic_pending_materialization_generation(self,
         generation: GenericMaterializationGeneration) -> GenericMaterializationGeneration: ...
 
+    async def retarget_failed_generic_vacuum_with_generation(self,
+        generation: GenericMaterializationGeneration, *, entry_vacuum_id: str,
+    ) -> GenericMaterializationGeneration: ...
+
     async def claim_generic_materialization_generation(self, materialization_generation_id: str, *,
         worker_id: str, now_ms: int, lease_duration_ms: int) -> GenericMaterializationLeaseClaim: ...
 

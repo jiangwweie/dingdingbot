@@ -210,7 +210,7 @@ def _generic_static_recovery_proof_function() -> None:
         SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
         IF NOT FOUND OR v.source_generation_id IS DISTINCT FROM g.materialization_generation_id
           OR v.strategy_group_id<>g.strategy_group_id OR v.selection_spec_id<>g.selection_spec_id
-          OR v.state<>'RECONFIGURING' OR v.fenced_at_ms<>g.fenced_at_ms
+          OR v.state<>'RECONFIGURING' OR v.fenced_at_ms>g.fenced_at_ms
           OR v.drained_at_ms IS NULL OR v.resolved_at_ms IS NOT NULL THEN RETURN false; END IF;
         SELECT payload INTO failure FROM brc_strategy_entry_vacuum_events
           WHERE entry_vacuum_id=v.entry_vacuum_id AND event_type='RECOVERY_REQUIRED'
