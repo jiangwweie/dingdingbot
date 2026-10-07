@@ -65,6 +65,7 @@ def upgrade() -> None:
     _generic_static_recovery_commit_guard()
     _generic_recovered_activation_commit_guard()
     _generic_gap_continuity_commit_guard()
+    _generic_gap_empty_resolution_guard()
     _grant_existing_owner_read_roles(bind)
 
 
@@ -116,6 +117,35 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
+        IF NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK') AND EXISTS (
+          SELECT 1 FROM brc_strategy_entry_vacuum_events e
+          WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_type='OPEN'
+            AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
+        ) THEN RAISE EXCEPTION 'Gap Vacuum cannot become ordinary active/fallback'; END IF;
+        IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL
+          AND OLD.state='RECOVERY_PENDING' AND NEW.state='DRAINING_ENTRY'
+          AND NEW.source_generation_id IS NULL AND NEW.first_blocker='NO_SELECTION_READY_MEMBERS'
+          AND NEW.period_anchor_ms>OLD.period_anchor_ms
+          AND NEW.fenced_at_ms=OLD.fenced_at_ms AND NEW.drained_at_ms=OLD.drained_at_ms
+          AND NEW.resolved_at_ms IS NULL AND NEW.projection_version=OLD.projection_version+1
+          AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
+            JOIN brc_instrument_selection_snapshots s
+              ON s.selection_snapshot_id=e.payload->>'selection_snapshot_id'
+            JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=OLD.strategy_group_id
+            JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=OLD.strategy_group_id
+            WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_sequence=NEW.projection_version
+              AND e.event_type='VALID_EMPTY_INTENT' AND e.payload->>'intended_authority_outcome'='VALID_EMPTY'
+              AND e.payload->>'supersedes_gap'='true'
+              AND s.selection_spec_id=OLD.selection_spec_id AND s.period_anchor_ms=NEW.period_anchor_ms
+              AND s.selection_epoch_id=c.selection_epoch_id AND s.selected_count=0
+              AND s.eligibility_not_before_ms<=e.occurred_at_ms AND e.occurred_at_ms<s.expires_at_ms
+              AND s.created_at_ms<=e.occurred_at_ms AND c.selection_mode='dynamic_selection'
+              AND o.entry_state='enabled')
+          AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
+            JOIN brc_selection_authority_current current_auth ON current_auth.selection_spec_id=OLD.selection_spec_id
+            WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_type='OPEN'
+              AND e.payload->>'source_selection_authority_id'=current_auth.selection_authority_id)
+          THEN RETURN NEW; END IF;
         IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL AND (
           NEW.first_blocker IS DISTINCT FROM OLD.first_blocker OR
           NEW.source_generation_id IS DISTINCT FROM OLD.source_generation_id OR
@@ -349,6 +379,38 @@ def _generic_gap_continuity_commit_guard() -> None:
         op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_generic_gap_continuity "
             f"AFTER INSERT ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
             "EXECUTE FUNCTION brc_validate_generic_gap_continuity_commit()"))
+
+
+def _generic_gap_empty_resolution_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_generic_gap_empty_resolution() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE intent jsonb;
+      BEGIN
+        IF NEW.state<>'VALID_EMPTY' OR NOT EXISTS (
+          SELECT 1 FROM brc_strategy_entry_vacuum_events e
+          WHERE e.entry_vacuum_id=NEW.entry_vacuum_id AND e.event_type='OPEN'
+            AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY')
+        THEN RETURN NULL; END IF;
+        SELECT e.payload INTO intent FROM brc_strategy_entry_vacuum_events e
+          WHERE e.entry_vacuum_id=NEW.entry_vacuum_id AND e.event_type='VALID_EMPTY_INTENT'
+          ORDER BY e.event_sequence DESC LIMIT 1;
+        IF intent IS NULL OR intent->>'intended_authority_outcome'<>'VALID_EMPTY'
+          OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_current current_auth
+            JOIN brc_selection_session_authorities a
+              ON a.selection_authority_id=current_auth.selection_authority_id
+            WHERE current_auth.selection_spec_id=NEW.selection_spec_id
+              AND a.authority_outcome='VALID_EMPTY' AND a.selection_mode='dynamic_selection'
+              AND a.selection_snapshot_id=intent->>'selection_snapshot_id'
+              AND a.period_anchor_ms=NEW.period_anchor_ms
+              AND a.created_at_ms=NEW.resolved_at_ms)
+        THEN RAISE EXCEPTION 'Gap VALID_EMPTY requires atomic negative Authority'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE CONSTRAINT TRIGGER trg_brc_generic_gap_empty_resolution "
+        "AFTER UPDATE ON brc_strategy_entry_vacuums_current "
+        "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+        "EXECUTE FUNCTION brc_validate_generic_gap_empty_resolution()"))
 
 
 def _generic_static_recovery_commit_guard() -> None:

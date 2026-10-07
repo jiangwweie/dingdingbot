@@ -1429,7 +1429,8 @@ async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericS
                 strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,now_ms=now_ms))
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                 entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
-        if vacuum.state not in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,StrategyEntryVacuumState.RECONFIGURING}:
+        if vacuum.state not in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,
+            StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.RECOVERY_PENDING}:
             return _blocked("GENERIC_EMPTY_REQUIRES_SUPERSESSION")
         vacuum = await uow.instrument_selection.retarget_generic_empty_vacuum(vacuum,selection_snapshot_id=snapshot.selection_snapshot_id,
             expected_owner_version=owner_control_version,expected_control_version=control.control_version)
