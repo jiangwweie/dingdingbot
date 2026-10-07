@@ -728,6 +728,8 @@ MPG/MI小时策略自然终态增量（基于`d28fe872`）：在上述三期正�
 
 自然Selection→terminal增量（基于`646aedd8`）：四策略首次Owner staging的exact epoch由正式Selection Runner读取24 Candidate并提交immutable Snapshot，再由现有Coordinator完成Generation、Vacuum、Warming和ACTIVE_NEW，测试不直接写Snapshot；旧Static Universe与认证仍是明确测试前置。CPM LONG及BRF2 SHORT进一步在同一真实签发链上产生原Detector Signal、CapacityClaim、AdmissionDecision、唯一prepared ENTRY，经独立UoW确认durable CLAIMED后由recording venue接受，随后正式Reconciliation/Initial Stop/TP1/Runner/外部flat/Settlement/Review到TERMINAL，冻结Selection Authority、Reservation、Netting Domain和Incident断言一致。模拟flat、Post-fill Stress与Review经济值是fixture事实，不是真实交易收益。相关集成/部分Full-chain切片176 passed、既有完整Full-chain51 passed、Unit/Architecture1257 passed；计数有重叠，不相加为R4。MPG/MI完成Owner→Runner→Active及Candidate24 Warming，但rebase后跨hourly period的自然Signal/Ticket、四边界攻击矩阵与Live Evidence projector仍未完成；GS-09不能标Done，生产未修改。
 
+2026-10-08 Dynamic Ticket immutable来源追踪补强：四策略自然Selection→terminal测试以真实Ticket的`selection_authority_id`逐级回查Authority、epoch、Snapshot和对应member的selected/qualified、Decimal feature、stable rank、input/qualification digest；Signal的trigger close与Fact digest和Ticket冻结值一致。Ticket冻结原始Initial Stop及Exit Binding ID/hash/version；终态Trade Event包含EntryFilled、TP1、Runner保护、BudgetSettled与ReviewRecorded，Aggregate Review指针指向本次Review。CPM/BRF2与MPG/MI共4条自然场景定向通过，小时完整fault参数矩阵加既有Full-chain共67 passed，Unit/Architecture1276 passed、Ruff/Mypy159 files/diff通过。此证据证明PostgreSQL lineage可追踪，不将本地模拟fill视为真实逐笔交易所fill/手续费；独立离线MAE/MFE/realized R projector仍属GS-13交付，不由本测试冒充，GS-09整卡与R4仍未完成，生产未修改。
+
 **目标**：所有新入口真实使用GS-08权限，维持既有保护、退出和unknown恢复。
 
 **允许**：Signal admission、CapacityClaim/issuance/submit authority、durable cancel/drain/lifecycle必要接线、integration/full-chain tests。**禁止**：更改资金和退出参数、添加ENTRY generation、直接exchange调用、随名单更换平仓。

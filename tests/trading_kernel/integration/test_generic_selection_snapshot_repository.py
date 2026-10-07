@@ -1896,7 +1896,29 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
         assert ticket.selection_authority_id == current.authority.selection_authority_id
         assert claim.selection_authority_id == ticket.selection_authority_id
         assert decision.selection_authority_id == ticket.selection_authority_id
+        source_snapshot = await uow.instrument_selection.get_generic_snapshot(
+            current.authority.selection_snapshot_id)
+        chosen = next(row for row in source_snapshot.members
+            if row.exchange_instrument_id == member)
+        assert chosen.selected and chosen.qualified and chosen.stable_rank > 0
+        assert chosen.input_window_digest.startswith("sha256:")
+        assert chosen.qualification_semantic_digest.startswith("sha256:")
+        assert ticket.exit_binding_id is not None
+        assert ticket.exit_binding_semantic_hash is not None
+        assert ticket.exit_binding_authority_version is not None
+        assert ticket.initial_stop_price > 0
     async with database.connect() as conn:
+        frozen_path = (await conn.execute(sa.text("SELECT a.selection_spec_id,a.selection_epoch_id,"
+            "a.selection_snapshot_id,s.occurred_at_ms,s.fact_digest,t.fact_digest AS ticket_fact_digest "
+            "FROM brc_trade_tickets t "
+            "JOIN brc_selection_session_authorities a ON a.selection_authority_id=t.selection_authority_id "
+            "JOIN brc_signal_events s ON s.signal_event_id=t.signal_event_id "
+            "WHERE t.ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().one()
+        assert frozen_path["selection_spec_id"] == source_snapshot.selection_spec_id
+        assert frozen_path["selection_epoch_id"] == source_snapshot.selection_epoch_id
+        assert frozen_path["selection_snapshot_id"] == source_snapshot.selection_snapshot_id
+        assert frozen_path["occurred_at_ms"] == close
+        assert frozen_path["fact_digest"] == frozen_path["ticket_fact_digest"]
         commands = (await conn.execute(sa.text(
             "SELECT command_kind,status FROM brc_exchange_commands WHERE ticket_id=:ticket"
         ), {"ticket":issued.ticket_id})).mappings().all()
@@ -2116,6 +2138,17 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
     assert reservation is not None and reservation.status == "released"
     assert incident is None and not active_domain
     assert len(commands) == len(venue.calls)
+    async with database.connect() as conn:
+        lineage = set((await conn.execute(sa.text("SELECT event_type FROM brc_trade_events "
+            "WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).scalars())
+        assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
+            "BudgetSettled","ReviewRecorded"} <= lineage
+        final_pointer = await conn.scalar(sa.text("SELECT review_id FROM brc_trade_aggregates "
+            "WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})
+        frozen_binding = (await conn.execute(sa.text("SELECT exit_binding_id,exit_binding_semantic_hash "
+            "FROM brc_trade_tickets WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).one()
+    assert final_pointer == f"review:natural-{group}"
+    assert frozen_binding == (ticket.exit_binding_id,ticket.exit_binding_semantic_hash)
 
 
 @pytest.mark.asyncio
@@ -4858,6 +4891,36 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert reservation is not None and reservation.status == "released"
     assert incident is None and not active_domain
     assert len(commands) == len(venue.calls)
+    async with database.connect() as conn:
+        path = (await conn.execute(sa.text("SELECT a.selection_spec_id,a.selection_epoch_id,"
+            "a.selection_snapshot_id,s.occurred_at_ms,s.fact_digest,t.fact_digest AS ticket_fact_digest,"
+            "t.exit_binding_id,t.exit_binding_semantic_hash,t.exit_binding_authority_version,"
+            "t.initial_stop_price,t.exchange_instrument_id,agg.review_id "
+            "FROM brc_trade_tickets t "
+            "JOIN brc_selection_session_authorities a ON a.selection_authority_id=t.selection_authority_id "
+            "JOIN brc_signal_events s ON s.signal_event_id=t.signal_event_id "
+            "JOIN brc_trade_aggregates agg ON agg.ticket_id=t.ticket_id "
+            "WHERE t.ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().one()
+        member = (await conn.execute(sa.text("SELECT selected,stable_rank,input_window_digest,"
+            "qualification_semantic_digest,feature_value FROM brc_instrument_selection_member_decisions "
+            "WHERE selection_snapshot_id=:snapshot AND exchange_instrument_id=:member"),
+            {"snapshot":path["selection_snapshot_id"],"member":path["exchange_instrument_id"]})).mappings().one()
+        event_types = set((await conn.execute(sa.text("SELECT event_type FROM brc_trade_events "
+            "WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).scalars())
+    assert path["selection_spec_id"] == inputs(group).spec.selection_spec_id
+    assert path["selection_epoch_id"] is not None
+    assert path["occurred_at_ms"] == closed_at_ms
+    assert path["fact_digest"] == path["ticket_fact_digest"]
+    assert path["exit_binding_id"] is not None
+    assert path["exit_binding_semantic_hash"] is not None
+    assert path["exit_binding_authority_version"] is not None
+    assert path["initial_stop_price"] == ticket.initial_stop_price
+    assert path["review_id"] == f"review:hourly-{group}"
+    assert member["selected"] and member["stable_rank"] > 0 and member["feature_value"] is not None
+    assert member["input_window_digest"].startswith("sha256:")
+    assert member["qualification_semantic_digest"].startswith("sha256:")
+    assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
+        "BudgetSettled","ReviewRecorded"} <= event_types
 
 
 @pytest.mark.asyncio
