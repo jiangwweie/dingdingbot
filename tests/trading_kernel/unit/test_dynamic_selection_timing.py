@@ -16,8 +16,18 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     build_dynamic_membership_freshness,
     build_generic_selection_period,
     confirm_dynamic_membership_snapshot,
+    missed_closes_at_gap_fence,
     record_dynamic_selection_miss,
 )
+
+
+def test_gap_ledger_counts_only_due_closed_bars_without_inventing_signals() -> None:
+    period = build_generic_selection_period(feature_cutoff_at_ms=104*3600000,cadence_hours=4)
+    assert missed_closes_at_gap_fence(period=period,fenced_at_ms=106*3600000+1) == (
+        105*3600000,106*3600000)
+    assert missed_closes_at_gap_fence(period=period,fenced_at_ms=105*3600000+1) == (105*3600000,)
+    with pytest.raises(ValueError,match="period"):
+        missed_closes_at_gap_fence(period=period,fenced_at_ms=period.period_expires_at_ms)
 from src.trading_kernel.domain.generic_selection_jobs import (
     GenericSelectionJobClaim,
     selection_job_identity,

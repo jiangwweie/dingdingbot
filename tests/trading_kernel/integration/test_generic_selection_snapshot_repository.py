@@ -2351,6 +2351,27 @@ async def test_generic_late_continuity_needs_gap_recovery_not_current_close(
     assert vacuum.fenced_at_ms == at and vacuum.drained_at_ms is not None
     assert vacuum.blocks_new_entry
     async with database.connect() as conn:
+        gap_open = await conn.scalar(sa.text("SELECT payload FROM brc_strategy_entry_vacuum_events "
+            "WHERE entry_vacuum_id=:id AND event_type='OPEN'"),{"id":vacuum.entry_vacuum_id})
+    assert gap_open["missed_close_time_ms"] == [anchor+HOUR,late_close]
+    assert gap_open["missed_close_count"] == 2
+    assert gap_open["missed_close_reason"] == "AUTHORITY_GAP"
+    async with database.connect() as conn:
+        forged_ledger = {**gap_open,"missed_close_count":1}
+        assert await conn.scalar(sa.text("SELECT brc_generic_gap_open_ledger_matches("
+            ":id,CAST(:payload AS jsonb),:at)"),
+            {"id":vacuum.entry_vacuum_id,"payload":json.dumps(forged_ledger),"at":at}) is False
+        assert await conn.scalar(sa.text("SELECT brc_generic_gap_open_ledger_matches("
+            ":id,CAST(:payload AS jsonb),:at)"),
+            {"id":vacuum.entry_vacuum_id,"payload":json.dumps(gap_open),"at":at}) is True
+    with pytest.raises(sa.exc.DBAPIError):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_strategy_entry_vacuum_events "
+                "(entry_vacuum_event_id,entry_vacuum_id,event_sequence,event_type,payload,occurred_at_ms) "
+                "VALUES (:eid,:id,99,'OPEN',CAST(:payload AS jsonb),:at)"),
+                {"eid":"vacuum-event:forged-gap-ledger","id":vacuum.entry_vacuum_id,
+                    "payload":json.dumps(forged_ledger),"at":at})
+    async with database.connect() as conn:
         scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
             "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
     async with PostgresKernelUnitOfWork(database) as uow:

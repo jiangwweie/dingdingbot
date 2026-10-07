@@ -33,6 +33,7 @@ def upgrade() -> None:
     proofs = certify_0007_static_comparison_sources_sync(bind)
     _rename_period_storage()
     _generic_gap_vacuum_states()
+    _generic_gap_open_ledger_guard()
     _comparison_tables()
     _episode_provenance()
     _bind_static_comparison(bind)
@@ -197,6 +198,51 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("CREATE TRIGGER trg_brc_generic_gap_vacuum_transition "
         "BEFORE UPDATE ON brc_strategy_entry_vacuums_current FOR EACH ROW "
         "EXECUTE FUNCTION brc_guard_generic_gap_vacuum_transition()"))
+
+
+def _generic_gap_open_ledger_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_gap_open_ledger_matches(vacuum_id text, payload jsonb, occurred bigint)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE v brc_strategy_entry_vacuums_current%ROWTYPE;
+        cadence integer; first_close bigint; last_close bigint; expiry bigint;
+        expected jsonb; n integer;
+      BEGIN
+        SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=vacuum_id;
+        IF NOT FOUND OR v.source_generation_id IS NOT NULL OR v.first_blocker<>'AUTHORITY_GAP'
+          OR occurred IS DISTINCT FROM v.fenced_at_ms
+          OR payload->>'intended_outcome'<>'PRE_FENCE_CONTINUITY'
+          OR payload->>'missed_close_reason'<>'AUTHORITY_GAP'
+          OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_current current_auth
+            WHERE current_auth.selection_spec_id=v.selection_spec_id
+              AND current_auth.selection_authority_id=payload->>'source_selection_authority_id')
+          THEN RETURN false; END IF;
+        SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1
+          WHERE selection_spec_id=v.selection_spec_id;
+        IF cadence IS NULL OR v.period_anchor_ms%(cadence*3600000::bigint)<>0 THEN RETURN false; END IF;
+        first_close:=v.period_anchor_ms+3600000;
+        expiry:=first_close+cadence*3600000::bigint;
+        last_close:=least((v.fenced_at_ms/3600000)*3600000,expiry-3600000);
+        SELECT jsonb_agg(t ORDER BY t),count(*) INTO expected,n
+          FROM generate_series(first_close,last_close,3600000::bigint) AS t;
+        RETURN coalesce(n>1 AND (payload->>'missed_close_count')::integer=n
+          AND payload->'missed_close_time_ms'=expected
+          AND (payload->>'period_expires_at_ms')::bigint=expiry,false);
+      EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
+      END; $$
+    """))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_guard_generic_gap_open_ledger() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.event_type='OPEN' AND NEW.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
+          AND NOT brc_generic_gap_open_ledger_matches(NEW.entry_vacuum_id,NEW.payload,NEW.occurred_at_ms)
+        THEN RAISE EXCEPTION 'Generic gap OPEN requires exact missed-close ledger'; END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_brc_generic_gap_open_ledger "
+        "BEFORE INSERT ON brc_strategy_entry_vacuum_events FOR EACH ROW "
+        "EXECUTE FUNCTION brc_guard_generic_gap_open_ledger()"))
 
 
 def _generic_gap_continuity_proof_function() -> None:

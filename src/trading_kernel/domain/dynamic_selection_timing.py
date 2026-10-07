@@ -41,6 +41,17 @@ class GenericSelectionPeriod(BaseModel):
         return self
 
 
+def missed_closes_at_gap_fence(*, period: GenericSelectionPeriod,
+    fenced_at_ms: int) -> tuple[int, ...]:
+    """Exact elapsed close boundaries, never inferred Detector or P&L outcomes."""
+    period = GenericSelectionPeriod.model_validate(period.model_dump())
+    if not period.scheduled_effective_at_ms <= fenced_at_ms < period.period_expires_at_ms:
+        raise ValueError("gap fence is outside its Selection period")
+    latest = fenced_at_ms//_HOUR_MS*_HOUR_MS
+    return tuple(range(period.scheduled_effective_at_ms,
+        min(latest,period.period_expires_at_ms-_HOUR_MS)+1,_HOUR_MS))
+
+
 HourlyRecoveryReason = Literal[
     "AUTHORITY_GAP", "MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT",
     "FAILED_RECOVERY", "STALE_SOURCE", "VACUUM_INTERRUPTION",
