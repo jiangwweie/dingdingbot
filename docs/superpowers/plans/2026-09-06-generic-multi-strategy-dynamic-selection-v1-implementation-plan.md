@@ -297,6 +297,8 @@ Owner角色及非交易Authority保全增量（基于`84484ffb`）：0008 migrat
 
 Owner epoch与Spec资格增量（基于`0c89884c`）：四策略新增正式`stage_generic_dynamic_selection_mode`，一次TOTP step-up经Owner Authorization锁定Spec、下一合法decision period及由策略/Spec/idempotency确定的epoch；Control CAS同事务写pending，Selector只能以该exact epoch在due后claim Job。重复请求在pending或同epoch ACTIVE后幂等，不同payload冲突；Static安装自身仍零Job。0008 Control trigger拒绝无pending Owner证明直接Static→Dynamic、伪造epoch/授权范围及Dynamic中偷换epoch；Generic first activation NO_CHANGE/ACTIVE_NEW/VALID_EMPTY、Static recovery均核对新Owner scope。先前直接SQL设置epoch的测试夹具已改为带授权的合法状态转换，而不是放松触发器。另以BRF2 `SPEC_CERT=FAIL`检验仅其他三Spec可安装，BRF2 SelectionSpec/Control保持不存在，其既有Static交易Control不变。当前受影响Docker PG组合246 passed、Unit/Architecture1257 passed、生产源码Mypy158 files及相关Ruff/diff通过；本地应用/PG边界不等于GS-11 Owner API/Console，也不构成GS-04整卡或完整R4，生产未修改。
 
+2026-10-08 Event binding deferred攻击补强：四个Generic策略各先经正式Repository提交`VALID_EMPTY` Authority及唯一EMPTY Event binding，再用直接SQL试图为同一Authority增加第二条SOR Event binding。PostgreSQL的`brc_validate_authority_event_bindings_v1`在攻击事务提交时拒绝`exact homogeneous Spec Event binding shape`，回滚后原绑定数仍为1、current仍为合法Empty。Generic migration加四策略专项25 passed、Ruff/diff通过。该测试明确验证父Authority和Spec Event cardinality由数据库执行，不仅是Python decoder；仍不代表所有并发/非法shape或GS-04整卡已认证，生产未修改。
+
 **目标**：在原authority表上落地已验证domain，保全source逻辑身份。
 
 **允许**：唯一forward migration（起草前核对head）、PG metadata/repository结构、exact source preservation/revision verifier及integration tests。**禁止**：migration内启动Selector、写Job/Snapshot/Generation/Vacuum/Authority parent、运行Owner activation、Tokyo migration。

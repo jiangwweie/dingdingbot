@@ -701,6 +701,16 @@ async def test_generic_empty_authority_persists_without_positive_grant(database:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_current")) == 1
         assert await conn.scalar(sa.text("SELECT state FROM brc_strategy_entry_vacuums_current")) == "VALID_EMPTY"
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+    with pytest.raises(sa.exc.DBAPIError,match="exact homogeneous Spec Event binding shape"):
+        async with database.begin() as conn:
+            await conn.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,
+                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",position_side="long",
+                grant_state="EMPTY",universe_version_id=None,
+                member_set_digest=authority.event_binding.member_set_digest))
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_authority_event_bindings "
+            "WHERE selection_authority_id=:id"),{"id":authority.selection_authority_id}) == 1
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id,for_update=True)
         assert current is not None and current.authority == authority and current.projection_version == 1
