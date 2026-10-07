@@ -19,6 +19,7 @@ class StrategyEntryVacuumState(StrEnum):
     OPEN = "OPEN"
     DRAINING_ENTRY = "DRAINING_ENTRY"
     RECONFIGURING = "RECONFIGURING"
+    RECOVERY_PENDING = "RECOVERY_PENDING"
     RESOLVED_ACTIVE = "RESOLVED_ACTIVE"
     RESOLVED_FALLBACK = "RESOLVED_FALLBACK"
     VALID_EMPTY = "VALID_EMPTY"
@@ -127,6 +128,7 @@ _TERMINAL_STATES = frozenset(
 )
 _DRAINED_STATES = _TERMINAL_STATES | {
     StrategyEntryVacuumState.RECONFIGURING,
+    StrategyEntryVacuumState.RECOVERY_PENDING,
 }
 
 _LEGAL_TRANSITIONS: dict[
@@ -144,6 +146,7 @@ _LEGAL_TRANSITIONS: dict[
     StrategyEntryVacuumState.DRAINING_ENTRY: frozenset(
         {
             StrategyEntryVacuumState.RECONFIGURING,
+            StrategyEntryVacuumState.RECOVERY_PENDING,
             StrategyEntryVacuumState.VALID_EMPTY,
             StrategyEntryVacuumState.OWNER_PAUSED,
             StrategyEntryVacuumState.SUPERSEDED,
@@ -154,6 +157,13 @@ _LEGAL_TRANSITIONS: dict[
         {
             StrategyEntryVacuumState.RESOLVED_ACTIVE,
             StrategyEntryVacuumState.RESOLVED_FALLBACK,
+            StrategyEntryVacuumState.OWNER_PAUSED,
+            StrategyEntryVacuumState.SUPERSEDED,
+            StrategyEntryVacuumState.FAILED_CLOSED,
+        }
+    ),
+    StrategyEntryVacuumState.RECOVERY_PENDING: frozenset(
+        {
             StrategyEntryVacuumState.OWNER_PAUSED,
             StrategyEntryVacuumState.SUPERSEDED,
             StrategyEntryVacuumState.FAILED_CLOSED,

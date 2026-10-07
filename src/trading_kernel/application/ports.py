@@ -1553,6 +1553,8 @@ class SelectionPersistenceConflict(RuntimeError):
 
 
 class InstrumentSelectionRepository(Protocol):
+    async def open_generic_authority_gap_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        source_selection_authority_id: str, expected_current_version: int) -> None: ...
     async def commit_generic_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority: ...
     async def prepare_generic_recovery_grant_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof: ...
     async def prepare_generic_recovered_activation_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof: ...
@@ -1924,7 +1926,7 @@ class InstrumentSelectionRepository(Protocol):
         self,
         vacuum: StrategyEntryVacuum,
         *,
-        target_state: Literal["RECONFIGURING", "VALID_EMPTY"],
+        target_state: Literal["RECONFIGURING", "RECOVERY_PENDING", "VALID_EMPTY"],
         drained_at_ms: int,
     ) -> StrategyEntryVacuum: ...
 

@@ -522,6 +522,16 @@ async def _complete_entry_drain(
             reason_code="GENERATION_READY_FOR_MATERIALIZATION",
         )
 
+    if vacuum.first_blocker == "AUTHORITY_GAP" and request.strategy_group_id != "SOR-001":
+        drained = await uow.instrument_selection.mark_entry_vacuum_drained(
+            vacuum, target_state="RECOVERY_PENDING", drained_at_ms=request.now_ms,
+        )
+        return DrainStrategyEntryVacuumResult(
+            status=VacuumDrainStatus.ENTRY_DRAINED,
+            entry_vacuum_id=drained.entry_vacuum_id,
+            reason_code="GENERIC_GAP_RECOVERY_PENDING",
+        )
+
     if vacuum.first_blocker != "NO_SELECTION_READY_MEMBERS":
         return DrainStrategyEntryVacuumResult(
             status=VacuumDrainStatus.BLOCKED,

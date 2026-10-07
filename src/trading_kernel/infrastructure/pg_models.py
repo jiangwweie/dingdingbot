@@ -1011,6 +1011,7 @@ sa.Index(
             "OPEN",
             "DRAINING_ENTRY",
             "RECONFIGURING",
+            "RECOVERY_PENDING",
             "OWNER_PAUSED",
             "SUPERSEDED",
             "FAILED_CLOSED",

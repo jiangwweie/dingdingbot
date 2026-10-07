@@ -98,7 +98,10 @@ from src.trading_kernel.domain.selection_authority import (
     GenericSelectionAuthority,
     selected_member_set_digest,
 )
-from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
+from src.trading_kernel.domain.strategy_entry_vacuum import (
+    StrategyEntryVacuum,
+    StrategyEntryVacuumState,
+)
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     PostgresInstrumentSelectionRepository,
@@ -2315,17 +2318,58 @@ async def test_generic_late_continuity_needs_gap_recovery_not_current_close(data
     at = late_close+1
     await make_warming_ready(database,universe_version_id=uid,
         warm_closed_bar_time_ms=late_close,valid_until_ms=at+HOUR)
-    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
-        new=AsyncMock(return_value=at)):
-        late = await coordinate_selection_materialization_once(
-            uow_factory=lambda:PostgresKernelUnitOfWork(database),
-            request=CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
-                selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
-                worker_id="late-continuity"),clock_ms=lambda:at)
-    assert late.disposition is MaterializationDisposition.BLOCKED
-    assert late.reason_code=="GENERIC_CONTINUITY_LATE_REQUIRES_RECOVERY"
+    request = CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+        selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+        worker_id="late-continuity")
+    outcomes = []
+    for offset in range(4):
+        now = at+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now)):
+            late = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda now=now:now)
+        outcomes.append(late)
+        if late.reason_code == "GENERIC_GAP_RECOVERY_PENDING":
+            break
+    assert outcomes[-1].disposition is MaterializationDisposition.WAITING_VACUUM, outcomes
+    assert outcomes[-1].reason_code == "GENERIC_GAP_RECOVERY_PENDING"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=source.spec.selection_spec_id)
+    assert current is not None and current.authority.period.feature_cutoff_at_ms < anchor
+    assert vacuum is not None and vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
+    assert vacuum.fenced_at_ms == at and vacuum.drained_at_ms is not None
+    assert vacuum.blocks_new_entry
+    async with database.connect() as conn:
+        scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        fenced = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=current.authority.selection_authority_id,
+            observed_close_time_ms=late_close,now_ms=at+4,
+            allow_current_as_birth=False,lock_current=True)
+    assert not fenced.allowed and fenced.reason_code == "selection_entry_vacuum_open"
+    async with database.connect() as conn:
+        with pytest.raises(sa.exc.DBAPIError):
+            await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current "
+                "SET state='RESOLVED_ACTIVE',resolved_at_ms=:at WHERE entry_vacuum_id=:id"),
+                {"id":vacuum.entry_vacuum_id,"at":at+3})
+        await conn.rollback()
+        with pytest.raises(sa.exc.DBAPIError):
+            await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current "
+                "SET first_blocker='OTHER',state='RESOLVED_ACTIVE',resolved_at_ms=:at "
+                "WHERE entry_vacuum_id=:id"),
+                {"id":vacuum.entry_vacuum_id,"at":at+3})
+        await conn.rollback()
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuums_current "
+            "WHERE state='RECOVERY_PENDING'"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
 
 
 @pytest.mark.asyncio

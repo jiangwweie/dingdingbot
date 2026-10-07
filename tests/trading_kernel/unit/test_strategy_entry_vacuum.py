@@ -67,6 +67,39 @@ def test_entry_vacuum_transitions_are_explicit_and_terminal() -> None:
         )
 
 
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+def test_generation_free_authority_gap_vacuum_requires_drain_before_continuity(group: str) -> None:
+    spec = generic_selection_spec(group)
+    anchor = 100 * 3_600_000
+    open_vacuum = StrategyEntryVacuum(
+        entry_vacuum_id="vacuum:gap", strategy_group_id=group,
+        selection_spec_id=spec.selection_spec_id, period_anchor_ms=anchor,
+        source_generation_id=None, state=StrategyEntryVacuumState.OPEN,
+        fenced_at_ms=anchor + 1, drained_at_ms=None, resolved_at_ms=None,
+        first_blocker="AUTHORITY_GAP", projection_version=1,
+    )
+    assert transition_strategy_entry_vacuum(
+        StrategyEntryVacuumState.DRAINING_ENTRY,
+        StrategyEntryVacuumState.RECOVERY_PENDING,
+    ) is StrategyEntryVacuumState.RECOVERY_PENDING
+    pending = StrategyEntryVacuum.model_validate({**open_vacuum.model_dump(),
+        "state": "RECOVERY_PENDING", "drained_at_ms": anchor + 2})
+    assert pending.blocks_new_entry
+    with pytest.raises(ValidationError, match="drain"):
+        StrategyEntryVacuum.model_validate({**open_vacuum.model_dump(),
+            "state": "RECOVERY_PENDING"})
+    with pytest.raises(ValueError, match="invalid Strategy Entry Vacuum transition"):
+        transition_strategy_entry_vacuum(
+            StrategyEntryVacuumState.RECOVERY_PENDING,
+            StrategyEntryVacuumState.RESOLVED_ACTIVE,
+        )
+    with pytest.raises(ValueError, match="invalid Strategy Entry Vacuum transition"):
+        transition_strategy_entry_vacuum(
+            StrategyEntryVacuumState.OPEN,
+            StrategyEntryVacuumState.RESOLVED_ACTIVE,
+        )
+
+
 def test_valid_empty_may_preserve_prior_generation_provenance() -> None:
     vacuum = StrategyEntryVacuum(
         entry_vacuum_id="vacuum:SOR-001:1704067200000",

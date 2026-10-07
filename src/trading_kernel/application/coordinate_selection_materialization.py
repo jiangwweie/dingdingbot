@@ -1165,9 +1165,18 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
             or control.selection_spec_id!=spec.selection_spec_id or control.selection_epoch_id is None
             or control.pending_selection_mode is not None):
             return _blocked("GENERIC_CONTINUITY_OWNER_OR_MODE_BLOCKED")
-        if await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
-            selection_spec_id=spec.selection_spec_id,for_update=True) is not None:
-            return _blocked("GENERIC_CONTINUITY_VACUUM_OPEN")
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
+            selection_spec_id=spec.selection_spec_id,for_update=True)
+        if vacuum is not None:
+            if vacuum.first_blocker != "AUTHORITY_GAP" or vacuum.period_anchor_ms != request.period_anchor_ms:
+                return _blocked("GENERIC_CONTINUITY_VACUUM_OPEN")
+            if vacuum.state in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY}:
+                drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=request.strategy_group_id,selection_spec_id=spec.selection_spec_id,now_ms=now_ms))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                entry_vacuum_id=vacuum.entry_vacuum_id,reason_code="GENERIC_GAP_RECOVERY_PENDING")
         source = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id,for_update=True)
         if source is None:
             return _blocked("GENERIC_CONTINUITY_SOURCE_MISSING")
@@ -1212,7 +1221,18 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
             return _blocked(str(certified.reason_code))
         close = now//HOUR_MS*HOUR_MS
         if close!=period.scheduled_effective_at_ms:
-            return _blocked("GENERIC_CONTINUITY_LATE_REQUIRES_RECOVERY")
+            gap = StrategyEntryVacuum(entry_vacuum_id="vacuum:gap:"+canonical_digest({
+                "selection_spec_id":spec.selection_spec_id,"period_anchor_ms":request.period_anchor_ms,
+                "source_selection_authority_id":prior.selection_authority_id})[7:],
+                strategy_group_id=request.strategy_group_id,selection_spec_id=spec.selection_spec_id,
+                period_anchor_ms=request.period_anchor_ms,source_generation_id=None,
+                state=StrategyEntryVacuumState.OPEN,fenced_at_ms=now,drained_at_ms=None,
+                resolved_at_ms=None,first_blocker="AUTHORITY_GAP",projection_version=1)
+            await uow.instrument_selection.open_generic_authority_gap_vacuum(gap,
+                source_selection_authority_id=prior.selection_authority_id,
+                expected_current_version=source.projection_version)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                entry_vacuum_id=gap.entry_vacuum_id,reason_code="GENERIC_CONTINUITY_LATE_REQUIRES_RECOVERY")
         origin = (prior.selection_authority_id if isinstance(prior,GenericRecoveryAuthority)
             else prior.continued_from_recovery_authority_id)
         try:

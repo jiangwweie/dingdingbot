@@ -162,6 +162,7 @@ _CURRENT_ENTRY_VACUUM_STATES = (
     "OPEN",
     "DRAINING_ENTRY",
     "RECONFIGURING",
+    "RECOVERY_PENDING",
     "OWNER_PAUSED",
     "SUPERSEDED",
     "FAILED_CLOSED",
@@ -4279,6 +4280,44 @@ class PostgresInstrumentSelectionRepository:
             )
         )
 
+    async def open_generic_authority_gap_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        source_selection_authority_id: str, expected_current_version: int) -> None:
+        """Fence a provably late Generic continuity before any recovery grant."""
+        if vacuum.strategy_group_id == "SOR-001" or vacuum.state is not StrategyEntryVacuumState.OPEN or (
+            vacuum.source_generation_id is not None or vacuum.first_blocker != "AUTHORITY_GAP"
+        ):
+            raise SelectionJobConflict("Generic authority gap requires an open scoped Vacuum")
+        current = await self.get_current_generic_authority(vacuum.selection_spec_id,for_update=True)
+        if current is None or current.projection_version != expected_current_version or (
+            current.authority.selection_authority_id != source_selection_authority_id
+            or current.authority.period.feature_cutoff_at_ms >= vacuum.period_anchor_ms
+            or current.authority.expires_at_ms != vacuum.period_anchor_ms + 3_600_000
+        ):
+            raise SelectionJobConflict("Generic authority gap source changed")
+        control = await self.get_selection_control(vacuum.strategy_group_id,for_update=True)
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==vacuum.strategy_group_id).with_for_update())).mappings().one_or_none()
+        if control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION or (
+            control.selection_spec_id != vacuum.selection_spec_id
+            or control.selection_epoch_id != current.authority.selection_epoch_id
+            or control.control_version != current.authority.selection_control_version
+            or control.pending_selection_mode is not None or owner is None
+            or owner["entry_state"] != "enabled"
+            or owner["control_version"] != current.authority.owner_control_version
+        ):
+            raise SelectionJobConflict("Generic authority gap Owner or Control changed")
+        if await self.get_current_entry_vacuum(strategy_group_id=vacuum.strategy_group_id,
+            selection_spec_id=vacuum.selection_spec_id,for_update=True) is not None:
+            raise SelectionJobConflict("Generic authority gap Vacuum already exists")
+        await self._connection.execute(sa.insert(strategy_entry_vacuums_current).values(
+            **vacuum.model_dump(mode="json")))
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:1",
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=1,event_type="OPEN",
+            payload={"intended_outcome":"PRE_FENCE_CONTINUITY",
+                "source_selection_authority_id":source_selection_authority_id},
+            occurred_at_ms=vacuum.fenced_at_ms))
+
     async def open_owner_paused_entry_vacuum(
         self,
         vacuum: StrategyEntryVacuum,
@@ -4491,7 +4530,7 @@ class PostgresInstrumentSelectionRepository:
         self,
         vacuum: StrategyEntryVacuum,
         *,
-        target_state: Literal["RECONFIGURING", "VALID_EMPTY"],
+        target_state: Literal["RECONFIGURING", "RECOVERY_PENDING", "VALID_EMPTY"],
         drained_at_ms: int,
     ) -> StrategyEntryVacuum:
         if vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
@@ -4526,6 +4565,11 @@ class PostgresInstrumentSelectionRepository:
             and vacuum.source_generation_id is None
         ):
             raise ValueError("RECONFIGURING requires source Generation")
+        if target is StrategyEntryVacuumState.RECOVERY_PENDING and (
+            vacuum.strategy_group_id == "SOR-001" or vacuum.source_generation_id is not None
+            or vacuum.first_blocker != "AUTHORITY_GAP"
+        ):
+            raise ValueError("RECOVERY_PENDING requires generation-free Generic authority gap")
         updated = await self._connection.execute(
             sa.update(strategy_entry_vacuums_current)
             .where(
@@ -4571,6 +4615,8 @@ class PostgresInstrumentSelectionRepository:
                     occurred_at_ms=drained_at_ms,
                 )
             )
+            return drained
+        if target is StrategyEntryVacuumState.RECOVERY_PENDING:
             return drained
         assert vacuum.source_generation_id is not None
         generation: MaterializationGeneration | GenericMaterializationGeneration | None

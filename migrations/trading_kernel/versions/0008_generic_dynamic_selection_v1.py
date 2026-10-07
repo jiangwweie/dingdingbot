@@ -32,6 +32,7 @@ def upgrade() -> None:
     _require_legacy_event_baseline_source(bind)
     proofs = certify_0007_static_comparison_sources_sync(bind)
     _rename_period_storage()
+    _generic_gap_vacuum_states()
     _comparison_tables()
     _episode_provenance()
     _bind_static_comparison(bind)
@@ -83,6 +84,43 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
             bind.execute(sa.text(
                 f"GRANT SELECT ON TABLE {', '.join(tables)} TO {role}"
             ))
+
+
+def _generic_gap_vacuum_states() -> None:
+    """A drained authority gap remains fenced; this revision grants no release path."""
+    table = "brc_strategy_entry_vacuums_current"
+    op.drop_constraint(f"ck_{table}_state_valid", table_name=table, type_="check")
+    op.create_check_constraint(f"ck_{table}_state_valid", table,
+        "state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING',"
+        "'RESOLVED_ACTIVE','RESOLVED_FALLBACK',"
+        "'VALID_EMPTY','OWNER_PAUSED','SUPERSEDED','FAILED_CLOSED')")
+    op.create_check_constraint("ck_brc_strategy_entry_vacuums_current_gap_recovery_shape", table,
+        "state <> 'RECOVERY_PENDING' OR ("
+        "selection_spec_id <> 'sor-dynamic-selection-v0' AND source_generation_id IS NULL "
+        "AND first_blocker='AUTHORITY_GAP' AND drained_at_ms IS NOT NULL "
+        "AND resolved_at_ms IS NULL)")
+    op.create_check_constraint("ck_brc_strategy_entry_vacuums_current_gap_stays_fenced", table,
+        "first_blocker <> 'AUTHORITY_GAP' OR source_generation_id IS NOT NULL OR "
+        "state NOT IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK','VALID_EMPTY')")
+    op.drop_index("uq_brc_strategy_entry_vacuums_current_open_scope", table_name=table)
+    op.create_index("uq_brc_strategy_entry_vacuums_current_open_scope", table,
+        ["strategy_group_id", "selection_spec_id"], unique=True,
+        postgresql_where=sa.text("state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING',"
+            "'RECOVERY_PENDING','OWNER_PAUSED','SUPERSEDED','FAILED_CLOSED')"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL AND (
+          NEW.first_blocker IS DISTINCT FROM OLD.first_blocker OR
+          NEW.source_generation_id IS DISTINCT FROM OLD.source_generation_id OR
+          NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK','VALID_EMPTY')
+        ) THEN RAISE EXCEPTION 'Generic authority gap Vacuum cannot bypass recovery proof'; END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_brc_generic_gap_vacuum_transition "
+        "BEFORE UPDATE ON brc_strategy_entry_vacuums_current FOR EACH ROW "
+        "EXECUTE FUNCTION brc_guard_generic_gap_vacuum_transition()"))
 
 
 def _generic_static_recovery_commit_guard() -> None:
@@ -600,7 +638,7 @@ def _generic_continuity_proof_function() -> None:
           OR owner_control.entry_state<>'enabled' OR owner_control.control_version<>source_auth.owner_control_version
           OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v
             WHERE v.strategy_group_id=control.strategy_group_id AND v.selection_spec_id=spec_id
-              AND v.state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','OWNER_PAUSED'))
+              AND v.state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING','OWNER_PAUSED'))
           THEN RETURN false; END IF;
         SELECT * INTO binding FROM brc_selection_authority_event_bindings
           WHERE selection_authority_id=source_auth.selection_authority_id;
@@ -684,7 +722,7 @@ def _generic_continuity_commit_guard() -> None:
           OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current
             WHERE strategy_group_id IN (SELECT strategy_group_id FROM brc_instrument_selection_specs
               WHERE selection_spec_id=a.selection_spec_id)
-              AND selection_spec_id=a.selection_spec_id AND state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','OWNER_PAUSED'))
+              AND selection_spec_id=a.selection_spec_id AND state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING','OWNER_PAUSED'))
           THEN RAISE EXCEPTION 'Generic continuity requires atomic current grant without Vacuum'; END IF;
         SELECT * INTO binding FROM brc_selection_authority_event_bindings
           WHERE selection_authority_id=a.selection_authority_id;
