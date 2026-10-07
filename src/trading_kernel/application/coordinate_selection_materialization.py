@@ -1359,7 +1359,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
-            if generic_input_is_unchanged(snapshot,current_members=members.exchange_instrument_ids,comparison=comparison):
+            if (not gap_handoff and generic_input_is_unchanged(
+                snapshot,current_members=members.exchange_instrument_ids,comparison=comparison)):
                 if prior_vacuum is not None:
                     return _blocked("GENERIC_GAP_NO_CHANGE_REBASE_REQUIRED")
                 first_activation = control.selection_mode is SelectionMode.STATIC_BASELINE

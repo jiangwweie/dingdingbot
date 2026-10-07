@@ -2588,8 +2588,9 @@ async def test_hourly_valid_empty_after_expired_authority_records_gap_before_emp
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
 @pytest.mark.parametrize("skipped_periods", [1,3])
+@pytest.mark.parametrize("same_members", [False,True])
 async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_not_normal(
-    database: AsyncEngine, group: str, skipped_periods: int,
+    database: AsyncEngine, group: str, skipped_periods: int, same_members: bool,
 ) -> None:
     source,first_snapshot,_,old_uid = await _exercise_generic_generation(
         database,group,False,durable=True,first_activation=True,natural_selection=True)
@@ -2603,10 +2604,13 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
     assert len(first_snapshot.selected_members) > 1
     excluded = first_snapshot.selected_members[-1]
     newer_input = newer_input.model_copy(update={"member_windows":tuple(
-        qualify_window(window,False) if window.exchange_instrument_id==excluded else window
+        qualify_window(window,window.exchange_instrument_id in first_snapshot.selected_members)
+        if same_members else (
+            qualify_window(window,False) if window.exchange_instrument_id==excluded else window)
         for window in newer_input.member_windows)})
     newer = compute_generic_selection(newer_input)
-    assert newer.selected_members and newer.selected_members != first_snapshot.selected_members
+    assert newer.selected_members
+    assert (newer.selected_members == first_snapshot.selected_members) == same_members
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(newer,
             decision_at_ms=newer_input.decision_at_ms,
@@ -2788,8 +2792,9 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "BRF2-001"])
+@pytest.mark.parametrize("same_members", [False,True])
 async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_normal_grant(
-    database: AsyncEngine, group: str,
+    database: AsyncEngine, group: str, same_members: bool,
 ) -> None:
     source,first_snapshot,_,uid = await _exercise_generic_generation(
         database,group,False,durable=True,first_activation=True,natural_selection=True)
@@ -2819,10 +2824,12 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
     successor = next_input(source).model_copy(update={"predecessor_snapshot":first_snapshot})
     removed = first_snapshot.selected_members[0]
     successor = successor.model_copy(update={"member_windows":tuple(
-        qualify_window(w,False) if w.exchange_instrument_id==removed else w
+        qualify_window(w,w.exchange_instrument_id in first_snapshot.selected_members)
+        if same_members else (qualify_window(w,False) if w.exchange_instrument_id==removed else w)
         for w in successor.member_windows)})
     snapshot = compute_generic_selection(successor)
-    assert snapshot.selected_members and snapshot.selected_members != first_snapshot.selected_members
+    assert snapshot.selected_members
+    assert (snapshot.selected_members == first_snapshot.selected_members) == same_members
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(snapshot,
             decision_at_ms=successor.decision_at_ms,
