@@ -54,6 +54,35 @@ def test_unowned_order_anywhere_blocks_cross_account_with_shared_digest() -> Non
     assert instrument.entry_admission_snapshot_digest == snapshot.digest()
 
 
+def test_late_position_from_terminal_ticket_blocks_new_entry_across_instruments() -> None:
+    snapshot = _snapshot(
+        positions=(
+            AccountRiskPosition(
+                exchange_instrument_id="BTCUSDT",
+                position_side="long",
+                quantity=Decimal("0.01"),
+                average_entry_price=Decimal(100),
+                current_unrealized_pnl=Decimal(0),
+                current_maintenance_margin=Decimal("0.01"),
+            ),
+        ),
+    )
+    # A zero-fill-closed Ticket is terminal and owns no active domain.
+    ownership = AdmissionOwnership()
+
+    account = classify_account_entry_health(snapshot, ownership)
+    instrument = classify_instrument_entry_health(
+        snapshot,
+        ownership,
+        exchange_instrument_id="SOLUSDT",
+        requested_position_side="short",
+    )
+
+    assert account.status is AccountEntryHealthStatus.UNOWNED_POSITION
+    assert account.entry_block_scope is EntryBlockScope.ACCOUNT_CAPACITY
+    assert instrument.status is InstrumentEntryHealthStatus.HEALTHY_FLAT
+
+
 def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() -> None:
     snapshot = _snapshot(
         positions=(
