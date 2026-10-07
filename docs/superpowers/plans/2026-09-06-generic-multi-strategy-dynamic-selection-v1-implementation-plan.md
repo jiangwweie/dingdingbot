@@ -359,6 +359,8 @@ Job终态增量（基于`46b23b5f`）：未部署的0008为Generic Job增加`EXP
 
 MPG/MI三期自然rebase链增量（基于`d28fe872`）：首次Owner→Runner→Snapshot→ACTIVE_NEW后，第一根真实Hourly Detector TRIGGERED由正comparison revision suppress；下一due Snapshot由正式Runner沿同epoch前驱计算，NO_CHANGE只复用相同成员、不制造Generation，最新未消费close上的合法NOT_TRIGGERED完成rebase/arming；再下一due Snapshot同样正式提交并获得NO_CHANGE，后续TRIGGERED只产生一个Signal。两策略均经真实PostgreSQL比较缓存、Episode checkpoint与Observation producer，未把第一根抑制当作可交易信号，也未用超期close追认。该增量仍需旧Ticket持续保护、A→B→A及故障/rollback攻击矩阵等整卡验收。
 
+2026-10-08 A→B→A producer屏障增量：MPG/MI在同一个Active交易Universe的隔离测试前置下，Comparison Binding先是原Static四成员A/revision1，再变为固定24成员B/revision2，最后回到同一个A Definition/revision3；每次使用正式`observe_strategy_scope`与真实PG comparison cache、Episode checkpoint。第三次A的首根TRIGGERED依然`COMPARISON_REBASE_REQUIRED`且零Signal，必须经历更晚合法NOT_TRIGGERED才armed，再后续TRIGGERED形成第三个不同Signal；整条链只保留原Episode domain key和一个current投影，零Ticket/Exchange Command。两策略定向2 passed，Observation模块19 passed，Unit/Architecture1276 passed、Ruff/Mypy159 files/diff通过。测试中的Binding转换由隔离PG夹具输入，不代表Owner Static rollback/Universe切换全链已认证；GS-06剩余Unselected重入与故障/rollback矩阵仍须逐项审计，生产未修改。
+
 **目标**：fixed24和GS-01 barrier接入真实producer，不只domain模拟。
 
 **允许**：`project_comparative_universe.py`、`observe_strategy_scope.py`、PG comparison/Episode repository与ports、对应integration/producer tests。**禁止**：缩比较集合、Detector条件变更、给Excluded/STAGED创建可交易Signal、平行Episode键。

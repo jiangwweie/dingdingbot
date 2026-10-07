@@ -21,6 +21,9 @@ from src.trading_kernel.application.observe_strategy_scope import (
     observe_strategy_scope,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.instrument_selection import (
+    CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS,
+)
 from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
@@ -201,6 +204,81 @@ async def test_comparison_rebase_is_enforced_by_real_observation(observation_eng
     async with observation_engine.connect() as conn:
         assert await conn.scalar(sa.select(sa.func.count()).select_from(signal_events)) == 2
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current")) == 1
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(exchange_commands)) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["MPG", "MI"])
+async def test_comparison_a_to_b_to_a_never_reuses_old_arming(
+    observation_engine: AsyncEngine, group: str,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    event = f"event_spec:{group}-001:{group}-LONG:v3"
+    static_members = tuple(sorted((SOL,OP,AVAX,SUI)))
+    dynamic_members = CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
+    a_digest = canonical_digest({"exchange_instrument_ids":static_members})
+    b_digest = canonical_digest({"exchange_instrument_ids":dynamic_members})
+    a_id,b_id = "comparison:"+a_digest[7:],"comparison:"+b_digest[7:]
+    async with observation_engine.begin() as conn:
+        await conn.execute(sa.update(runtime_capabilities_current).values(schema_revision=CURRENT_SCHEMA_REVISION))
+        universe_id = await conn.scalar(sa.select(strategy_universe_current.c.universe_version_id).where(
+            strategy_universe_current.c.event_spec_id==event))
+        for member in dynamic_members:
+            await conn.execute(pg_insert(instruments).values(exchange_instrument_id=member,
+                venue_id="binance-usdm",asset_class="crypto",venue_symbol=member.split(":")[1],
+                contract_kind="perpetual",status="active").on_conflict_do_nothing(
+                    index_elements=[instruments.c.exchange_instrument_id]))
+        for cid,digest,members in ((a_id,a_digest,static_members),(b_id,b_digest,dynamic_members)):
+            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,:count)"),
+                {"id":cid,"digest":digest,"count":len(members)})
+            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:id,:member)"),
+                [{"id":cid,"member":member} for member in members])
+        await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:id,1,:uid)"),
+            {"event":event,"id":a_id,"uid":universe_id})
+    signals = []
+    for step,status in enumerate((True,False,True,True,False,True,True,False,True)):
+        if step in (3,6):
+            async with observation_engine.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_comparison_binding_current "
+                    "SET comparison_universe_id=:id,comparison_transition_revision=:revision,"
+                    "source_static_universe_version_id=:uid WHERE event_spec_id=:event"),
+                    {"id":b_id if step==3 else a_id,"revision":2 if step==3 else 3,
+                        "uid":None if step==3 else universe_id,"event":event})
+        close = NOW_MS+step*3_600_000
+        base = _shift_snapshot(mpg_long_snapshot() if status else mpg_flat_snapshot(),
+            delta_ms=step*3_600_000)
+        peer_candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+step*3_600_000,
+            "close_time_ms":c.close_time_ms+step*3_600_000}) for c in flat_candles(13,3_600_000))
+        members = dynamic_members if 3<=step<6 else static_members
+        source = FakeMarketSource({(SOL,"1h"):base.candles_1h,(SOL,"4h"):base.candles_4h,
+            **{(member,"1h"):peer_candles for member in members if member!=SOL}})
+        result = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(observation_engine),source,
+            ObservationRequest(runtime_scope_id=f"scope-{group.lower()}-sol-long",
+                runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=close))
+        if step in (0,3,6):
+            assert result.status is ObservationStatus.NO_SIGNAL, result
+            assert result.detector_reason == "COMPARISON_REBASE_REQUIRED"
+        elif step in (1,4,7):
+            assert result.status is ObservationStatus.NO_SIGNAL, result
+        else:
+            assert result.status is ObservationStatus.SIGNAL_CREATED, result
+            signals.append(result.signal_event_id)
+        async with observation_engine.connect() as conn:
+            checkpoint = (await conn.execute(sa.text("SELECT comparison_transition_revision,"
+                "comparison_armed_at_ms FROM brc_exposure_episode_current "
+                "WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+                {"event":event,"member":SOL})).one()
+            assert checkpoint[0] == 1+step//3
+            if step in (0,3,6):
+                assert checkpoint[1] is None
+    assert len(signals)==3 and len(set(signals))==3
+    async with observation_engine.connect() as conn:
+        binding = (await conn.execute(sa.text("SELECT comparison_universe_id,"
+            "comparison_transition_revision FROM brc_comparison_binding_current "
+            "WHERE event_spec_id=:event"),{"event":event})).one()
+        assert binding == (a_id,3)
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(signal_events)) == 3
         assert await conn.scalar(sa.select(sa.func.count()).select_from(exchange_commands)) == 0
 
 
