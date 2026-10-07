@@ -2495,6 +2495,78 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 if resolution=="activate_change_guard":
                     assert refused_change.disposition is MaterializationDisposition.BLOCKED
                     assert refused_change.reason_code == "GENERIC_RECOVERY_REBASE_PENDING"
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        pending_generation = await uow.instrument_selection.get_generic_materialization_generation(generation_id)
+                    assert pending_generation is not None and pending_generation.fenced_at_ms is not None
+                    timed_out_at = pending_generation.fenced_at_ms+first_source.spec.materialization_timeout_ms
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                        new=AsyncMock(return_value=timed_out_at)):
+                        timed_out = await coordinate_selection_materialization_once(
+                            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=changed_request,
+                            clock_ms=lambda:timed_out_at)
+                    assert timed_out.reason_code == "MATERIALIZATION_TIMEOUT"
+                    replacement_source = next_input(changed_source).model_copy(update={
+                        "predecessor_snapshot":changed_snapshot})
+                    replacement_snapshot = compute_generic_selection(replacement_source)
+                    assert replacement_snapshot.selected_members == changed_snapshot.selected_members
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.instrument_selection.save_generic_snapshot(replacement_snapshot,
+                            decision_at_ms=replacement_source.decision_at_ms,
+                            source_observed_at_ms=replacement_source.source_observed_at_ms)
+                    replacement_request = CoordinateGenericSnapshotRequest(
+                        selection_snapshot_id=replacement_snapshot.selection_snapshot_id,
+                        worker_id="recover-changed-membership")
+                    replacement_at = replacement_snapshot.effective_from_ms+1
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                        new=AsyncMock(return_value=replacement_at)):
+                        retargeted = await coordinate_selection_materialization_once(
+                            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=replacement_request,
+                            clock_ms=lambda:replacement_at)
+                    assert retargeted.disposition is MaterializationDisposition.GENERATION_MATERIALIZING
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                        new=AsyncMock(return_value=replacement_at+1)):
+                        new_warming = await coordinate_selection_materialization_once(
+                            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=replacement_request,
+                            clock_ms=lambda:replacement_at+1)
+                    assert new_warming.disposition is MaterializationDisposition.TARGET_WARMING
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        replacement_targets = await uow.strategy_universes.get_generation_universe_targets(
+                            retargeted.materialization_generation_id)
+                    assert len(replacement_targets)==1
+                    replacement_uid = replacement_targets[0].universe_version_id
+                    await make_warming_ready(database,universe_version_id=replacement_uid,
+                        warm_closed_bar_time_ms=replacement_at//HOUR*HOUR,
+                        valid_until_ms=replacement_at+HOUR)
+                    template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+                    shift = replacement_at//HOUR*HOUR-template.trigger_candle_close_time_ms
+                    candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                        "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+                    replacement_projection = build_comparative_universe_projection(
+                        event_spec_id=first_source.spec.event_spec_id,universe_version_id=replacement_uid,
+                        strategy_group_id=group,exchange_instrument_ids=first_source.spec.candidate_ids,
+                        closed_bar_time_ms=replacement_at//HOUR*HOUR,
+                        lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles)
+                            for member in first_source.spec.candidate_ids))
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.strategy_universes.save_comparative_projection(replacement_projection)
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                        new=AsyncMock(return_value=replacement_at+2)):
+                        replacement_staged = await coordinate_selection_materialization_once(
+                            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=replacement_request,
+                            clock_ms=lambda:replacement_at+2)
+                        replacement_active = await coordinate_selection_materialization_once(
+                            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=replacement_request,
+                            clock_ms=lambda:replacement_at+2)
+                    assert replacement_staged.disposition is MaterializationDisposition.GENERATION_STAGED
+                    assert replacement_active.disposition is MaterializationDisposition.ACTIVE_NEW, replacement_active
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        recovered_current = await uow.instrument_selection.get_current_generic_authority(
+                            first_source.spec.selection_spec_id)
+                        recovered_universe = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
+                    assert recovered_current is not None and recovered_current.authority.authority_outcome=="ACTIVE_NEW"
+                    assert recovered_current.authority.recovery_proof.first_eligible_close_time_ms>replacement_at+2
+                    assert recovered_universe is not None and recovered_universe.universe_version_id==replacement_uid
                 else:
                     assert refused_change.disposition is MaterializationDisposition.ACTIVE_NEW, refused_change
                 return
