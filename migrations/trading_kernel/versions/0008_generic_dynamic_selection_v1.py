@@ -763,6 +763,7 @@ def _authority_snapshot_epoch() -> None:
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_authority_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE kind text; cadence integer; snapshot brc_instrument_selection_snapshots%ROWTYPE; p jsonb;
+          source_authority_row brc_selection_session_authorities%ROWTYPE; origin_id text; origin_proof jsonb;
         BEGIN
           SELECT selection_kind INTO kind FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF kind='sor_dynamic_v0' AND (NEW.current_close_proof IS NOT NULL OR NEW.membership_freshness IS NOT NULL
@@ -856,6 +857,34 @@ def _authority_snapshot_epoch() -> None:
                 RAISE EXCEPTION 'Generic VALID_EMPTY requires exact zero-member Snapshot and no trading proof';
               END IF;
             ELSE
+              IF NEW.authority_outcome='ACTIVE_NEW' THEN
+                SELECT a.* INTO source_authority_row FROM brc_selection_authority_current current_auth
+                  JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_auth.selection_authority_id
+                  WHERE current_auth.selection_spec_id=NEW.selection_spec_id;
+                IF FOUND THEN
+                  origin_id:=CASE WHEN source_authority_row.recovery_grant_proof IS NOT NULL
+                    THEN source_authority_row.selection_authority_id ELSE source_authority_row.continued_from_selection_authority_id END;
+                  IF origin_id IS NOT NULL THEN
+                    SELECT recovery_grant_proof INTO origin_proof FROM brc_selection_session_authorities
+                      WHERE selection_authority_id=origin_id AND selection_spec_id=NEW.selection_spec_id;
+                    IF origin_proof IS NULL OR EXISTS (
+                      SELECT 1 FROM jsonb_array_elements(origin_proof->'observation_cursors') cursor
+                        JOIN brc_instrument_selection_member_decisions chosen
+                          ON chosen.selection_snapshot_id=NEW.selection_snapshot_id AND chosen.selected
+                            AND chosen.exchange_instrument_id=cursor->>'exchange_instrument_id'
+                        LEFT JOIN brc_exposure_episode_current e
+                          ON e.episode_domain_key=cursor->>'episode_domain_key'
+                      WHERE e.episode_domain_key IS NULL
+                        OR e.authority_recovery_id IS DISTINCT FROM origin_proof->'recovery_close_plan'->>'recovery_id'
+                        OR e.authority_recovery_revision IS DISTINCT FROM
+                          (origin_proof->'recovery_close_plan'->>'recovery_revision')::bigint
+                        OR e.authority_recovery_effective_from_ms IS DISTINCT FROM
+                          (origin_proof->>'committed_at_ms')::bigint
+                        OR e.authority_recovery_armed_at_ms IS NULL
+                    ) THEN RAISE EXCEPTION 'Generic recovery rebase pending for changed members'; END IF;
+                  END IF;
+                END IF;
+              END IF;
               IF NEW.continued_from_selection_authority_id IS NOT NULL AND (
                 NEW.authority_outcome<>'NO_CHANGE' OR NOT EXISTS (
                   SELECT 1 FROM brc_selection_session_authorities origin

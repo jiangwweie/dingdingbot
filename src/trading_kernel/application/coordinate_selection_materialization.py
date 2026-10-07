@@ -1533,6 +1533,10 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     comparison_id = "comparison:"+canonical_digest({"exchange_instrument_ids":spec.candidate_ids})[7:]
                     comparison_revision = comparison.comparison_transition_revision + (comparison.comparison_universe_id!=comparison_id)
                 prior = await uow.instrument_selection.get_current_generic_authority(generation.selection_spec_id,for_update=True)
+                blocker = await uow.instrument_selection.generic_recovery_transition_blocker(
+                    selection_spec_id=generation.selection_spec_id,target_members=snapshot.selected_members)
+                if blocker is not None:
+                    return _blocked(blocker)
                 proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
                 sequence = 1 if prior is None or prior.authority.period!=proof.period else prior.authority.authority_sequence+1
                 authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",

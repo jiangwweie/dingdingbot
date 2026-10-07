@@ -1018,6 +1018,11 @@ class PostgresStrategyUniverseRepository:
         snapshot = await selection.get_generic_snapshot(authority.selection_snapshot_id)
         if snapshot.selection_spec_id!=authority.selection_spec_id or snapshot.selection_epoch_id!=authority.selection_epoch_id or snapshot.member_set_digest!=authority.event_binding.member_set_digest:
             raise UniverseInstallConflict("GENERIC_ACTIVATION_SNAPSHOT_CHANGED")
+        if not recovering:
+            blocker = await selection.generic_recovery_transition_blocker(
+                selection_spec_id=authority.selection_spec_id,target_members=snapshot.selected_members)
+            if blocker is not None:
+                raise UniverseInstallConflict(blocker)
         signals = PostgresSignalRepository(self._connection)
         if recovery_authority is not None:
             cursors = await signals.lock_recovery_close_coverage(event_spec_id=authority.event_binding.event_spec_id,

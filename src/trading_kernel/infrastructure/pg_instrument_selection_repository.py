@@ -38,7 +38,10 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     require_hourly_recovery_commit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
+from src.trading_kernel.domain.exposure_episode import (
+    ExposureEpisodeState,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
@@ -4999,6 +5002,53 @@ class PostgresInstrumentSelectionRepository:
             selection_authority_event_bindings.c.selection_authority_id==selection_authority_id).limit(2))).mappings().all()
         return generic_recovery_authority_from_storage(dict(row),spec=spec,
             event_bindings=tuple(dict(binding) for binding in bindings))
+
+    async def generic_recovery_transition_blocker(self, *, selection_spec_id: str,
+        target_members: tuple[str, ...]) -> str | None:
+        """Do not abandon an unarmed recovery barrier on overlapping members."""
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        current = await self.get_current_generic_authority(selection_spec_id,for_update=True)
+        if current is None:
+            # The first Static -> Dynamic activation has no Generic parent.
+            # Its separate Owner/epoch grant proof remains mandatory.
+            return None
+        source = current.authority
+        origin_id = (source.selection_authority_id if isinstance(source,GenericRecoveryAuthority)
+            else source.continued_from_recovery_authority_id)
+        if origin_id is None:
+            return None
+        origin = await self.get_generic_recovery_authority_by_id(origin_id)
+        if origin is None or origin.selection_epoch_id!=source.selection_epoch_id or (
+            origin.event_binding!=source.event_binding
+            or origin.comparison_universe_id!=source.comparison_universe_id
+            or origin.comparison_transition_revision!=source.comparison_transition_revision):
+            return "GENERIC_RECOVERY_SOURCE_CHANGED"
+        uid = source.event_binding.universe_version_id
+        if uid is None:
+            return "GENERIC_RECOVERY_SOURCE_CHANGED"
+        previous_members = await PostgresStrategyUniverseRepository(self._connection).get_members(uid)
+        overlap = tuple(sorted(set(previous_members).intersection(target_members)))
+        signals = PostgresSignalRepository(self._connection)
+        proof = origin.recovery_proof
+        for member in overlap:
+            key = build_episode_domain_key(event_spec_id=source.event_binding.event_spec_id,
+                exchange_instrument_id=member,position_side=source.event_binding.position_side)
+            await signals.lock_exposure_episode(key)
+            checkpoint = await signals.get_authority_recovery_checkpoint(key)
+            if checkpoint is None or (checkpoint.recovery_id,checkpoint.recovery_revision,
+                checkpoint.effective_from_ms,checkpoint.first_eligible_close_time_ms)!=(
+                proof.recovery_close_plan.recovery_id,proof.recovery_close_plan.recovery_revision,
+                proof.committed_at_ms,proof.first_eligible_close_time_ms):
+                return "GENERIC_RECOVERY_SOURCE_CHANGED"
+            if checkpoint.state!="ARMED":
+                return "GENERIC_RECOVERY_REBASE_PENDING"
+        return None
 
     async def get_current_authority(
         self,
