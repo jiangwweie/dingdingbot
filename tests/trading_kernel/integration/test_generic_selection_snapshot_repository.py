@@ -2301,6 +2301,38 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
         if resolution in {"activate","activate_refusal","activate_change_guard","activate_change_after_arm"}:
+            if resolution in {"activate","activate_refusal"}:
+                @asynccontextmanager
+                async def interrupted_recovered_activation():
+                    async with PostgresKernelUnitOfWork(database) as interrupted_uow:
+                        yield interrupted_uow
+                        inside = await interrupted_uow.instrument_selection.get_current_generic_authority(
+                            first_source.spec.selection_spec_id)
+                        assert inside is not None and inside.authority.authority_outcome=="ACTIVE_NEW"
+                        raise RuntimeError("recovered activation interrupted before commit")
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                    new=AsyncMock(return_value=next_at+4)),pytest.raises(RuntimeError,
+                        match="recovered activation interrupted before commit"):
+                    await coordinate_selection_materialization_once(
+                        uow_factory=interrupted_recovered_activation,
+                        request=CoordinateGenericGenerationRequest(
+                            materialization_generation_id=handoff.materialization_generation_id,
+                            worker_id="recover-interrupted"),clock_ms=lambda:next_at+4)
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    prior_after_fault = await uow.instrument_selection.get_current_generic_authority(
+                        first_source.spec.selection_spec_id)
+                    target_after_fault = await uow.strategy_universes.get_generation_universe_targets(
+                        handoff.materialization_generation_id)
+                    vacuum_after_fault = await uow.instrument_selection.get_current_entry_vacuum(
+                        strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
+                assert prior_after_fault is not None
+                assert prior_after_fault.authority.selection_authority_id==previous_authority.authority.selection_authority_id
+                assert len(target_after_fault)==1 and target_after_fault[0].lifecycle_state.value=="staged"
+                assert vacuum_after_fault is not None and vacuum_after_fault.state.value=="RECONFIGURING"
+                async with database.connect() as conn:
+                    assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+                        "WHERE authority_recovery_id=:id"),{
+                            "id":recovery_proof.recovery_close_plan.recovery_id})==0
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=next_at+4)):
                 activated = await coordinate_selection_materialization_once(
