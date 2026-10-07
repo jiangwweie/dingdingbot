@@ -2404,6 +2404,19 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             assert successor.authority.selection_authority_id == continuation.selection_authority_id
             assert successor.authority.continued_from_recovery_authority_id == current_recovery.authority.selection_authority_id
             assert still_pending is not None and still_pending.armed_at_close_time_ms is None
+            forged_successor = successor.authority.model_copy(update={
+                "selection_authority_id":"authority:forged-successor",
+                "authority_sequence":successor.authority.authority_sequence+1})
+            async with database.connect() as conn:
+                await conn.execute(sa.text("UPDATE brc_exposure_episode_current "
+                    "SET authority_recovery_revision=authority_recovery_revision+1 "
+                    "WHERE episode_domain_key=:key"),
+                    {"key":current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key})
+                with pytest.raises(sa.exc.DBAPIError,match="successor checkpoint changed"):
+                    async with conn.begin_nested():
+                        await conn.execute(sa.insert(selection_session_authorities).values(
+                            **generic_authority_storage_values(forged_successor)))
+                await conn.rollback()
             async with PostgresKernelUnitOfWork(database) as gate_uow:
                 active_scope = await gate_uow.signals.get_runtime_scope(active_scope_id)
                 assert active_scope is not None and gate_uow._connection is not None

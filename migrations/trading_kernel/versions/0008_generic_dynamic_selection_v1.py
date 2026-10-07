@@ -877,6 +877,21 @@ def _authority_snapshot_epoch() -> None:
                     AND origin_binding.event_spec_id IN (
                       SELECT event_spec_id FROM brc_instrument_selection_spec_events WHERE selection_spec_id=NEW.selection_spec_id)
                 )) THEN RAISE EXCEPTION 'Generic recovery successor origin differs'; END IF;
+              IF NEW.continued_from_selection_authority_id IS NOT NULL THEN
+                SELECT recovery_grant_proof INTO p FROM brc_selection_session_authorities
+                  WHERE selection_authority_id=NEW.continued_from_selection_authority_id;
+                IF p IS NULL OR EXISTS (
+                  SELECT 1 FROM jsonb_array_elements(p->'observation_cursors') cursor
+                    LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=cursor->>'episode_domain_key'
+                  WHERE e.episode_domain_key IS NULL
+                    OR e.authority_recovery_id IS DISTINCT FROM p->'recovery_close_plan'->>'recovery_id'
+                    OR e.authority_recovery_revision IS DISTINCT FROM
+                      (p->'recovery_close_plan'->>'recovery_revision')::bigint
+                    OR e.authority_recovery_effective_from_ms IS DISTINCT FROM (p->>'committed_at_ms')::bigint
+                    OR e.authority_recovery_first_eligible_close_time_ms IS DISTINCT FROM
+                      (p->'recovery_close_plan'->>'first_eligible_close_time_ms')::bigint
+                ) THEN RAISE EXCEPTION 'Generic recovery successor checkpoint changed'; END IF;
+              END IF;
               SELECT * INTO snapshot FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.selection_snapshot_id;
               IF NOT FOUND OR snapshot.selection_spec_id<>NEW.selection_spec_id OR snapshot.selection_epoch_id<>NEW.selection_epoch_id
                   OR snapshot.period_anchor_ms<>NEW.period_anchor_ms
