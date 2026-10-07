@@ -2558,6 +2558,62 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             async with database.connect() as conn:
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands "
                     "WHERE ticket_id=:ticket AND command_kind='entry'"),{"ticket":issued.ticket_id}) == 1
+            from src.trading_kernel.application.dispatch_exchange_command import (
+                DispatchCommandRequest,
+                dispatch_one_command,
+            )
+            from src.trading_kernel.application.runtime_facts import (
+                InstrumentRulesFacts,
+            )
+            from src.trading_kernel.domain.commands import (
+                ExchangeCommandResult,
+                ExchangeCommandStatus,
+            )
+            class SuccessorEntryFacts:
+                async def read_entry_admission_snapshot(self, request):
+                    fresh_risk = AccountRiskSnapshot.create(**{
+                        **admission.account_risk_snapshot.model_dump(exclude={"snapshot_digest"}),
+                        "observed_at_ms":request.observed_at_ms,
+                        "valid_until_ms":request.observed_at_ms+request.valid_for_ms})
+                    return admission.model_copy(update={"account_risk_snapshot":fresh_risk,
+                        "observed_at_ms":request.observed_at_ms,
+                        "valid_until_ms":request.observed_at_ms+request.valid_for_ms})
+
+                async def read_instrument_rules(self, request):
+                    return InstrumentRulesFacts(exchange_instrument_id=request.exchange_instrument_id,
+                        quantity_step=Decimal("0.001"),price_tick=Decimal("0.01"),min_quantity=Decimal("0.001"),
+                        min_notional=Decimal(5),exchange_max_leverage=5,maintenance_margin_brackets=brackets,
+                        maintenance_margin_brackets_digest=canonical_digest(brackets),
+                        notional_coefficient=Decimal(1),notional_coefficient_certified=True,
+                        observed_at_ms=request.observed_at_ms,
+                        valid_until_ms=request.observed_at_ms+request.valid_for_ms)
+            class SuccessorVenue:
+                def __init__(self):
+                    self.calls = []
+
+                async def execute(self, request):
+                    async with PostgresKernelUnitOfWork(database) as durable_uow:
+                        durable = await durable_uow.exchange_commands.get(request.command_id)
+                        assert durable.status is ExchangeCommandStatus.CLAIMED
+                    self.calls.append(request)
+                    return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
+                        observed_at_ms=issued_at+6,exchange_order_id=f"successor-{len(self.calls)}")
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true "
+                    "WHERE capability_key='exchange_commands'"))
+            venue = SuccessorVenue()
+            dispatch_request = DispatchCommandRequest(worker_id="recovery-successor-dispatch",
+                ticket_id=issued.ticket_id,now_ms=issued_at+5,lease_until_ms=issued_at+30_000,
+                timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                admission_snapshot_validity_ms=60_000)
+            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                dispatch_request,entry_facts_source=SuccessorEntryFacts())
+            assert dispatched.status.value == "accepted", dispatched
+            assert len(venue.calls) == 1
+            repeated_dispatch = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                dispatch_request.model_copy(update={"now_ms":issued_at+7}),entry_facts_source=SuccessorEntryFacts())
+            assert repeated_dispatch.status.value == "no_command"
+            assert len(venue.calls) == 1
             return
         second_failure_at = next_at+first_source.spec.materialization_timeout_ms
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
