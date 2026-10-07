@@ -1519,6 +1519,70 @@ async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(dat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_generic_snapshot_commit_response_loss_retries_without_second_market_read(
+    database: AsyncEngine, group: str,
+) -> None:
+    source = inputs(group)
+    await enable_epoch(database,group)
+    class CompleteMarket:
+        def __init__(self):
+            self.qualifications = 0
+            self.klines = 0
+
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            self.qualifications += 1
+            assert event_spec_id == source.spec.event_spec_id and len(product_profiles) == 24
+            return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                for window in source.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            self.klines += 1
+            return next(window.candles for window in source.member_windows
+                if window.exchange_instrument_id==request.exchange_instrument_id)
+    market = CompleteMarket()
+    request = RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+        selection_epoch_id=source.selection_epoch_id,period_anchor_ms=source.feature_cutoff_at_ms,
+        worker_id=f"lost-response:{group}")
+    tick = source.feature_cutoff_at_ms
+    def clock():
+        nonlocal tick
+        tick += 1
+        return tick
+    injected = False
+    @asynccontextmanager
+    async def lost_commit_response():
+        nonlocal injected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+        if not injected:
+            async with database.connect() as conn:
+                ready = await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current "
+                    "WHERE selection_spec_id=:spec AND state='SNAPSHOT_READY'"),
+                    {"spec":source.spec.selection_spec_id})
+            if ready:
+                injected = True
+                raise RuntimeError("selection commit acknowledgement lost")
+    with pytest.raises(RuntimeError,match="acknowledgement lost"):
+        await run_instrument_selection_once(uow_factory=lost_commit_response,
+            market_source=market,request=request,clock_ms=clock)
+    assert injected and market.qualifications == 1 and market.klines == 24
+    retry = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        request=request,clock_ms=clock)
+    assert retry.outcome == "ALREADY_READY"
+    assert market.qualifications == 1 and market.klines == 24
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts "
+            "WHERE selection_spec_id=:spec"),{"spec":source.spec.selection_spec_id}) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots "
+            "WHERE selection_spec_id=:spec"),{"spec":source.spec.selection_spec_id}) == 1
+        for table in ("brc_strategy_universe_materialization_generations",
+            "brc_strategy_entry_vacuums_current","brc_trade_tickets","brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+
+
+@pytest.mark.asyncio
 async def test_generic_claim_rejects_live_lease_then_reclaims_without_stale_completion(database: AsyncEngine) -> None:
     source = inputs("BRF2-001")
     await enable_epoch(database, "BRF2-001")
