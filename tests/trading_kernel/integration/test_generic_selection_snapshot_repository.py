@@ -3161,6 +3161,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             class SuccessorVenue:
                 def __init__(self):
                     self.calls = []
+                    self.now_ms = issued_at+5
 
                 async def execute(self, request):
                     async with PostgresKernelUnitOfWork(database) as durable_uow:
@@ -3168,7 +3169,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         assert durable.status is ExchangeCommandStatus.CLAIMED
                     self.calls.append(request)
                     return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
-                        observed_at_ms=issued_at+6,exchange_order_id=f"successor-{len(self.calls)}")
+                        observed_at_ms=self.now_ms+1,exchange_order_id=f"successor-{len(self.calls)}")
             async with database.begin() as conn:
                 await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true "
                     "WHERE capability_key='exchange_commands'"))
@@ -3259,6 +3260,106 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 checkpoint = await uow.signals.get_authority_recovery_checkpoint(
                     current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key)
             assert checkpoint is not None and checkpoint.recovery_id==current_recovery.authority.recovery_proof.recovery_close_plan.recovery_id
+            from src.trading_kernel.application.maintain_ticket_lifecycle import (
+                LifecycleMaintenanceRequest,
+                TicketLifecycleFacts,
+                maintain_ticket_lifecycle,
+            )
+            from src.trading_kernel.application.reconcile_ticket import (
+                ReconcileTicketRequest,
+                reconcile_ticket,
+            )
+            from src.trading_kernel.application.settle_ticket import (
+                RecordTradeReviewRequest,
+                SettleTicketRequest,
+                record_trade_review,
+                settle_ticket,
+            )
+            from src.trading_kernel.domain.aggregate import AggregateStatus
+            from src.trading_kernel.domain.events import PostFillStressAssessed
+            from src.trading_kernel.domain.position import PositionSnapshot
+            from src.trading_kernel.domain.reducer import reduce_event
+            from tests.trading_kernel.support.capacity_claims import (
+                make_stress_evidence,
+            )
+            lifecycle_at = continuity_close+100
+            async with PostgresKernelUnitOfWork(database) as uow:
+                filled = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
+                    snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                        quantity=ticket.quantity,average_entry_price=ticket.entry_reference_price,
+                        venue_reported_liquidation_price=Decimal(0),open_orders=(),
+                        observed_at_ms=lifecycle_at)))
+            assert filled.status.value=="entry_fill_recorded"
+            async def dispatch_safety(offset):
+                now = lifecycle_at+offset
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    aggregate = await uow.aggregates.get(issued.ticket_id)
+                    if aggregate is not None and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING:
+                        stress = PostFillStressAssessed(event_id=f"event:{issued.ticket_id}:{aggregate.last_event_sequence+1}",
+                            ticket_id=issued.ticket_id,sequence=aggregate.last_event_sequence+1,
+                            occurred_at_ms=now-1,status="passed",evidence=make_stress_evidence(aggregate.ticket),
+                            owner_policy_id=aggregate.ticket.owner_policy_id,
+                            owner_policy_version=aggregate.ticket.owner_policy_version,
+                            filled_qty=aggregate.position_qty,average_fill_price=aggregate.average_fill_price,
+                            initial_stop_price=aggregate.ticket.initial_stop_price,
+                            initial_stop_exchange_order_id=aggregate.initial_stop_exchange_order_id)
+                        await uow.commit_reduction(event=stress,reduction=reduce_event(aggregate,stress),
+                            expected_version=aggregate.version)
+                venue.now_ms = now
+                dispatched_safety = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                    DispatchCommandRequest(worker_id="successor-lifecycle",ticket_id=issued.ticket_id,
+                        now_ms=now,lease_until_ms=now+30_000,timeout_seconds=1))
+                assert dispatched_safety.status.value=="accepted", dispatched_safety
+            await dispatch_safety(100)
+            await dispatch_safety(200)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                protected = await uow.aggregates.get(issued.ticket_id)
+            assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
+            async with PostgresKernelUnitOfWork(database) as uow:
+                runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(
+                    ticket_id=issued.ticket_id,
+                    facts=TicketLifecycleFacts(position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
+                        tp1_filled_quantity=ticket.take_profit_quantities[0],
+                        tp1_average_fill_price=ticket.take_profit_prices[0],
+                        allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
+                        price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=lifecycle_at+300),
+                    now_ms=lifecycle_at+300))
+            assert runner.status.value=="break_even_requested"
+            await dispatch_safety(400)
+            await dispatch_safety(500)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
+                    snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                        quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                        observed_at_ms=lifecycle_at+600)))
+            assert external_flat.status.value=="external_flat_incident"
+            await dispatch_safety(700)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                matched = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
+                    snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+                        quantity=Decimal(0),average_entry_price=None,open_orders=(),
+                        observed_at_ms=lifecycle_at+800)))
+                settled = await settle_ticket(uow,SettleTicketRequest(ticket_id=issued.ticket_id,
+                    settled_at_ms=lifecycle_at+900))
+                reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
+                    ticket_id=issued.ticket_id,review_id=f"review:recovery-successor-{group}",
+                    outcome="closed",metrics={"realized_pnl":"1.25"},
+                    decision_impact={"strategy_action":"keep"},recorded_at_ms=lifecycle_at+1000))
+                terminal = await uow.aggregates.get(issued.ticket_id)
+                frozen_ticket = await uow.tickets.get(issued.ticket_id)
+                reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
+                incident = await uow.incidents.get_open_for_ticket(issued.ticket_id)
+                active_domain = await uow.entry_admission.has_active_ticket_in_domain(
+                    ticket.identity.netting_domain.key())
+                commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+            assert matched.status.value=="matched"
+            assert settled.status.value=="budget_settled"
+            assert reviewed.status.value=="review_recorded"
+            assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+            assert frozen_ticket is not None and frozen_ticket.selection_authority_id==renewed.selection_authority_id
+            assert reservation is not None and reservation.status=="released"
+            assert incident is None and not active_domain
+            assert len(commands)==len(venue.calls)
             return
         second_failure_at = next_at+first_source.spec.materialization_timeout_ms
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
