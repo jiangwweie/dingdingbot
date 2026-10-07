@@ -361,6 +361,8 @@ MPG/MI三期自然rebase链增量（基于`d28fe872`）：首次Owner→Runner�
 
 2026-10-08 A→B→A producer屏障增量：MPG/MI在同一个Active交易Universe的隔离测试前置下，Comparison Binding先是原Static四成员A/revision1，再变为固定24成员B/revision2，最后回到同一个A Definition/revision3；每次使用正式`observe_strategy_scope`与真实PG comparison cache、Episode checkpoint。第三次A的首根TRIGGERED依然`COMPARISON_REBASE_REQUIRED`且零Signal，必须经历更晚合法NOT_TRIGGERED才armed，再后续TRIGGERED形成第三个不同Signal；整条链只保留原Episode domain key和一个current投影，零Ticket/Exchange Command。两策略定向2 passed，Observation模块19 passed，Unit/Architecture1276 passed、Ruff/Mypy159 files/diff通过。测试中的Binding转换由隔离PG夹具输入，不代表Owner Static rollback/Universe切换全链已认证；GS-06剩余Unselected重入与故障/rollback矩阵仍须逐项审计，生产未修改。
 
+2026-10-08未观察成员重入补强：在上述A→B→A正式Observation路径中，原A成员OP此前没有Episode/checkpoint，回到A/revision3后首次为OP安装独立scope并以真实行情触发；第一根TRIGGERED只形成`COMPARISON_REBASE_REQUIRED`，后续NOT_TRIGGERED才armed，更晚TRIGGERED仅产生一个新Signal，原SOL Episode domain key未被替换，零Exchange Command。另在MPG/MI小时Authority gap后新Snapshot选入此前未选中的Candidate，正式future-close恢复的首根TRIGGERED仍被`RECOVERY_REBASE_REQUIRED`屏障抑制，不能以新入选直接发Signal。两处定向合计10 passed；迁移+Vacuum unknown/partial相邻组合51 passed，Ruff/diff通过。上述覆盖首次重入的抑制/armed序列与恢复首根抑制，尚不代替真实Owner rollback全链或完整GS-06/09认证；生产未修改。
+
 **目标**：fixed24和GS-01 barrier接入真实producer，不只domain模拟。
 
 **允许**：`project_comparative_universe.py`、`observe_strategy_scope.py`、PG comparison/Episode repository与ports、对应integration/producer tests。**禁止**：缩比较集合、Detector条件变更、给Excluded/STAGED创建可交易Signal、平行Episode键。

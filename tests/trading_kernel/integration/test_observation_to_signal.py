@@ -280,6 +280,49 @@ async def test_comparison_a_to_b_to_a_never_reuses_old_arming(
         assert binding == (a_id,3)
         assert await conn.scalar(sa.select(sa.func.count()).select_from(signal_events)) == 3
         assert await conn.scalar(sa.select(sa.func.count()).select_from(exchange_commands)) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+            "WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+            {"event":event,"member":OP}) == 0
+    reentry_scope_id = f"scope-{group.lower()}-op-long"
+    async with observation_engine.begin() as conn:
+        old_scope = (await conn.execute(sa.select(runtime_scopes_current).where(
+            runtime_scopes_current.c.runtime_scope_id==f"scope-{group.lower()}-sol-long"))).mappings().one()
+        await conn.execute(sa.insert(runtime_scopes_current).values(**{
+            **dict(old_scope),"runtime_scope_id":reentry_scope_id,
+            "exchange_instrument_id":OP,"scope_version":1,
+            "warm_closed_bar_time_ms":NOW_MS+8*3_600_000,
+            "warm_completed_at_ms":NOW_MS+8*3_600_000,
+            "warm_valid_until_ms":NOW_MS+13*3_600_000,
+            "updated_at_ms":NOW_MS+8*3_600_000,
+        }))
+    for offset,triggered in enumerate((True,False,True),start=9):
+        delta = offset*3_600_000
+        base = _shift_snapshot(mpg_long_snapshot() if triggered else mpg_flat_snapshot(),delta_ms=delta)
+        peers = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,
+            "close_time_ms":c.close_time_ms+delta}) for c in flat_candles(13,3_600_000))
+        source = FakeMarketSource({(OP,"1h"):base.candles_1h,(OP,"4h"):base.candles_4h,
+            **{(member,"1h"):peers for member in static_members if member!=OP}})
+        reentered = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(observation_engine),source,
+            ObservationRequest(runtime_scope_id=reentry_scope_id,runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=NOW_MS+delta))
+        if offset==9:
+            assert reentered.status is ObservationStatus.NO_SIGNAL, reentered
+            assert reentered.detector_reason == "COMPARISON_REBASE_REQUIRED"
+        elif offset==10:
+            assert reentered.status is ObservationStatus.NO_SIGNAL, reentered
+        else:
+            assert reentered.status is ObservationStatus.SIGNAL_CREATED, reentered
+        async with observation_engine.connect() as conn:
+            checkpoint = (await conn.execute(sa.text("SELECT comparison_transition_revision,"
+                "comparison_armed_at_ms FROM brc_exposure_episode_current "
+                "WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+                {"event":event,"member":OP})).one()
+            assert checkpoint[0] == 3
+            if offset==9:
+                assert checkpoint[1] is None
+    async with observation_engine.connect() as conn:
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(signal_events)) == 4
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(exchange_commands)) == 0
 
 
 @pytest.mark.asyncio

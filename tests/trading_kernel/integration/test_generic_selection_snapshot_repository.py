@@ -2746,11 +2746,16 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
         newer_input = next_input(newer_input)
     newer_input = newer_input.model_copy(update={"predecessor_snapshot":first_snapshot})
     assert len(first_snapshot.selected_members) > 1
-    excluded = first_snapshot.selected_members[-1]
+    outsider = next(member for member in source.spec.candidate_ids
+        if member not in first_snapshot.selected_members)
+    retained = first_snapshot.selected_members[0]
+    retained_candles = next(window.candles for window in newer_input.member_windows
+        if window.exchange_instrument_id==retained)
     newer_input = newer_input.model_copy(update={"member_windows":tuple(
         qualify_window(window,window.exchange_instrument_id in first_snapshot.selected_members)
-        if same_members else (
-            qualify_window(window,False) if window.exchange_instrument_id==excluded else window)
+        if same_members else qualify_window(window.model_copy(update={"candles":retained_candles})
+            if window.exchange_instrument_id==outsider else window,
+            window.exchange_instrument_id in {retained,outsider})
         for window in newer_input.member_windows)})
     newer = compute_generic_selection(newer_input)
     assert newer.selected_members
@@ -2886,6 +2891,11 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
     assert recovered.authority.first_eligible_close_time_ms == newer.expires_at_ms
     assert active is not None and active.universe_version_id == target_uid
     assert unresolved is None
+    added_members = sorted(set(newer.selected_members)-set(first_snapshot.selected_members))
+    assert same_members or added_members, (first_snapshot.selected_members,newer.selected_members)
+    focus_member = newer.selected_members[0] if same_members else added_members[0]
+    if not same_members:
+        assert focus_member not in first_snapshot.selected_members
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
         new=AsyncMock(return_value=now+15)):
         repeated = await coordinate_selection_materialization_once(
@@ -2907,7 +2917,7 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
         exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=first_close,
         lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
         member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,
-            candles_1h=next_candles if member==newer.selected_members[0] else flat_candles)
+            candles_1h=next_candles if member==focus_member else flat_candles)
             for member in source.spec.candidate_ids)).model_copy(update={
                 "comparison_transition_revision":recovered.authority.comparison_transition_revision})
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -2915,7 +2925,7 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
     async with database.connect() as conn:
         scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
             "WHERE universe_version_id=:uid AND exchange_instrument_id=:member LIMIT 1"),
-            {"uid":target_uid,"member":newer.selected_members[0]})
+            {"uid":target_uid,"member":focus_member})
     class HourlyRecoveryMarket:
         async def fetch_closed_candles(self, request):
             candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
@@ -2932,6 +2942,16 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
     assert first_observation.detector_reason == "RECOVERY_REBASE_REQUIRED"
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 0
+        checkpoint = (await conn.execute(sa.text("SELECT authority_recovery_id,"
+            "authority_recovery_armed_at_ms,comparison_transition_revision,"
+            "comparison_armed_at_ms FROM brc_exposure_episode_current "
+            "WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+            {"event":source.spec.event_spec_id,"member":focus_member})).one()
+    assert checkpoint[0] == recovered.authority.recovery_proof.recovery_close_plan.recovery_id
+    assert checkpoint[1] is None
+    if not same_members:
+        assert focus_member == outsider
+        assert checkpoint[3] is None
 
 
 @pytest.mark.asyncio
