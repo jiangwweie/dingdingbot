@@ -1598,6 +1598,9 @@ class InstrumentSelectionRepository(Protocol):
     async def retarget_generic_empty_vacuum(self, vacuum: StrategyEntryVacuum, *,
         selection_snapshot_id: str, expected_owner_version: int, expected_control_version: int,
     ) -> StrategyEntryVacuum: ...
+    async def retarget_generic_gap_vacuum_with_generation(self,
+        generation: GenericMaterializationGeneration, *, entry_vacuum_id: str,
+    ) -> GenericMaterializationGeneration: ...
 
     async def get_generic_spec(self, selection_spec_id: str) -> GenericSelectionSpecV1: ...
 

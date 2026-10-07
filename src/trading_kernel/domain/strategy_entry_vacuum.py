@@ -168,6 +168,7 @@ _LEGAL_TRANSITIONS: dict[
     StrategyEntryVacuumState.RECOVERY_PENDING: frozenset(
         {
             StrategyEntryVacuumState.DRAINING_ENTRY,
+            StrategyEntryVacuumState.RECONFIGURING,
             StrategyEntryVacuumState.RESOLVED_CONTINUITY,
             StrategyEntryVacuumState.OWNER_PAUSED,
             StrategyEntryVacuumState.SUPERSEDED,

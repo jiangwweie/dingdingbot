@@ -1307,9 +1307,14 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     owner_control_version=owner.control_version,now_ms=now_ms)
             prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                 strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
-            if prior_vacuum is not None and (prior_vacuum.source_generation_id is None
-                or prior_vacuum.state is not StrategyEntryVacuumState.RECONFIGURING
-                or prior_vacuum.drained_at_ms is None or prior_vacuum.period_anchor_ms>=snapshot.feature_cutoff_at_ms):
+            gap_handoff = (prior_vacuum is not None and prior_vacuum.source_generation_id is None
+                and prior_vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
+                and prior_vacuum.first_blocker == "AUTHORITY_GAP")
+            if prior_vacuum is not None and (not gap_handoff and (prior_vacuum.source_generation_id is None
+                or prior_vacuum.state is not StrategyEntryVacuumState.RECONFIGURING)
+                or prior_vacuum.drained_at_ms is None or (
+                    prior_vacuum.period_anchor_ms > snapshot.feature_cutoff_at_ms if gap_handoff
+                    else prior_vacuum.period_anchor_ms >= snapshot.feature_cutoff_at_ms)):
                 return _blocked("GENERIC_PRIOR_VACUUM_REQUIRES_SUPERSESSION")
             spec = await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)
             current = await uow.strategy_universes.get_current(spec.event_spec_id)
@@ -1369,8 +1374,12 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
                     comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
             if prior_vacuum is not None:
-                await uow.instrument_selection.retarget_failed_generic_vacuum_with_generation(generation,
-                    entry_vacuum_id=prior_vacuum.entry_vacuum_id)
+                if gap_handoff:
+                    await uow.instrument_selection.retarget_generic_gap_vacuum_with_generation(generation,
+                        entry_vacuum_id=prior_vacuum.entry_vacuum_id)
+                else:
+                    await uow.instrument_selection.retarget_failed_generic_vacuum_with_generation(generation,
+                        entry_vacuum_id=prior_vacuum.entry_vacuum_id)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_MATERIALIZING,
                     selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id,
                     entry_vacuum_id=prior_vacuum.entry_vacuum_id)

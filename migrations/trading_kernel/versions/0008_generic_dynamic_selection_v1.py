@@ -117,11 +117,45 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
+        IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL
+          AND OLD.state='RECOVERY_PENDING' AND NEW.state='RECONFIGURING'
+          AND NEW.first_blocker='AUTHORITY_GAP' AND NEW.source_generation_id IS NOT NULL
+          AND NEW.period_anchor_ms>=OLD.period_anchor_ms
+          AND NEW.fenced_at_ms=OLD.fenced_at_ms AND NEW.drained_at_ms=OLD.drained_at_ms
+          AND NEW.resolved_at_ms IS NULL AND NEW.projection_version=OLD.projection_version+1
+          AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
+            JOIN brc_strategy_universe_materialization_generations g
+              ON g.materialization_generation_id=e.payload->>'replacement_generation_id'
+            JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=g.selection_snapshot_id
+            WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_sequence=NEW.projection_version
+              AND e.event_type='SUPERSEDED' AND e.payload->>'recovery_origin'='AUTHORITY_GAP'
+              AND e.payload->>'previous_generation_id' IS NULL
+              AND g.materialization_generation_id=NEW.source_generation_id
+              AND g.lifecycle_state='MATERIALIZING' AND g.fenced_at_ms=e.occurred_at_ms
+              AND g.selection_spec_id=OLD.selection_spec_id AND g.period_anchor_ms=NEW.period_anchor_ms
+              AND s.selection_epoch_id=g.selection_epoch_id AND s.selected_count>0
+              AND s.eligibility_not_before_ms<=e.occurred_at_ms AND e.occurred_at_ms<s.expires_at_ms)
+          AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events opened
+            JOIN brc_strategy_entry_vacuum_events change
+              ON change.entry_vacuum_id=opened.entry_vacuum_id
+            JOIN brc_selection_authority_current current_auth
+              ON current_auth.selection_spec_id=OLD.selection_spec_id
+            WHERE opened.entry_vacuum_id=OLD.entry_vacuum_id AND opened.event_type='OPEN'
+              AND opened.payload->>'source_selection_authority_id'=current_auth.selection_authority_id
+              AND change.event_sequence=NEW.projection_version
+              AND change.payload->>'source_selection_authority_id'=current_auth.selection_authority_id)
+          THEN RETURN NEW; END IF;
         IF NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK') AND EXISTS (
           SELECT 1 FROM brc_strategy_entry_vacuum_events e
           WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_type='OPEN'
             AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
-        ) THEN RAISE EXCEPTION 'Gap Vacuum cannot become ordinary active/fallback'; END IF;
+        ) AND (NEW.state<>'RESOLVED_ACTIVE' OR NOT EXISTS (
+          SELECT 1 FROM brc_selection_session_authorities a
+          WHERE a.recovery_grant_proof->>'source_entry_vacuum_id'=OLD.entry_vacuum_id
+            AND a.recovery_grant_proof->>'materialization_generation_id'=NEW.source_generation_id
+            AND a.recovery_grant_proof->'recovery_close_plan'->>'reason'='AUTHORITY_GAP'
+            AND a.authority_outcome='ACTIVE_NEW' AND a.created_at_ms=NEW.resolved_at_ms
+        )) THEN RAISE EXCEPTION 'Gap Vacuum cannot become ordinary active/fallback'; END IF;
         IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL
           AND OLD.state='RECOVERY_PENDING' AND NEW.state='DRAINING_ENTRY'
           AND NEW.source_generation_id IS NULL AND NEW.first_blocker='NO_SELECTION_READY_MEMBERS'
@@ -732,7 +766,8 @@ def _generic_recovered_activation_proof_function() -> None:
         src brc_selection_session_authorities%ROWTYPE;
         b brc_materialization_generation_event_baselines%ROWTYPE;
         cb brc_comparison_binding_current%ROWTYPE;
-        old_event jsonb; failure jsonb; expected jsonb; cursors jsonb; freshness jsonb;
+        old_event jsonb; opened jsonb; failure jsonb; expected jsonb; cursors jsonb; freshness jsonb;
+        gap_origin boolean;
         cadence integer; n integer; missed integer; comparison_revision bigint; revision bigint;
         evaluated bigint; committed bigint; cutoff bigint; effective bigint; expiry bigint;
         first_close bigint; cadence_ms bigint; future_cursor boolean;
@@ -767,23 +802,34 @@ def _generic_recovered_activation_proof_function() -> None:
           ORDER BY event_sequence DESC LIMIT 1;
         IF old_event IS NULL OR old_event->>'replacement_generation_id' IS DISTINCT FROM g.materialization_generation_id
           THEN RETURN false; END IF;
-        SELECT * INTO oldg FROM brc_strategy_universe_materialization_generations
-          WHERE materialization_generation_id=old_event->>'previous_generation_id';
-        IF NOT FOUND OR oldg.lifecycle_state<>'FAILED_CLOSED' OR oldg.fenced_at_ms<>v.fenced_at_ms
-          OR oldg.terminal_at_ms>g.created_at_ms OR oldg.selection_epoch_id<>g.selection_epoch_id THEN RETURN false; END IF;
-        SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
-          WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='FAILED_CLOSED'
-          ORDER BY event_sequence DESC LIMIT 1;
-        IF failure IS NULL OR failure->>'entry_vacuum_id' IS DISTINCT FROM v.entry_vacuum_id
-          OR failure->>'reason_code' IS NULL OR failure->>'reason_code' NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
-            'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
-        reason:=CASE WHEN failure->>'reason_code' IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED')
-          THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
+        gap_origin:=old_event->>'recovery_origin'='AUTHORITY_GAP';
+        IF gap_origin THEN
+          SELECT payload INTO opened FROM brc_strategy_entry_vacuum_events
+            WHERE entry_vacuum_id=v.entry_vacuum_id AND event_type='OPEN' LIMIT 1;
+          IF old_event->>'previous_generation_id' IS NOT NULL OR v.first_blocker<>'AUTHORITY_GAP'
+            OR opened IS NULL OR opened->>'intended_outcome'<>'PRE_FENCE_CONTINUITY'
+            OR opened->>'source_selection_authority_id' IS DISTINCT FROM old_event->>'source_selection_authority_id'
+            THEN RETURN false; END IF;
+          reason:='AUTHORITY_GAP';
+        ELSE
+          SELECT * INTO oldg FROM brc_strategy_universe_materialization_generations
+            WHERE materialization_generation_id=old_event->>'previous_generation_id';
+          IF NOT FOUND OR oldg.lifecycle_state<>'FAILED_CLOSED' OR oldg.fenced_at_ms<>v.fenced_at_ms
+            OR oldg.terminal_at_ms>g.created_at_ms OR oldg.selection_epoch_id<>g.selection_epoch_id THEN RETURN false; END IF;
+          SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
+            WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='FAILED_CLOSED'
+            ORDER BY event_sequence DESC LIMIT 1;
+          IF failure IS NULL OR failure->>'entry_vacuum_id' IS DISTINCT FROM v.entry_vacuum_id
+            OR failure->>'reason_code' IS NULL OR failure->>'reason_code' NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
+              'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
+          reason:=CASE WHEN failure->>'reason_code' IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED')
+            THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
+        END IF;
         SELECT * INTO b FROM brc_materialization_generation_event_baselines
           WHERE materialization_generation_id=g.materialization_generation_id;
         IF NOT FOUND OR (SELECT count(*) FROM brc_materialization_generation_event_baselines
-          WHERE materialization_generation_id=g.materialization_generation_id)<>1 OR b.grant_state<>'ACTIVE'
-          OR NOT EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines oldb
+          WHERE materialization_generation_id=g.materialization_generation_id)<>1 OR b.grant_state<>'ACTIVE' THEN RETURN false; END IF;
+        IF NOT gap_origin AND NOT EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines oldb
             WHERE oldb.materialization_generation_id=oldg.materialization_generation_id
               AND oldb.event_spec_id=b.event_spec_id AND oldb.position_side=b.position_side
               AND oldb.universe_version_id=b.universe_version_id AND oldb.member_set_digest=b.member_set_digest
@@ -794,6 +840,7 @@ def _generic_recovered_activation_proof_function() -> None:
           JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_a.selection_authority_id
           WHERE current_a.selection_spec_id=g.selection_spec_id;
         IF NOT FOUND OR src.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+          OR (gap_origin AND src.selection_authority_id IS DISTINCT FROM opened->>'source_selection_authority_id')
           OR src.selection_epoch_id<>g.selection_epoch_id OR src.selection_control_version<>c.control_version
           OR src.owner_control_version<>o.control_version OR src.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
           OR src.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision

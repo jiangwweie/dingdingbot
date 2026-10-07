@@ -2508,6 +2508,208 @@ async def test_generic_late_continuity_needs_gap_recovery_not_current_close(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "BRF2-001"])
+async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_normal_grant(
+    database: AsyncEngine, group: str,
+) -> None:
+    source,first_snapshot,_,uid = await _exercise_generic_generation(
+        database,group,False,durable=True,first_activation=True,natural_selection=True)
+    anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
+    late_close = anchor+2*HOUR
+    at = late_close+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=late_close,valid_until_ms=at+4*HOUR)
+    period_request = CoordinateGenericPeriodRequest(strategy_group_id=group,
+        selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+        worker_id="gap-before-nonempty")
+    for offset in range(4):
+        now = at+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now)):
+            result = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=period_request,clock_ms=lambda now=now:now)
+        if result.reason_code == "GENERIC_GAP_RECOVERY_PENDING":
+            break
+    async with PostgresKernelUnitOfWork(database) as uow:
+        gap = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+        previous = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    assert gap is not None and gap.state is StrategyEntryVacuumState.RECOVERY_PENDING
+    assert previous is not None
+    successor = next_input(source).model_copy(update={"predecessor_snapshot":first_snapshot})
+    removed = first_snapshot.selected_members[0]
+    successor = successor.model_copy(update={"member_windows":tuple(
+        qualify_window(w,False) if w.exchange_instrument_id==removed else w
+        for w in successor.member_windows)})
+    snapshot = compute_generic_selection(successor)
+    assert snapshot.selected_members and snapshot.selected_members != first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,
+            decision_at_ms=successor.decision_at_ms,
+            source_observed_at_ms=successor.source_observed_at_ms)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,
+        worker_id="new-desired-after-gap")
+    now = at+5
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now)):
+        result = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:now)
+    assert result.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, result
+    async with PostgresKernelUnitOfWork(database) as uow:
+        inherited = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        generation = await uow.instrument_selection.get_generic_materialization_generation(
+            result.materialization_generation_id)
+    assert inherited is not None and inherited.entry_vacuum_id == gap.entry_vacuum_id
+    assert inherited.fenced_at_ms == gap.fenced_at_ms and inherited.drained_at_ms == gap.drained_at_ms
+    assert inherited.source_generation_id == generation.materialization_generation_id
+    assert inherited.state is StrategyEntryVacuumState.RECONFIGURING
+    assert generation.fenced_at_ms == now
+    assert current is not None and current.authority.selection_authority_id == previous.authority.selection_authority_id
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 0
+    generation_request = CoordinateGenericGenerationRequest(
+        materialization_generation_id=generation.materialization_generation_id,
+        worker_id="new-desired-after-gap")
+    staged = None
+    for offset in range(1,7):
+        tick = now+offset
+        await make_warming_ready(database,universe_version_id=uid,
+            warm_closed_bar_time_ms=late_close,valid_until_ms=tick+HOUR)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=tick)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=generation_request,clock_ms=lambda tick=tick:tick)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            targets = await uow.strategy_universes.get_generation_universe_targets(
+                generation.materialization_generation_id)
+        if targets:
+            await make_warming_ready(database,universe_version_id=targets[0].universe_version_id,
+                warm_closed_bar_time_ms=late_close,valid_until_ms=tick+HOUR)
+        if step.disposition is MaterializationDisposition.GENERATION_STAGED:
+            staged = step
+            break
+    assert staged is not None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+8)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            proposal = await uow.instrument_selection.prepare_generic_recovered_activation_proof(
+                generation.materialization_generation_id)
+    assert proposal.authority_outcome == "ACTIVE_NEW"
+    assert proposal.recovery_close_plan.reason == "AUTHORITY_GAP"
+    assert proposal.first_eligible_close_time_ms > proposal.committed_at_ms
+    assert proposal.source_entry_vacuum_id == gap.entry_vacuum_id
+    with pytest.raises(sa.exc.DBAPIError):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current "
+                "SET state='RESOLVED_ACTIVE',resolved_at_ms=:at "
+                "WHERE entry_vacuum_id=:id"),
+                {"at":now+8,"id":gap.entry_vacuum_id})
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof":proposal.model_dump_json(),"checked_at":proposal.committed_at_ms}) is True
+        wrong_source = proposal.model_copy(update={"source_selection_authority_id":"authority:wrong"})
+        assert await conn.scalar(sa.text(
+            "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof":wrong_source.model_dump_json(),"checked_at":proposal.committed_at_ms}) is False
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+8)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises(SelectionJobConflict,match="proof changed"):
+                await uow.instrument_selection.require_generic_recovered_activation_proof(wrong_source)
+            assert uow._connection is not None
+            owner_probe = await uow._connection.begin_nested()
+            await uow._connection.execute(sa.text("UPDATE brc_strategy_entry_controls_current "
+                "SET entry_state='paused' WHERE strategy_group_id=:group"),{"group":group})
+            with pytest.raises(SelectionJobConflict,match="Owner or Control"):
+                await uow.instrument_selection.prepare_generic_recovered_activation_proof(
+                    generation.materialization_generation_id)
+            await owner_probe.rollback()
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=proposal.first_eligible_close_time_ms)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises(ValueError,match="boundary"):
+                await uow.instrument_selection.require_generic_recovered_activation_proof(proposal)
+    @asynccontextmanager
+    async def interrupted_gap_activation():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            inside = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            assert inside is not None and inside.authority.authority_outcome == "ACTIVE_NEW"
+            raise RuntimeError("injected gap target activation interruption")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+8)), pytest.raises(RuntimeError,
+            match="injected gap target activation interruption"):
+        await coordinate_selection_materialization_once(
+            uow_factory=interrupted_gap_activation,
+            request=generation_request,clock_ms=lambda:now+8)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        still_previous = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        still_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+        still_target = await uow.strategy_universes.get_generation_universe_targets(
+            generation.materialization_generation_id)
+    assert still_previous is not None and still_previous.authority.selection_authority_id == previous.authority.selection_authority_id
+    assert still_vacuum is not None and still_vacuum.state is StrategyEntryVacuumState.RECONFIGURING
+    assert len(still_target) == 1 and still_target[0].lifecycle_state.value == "staged"
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+8)):
+        activated = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=generation_request,clock_ms=lambda:now+8)
+    assert activated.disposition is MaterializationDisposition.ACTIVE_NEW, activated
+    async with PostgresKernelUnitOfWork(database) as uow:
+        live = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        switched = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+        unresolved = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+    assert live is not None and live.authority.selection_authority_id == activated.selection_authority_id
+    assert live.authority.recovery_proof.recovery_close_plan.reason == "AUTHORITY_GAP"
+    assert live.authority.first_eligible_close_time_ms > live.authority.created_at_ms
+    assert switched is not None and switched.universe_version_id != uid
+    assert unresolved is None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+9)):
+        duplicate = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=generation_request,clock_ms=lambda:now+9)
+    assert duplicate.selection_authority_id == live.authority.selection_authority_id
+    async with database.connect() as conn:
+        target_scope = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),
+            {"uid":switched.universe_version_id})
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+            "WHERE authority_recovery_id=:rid"),
+            {"rid":live.authority.recovery_proof.recovery_close_plan.recovery_id}) == len(snapshot.selected_members)
+    first_future = live.authority.first_eligible_close_time_ms
+    await make_warming_ready(database,universe_version_id=switched.universe_version_id,
+        warm_closed_bar_time_ms=first_future,valid_until_ms=first_future+HOUR)
+    template = cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot()
+    delta = first_future-template.trigger_candle_close_time_ms
+    class RecoveredGapMarket:
+        async def fetch_closed_candles(self, request):
+            candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,
+                "close_time_ms":c.close_time_ms+delta}) for c in candles)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=first_future+1)):
+        observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),
+            RecoveredGapMarket(),ObservationRequest(runtime_scope_id=target_scope,runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=first_future,
+                attempted_at_ms=first_future+1))
+    assert observed.status is ObservationStatus.NO_SIGNAL, observed
+    assert observed.detector_reason == "RECOVERY_REBASE_REQUIRED", observed
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "BRF2-001"])
 async def test_generic_new_empty_snapshot_supersedes_drained_gap_without_previous_fallback(
     database: AsyncEngine, group: str,
 ) -> None:
