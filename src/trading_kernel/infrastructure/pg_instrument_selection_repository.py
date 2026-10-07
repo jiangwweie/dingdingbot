@@ -3408,7 +3408,10 @@ class PostgresInstrumentSelectionRepository:
         )
 
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
-        await self.require_generic_recovery_grant_proof(proof)
+        if proof.authority_outcome=="ACTIVE_NEW":
+            await self.require_generic_recovered_activation_proof(proof)
+        else:
+            await self.require_generic_recovery_grant_proof(proof)
         signals = PostgresSignalRepository(self._connection)
         checkpoints = []
         # The proof checker already acquired these advisory/row locks in the

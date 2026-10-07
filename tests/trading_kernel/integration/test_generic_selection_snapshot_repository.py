@@ -2065,8 +2065,12 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group",("CPM-RO-001","MPG-001","MI-001","BRF2-001"))
-async def test_failed_second_dynamic_generation_respects_previous_freshness(database: AsyncEngine,group: str) -> None:
+@pytest.mark.parametrize(("group","resolution"),(
+    ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","empty"),
+    ("MI-001","activate"),("MI-001","empty"),("BRF2-001","fallback")))
+async def test_failed_second_dynamic_generation_respects_previous_freshness(
+    database: AsyncEngine,group: str,resolution: str,
+) -> None:
     first_result = await _exercise_generic_generation(database,group,False,
         durable=True,first_activation=True,natural_selection=True)
     first_source,first_snapshot,_,previous_uid = first_result
@@ -2226,12 +2230,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(data
             staged = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=next_request,
                 clock_ms=lambda:next_at+2)
-            no_normal_grant = await coordinate_selection_materialization_once(
-                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=next_request,
-                clock_ms=lambda:next_at+2)
         assert staged.disposition is MaterializationDisposition.GENERATION_STAGED
-        assert no_normal_grant.disposition is MaterializationDisposition.BLOCKED
-        assert no_normal_grant.reason_code == "GENERIC_RECOVERY_AUTHORITY_REQUIRED"
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=next_at+3)):
             async with PostgresKernelUnitOfWork(database) as uow:
@@ -2271,7 +2270,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(data
                 {"observation_cursors":()}):
                 forged = recovery_proof.model_copy(update=changes)
                 assert await conn.scalar(proof_check,{"proof":forged.model_dump_json(),"checked_at":next_at+3}) is False
-        with pytest.raises(sa.exc.DBAPIError,match="recovery proof differs|ck_brc_recovery_grant_shape"):
+        with pytest.raises(sa.exc.DBAPIError,match="requires exact homogeneous Spec Event binding shape|Recovered activation requires atomic"):
             async with database.begin() as conn:
                 await conn.execute(sa.insert(selection_session_authorities).values(
                     **generic_recovery_authority_storage_values(proposed_new_authority)))
@@ -2291,6 +2290,69 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(data
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
+        if resolution == "activate":
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=next_at+4)):
+                activated = await coordinate_selection_materialization_once(
+                    uow_factory=lambda:PostgresKernelUnitOfWork(database),request=next_request,
+                    clock_ms=lambda:next_at+4)
+            assert activated.disposition is MaterializationDisposition.ACTIVE_NEW, activated
+            async with PostgresKernelUnitOfWork(database) as uow:
+                current_recovery = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+                current_universe = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
+                resolved_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
+            assert current_recovery is not None and current_recovery.authority.authority_outcome == "ACTIVE_NEW"
+            assert current_recovery.authority.selection_authority_id == activated.selection_authority_id
+            assert current_recovery.authority.recovery_proof == recovery_proof.model_copy(update={
+                "committed_at_ms":next_at+4,
+                "recovery_close_plan":recovery_proof.recovery_close_plan.model_copy(update={"evaluated_at_ms":next_at+4})})
+            assert current_recovery.authority.first_eligible_close_time_ms > next_at+4
+            assert current_universe is not None and current_universe.universe_version_id == target_uid
+            assert resolved_vacuum is None
+            async with database.connect() as conn:
+                checkpoint_count = await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+                    "WHERE authority_recovery_id=:id"),{"id":current_recovery.authority.recovery_proof.recovery_close_plan.recovery_id})
+            assert checkpoint_count == len(next_snapshot.selected_members)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=next_at+5)):
+                repeated_activation = await coordinate_selection_materialization_once(
+                    uow_factory=lambda:PostgresKernelUnitOfWork(database),request=next_request,
+                    clock_ms=lambda:next_at+5)
+            assert repeated_activation.disposition is MaterializationDisposition.ACTIVE_NEW
+            assert repeated_activation.selection_authority_id == activated.selection_authority_id
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities "
+                    "WHERE materialization_generation_id=:gid"),{"gid":handoff.materialization_generation_id}) == 1
+                active_scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+                    "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":target_uid})
+            first_close = current_recovery.authority.first_eligible_close_time_ms
+            await make_warming_ready(database,universe_version_id=target_uid,
+                warm_closed_bar_time_ms=first_close,valid_until_ms=first_close+HOUR)
+            template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+            shift = first_close-template.trigger_candle_close_time_ms
+            class RecoveredTargetMarket:
+                async def fetch_closed_candles(self, request):
+                    candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                    return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                        "close_time_ms":c.close_time_ms+shift}) for c in candles)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=first_close+1)):
+                first_observation = await observe_strategy_scope(
+                    lambda:PostgresKernelUnitOfWork(database),RecoveredTargetMarket(),
+                    ObservationRequest(runtime_scope_id=active_scope_id,runtime_commit="a"*40,
+                        schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=first_close,
+                        attempted_at_ms=first_close+1))
+            assert first_observation.status is ObservationStatus.NO_SIGNAL
+            assert first_observation.detector_reason == "RECOVERY_REBASE_REQUIRED"
+            async with PostgresKernelUnitOfWork(database) as uow:
+                checkpoint = await uow.signals.get_authority_recovery_checkpoint(
+                    current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key)
+            assert checkpoint is not None and checkpoint.armed_at_close_time_ms is None
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 0
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            return
         second_failure_at = next_at+first_source.spec.materialization_timeout_ms
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=second_failure_at)):

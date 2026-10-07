@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.selection_authority import (
+    GenericRecoveryAuthority,
     GenericSelectionAuthority,
     SelectionSessionAuthority,
 )
@@ -143,7 +144,7 @@ class UniverseActivationRequest(BaseModel):
     materialization_lease_epoch: int | None = None
     paired_universe_version_id: str | None = None
     selection_authority: SelectionSessionAuthority | None = None
-    generic_authority: GenericSelectionAuthority | None = None
+    generic_authority: GenericSelectionAuthority | GenericRecoveryAuthority | None = None
 
     @field_validator("universe_version_id", mode="before")
     @classmethod

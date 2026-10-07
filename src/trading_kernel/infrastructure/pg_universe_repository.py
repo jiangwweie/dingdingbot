@@ -63,6 +63,7 @@ from src.trading_kernel.domain.comparison_universe import (
 )
 from src.trading_kernel.domain.dynamic_selection_timing import (
     require_current_close_commit,
+    require_hourly_recovery_commit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
@@ -904,13 +905,21 @@ class PostgresStrategyUniverseRepository:
         from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
             PostgresInstrumentSelectionRepository,
             generic_authority_storage_values,
+            generic_recovery_authority_storage_values,
         )
         from src.trading_kernel.infrastructure.pg_signal_repository import (
             PostgresSignalRepository,
         )
         if request.generic_authority is None:
             raise UniverseInstallConflict("GENERIC_AUTHORITY_REQUIRED")
-        authority = GenericSelectionAuthority.model_validate(request.generic_authority.model_dump())
+        authority: GenericSelectionAuthority | GenericRecoveryAuthority
+        if isinstance(request.generic_authority,GenericRecoveryAuthority):
+            authority = GenericRecoveryAuthority.model_validate(request.generic_authority.model_dump())
+        else:
+            authority = GenericSelectionAuthority.model_validate(request.generic_authority.model_dump())
+        recovery_authority = authority if isinstance(authority,GenericRecoveryAuthority) else None
+        normal_authority = authority if isinstance(authority,GenericSelectionAuthority) else None
+        recovering = recovery_authority is not None
         if authority.authority_outcome != "ACTIVE_NEW" or authority.materialization_generation_id != request.materialization_generation_id or authority.event_binding.universe_version_id != request.universe_version_id or authority.created_at_ms != request.attempted_at_ms:
             raise UniverseInstallConflict("GENERIC_AUTHORITY_TARGET_CONFLICT")
         selection = PostgresInstrumentSelectionRepository(self._connection)
@@ -919,14 +928,15 @@ class PostgresStrategyUniverseRepository:
         control = await selection.get_selection_control(authority.strategy_group_id,for_update=True)
         if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=authority.owner_control_version:
             raise UniverseInstallConflict("GENERIC_OWNER_CONTROL_CHANGED")
+        authorization_id = None if normal_authority is None else normal_authority.activation_authorization_id
         first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
             and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
-            and control.pending_authorization_id == authority.activation_authorization_id
-            and authority.activation_authorization_id is not None)
+            and control.pending_authorization_id == authorization_id
+            and authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version + int(first_activation)!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
             raise UniverseInstallConflict("GENERIC_SELECTION_CONTROL_CHANGED")
-        if first_activation and not await selection.generic_activation_authorization_matches(authority):
+        if first_activation and (normal_authority is None or not await selection.generic_activation_authorization_matches(normal_authority)):
             raise UniverseInstallConflict("GENERIC_ACTIVATION_AUTHORIZATION_CHANGED")
         await self._lock_installs()
         generation = await selection.get_generic_materialization_generation(str(request.materialization_generation_id),for_update=True)
@@ -942,19 +952,24 @@ class PostgresStrategyUniverseRepository:
             return UniverseActivationResult(status=UniverseActivationStatus.ALREADY_ACTIVE,reason_code=None,
                 event_spec_id=authority.event_binding.event_spec_id,universe_version_id=request.universe_version_id,
                 previous_universe_version_id=None,activation_generation=current_target.activation_generation,activated_at_ms=current_target.activated_at_ms)
-        if authority.activation_authorization_id is not None and not first_activation:
+        if authorization_id is not None and not first_activation:
             raise UniverseInstallConflict("GENERIC_ACTIVATION_PENDING_REQUIRED")
         vacuum = await selection.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,selection_spec_id=authority.selection_spec_id,for_update=True)
-        if generation.lifecycle_state.value!="STAGED" or vacuum is None or vacuum.state.value!="RECONFIGURING" or vacuum.source_generation_id!=generation.materialization_generation_id or vacuum.fenced_at_ms!=generation.fenced_at_ms:
+        if generation.lifecycle_state.value!="STAGED" or vacuum is None or vacuum.state.value!="RECONFIGURING" or vacuum.source_generation_id!=generation.materialization_generation_id or (
+            (recovering and (generation.fenced_at_ms is None or vacuum.fenced_at_ms>=generation.fenced_at_ms))
+            or (not recovering and vacuum.fenced_at_ms!=generation.fenced_at_ms)):
             raise UniverseInstallConflict("GENERIC_STAGED_DRAINED_GENERATION_REQUIRED")
         now = await selection.read_authority_clock_ms()
         activation_spec = await selection.get_generic_spec(authority.selection_spec_id)
         if generation.fenced_at_ms is None or now>=generation.fenced_at_ms+activation_spec.materialization_timeout_ms:
             raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
-        proof = authority.current_close_proof
-        if proof is None:
-            raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
-        require_current_close_commit(proof,committed_at_ms=now)
+        proof = None if normal_authority is None else normal_authority.current_close_proof
+        if recovery_authority is not None:
+            await selection.require_generic_recovered_activation_proof(recovery_authority.recovery_proof)
+        else:
+            if proof is None:
+                raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+            require_current_close_commit(proof,committed_at_ms=now)
         certified = await self._try_stage_dynamic(request=request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED,"attempted_at_ms":now}),target=target)
         if certified.status is not UniverseActivationStatus.STAGED:
             raise UniverseInstallConflict(str(certified.reason_code))
@@ -980,13 +995,15 @@ class PostgresStrategyUniverseRepository:
             if revision!=authority.comparison_transition_revision:
                 raise UniverseInstallConflict("GENERIC_COMPARISON_REVISION_CHANGED")
         current_authority = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
-        if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority):
+        if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority) and not recovering:
             raise UniverseInstallConflict("GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")
         if first_activation and current_authority is not None:
             raise UniverseInstallConflict("GENERIC_FIRST_ACTIVATION_AUTHORITY_EXISTS")
-        if current_authority is not None and (current_authority.authority.blocks_new_entry
+        if not recovering and current_authority is not None and (current_authority.authority.blocks_new_entry
             or current_authority.authority.expires_at_ms < authority.period.scheduled_effective_at_ms):
             raise UniverseInstallConflict("GENERIC_ACTIVATION_REQUIRES_RECOVERY")
+        if recovery_authority is not None and (current_authority is None or current_authority.authority.selection_authority_id!=recovery_authority.recovery_proof.source_selection_authority_id):
+            raise UniverseInstallConflict("GENERIC_RECOVERY_SOURCE_AUTHORITY_CHANGED")
         if current_authority is not None and (
             current_authority.authority.event_binding.universe_version_id != previous.universe_version_id
             or current_authority.authority.event_binding.member_set_digest != previous.member_set_digest
@@ -1002,11 +1019,36 @@ class PostgresStrategyUniverseRepository:
         if snapshot.selection_spec_id!=authority.selection_spec_id or snapshot.selection_epoch_id!=authority.selection_epoch_id or snapshot.member_set_digest!=authority.event_binding.member_set_digest:
             raise UniverseInstallConflict("GENERIC_ACTIVATION_SNAPSHOT_CHANGED")
         signals = PostgresSignalRepository(self._connection)
-        cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
-            exchange_instrument_ids=snapshot.selected_members,closed_at_ms=proof.current_final_close_time_ms)
-        if cursors!=proof.observation_cursors:
+        if recovery_authority is not None:
+            cursors = await signals.lock_recovery_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
+                exchange_instrument_ids=snapshot.selected_members,selection_mode="dynamic_selection",evaluated_at_ms=now)
+        else:
+            if proof is None:
+                raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+            cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
+                exchange_instrument_ids=snapshot.selected_members,closed_at_ms=proof.current_final_close_time_ms)
+        if recovery_authority is not None:
+            expected_cursors = recovery_authority.recovery_proof.observation_cursors
+        elif proof is not None:
+            expected_cursors = proof.observation_cursors
+        else:
+            raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+        if cursors!=expected_cursors:
             raise UniverseInstallConflict("GENERIC_CLOSE_COVERAGE_CHANGED")
-        await selection.require_generic_close_proof(proof)
+        if recovery_authority is not None:
+            await selection.require_generic_recovered_activation_proof(recovery_authority.recovery_proof)
+        else:
+            if proof is None:
+                raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+            await selection.require_generic_close_proof(proof)
+        if recovery_authority is not None:
+            # The INSERT trigger proves the locked pre-switch source. Deferred
+            # guards prove the post-switch set at commit.
+            await self._connection.execute(sa.insert(selection_session_authorities).values(
+                **generic_recovery_authority_storage_values(recovery_authority)))
+            await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+            await selection.initialize_generic_recovery_checkpoints(recovery_authority.recovery_proof)
         at = authority.created_at_ms
         old_id = current["universe_version_id"]
         await self._connection.execute(sa.update(runtime_scopes_current).where(runtime_scopes_current.c.universe_version_id==old_id).values(
@@ -1034,8 +1076,11 @@ class PostgresStrategyUniverseRepository:
         if first_activation:
             await selection.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,
                 expected_control_version=control.control_version,expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,activated_at_ms=at)
-        await self._connection.execute(sa.insert(selection_session_authorities).values(**generic_authority_storage_values(authority)))
-        await self._connection.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+        if normal_authority is not None:
+            authority_values = generic_authority_storage_values(normal_authority)
+            await self._connection.execute(sa.insert(selection_session_authorities).values(**authority_values))
+            await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
         if current_authority is None:
             changed = await self._connection.execute(pg_insert(selection_authority_current).values(selection_spec_id=authority.selection_spec_id,
                 selection_authority_id=authority.selection_authority_id,projection_version=1,updated_at_ms=at).on_conflict_do_nothing())
@@ -1052,7 +1097,12 @@ class PostgresStrategyUniverseRepository:
         await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
             entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RESOLVED_ACTIVE",payload={"materialization_generation_id":gid},occurred_at_ms=at))
         committed_at = await selection.read_authority_clock_ms()
-        require_current_close_commit(proof,committed_at_ms=committed_at)
+        if recovery_authority is not None:
+            require_hourly_recovery_commit(recovery_authority.recovery_proof.recovery_close_plan,committed_at_ms=committed_at)
+        else:
+            if proof is None:
+                raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
+            require_current_close_commit(proof,committed_at_ms=committed_at)
         if committed_at>=generation.fenced_at_ms+activation_spec.materialization_timeout_ms:
             raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
         if generation.lease_expires_at_ms is None or committed_at>=generation.lease_expires_at_ms:

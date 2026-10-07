@@ -1367,13 +1367,16 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
             committed = await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)
             checked_at = await uow.instrument_selection.read_authority_clock_ms()
+            committed_window_valid = committed is not None and (
+                (committed.authority.created_at_ms if isinstance(committed.authority,GenericRecoveryAuthority)
+                    else committed.authority.effective_from_ms) <= checked_at < committed.authority.expires_at_ms)
             if committed is None or control is None or committed.authority.materialization_generation_id != initial.materialization_generation_id or (
                 committed.authority.selection_control_version != control.control_version
                 or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
                 or control.selection_spec_id != initial.selection_spec_id
                 or control.selection_epoch_id != initial.selection_epoch_id
                 or committed.authority.owner_control_version != owner.control_version
-                or not committed.authority.effective_from_ms <= checked_at < committed.authority.expires_at_ms):
+                or not committed_window_valid):
                 return _blocked("GENERIC_ACTIVE_AUTHORITY_CHANGED")
             active = await uow.strategy_universes.get_current(committed.authority.event_binding.event_spec_id)
             if active is None or active.universe_version_id != committed.authority.event_binding.universe_version_id:
@@ -1466,10 +1469,35 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
                 if vacuum is None or vacuum.source_generation_id!=generation.materialization_generation_id:
                     return _blocked("GENERIC_STAGED_VACUUM_CHANGED")
-                if generation.fenced_at_ms is None or vacuum.fenced_at_ms!=generation.fenced_at_ms:
-                    # A retargeted Vacuum is a real authority gap. It can be
-                    # certified/staged, but never receives a normal current-close grant.
-                    return _blocked("GENERIC_RECOVERY_AUTHORITY_REQUIRED")
+                if generation.fenced_at_ms is None:
+                    return _blocked("GENERIC_STAGED_FENCE_MISSING")
+                if vacuum.fenced_at_ms!=generation.fenced_at_ms:
+                    # A retargeted Vacuum is a real authority gap. Only the
+                    # future-close recovery proof may authorize this target.
+                    recovery_proof = await uow.instrument_selection.prepare_generic_recovered_activation_proof(
+                        generation.materialization_generation_id)
+                    prior_recovery = await uow.instrument_selection.get_current_generic_authority(
+                        generation.selection_spec_id,for_update=True)
+                    sequence = 1 if prior_recovery is None or prior_recovery.authority.period!=recovery_proof.recovery_close_plan.period else (
+                        prior_recovery.authority.authority_sequence+1)
+                    recovered_authority = GenericRecoveryAuthority.build(proof=recovery_proof,authority_sequence=sequence)
+                    target_rows = await uow.strategy_universes.get_generation_universe_targets(
+                        generation.materialization_generation_id,for_update=True)
+                    if len(target_rows)!=1 or target_rows[0].lifecycle_state.value!="staged":
+                        return _blocked("GENERIC_RECOVERY_TARGET_CHANGED")
+                    recovered_target = target_rows[0]
+                    activated = await advance_strategy_universe(uow,UniverseActivationRequest(
+                        universe_version_id=recovered_target.universe_version_id,attempted_at_ms=recovery_proof.committed_at_ms,
+                        operation=UniverseActivationOperation.ACTIVATE_GENERIC,
+                        materialization_generation_id=generation.materialization_generation_id,
+                        materialization_lease_owner=request.worker_id,materialization_lease_epoch=generation.lease_epoch,
+                        generic_authority=recovered_authority))
+                    if activated.status not in {UniverseActivationStatus.ACTIVATED,UniverseActivationStatus.ALREADY_ACTIVE}:
+                        return _blocked(str(activated.reason_code))
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
+                        selection_authority_id=recovered_authority.selection_authority_id,
+                        materialization_generation_id=generation.materialization_generation_id,
+                        selection_snapshot_id=generation.selection_snapshot_id,entry_vacuum_id=vacuum.entry_vacuum_id)
                 control = await uow.instrument_selection.get_selection_control(generation.strategy_group_id,for_update=True)
                 first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
                     control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
