@@ -225,8 +225,11 @@ def _generic_gap_open_ledger_guard() -> None:
         last_close:=least((v.fenced_at_ms/3600000)*3600000,expiry-3600000);
         SELECT jsonb_agg(t ORDER BY t),count(*) INTO expected,n
           FROM generate_series(first_close,last_close,3600000::bigint) AS t;
-        RETURN coalesce(n>1 AND (payload->>'missed_close_count')::integer=n
+        RETURN coalesce(n>0 AND (n>1 OR v.fenced_at_ms>=expiry)
+          AND (payload->>'missed_close_count')::integer=n
           AND payload->'missed_close_time_ms'=expected
+          AND (payload->>'uncovered_close_count')::bigint=v.fenced_at_ms/3600000-first_close/3600000+1
+          AND (payload->>'uncovered_last_close_time_ms')::bigint=(v.fenced_at_ms/3600000)*3600000
           AND (payload->>'period_expires_at_ms')::bigint=expiry,false);
       EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
       END; $$

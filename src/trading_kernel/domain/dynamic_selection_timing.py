@@ -45,11 +45,20 @@ def missed_closes_at_gap_fence(*, period: GenericSelectionPeriod,
     fenced_at_ms: int) -> tuple[int, ...]:
     """Exact elapsed close boundaries, never inferred Detector or P&L outcomes."""
     period = GenericSelectionPeriod.model_validate(period.model_dump())
-    if not period.scheduled_effective_at_ms <= fenced_at_ms < period.period_expires_at_ms:
-        raise ValueError("gap fence is outside its Selection period")
+    if fenced_at_ms < period.scheduled_effective_at_ms:
+        raise ValueError("gap fence precedes its Selection period")
     latest = fenced_at_ms//_HOUR_MS*_HOUR_MS
     return tuple(range(period.scheduled_effective_at_ms,
         min(latest,period.period_expires_at_ms-_HOUR_MS)+1,_HOUR_MS))
+
+
+def uncovered_close_count_since_gap(*, period: GenericSelectionPeriod,
+    fenced_at_ms: int) -> int:
+    """Count the full hourly authority gap without allocating unbounded rows."""
+    period = GenericSelectionPeriod.model_validate(period.model_dump())
+    if fenced_at_ms < period.scheduled_effective_at_ms:
+        raise ValueError("gap fence precedes its Selection period")
+    return (fenced_at_ms//_HOUR_MS*_HOUR_MS-period.scheduled_effective_at_ms)//_HOUR_MS+1
 
 
 HourlyRecoveryReason = Literal[

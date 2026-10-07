@@ -18,6 +18,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     confirm_dynamic_membership_snapshot,
     missed_closes_at_gap_fence,
     record_dynamic_selection_miss,
+    uncovered_close_count_since_gap,
 )
 
 
@@ -26,8 +27,20 @@ def test_gap_ledger_counts_only_due_closed_bars_without_inventing_signals() -> N
     assert missed_closes_at_gap_fence(period=period,fenced_at_ms=106*3600000+1) == (
         105*3600000,106*3600000)
     assert missed_closes_at_gap_fence(period=period,fenced_at_ms=105*3600000+1) == (105*3600000,)
+    assert missed_closes_at_gap_fence(period=period,fenced_at_ms=period.period_expires_at_ms) == (
+        105*3600000,106*3600000,107*3600000,108*3600000)
     with pytest.raises(ValueError,match="period"):
-        missed_closes_at_gap_fence(period=period,fenced_at_ms=period.period_expires_at_ms)
+        missed_closes_at_gap_fence(period=period,fenced_at_ms=period.scheduled_effective_at_ms-1)
+
+
+def test_expired_hourly_gap_records_its_only_close_without_inventing_future_eligibility() -> None:
+    period = build_generic_selection_period(feature_cutoff_at_ms=101*3600000,cadence_hours=1)
+    assert missed_closes_at_gap_fence(period=period,
+        fenced_at_ms=period.period_expires_at_ms+1) == (period.scheduled_effective_at_ms,)
+    assert uncovered_close_count_since_gap(period=period,
+        fenced_at_ms=period.period_expires_at_ms+1) == 2
+    assert uncovered_close_count_since_gap(period=period,
+        fenced_at_ms=period.period_expires_at_ms+3*3600000+1) == 5
 from src.trading_kernel.domain.generic_selection_jobs import (
     GenericSelectionJobClaim,
     selection_job_identity,

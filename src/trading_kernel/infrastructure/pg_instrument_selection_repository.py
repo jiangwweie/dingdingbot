@@ -39,6 +39,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     require_current_close_commit,
     require_generic_continuity_commit,
     require_hourly_recovery_commit,
+    uncovered_close_count_since_gap,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_episode import (
@@ -4620,8 +4621,10 @@ class PostgresInstrumentSelectionRepository:
         period = build_generic_selection_period(feature_cutoff_at_ms=vacuum.period_anchor_ms,
             cadence_hours=spec.cadence_hours)
         missed = missed_closes_at_gap_fence(period=period,fenced_at_ms=vacuum.fenced_at_ms)
-        if not missed or missed[-1]==period.scheduled_effective_at_ms:
+        if not missed or (missed[-1]==period.scheduled_effective_at_ms
+            and vacuum.fenced_at_ms<period.period_expires_at_ms):
             raise SelectionJobConflict("Generic authority gap has no missed later close")
+        uncovered = uncovered_close_count_since_gap(period=period,fenced_at_ms=vacuum.fenced_at_ms)
         await self._connection.execute(sa.insert(strategy_entry_vacuums_current).values(
             **vacuum.model_dump(mode="json")))
         await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
@@ -4630,7 +4633,8 @@ class PostgresInstrumentSelectionRepository:
             payload={"intended_outcome":"PRE_FENCE_CONTINUITY",
                 "source_selection_authority_id":source_selection_authority_id,
                 "missed_close_time_ms":missed,"missed_close_count":len(missed),
-                "missed_close_reason":"AUTHORITY_GAP","period_expires_at_ms":period.period_expires_at_ms},
+                "missed_close_reason":"AUTHORITY_GAP","period_expires_at_ms":period.period_expires_at_ms,
+                "uncovered_close_count":uncovered,"uncovered_last_close_time_ms":vacuum.fenced_at_ms//3_600_000*3_600_000},
             occurred_at_ms=vacuum.fenced_at_ms))
 
     async def open_owner_paused_entry_vacuum(

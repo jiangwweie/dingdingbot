@@ -1302,11 +1302,41 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return _blocked("GENERIC_SNAPSHOT_PERIOD_EXPIRED")
             if now_ms < snapshot.committed_at_ms:
                 return _blocked("GENERIC_SNAPSHOT_COMMIT_IS_FUTURE")
+            prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
+            if prior_vacuum is None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
+                prior_authority = await uow.instrument_selection.get_current_generic_authority(
+                    snapshot.selection_spec_id,for_update=True)
+                if prior_authority is not None and not prior_authority.authority.blocks_new_entry and (
+                    prior_authority.authority.expires_at_ms<snapshot.effective_from_ms):
+                    missed_anchor = prior_authority.authority.expires_at_ms-HOUR_MS
+                    missed_period = build_generic_selection_period(feature_cutoff_at_ms=missed_anchor,
+                        cadence_hours=(await uow.instrument_selection.get_generic_spec(snapshot.selection_spec_id)).cadence_hours)
+                    if (prior_authority.authority.selection_epoch_id!=snapshot.selection_epoch_id
+                        or missed_period.period_expires_at_ms>now_ms):
+                        return _blocked("GENERIC_EXPIRED_AUTHORITY_GAP_NOT_PROVEN")
+                    fence_at = await uow.instrument_selection.read_authority_clock_ms()
+                    gap = StrategyEntryVacuum(entry_vacuum_id="vacuum:gap:"+canonical_digest({
+                        "selection_spec_id":snapshot.selection_spec_id,"period_anchor_ms":missed_anchor,
+                        "source_selection_authority_id":prior_authority.authority.selection_authority_id})[7:],
+                        strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,
+                        period_anchor_ms=missed_anchor,source_generation_id=None,state=StrategyEntryVacuumState.OPEN,
+                        fenced_at_ms=fence_at,drained_at_ms=None,resolved_at_ms=None,
+                        first_blocker="AUTHORITY_GAP",projection_version=1)
+                    await uow.instrument_selection.open_generic_authority_gap_vacuum(gap,
+                        source_selection_authority_id=prior_authority.authority.selection_authority_id,
+                        expected_current_version=prior_authority.projection_version)
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                        entry_vacuum_id=gap.entry_vacuum_id,reason_code="GENERIC_EXPIRED_AUTHORITY_GAP_FENCED")
+            if prior_vacuum is not None and prior_vacuum.first_blocker=="AUTHORITY_GAP" and (
+                prior_vacuum.state in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY}):
+                drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,now_ms=now_ms))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=prior_vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
             if not snapshot.selected_members:
                 return await _coordinate_generic_empty(uow=uow,snapshot=snapshot,control=control,
                     owner_control_version=owner.control_version,now_ms=now_ms)
-            prior_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
-                strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,for_update=True)
             gap_handoff = (prior_vacuum is not None and prior_vacuum.source_generation_id is None
                 and prior_vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
                 and prior_vacuum.first_blocker == "AUTHORITY_GAP")
