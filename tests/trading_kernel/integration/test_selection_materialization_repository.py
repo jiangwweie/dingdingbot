@@ -2497,6 +2497,12 @@ async def test_temporary_certification_outage_waits_and_resumes_materialization(
                 blocker_code="readonly_facts_unavailable",
             )
         )
+    async with head_template_engine.connect() as connection:
+        original_fence = await connection.scalar(sa.select(
+            strategy_universe_materialization_generations.c.fenced_at_ms).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id))
+    assert original_fence is not None
+    original_deadline = original_fence+1_800_000
 
     waiting = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
@@ -2523,8 +2529,12 @@ async def test_temporary_certification_outage_waits_and_resumes_materialization(
                 == generation_id
             )
         )
+        unchanged_fence = await connection.scalar(sa.select(
+            strategy_universe_materialization_generations.c.fenced_at_ms).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id))
     assert generation_state == "MATERIALIZING"
     assert audit_count == 0
+    assert unchanged_fence == original_fence
 
     await make_warming_ready(
         head_template_engine,
@@ -2546,7 +2556,34 @@ async def test_temporary_certification_outage_waits_and_resumes_materialization(
                 == installed.universe.universe_version_id
             )
         )
+        resumed_fence = await connection.scalar(sa.select(
+            strategy_universe_materialization_generations.c.fenced_at_ms).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id))
     assert long_state == "staged"
+    assert resumed_fence+1_800_000 == original_deadline
+    timed_out = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
+        request=_materialization_request("materializer:temporary-outage-original-deadline"),
+        clock_ms=_Clock(original_deadline),
+    )
+    assert timed_out.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
+    assert timed_out.authority_gap_audit_id is not None
+    async with head_template_engine.connect() as connection:
+        final_fence = await connection.scalar(sa.select(
+            strategy_universe_materialization_generations.c.fenced_at_ms).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id))
+        final_state = await connection.scalar(sa.select(
+            strategy_universe_materialization_generations.c.lifecycle_state).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id))
+        first_blocker = await connection.scalar(sa.text(
+            "SELECT first_blocker FROM brc_strategy_entry_vacuums_current "
+            "WHERE source_generation_id=:gid"),{"gid":generation_id})
+        positive_grants = await connection.scalar(sa.select(sa.func.count()).select_from(
+            selection_session_authorities).where(
+                selection_session_authorities.c.period_anchor_ms==SESSION_START_MS))
+    assert final_fence == original_fence and final_state == "MATERIALIZING", timed_out
+    assert first_blocker == "materialization_timeout"
+    assert positive_grants == 0
 
 
 @pytest.mark.asyncio
@@ -3336,10 +3373,16 @@ async def test_newer_valid_snapshot_supersedes_unactivated_generation_without_fa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("audit_failed", [False,True])
 async def test_newer_snapshot_supersession_fails_old_pending_gap_audit(
     head_template_engine,
+    audit_failed: bool,
 ) -> None:
     old_generation_id, _, _ = await _prepare_staged_pair(head_template_engine)
+    async with head_template_engine.connect() as connection:
+        initial_authority_count = await connection.scalar(sa.select(sa.func.count()).select_from(
+            selection_session_authorities).where(
+                selection_session_authorities.c.period_anchor_ms==SESSION_START_MS))
     old_audit = await coordinate_selection_materialization_once(
         uow_factory=lambda: PostgresKernelUnitOfWork(head_template_engine),
         request=_materialization_request("materializer:old-audit"),
@@ -3347,6 +3390,16 @@ async def test_newer_snapshot_supersession_fails_old_pending_gap_audit(
     )
     assert old_audit.disposition is MaterializationDisposition.GAP_AUDIT_PENDING
     assert old_audit.authority_gap_audit_id is not None
+    if audit_failed:
+        failed = await complete_pending_authority_gap_audit(
+            uow_factory=lambda:PostgresKernelUnitOfWork(head_template_engine),
+            audit_source=_FailingAuditSource(AuthorityGapAuditSourceIntegrityError(
+                "source_integrity_failed_before_new_selection")),
+            authority_gap_audit_id=old_audit.authority_gap_audit_id,
+            clock_ms=_Clock(SESSION_START_MS+4_500_010),
+        )
+        assert failed.disposition is MaterializationDisposition.BLOCKED
+        assert failed.reason_code == "AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED"
     next_session_start_ms = SESSION_START_MS + 86_400_000
     next_members = tuple(
         sorted(
@@ -3395,8 +3448,13 @@ async def test_newer_snapshot_supersession_fails_old_pending_gap_audit(
                 == old_generation_id
             )
         )
-    assert audit_row == ("FAILED", "SUPERSEDED_BY_NEWER_SELECTION")
+    assert audit_row == ("FAILED", "AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED"
+        if audit_failed else "SUPERSEDED_BY_NEWER_SELECTION")
     assert generation_state == "SUPERSEDED"
+    async with head_template_engine.connect() as connection:
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(
+            selection_session_authorities).where(
+                selection_session_authorities.c.period_anchor_ms==SESSION_START_MS)) == initial_authority_count
 
 
 @pytest.mark.parametrize(

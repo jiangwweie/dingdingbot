@@ -377,6 +377,8 @@ MPG/MI三期自然rebase链增量（基于`d28fe872`）：首次Owner→Runner�
 
 **GS-07-SOR-INCIDENT-01（必须显式验收）**：`temporarily_unavailable`属于retryable，不能压成`CERTIFICATION_NOT_ELIGIBLE`后立即fallback；`owner_action_required`属于non-transient，可进入受现有条件约束的fallback，不代表可越过Owner pause或drain。任何retry、重启或重新取得lease不得刷新原materialization deadline。测试需从真实certification结果经Coordinator到Generation/Vacuum断言状态及原deadline，而非只测枚举分类。
 
+2026-10-08事故路径认证补强：Docker PostgreSQL先将真实Generation-owned LONG target认证置`temporarily_unavailable`，经正式Coordinator返回`LONG_WARMING / CERTIFICATION_TEMPORARILY_UNAVAILABLE`，Generation仍`MATERIALIZING`、Gap Audit为0，原fence时间不变；恢复认证后LONG进入STAGED/SHORT warming，换Worker在原`fence + 1800s`再次tick立即进入materialization timeout的Gap Audit pending，Vacuum blocker为`materialization_timeout`，仍无新增Session Authority。另有`owner_action_required`在首个合法close前建立pending Audit且recording replay调用为0的现有专项。本次是对既有代码补真正deadline与无提前授权的验收，不更改SOR语义。SOR materialization全模块78 passed、Ruff/diff通过；不是GS-07整卡或final R4，生产未修改。
+
 **验证**：真实PG+recording venue；全局slot冲突、partial staging、resume/abandon/reclaim、duplicate callback；零warming Signal/Ticket/Command，source eligibility不得从研究数据读。
 
 **Done**：targets可准确STAGED/ABANDONED并恢复，最终activation权限留给GS-08，无incremental warming/carry-forward新设计；§3.4相关SOR子集PASS。
@@ -710,6 +712,8 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 7. **GS-08-SOR-INCIDENT-01**：`now < first eligible close`时Gap Audit不得调用market replay，保持pending；用recording source证明零调用，不能靠构造4根OR后的空path绕过。
 8. **GS-08-SOR-INCIDENT-02**：expired session不得伪造retroactive Authority。首次Dynamic失败只走正式recovery/supersession，保留previous Static pair及`selection_mode=static_baseline`；failed Audit不能无限卡住后续合法恢复。测试覆盖failed Audit、重启、新period与Owner pause交叉路径，禁止以直接SQL修复作为运行方案。
+
+2026-10-08 failed Audit跨Session接管补强：在旧Generation的真实Gap Audit先变成`AUTHORITY_GAP_SOURCE_INTEGRITY_FAILED`、当前Session仍零新增Authority之后，提交下一Session的有效Snapshot；正式Coordinator将旧Generation设`SUPERSEDED`、旧Audit保留原失败原因、新Generation继续接管同一Vacuum，旧Session Authority数量不增加。与原pending Audit被新Snapshot合法supersede的分支参数化复验2 passed；Owner Pause和expired窗口仍由独立现有测试覆盖，不用直接SQL修复旧Audit。SOR materialization全模块78 passed、Ruff/diff通过；不把这一条扩称全部GS-08或R4完成。
 9. **GS-08-HOURLY-CLOCK-01**：NORMAL证明完整时，05:00:08可消费05:00最新未消费close；8秒/30秒/2分钟延迟不能仅按耗时变成RECOVERY。迟到Snapshot、已消费close、freshness失效、commit越界拒绝。RECOVERY原因一旦成立，禁止恢复后降级NORMAL追认；future-close-only与独立recovery revision rebase必须覆盖四策略，先未来合法NOT_TRIGGERED再更晚TRIGGERED。首个未来close不小于expiry时记录NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY及miss，零新Signal/Ticket；下一合法period才能恢复。SOR保持专属Gap Audit路径。
 
 **验证**：PG并发事务/barrier测试+recording network；current-close先consume或先switch两种顺序、crash每个commit点、重试terminal authority；SOR近期四类bug regression。
