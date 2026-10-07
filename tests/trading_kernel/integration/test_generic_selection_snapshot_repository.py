@@ -37,6 +37,7 @@ from src.trading_kernel.application.drain_strategy_entry_vacuum import (
 )
 from src.trading_kernel.application.ingest_signal import (
     resolve_selection_entry_authority,
+    resolve_selection_observation_authority,
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
@@ -3197,6 +3198,67 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 dispatch_request.model_copy(update={"now_ms":issued_at+7}),entry_facts_source=SuccessorEntryFacts())
             assert repeated_dispatch.status.value == "no_command"
             assert len(venue.calls) == 1
+            next_anchor = period_snapshot.feature_cutoff_at_ms+first_source.spec.cadence_hours*HOUR
+            continuity_close = next_anchor+HOUR
+            await make_warming_ready(database,universe_version_id=target_uid,
+                warm_closed_bar_time_ms=continuity_close,valid_until_ms=continuity_close+HOUR)
+            template = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+            shift = continuity_close-template.trigger_candle_close_time_ms
+            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                before_continuity = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+            assert before_continuity is not None
+            compare_at_boundary = build_comparative_universe_projection(
+                event_spec_id=first_source.spec.event_spec_id,universe_version_id=target_uid,
+                strategy_group_id=group,exchange_instrument_ids=first_source.spec.candidate_ids,
+                closed_bar_time_ms=continuity_close,lookback_bars=8 if group=="MPG-001" else 12,
+                freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(
+                    exchange_instrument_id=member,candles_1h=candles) for member in first_source.spec.candidate_ids))
+            compare_at_boundary = compare_at_boundary.model_copy(update={
+                "comparison_transition_revision":before_continuity.authority.comparison_transition_revision})
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(compare_at_boundary)
+            at = continuity_close+1
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=at)):
+                carried = await coordinate_selection_materialization_once(
+                    uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                    request=CoordinateGenericPeriodRequest(strategy_group_id=group,
+                        selection_spec_id=first_source.spec.selection_spec_id,period_anchor_ms=next_anchor,
+                        worker_id="recovery-origin-continuity"),clock_ms=lambda:at)
+            assert carried.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY, carried
+            async with PostgresKernelUnitOfWork(database) as uow:
+                continuation = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+                scope = await uow.signals.get_runtime_scope(active_scope_id)
+                frozen_ticket = await uow.tickets.get(issued.ticket_id)
+            assert continuation is not None and scope is not None and frozen_ticket is not None
+            assert continuation.authority.current_close_proof.origin_recovery_authority_id==current_recovery.authority.selection_authority_id
+            assert continuation.authority.membership_freshness.source_snapshot_id==period_snapshot.selection_snapshot_id
+            assert continuation.authority.membership_freshness.state.value=="GRACE"
+            assert frozen_ticket.selection_authority_id==renewed.selection_authority_id
+            async with PostgresKernelUnitOfWork(database) as uow:
+                observation_permission = await resolve_selection_observation_authority(uow,runtime_scope=scope,
+                    birth_selection_authority_id=None,observed_close_time_ms=continuity_close,
+                    now_ms=at,allow_current_as_birth=True,lock_current=True)
+            assert observation_permission.allowed
+            assert observation_permission.reason_code=="generic_recovery_observation"
+            class RecoveryOriginMarket:
+                async def fetch_closed_candles(self, request):
+                    path = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                    return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                        "close_time_ms":c.close_time_ms+shift}) for c in path)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=at+2)):
+                preserved = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),RecoveryOriginMarket(),
+                    ObservationRequest(runtime_scope_id=active_scope_id,runtime_commit="a"*40,
+                        schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=continuity_close,
+                        attempted_at_ms=at+2))
+            assert preserved.status is ObservationStatus.NO_SIGNAL, preserved
+            async with PostgresKernelUnitOfWork(database) as uow:
+                checkpoint = await uow.signals.get_authority_recovery_checkpoint(
+                    current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key)
+            assert checkpoint is not None and checkpoint.recovery_id==current_recovery.authority.recovery_proof.recovery_close_plan.recovery_id
             return
         second_failure_at = next_at+first_source.spec.materialization_timeout_ms
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
