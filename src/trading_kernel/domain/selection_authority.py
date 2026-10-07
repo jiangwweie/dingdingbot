@@ -19,6 +19,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
     DynamicMembershipFreshness,
     DynamicMembershipState,
+    GenericContinuityCloseProof,
     GenericSelectionPeriod,
     HourlyRecoveryClosePlan,
     require_hourly_recovery_commit,
@@ -795,8 +796,8 @@ def trusted_universe_membership_policy(
 class GenericSelectionAuthority(BaseModel):
     """Normal/empty Generic authority contract; persistence remains the shared chain.
 
-    Recovery and continuity must supply their own typed proofs, not masquerade
-    as normal ACTIVE_NEW/NO_CHANGE grants.
+    Recovery and continuity supply distinct typed proofs, never normal
+    ACTIVE_NEW/NO_CHANGE evidence by assertion.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -812,10 +813,11 @@ class GenericSelectionAuthority(BaseModel):
     selection_control_version: int = Field(gt=0)
     activation_authorization_id: str | None = None
     continued_from_recovery_authority_id: str | None = None
+    continuity_source_authority_id: str | None = None
     period: GenericSelectionPeriod
-    authority_outcome: Literal["ACTIVE_NEW", "NO_CHANGE", "VALID_EMPTY"]
+    authority_outcome: Literal["ACTIVE_NEW", "NO_CHANGE", "VALID_EMPTY", "PRE_FENCE_CONTINUITY"]
     event_binding: AuthorityEventBinding
-    current_close_proof: CurrentFinalCloseGrantProof | None
+    current_close_proof: CurrentFinalCloseGrantProof | GenericContinuityCloseProof | None
     membership_freshness: DynamicMembershipFreshness | None
     comparison_universe_id: str | None = None
     comparison_transition_revision: int | None = None
@@ -830,7 +832,7 @@ class GenericSelectionAuthority(BaseModel):
         return value.strip()
 
     @field_validator("materialization_generation_id", "comparison_universe_id", "activation_authorization_id",
-        "continued_from_recovery_authority_id")
+        "continued_from_recovery_authority_id", "continuity_source_authority_id")
     @classmethod
     def _optional_identity(cls, value: str | None) -> str | None:
         if value is not None and (not value.strip() or value != value.strip() or len(value)>160):
@@ -878,7 +880,7 @@ class GenericSelectionAuthority(BaseModel):
         if self.comparison_transition_revision is not None and self.comparison_transition_revision < 0:
             raise ValueError("Generic comparison revision is invalid")
         if self.blocks_new_entry:
-            if self.continued_from_recovery_authority_id is not None:
+            if self.continued_from_recovery_authority_id is not None or self.continuity_source_authority_id is not None:
                 raise ValueError("VALID_EMPTY cannot inherit a positive recovery barrier")
             if self.materialization_generation_id is not None:
                 raise ValueError("VALID_EMPTY forbids a materialization Generation")
@@ -887,6 +889,36 @@ class GenericSelectionAuthority(BaseModel):
             return self
         if self.event_binding.grant_state is not AuthorityEventGrantState.ACTIVE:
             raise ValueError("normal Generic Authority requires ACTIVE Event")
+        if self.authority_outcome == "PRE_FENCE_CONTINUITY":
+            proof = self.current_close_proof
+            fresh = self.membership_freshness
+            if not isinstance(proof,GenericContinuityCloseProof) or self.continuity_source_authority_id is None or (
+                self.materialization_generation_id is not None or self.activation_authorization_id is not None
+                or proof.source_selection_authority_id!=self.continuity_source_authority_id
+                or proof.origin_recovery_authority_id!=self.continued_from_recovery_authority_id
+                or proof.source_snapshot_id!=self.selection_snapshot_id or proof.period!=self.period
+                or proof.authority_granted_at_ms!=self.effective_from_ms):
+                raise ValueError("Continuity requires its exact source and current-close proof")
+            if fresh is None or fresh.state is not DynamicMembershipState.GRACE or (
+                fresh.consecutive_missed_periods!=1 or fresh.source_snapshot_id!=self.selection_snapshot_id
+                or fresh.source_member_set_digest!=self.event_binding.member_set_digest
+                or fresh.source_snapshot_effective_at_ms+fresh.cadence_hours*HOUR_MS!=self.period.scheduled_effective_at_ms
+                or fresh.membership_valid_until_ms!=self.period.period_expires_at_ms):
+                raise ValueError("Continuity cannot refresh the prior membership deadline")
+            members = tuple(cursor.exchange_instrument_id for cursor in proof.observation_cursors)
+            if selected_member_set_digest(members)!=self.event_binding.member_set_digest or (
+                len(members)>spec.retain_rank or not set(members).issubset(spec.candidate_ids)
+                or any(cursor.episode_domain_key!=build_episode_domain_key(
+                    event_spec_id=spec.event_spec_id,exchange_instrument_id=cursor.exchange_instrument_id,
+                    position_side=spec.position_side) for cursor in proof.observation_cursors)):
+                raise ValueError("Continuity member coverage differs")
+            if comparative and (self.comparison_universe_id!="comparison:"+_semantic_digest({
+                "exchange_instrument_ids":spec.candidate_ids})[7:] or self.comparison_transition_revision is None
+                or self.comparison_transition_revision<=0):
+                raise ValueError("Continuity comparison identity differs")
+            return self
+        if self.continuity_source_authority_id is not None:
+            raise ValueError("ordinary Authority cannot claim a continuity source")
         if self.authority_outcome == "NO_CHANGE" and self.materialization_generation_id is not None:
             raise ValueError("NO_CHANGE forbids a materialization Generation")
         if self.continued_from_recovery_authority_id is not None and self.authority_outcome != "NO_CHANGE":
@@ -901,7 +933,7 @@ class GenericSelectionAuthority(BaseModel):
             raise ValueError("Generic trading comparison requires fixed24 and positive revision")
         proof = self.current_close_proof
         fresh = self.membership_freshness
-        if proof is None or proof.period != self.period or proof.selection_snapshot_id != self.selection_snapshot_id or proof.authority_granted_at_ms != self.effective_from_ms:
+        if not isinstance(proof,CurrentFinalCloseGrantProof) or proof.period != self.period or proof.selection_snapshot_id != self.selection_snapshot_id or proof.authority_granted_at_ms != self.effective_from_ms:
             raise ValueError("Generic Authority current-close proof differs")
         covered_members = tuple(cursor.exchange_instrument_id for cursor in proof.observation_cursors)
         if selected_member_set_digest(covered_members) != self.event_binding.member_set_digest or (

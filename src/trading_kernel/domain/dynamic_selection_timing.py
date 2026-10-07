@@ -240,6 +240,44 @@ class CurrentFinalCloseGrantProof(BaseModel):
         return self
 
 
+class GenericContinuityCloseProof(BaseModel):
+    """The previous exact set, not a new Selection result, owns this close."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    proof_kind: Literal["PRE_FENCE_CONTINUITY_CURRENT_CLOSE"] = "PRE_FENCE_CONTINUITY_CURRENT_CLOSE"
+    source_selection_authority_id: str
+    source_snapshot_id: str
+    origin_recovery_authority_id: str | None = None
+    period: GenericSelectionPeriod
+    current_final_close_time_ms: int
+    authority_granted_at_ms: int
+    observation_cursors: tuple[LockedObservationCursor, ...]
+
+    @field_validator("source_selection_authority_id", "source_snapshot_id", "origin_recovery_authority_id")
+    @classmethod
+    def _bounded_identity(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value!=value.strip() or len(value)>160):
+            raise ValueError("Continuity requires an exact bounded source identity")
+        return value
+
+    @model_validator(mode="after")
+    def _shape(self) -> GenericContinuityCloseProof:
+        close = self.current_final_close_time_ms
+        if close<=0 or close%_HOUR_MS or close!=self.authority_granted_at_ms//_HOUR_MS*_HOUR_MS or (
+            not self.period.scheduled_effective_at_ms==close<self.authority_granted_at_ms<self.period.period_expires_at_ms):
+            raise ValueError("Continuity must grant only the latest unconsumed current close")
+        if not self.source_selection_authority_id or not self.source_snapshot_id:
+            raise ValueError("Continuity requires a source Authority and Snapshot")
+        members = tuple(cursor.exchange_instrument_id for cursor in self.observation_cursors)
+        if not 1<=len(members)<=16 or members!=tuple(sorted(set(members))) or (
+            len({cursor.episode_domain_key for cursor in self.observation_cursors})!=len(members)
+            or any(cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>=close
+                for cursor in self.observation_cursors)):
+            raise ValueError("Continuity requires exact unconsumed member coverage")
+        return self
+
+
 def require_current_close_commit(proof: CurrentFinalCloseGrantProof, *, committed_at_ms: int) -> None:
     """Recheck NORMAL close at the final transaction boundary; never reclassify a gap."""
     proof = CurrentFinalCloseGrantProof.model_validate(proof.model_dump())
@@ -247,6 +285,13 @@ def require_current_close_commit(proof: CurrentFinalCloseGrantProof, *, committe
         raise ValueError("current-close commit clock moved backwards")
     if committed_at_ms >= proof.period.period_expires_at_ms or committed_at_ms//_HOUR_MS*_HOUR_MS != proof.current_final_close_time_ms:
         raise ValueError("current-close commit crossed its proof boundary")
+
+
+def require_generic_continuity_commit(proof: GenericContinuityCloseProof, *, committed_at_ms: int) -> None:
+    proof = GenericContinuityCloseProof.model_validate(proof.model_dump())
+    if committed_at_ms<proof.authority_granted_at_ms or committed_at_ms>=proof.period.period_expires_at_ms or (
+        committed_at_ms//_HOUR_MS*_HOUR_MS!=proof.current_final_close_time_ms):
+        raise ValueError("Continuity commit crossed its current-close boundary")
 
 
 def build_generic_selection_period(

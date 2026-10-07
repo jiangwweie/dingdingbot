@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from hashlib import sha256
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, cast
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -30,11 +30,13 @@ from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBind
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
     DynamicMembershipState,
+    GenericContinuityCloseProof,
     build_dynamic_membership_freshness,
     build_generic_selection_period,
     plan_hourly_recovery_close,
     record_dynamic_selection_miss,
     require_current_close_commit,
+    require_generic_continuity_commit,
     require_hourly_recovery_commit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
@@ -3827,7 +3829,7 @@ class PostgresInstrumentSelectionRepository:
             PostgresStrategyUniverseRepository,
         )
         authority = GenericSelectionAuthority.model_validate(authority.model_dump())
-        if authority.authority_outcome != "NO_CHANGE" or authority.current_close_proof is None:
+        if authority.authority_outcome != "NO_CHANGE" or not isinstance(authority.current_close_proof,CurrentFinalCloseGrantProof):
             raise ValueError("NO_CHANGE commit requires normal proof without Generation")
         owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
             strategy_entry_controls_current.c.strategy_group_id == authority.strategy_group_id).with_for_update())).mappings().one_or_none()
@@ -3939,6 +3941,52 @@ class PostgresInstrumentSelectionRepository:
         if updated.rowcount!=1:
             raise SelectionJobConflict("NO_CHANGE current CAS failed")
         require_current_close_commit(authority.current_close_proof,committed_at_ms=await self.read_authority_clock_ms())
+
+    async def commit_generic_continuity(self, authority: GenericSelectionAuthority, *,
+        expected_current_version: int) -> None:
+        """Commit a one-miss current-set Authority without a Selection result."""
+        authority = GenericSelectionAuthority.model_validate(authority.model_dump())
+        proof = authority.current_close_proof
+        if authority.authority_outcome!="PRE_FENCE_CONTINUITY" or not isinstance(proof,GenericContinuityCloseProof):
+            raise SelectionJobConflict("Generic continuity requires its typed source proof")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==authority.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(authority.strategy_group_id,for_update=True)
+        current = await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+        if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=authority.owner_control_version or (
+            control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.selection_spec_id!=authority.selection_spec_id or control.selection_epoch_id!=authority.selection_epoch_id
+            or control.control_version!=authority.selection_control_version or control.pending_selection_mode is not None
+            or current is None or current.projection_version!=expected_current_version
+            or current.authority.selection_authority_id!=proof.source_selection_authority_id):
+            raise SelectionJobConflict("Generic continuity Owner, Control or source changed")
+        if await self.get_current_entry_vacuum(strategy_group_id=authority.strategy_group_id,
+            selection_spec_id=authority.selection_spec_id,for_update=True) is not None:
+            raise SelectionJobConflict("Generic continuity cannot cross a Vacuum")
+        now = await self.read_authority_clock_ms()
+        require_generic_continuity_commit(proof,committed_at_ms=now)
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        signals = PostgresSignalRepository(self._connection)
+        members = tuple(cursor.exchange_instrument_id for cursor in proof.observation_cursors)
+        cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
+            exchange_instrument_ids=members,closed_at_ms=proof.current_final_close_time_ms)
+        if cursors!=proof.observation_cursors:
+            raise SelectionJobConflict("Generic continuity Observation cursor changed")
+        await self._connection.execute(sa.insert(selection_session_authorities).values(
+            **generic_authority_storage_values(authority)))
+        await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+            selection_authority_id=authority.selection_authority_id,**authority.event_binding.model_dump(mode="json")))
+        changed = await self._connection.execute(sa.update(selection_authority_current).where(
+            selection_authority_current.c.selection_spec_id==authority.selection_spec_id,
+            selection_authority_current.c.selection_authority_id==proof.source_selection_authority_id,
+            selection_authority_current.c.projection_version==expected_current_version).values(
+                selection_authority_id=authority.selection_authority_id,projection_version=expected_current_version+1,
+                updated_at_ms=authority.created_at_ms))
+        if changed.rowcount!=1:
+            raise SelectionJobConflict("Generic continuity current pointer CAS changed")
+        require_generic_continuity_commit(proof,committed_at_ms=await self.read_authority_clock_ms())
 
     async def commit_generic_valid_empty(self, authority: GenericSelectionAuthority, *,
         entry_vacuum_id: str, expected_vacuum_version: int, expected_current_version: int | None) -> None:
@@ -5007,6 +5055,19 @@ class PostgresInstrumentSelectionRepository:
         return generic_recovery_authority_from_storage(dict(row),spec=spec,
             event_bindings=tuple(dict(binding) for binding in bindings))
 
+    async def get_generic_authority_by_id(self, selection_authority_id: str) -> GenericSelectionAuthority | GenericRecoveryAuthority | None:
+        row = (await self._connection.execute(sa.select(selection_session_authorities).where(
+            selection_session_authorities.c.selection_authority_id==selection_authority_id).limit(1))).mappings().one_or_none()
+        if row is None:
+            return None
+        spec = await self.get_generic_spec(row["selection_spec_id"])
+        bindings = tuple((await self._connection.execute(sa.select(selection_authority_event_bindings).where(
+            selection_authority_event_bindings.c.selection_authority_id==selection_authority_id).limit(2))).mappings())
+        data = tuple(dict(binding) for binding in bindings)
+        return (generic_recovery_authority_from_storage(dict(row),spec=spec,event_bindings=data)
+            if row["recovery_grant_proof"] is not None else
+            generic_authority_from_storage(dict(row),spec=spec,event_bindings=data))
+
     async def generic_recovery_transition_blocker(self, *, selection_spec_id: str,
         target_members: tuple[str, ...]) -> str | None:
         """Do not abandon an unarmed recovery barrier on overlapping members."""
@@ -5116,11 +5177,15 @@ def generic_authority_storage_values(authority: GenericSelectionAuthority) -> di
         "selection_mode":authority.selection_mode,
         "selection_job_id":None,"selection_attempt_id":None,
         "selection_snapshot_id":authority.selection_snapshot_id,
-        "continued_from_selection_authority_id":authority.continued_from_recovery_authority_id,
-        "continuity_source_kind":"NONE" if authority.continued_from_recovery_authority_id is None else "SELECTION_AUTHORITY",
+        "continued_from_selection_authority_id":authority.continuity_source_authority_id
+            if authority.authority_outcome=="PRE_FENCE_CONTINUITY" else authority.continued_from_recovery_authority_id,
+        "continuity_source_kind":"SELECTION_AUTHORITY" if authority.authority_outcome=="PRE_FENCE_CONTINUITY"
+            or authority.continued_from_recovery_authority_id is not None else "NONE",
         "authority_gap_audit_id":None,"materialization_generation_id":authority.materialization_generation_id,
         "owner_control_version":authority.owner_control_version,"authority_outcome":authority.authority_outcome,
-        "grant_proof_kind":None if authority.blocks_new_entry else "PRECOMMITTED_SELECTION_CURRENT_CLOSE",
+        "grant_proof_kind":None if authority.blocks_new_entry else (
+            "PRE_FENCE_CONTINUITY_CURRENT_CLOSE" if authority.authority_outcome=="PRE_FENCE_CONTINUITY"
+            else "PRECOMMITTED_SELECTION_CURRENT_CLOSE"),
         "grant_predecessor_authority_id":None,
         "current_close_proof":None if authority.current_close_proof is None else authority.current_close_proof.model_dump(mode="json"),
         "recovery_grant_proof":None,
@@ -5192,7 +5257,10 @@ def generic_authority_from_storage(row: Mapping[str, object], *, spec: GenericSe
             "selection_mode","authority_outcome","current_close_proof","membership_freshness",
             "comparison_universe_id","comparison_transition_revision","effective_from_ms","created_at_ms")},
         "strategy_group_id":spec.strategy_group_id,
-        "continued_from_recovery_authority_id":row["continued_from_selection_authority_id"],
+        "continued_from_recovery_authority_id":(cast(Mapping[str, object],row["current_close_proof"]).get("origin_recovery_authority_id")
+            if row["authority_outcome"]=="PRE_FENCE_CONTINUITY" else row["continued_from_selection_authority_id"]),
+        "continuity_source_authority_id":(row["continued_from_selection_authority_id"]
+            if row["authority_outcome"]=="PRE_FENCE_CONTINUITY" else None),
         "period":{"feature_cutoff_at_ms":row["period_anchor_ms"],"cadence_hours":spec.cadence_hours,
             "scheduled_effective_at_ms":row["decision_boundary_ms"],"period_expires_at_ms":row["expires_at_ms"]},
         "event_binding":{name:binding[name] for name in AuthorityEventBinding.model_fields},

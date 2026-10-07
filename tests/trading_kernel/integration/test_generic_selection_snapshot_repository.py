@@ -24,6 +24,7 @@ from src.trading_kernel.application.advance_strategy_universe import (
 )
 from src.trading_kernel.application.coordinate_selection_materialization import (
     CoordinateGenericGenerationRequest,
+    CoordinateGenericPeriodRequest,
     CoordinateGenericSnapshotRequest,
     MaterializationDisposition,
     coordinate_selection_materialization_once,
@@ -2062,6 +2063,356 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
     assert reservation is not None and reservation.status == "released"
     assert incident is None and not active_domain
     assert len(commands) == len(venue.calls)
+
+
+@pytest.mark.asyncio
+async def test_generic_continuity_precedes_selection_result_and_has_one_miss_budget(database: AsyncEngine) -> None:
+    first_source,first_snapshot,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        initial = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+    assert initial is not None
+    period_anchor = first_source.feature_cutoff_at_ms+first_source.spec.cadence_hours*HOUR
+    boundary = period_anchor+HOUR
+    at = boundary+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=boundary,valid_until_ms=at+HOUR)
+    request = CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+        selection_spec_id=first_source.spec.selection_spec_id,period_anchor_ms=period_anchor,
+        worker_id="continuity-before-selector")
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' "
+            "WHERE strategy_group_id='CPM-RO-001'"))
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        paused = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at)
+    assert paused.disposition is MaterializationDisposition.BLOCKED
+    assert paused.reason_code=="GENERIC_CONTINUITY_OWNER_OR_MODE_BLOCKED"
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' "
+            "WHERE strategy_group_id='CPM-RO-001'"))
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        granted = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at)
+    assert granted.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY, granted
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        active = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+    assert current is not None and current.authority.authority_outcome=="PRE_FENCE_CONTINUITY"
+    assert current.authority.event_binding.universe_version_id==uid
+    assert current.authority.continuity_source_authority_id==initial.authority.selection_authority_id
+    assert current.authority.membership_freshness.source_snapshot_id==first_snapshot.selection_snapshot_id
+    assert current.authority.membership_freshness.state.value=="GRACE"
+    assert current.authority.membership_freshness.membership_valid_until_ms==initial.authority.membership_freshness.membership_valid_until_ms
+    assert active is not None and active.universe_version_id==uid
+    assert vacuum is None
+    source_proof = current.authority.current_close_proof
+    forged = current.authority.model_copy(update={
+        "selection_authority_id":"authority:forged-continuity",
+        "continuity_source_authority_id":"authority:forged-source",
+        "current_close_proof":source_proof.model_copy(update={
+            "source_selection_authority_id":"authority:forged-source"})})
+    with pytest.raises(sa.exc.DBAPIError,match="Generic continuity proof differs"):
+        async with database.begin() as conn:
+            await conn.execute(sa.insert(selection_session_authorities).values(
+                **generic_authority_storage_values(forged)))
+    async with database.connect() as conn:
+        scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
+    from src.trading_kernel.application.ingest_signal import (
+        resolve_selection_observation_authority,
+    )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        observation = await resolve_selection_observation_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=None,observed_close_time_ms=boundary,
+            now_ms=at,allow_current_as_birth=True,lock_current=True)
+    assert observation.allowed, observation
+    assert observation.selection_authority_id==current.authority.selection_authority_id
+    template = cpm_long_snapshot()
+    shift = boundary-template.trigger_candle_close_time_ms
+    class ContinuityMarket:
+        async def fetch_closed_candles(self, request):
+            candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                "close_time_ms":c.close_time_ms+shift}) for c in candles)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=boundary+2)):
+        produced = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),ContinuityMarket(),
+            ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=boundary,
+                attempted_at_ms=boundary+2))
+    assert produced.status is ObservationStatus.SIGNAL_CREATED, produced
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        entry = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=current.authority.selection_authority_id,
+            observed_close_time_ms=boundary,now_ms=boundary+3,
+            allow_current_as_birth=False,lock_current=True)
+    assert entry.allowed, entry
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at+3)):
+        repeated = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+3)
+    assert repeated.selection_authority_id==granted.selection_authority_id
+    second_anchor = period_anchor+first_source.spec.cadence_hours*HOUR
+    second_boundary = second_anchor+HOUR
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=second_boundary+1)):
+        stale = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request.model_copy(update={"period_anchor_ms":second_anchor}),
+            clock_ms=lambda:second_boundary+1)
+    assert stale.disposition is MaterializationDisposition.BLOCKED
+    assert stale.reason_code == "GENERIC_CONTINUITY_MEMBERSHIP_STALE"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations"))==1
+
+
+@pytest.mark.asyncio
+async def test_generic_continuity_is_replaced_by_same_period_no_change(database: AsyncEngine) -> None:
+    first_source,first_snapshot,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    next_source = next_input(first_source)
+    next_snapshot = compute_generic_selection(next_source)
+    assert next_snapshot.selected_members == first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(next_snapshot,
+            decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
+    at = next_snapshot.effective_from_ms+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=next_snapshot.effective_from_ms,valid_until_ms=at+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        continuity = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+                selection_spec_id=first_source.spec.selection_spec_id,
+                period_anchor_ms=next_snapshot.feature_cutoff_at_ms,worker_id="period-continuity"),
+            clock_ms=lambda:at)
+    assert continuity.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at+1)):
+        no_change = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericSnapshotRequest(selection_snapshot_id=next_snapshot.selection_snapshot_id,
+                worker_id="replace-continuity"),clock_ms=lambda:at+1)
+    assert no_change.disposition is MaterializationDisposition.NO_CHANGE, no_change
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+    assert current is not None and current.authority.authority_outcome=="NO_CHANGE"
+    assert current.authority.selection_snapshot_id==next_snapshot.selection_snapshot_id
+    assert current.authority.membership_freshness.state.value=="ACTIVE"
+    assert vacuum is None
+
+
+@pytest.mark.asyncio
+async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(database: AsyncEngine) -> None:
+    first_source,first_snapshot,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    next_source = next_input(first_source)
+    next_source = next_source.model_copy(update={
+        "predecessor_snapshot":first_snapshot,
+        "member_windows":tuple(qualify_window(window,window.exchange_instrument_id==next_source.spec.candidate_ids[0])
+            for window in next_source.member_windows)})
+    next_snapshot = compute_generic_selection(next_source)
+    assert next_snapshot.selected_members!=first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(next_snapshot,
+            decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
+    e = next_snapshot.effective_from_ms
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=e,valid_until_ms=e+HOUR)
+    period_request = CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+        selection_spec_id=first_source.spec.selection_spec_id,
+        period_anchor_ms=next_snapshot.feature_cutoff_at_ms,worker_id="before-new-desired")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=e+1)):
+        continued = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=period_request,clock_ms=lambda:e+1)
+    assert continued.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
+    snapshot_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=next_snapshot.selection_snapshot_id,
+        worker_id="fence-continuity")
+    steps = []
+    for offset in range(2,6):
+        at = e+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=snapshot_request,
+                clock_ms=lambda at=at:at)
+        steps.append(step)
+        if step.disposition is MaterializationDisposition.WAITING_VACUUM:
+            break
+    assert steps[-1].disposition is MaterializationDisposition.WAITING_VACUUM, steps
+    async with PostgresKernelUnitOfWork(database) as uow:
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=first_source.spec.selection_spec_id)
+        current = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        active = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
+    assert vacuum is not None and vacuum.blocks_new_entry
+    assert current is not None and current.authority.selection_authority_id==continued.selection_authority_id
+    assert active is not None and active.universe_version_id==uid
+    async with database.connect() as conn:
+        scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        fenced = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=continued.selection_authority_id,
+            observed_close_time_ms=e,now_ms=e+6,allow_current_as_birth=False,lock_current=True)
+    assert not fenced.allowed and fenced.reason_code=="selection_entry_vacuum_open"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions "
+            "WHERE lifecycle_state IN ('warming','staged')"))==0
+
+
+@pytest.mark.asyncio
+async def test_generic_continuity_refuses_an_already_consumed_close(database: AsyncEngine) -> None:
+    source,_,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
+    close = anchor+HOUR
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+    member = source.spec.candidate_ids[0]
+    transition = advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),
+        current=None,detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,
+        observed_at_ms=close,exchange_instrument_id=member)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.signals.save_exposure_episode(transition.current,expected_version=0)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=close+1)):
+        refused = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+                selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+                worker_id="consumed-close-continuity"),clock_ms=lambda:close+1)
+    assert refused.disposition is MaterializationDisposition.BLOCKED
+    assert refused.reason_code=="GENERIC_CONTINUITY_CLOSE_NOT_PROVEN"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))==1
+
+
+@pytest.mark.asyncio
+async def test_generic_late_continuity_needs_gap_recovery_not_current_close(database: AsyncEngine) -> None:
+    source,_,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
+    late_close = anchor+2*HOUR
+    at = late_close+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=late_close,valid_until_ms=at+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        late = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+                selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+                worker_id="late-continuity"),clock_ms=lambda:at)
+    assert late.disposition is MaterializationDisposition.BLOCKED
+    assert late.reason_code=="GENERIC_CONTINUITY_LATE_REQUIRES_RECOVERY"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))==1
+
+
+@pytest.mark.asyncio
+async def test_generic_source_failure_cannot_revoke_pre_fence_continuity(database: AsyncEngine) -> None:
+    first_source,first_snapshot,_,uid = await _exercise_generic_generation(
+        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+    source = next_input(first_source)
+    anchor = source.feature_cutoff_at_ms
+    class BrokenSource:
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            return tuple(member.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                for member in source.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            bars = next(member.candles for member in source.member_windows
+                if member.exchange_instrument_id==request.exchange_instrument_id)
+            return bars[:-1] if request.exchange_instrument_id==source.spec.candidate_ids[0] else bars
+    failed = await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+        market_source=BrokenSource(),request=RunInstrumentSelectionRequest(
+            selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=source.selection_epoch_id,
+            period_anchor_ms=anchor,worker_id="source-failure-before-continuity"),
+        clock_ms=lambda:anchor+1)
+    assert failed.outcome=="SOURCE_FAILED"
+    boundary = anchor+HOUR
+    at = boundary+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=boundary,valid_until_ms=at+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        continued = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+                selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+                worker_id="source-failed-continuity"),clock_ms=lambda:at)
+    assert continued.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id="CPM-RO-001",selection_spec_id=source.spec.selection_spec_id)
+    assert current is not None and current.authority.membership_freshness.source_snapshot_id==first_snapshot.selection_snapshot_id
+    assert vacuum is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations"))==1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group",("MPG-001","MI-001","BRF2-001"))
+async def test_generic_continuity_preserves_event_side_and_comparison(database: AsyncEngine,group: str) -> None:
+    source,snapshot,_,uid = await _exercise_generic_generation(
+        database,group,False,durable=True,first_activation=True,natural_selection=True)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        original = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    assert original is not None
+    anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
+    boundary = anchor+HOUR
+    at = boundary+1
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=boundary,valid_until_ms=at+HOUR)
+    if group in {"MPG-001","MI-001"}:
+        template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+        shift = boundary-template.trigger_candle_close_time_ms
+        candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+            "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+        projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+            universe_version_id=uid,strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids,
+            closed_bar_time_ms=boundary,lookback_bars=8 if group=="MPG-001" else 12,
+            freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(
+                exchange_instrument_id=member,candles_1h=candles) for member in source.spec.candidate_ids))
+        projection = projection.model_copy(update={
+            "comparison_transition_revision":original.authority.comparison_transition_revision})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        result = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
+                worker_id="multi-strategy-continuity"),clock_ms=lambda:at)
+    assert result.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY, result
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    assert current is not None
+    assert current.authority.event_binding==original.authority.event_binding
+    assert current.authority.comparison_universe_id==original.authority.comparison_universe_id
+    assert current.authority.comparison_transition_revision==original.authority.comparison_transition_revision
+    assert current.authority.membership_freshness.source_snapshot_id==snapshot.selection_snapshot_id
 
 
 @pytest.mark.asyncio

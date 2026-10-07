@@ -37,9 +37,12 @@ from src.trading_kernel.application.ports import (
 )
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
+    DynamicMembershipState,
+    GenericContinuityCloseProof,
     build_current_final_close_grant_proof,
     build_dynamic_membership_freshness,
     build_generic_selection_period,
+    record_dynamic_selection_miss,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
@@ -49,6 +52,7 @@ from src.trading_kernel.domain.generic_materialization import (
 )
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.instrument_selection import (
+    HOUR_MS,
     INTERVAL_MS,
     SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
@@ -259,6 +263,23 @@ class CoordinateGenericSnapshotRequest(BaseModel):
         return value.strip()
 
 
+class CoordinateGenericPeriodRequest(BaseModel):
+    """Evaluate current-set continuity before the Selector has an outcome."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    strategy_group_id: str
+    selection_spec_id: str
+    period_anchor_ms: int
+    worker_id: str
+
+    @field_validator("strategy_group_id", "selection_spec_id", "worker_id")
+    @classmethod
+    def _bounded_identity(cls, value: str) -> str:
+        if not value.strip() or value!=value.strip() or len(value)>160:
+            raise ValueError("Generic continuity requires exact bounded identity")
+        return value
+
+
 class CoordinateSelectionMaterializationResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -416,12 +437,14 @@ def plan_selection_materialization(
 async def coordinate_selection_materialization_once(
     *,
     uow_factory: UnitOfWorkFactory,
-    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest | CoordinateGenericSnapshotRequest,
+    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest | CoordinateGenericSnapshotRequest | CoordinateGenericPeriodRequest,
     clock_ms: Callable[[], int],
 ) -> CoordinateSelectionMaterializationResult:
     """Advance exactly one no-network materialization state from PostgreSQL facts."""
 
     now_ms = clock_ms()
+    if isinstance(request, CoordinateGenericPeriodRequest):
+        return await _coordinate_generic_period(uow_factory=uow_factory,request=request,now_ms=now_ms)
     if isinstance(request, CoordinateGenericSnapshotRequest):
         return await _coordinate_generic_snapshot(uow_factory=uow_factory,request=request,now_ms=now_ms)
     if isinstance(request, CoordinateGenericGenerationRequest):
@@ -1123,6 +1146,98 @@ async def coordinate_selection_materialization_once(
             ),
             entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
         )
+
+
+async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
+    request: CoordinateGenericPeriodRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
+    async with uow_factory() as uow:
+        spec = await uow.instrument_selection.get_generic_spec(request.selection_spec_id)
+        if spec.strategy_group_id!=request.strategy_group_id:
+            return _blocked("GENERIC_CONTINUITY_SPEC_CHANGED")
+        period = build_generic_selection_period(feature_cutoff_at_ms=request.period_anchor_ms,
+            cadence_hours=spec.cadence_hours)
+        if not period.scheduled_effective_at_ms<=now_ms<period.period_expires_at_ms:
+            return _blocked("GENERIC_CONTINUITY_NOT_DUE")
+        owner = await uow.owner_controls.get_strategy_control(request.strategy_group_id,for_update=True)
+        control = await uow.instrument_selection.get_selection_control(request.strategy_group_id,for_update=True)
+        if owner is None or owner.entry_state is not StrategyEntryState.ENABLED or control is None or (
+            control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.selection_spec_id!=spec.selection_spec_id or control.selection_epoch_id is None
+            or control.pending_selection_mode is not None):
+            return _blocked("GENERIC_CONTINUITY_OWNER_OR_MODE_BLOCKED")
+        if await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
+            selection_spec_id=spec.selection_spec_id,for_update=True) is not None:
+            return _blocked("GENERIC_CONTINUITY_VACUUM_OPEN")
+        source = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id,for_update=True)
+        if source is None:
+            return _blocked("GENERIC_CONTINUITY_SOURCE_MISSING")
+        prior = source.authority
+        if prior.period==period:
+            if prior.authority_outcome=="PRE_FENCE_CONTINUITY":
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.PRE_FENCE_CONTINUITY,
+                    selection_authority_id=prior.selection_authority_id)
+            return _blocked("GENERIC_CONTINUITY_PERIOD_ALREADY_MATERIALIZED")
+        source_fresh = (prior.recovery_proof.membership_freshness if isinstance(prior,GenericRecoveryAuthority)
+            else prior.membership_freshness)
+        if prior.blocks_new_entry or source_fresh is None or prior.expires_at_ms!=period.scheduled_effective_at_ms or (
+            prior.selection_epoch_id!=control.selection_epoch_id
+            or prior.selection_control_version!=control.control_version
+            or prior.owner_control_version!=owner.control_version
+            or prior.event_binding.grant_state is not AuthorityEventGrantState.ACTIVE):
+            return _blocked("GENERIC_CONTINUITY_SOURCE_CHANGED")
+        try:
+            freshness = record_dynamic_selection_miss(current=source_fresh,missed_period=period)
+        except ValueError:
+            return _blocked("GENERIC_CONTINUITY_MEMBERSHIP_STALE")
+        if freshness.state is not DynamicMembershipState.GRACE or not freshness.allows_new_entry_at(now_ms):
+            return _blocked("GENERIC_CONTINUITY_MEMBERSHIP_STALE")
+        uid = prior.event_binding.universe_version_id
+        if uid is None:
+            return _blocked("GENERIC_CONTINUITY_SOURCE_UNIVERSE_MISSING")
+        active = await uow.strategy_universes.get_current(spec.event_spec_id)
+        members = await uow.strategy_universes.get_members(uid)
+        if active is None or active.universe_version_id!=uid or selected_member_set_digest(members)!=prior.event_binding.member_set_digest:
+            return _blocked("GENERIC_CONTINUITY_SOURCE_UNIVERSE_CHANGED")
+        comparison_id = prior.comparison_universe_id
+        comparison_revision = prior.comparison_transition_revision
+        if comparison_id is not None:
+            comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+            if comparison is None or comparison.comparison_universe_id!=comparison_id or (
+                comparison.comparison_transition_revision!=comparison_revision):
+                return _blocked("GENERIC_CONTINUITY_COMPARISON_CHANGED")
+        now = await uow.instrument_selection.read_authority_clock_ms()
+        certified = await advance_strategy_universe(uow,UniverseActivationRequest(
+            universe_version_id=uid,attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+        if certified.status is not UniverseActivationStatus.ALREADY_ACTIVE:
+            return _blocked(str(certified.reason_code))
+        close = now//HOUR_MS*HOUR_MS
+        if close!=period.scheduled_effective_at_ms:
+            return _blocked("GENERIC_CONTINUITY_LATE_REQUIRES_RECOVERY")
+        origin = (prior.selection_authority_id if isinstance(prior,GenericRecoveryAuthority)
+            else prior.continued_from_recovery_authority_id)
+        try:
+            cursors = await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+                exchange_instrument_ids=members,closed_at_ms=close)
+            proof = GenericContinuityCloseProof(source_selection_authority_id=prior.selection_authority_id,
+                source_snapshot_id=freshness.source_snapshot_id,origin_recovery_authority_id=origin,
+                period=period,current_final_close_time_ms=close,
+                authority_granted_at_ms=now,observation_cursors=cursors)
+        except (RuntimeError,ValueError):
+            return _blocked("GENERIC_CONTINUITY_CLOSE_NOT_PROVEN")
+        authority = GenericSelectionAuthority(selection_authority_id="authority:continuity:"+canonical_digest({
+            "selection_spec_id":spec.selection_spec_id,"proof":proof.model_dump(mode="json")})[7:],
+            selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,
+            selection_epoch_id=control.selection_epoch_id,selection_snapshot_id=freshness.source_snapshot_id,
+            authority_sequence=1,owner_control_version=owner.control_version,
+            selection_control_version=control.control_version,continued_from_recovery_authority_id=origin,
+            continuity_source_authority_id=prior.selection_authority_id,period=period,
+            authority_outcome="PRE_FENCE_CONTINUITY",event_binding=prior.event_binding,
+            current_close_proof=proof,membership_freshness=freshness,comparison_universe_id=comparison_id,
+            comparison_transition_revision=comparison_revision,effective_from_ms=now,created_at_ms=now)
+        await uow.instrument_selection.commit_generic_continuity(authority,
+            expected_current_version=source.projection_version)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.PRE_FENCE_CONTINUITY,
+            selection_authority_id=authority.selection_authority_id)
 
 
 async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,

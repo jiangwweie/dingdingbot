@@ -12,6 +12,9 @@ from src.trading_kernel.domain.authority_recovery_rebase import (
     recovery_comparison_entry_rejection,
     recovery_rebase_entry_rejection,
 )
+from src.trading_kernel.domain.dynamic_selection_timing import (
+    GenericContinuityCloseProof,
+)
 from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
 from src.trading_kernel.domain.instrument_selection import (
     SOR_LONG_EVENT_SPEC_ID,
@@ -599,10 +602,31 @@ async def _resolve_generic_selection_authority(
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_universe_changed")
         snapshot = await uow.instrument_selection.get_generic_snapshot(authority.selection_snapshot_id)
         close_proof = authority.current_close_proof
-        if close_proof is None or snapshot.selection_spec_id != authority.selection_spec_id or snapshot.selection_epoch_id != authority.selection_epoch_id or (
-            snapshot.selected_members != members.exchange_instrument_ids
-            or snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms
-            or snapshot.committed_at_ms != close_proof.selection_committed_at_ms):
+        if snapshot.selection_spec_id != authority.selection_spec_id or snapshot.selection_epoch_id != authority.selection_epoch_id or (
+            snapshot.selected_members != members.exchange_instrument_ids):
+            return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_snapshot_changed")
+        if isinstance(close_proof,GenericContinuityCloseProof):
+            source = await uow.instrument_selection.get_generic_authority_by_id(close_proof.source_selection_authority_id)
+            source_fresh = None if source is None else (
+                source.recovery_proof.membership_freshness if isinstance(source,GenericRecoveryAuthority)
+                else source.membership_freshness)
+            if (authority.authority_outcome!="PRE_FENCE_CONTINUITY"
+                or source is None or source_fresh is None
+                or close_proof.source_snapshot_id!=snapshot.selection_snapshot_id
+                or close_proof.source_selection_authority_id!=authority.continuity_source_authority_id
+                or source.event_binding!=authority.event_binding
+                or source.selection_epoch_id!=authority.selection_epoch_id
+                or source.selection_control_version!=authority.selection_control_version
+                or source.owner_control_version!=authority.owner_control_version
+                or source.comparison_universe_id!=authority.comparison_universe_id
+                or source.comparison_transition_revision!=authority.comparison_transition_revision
+                or source_fresh.source_snapshot_id!=snapshot.selection_snapshot_id
+                or authority.membership_freshness is None
+                or source_fresh.membership_valid_until_ms!=authority.membership_freshness.membership_valid_until_ms
+                or source.expires_at_ms!=authority.period.scheduled_effective_at_ms):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_continuity_source_changed")
+        elif close_proof is None or snapshot.feature_cutoff_at_ms != authority.period.feature_cutoff_at_ms or (
+            snapshot.committed_at_ms != close_proof.selection_committed_at_ms):
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_snapshot_changed")
         if authority.materialization_generation_id is not None:
             generation = await uow.instrument_selection.get_generic_materialization_generation(authority.materialization_generation_id)

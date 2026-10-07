@@ -62,6 +62,7 @@ from src.trading_kernel.domain.comparison_universe import (
     comparative_lookback_bars,
 )
 from src.trading_kernel.domain.dynamic_selection_timing import (
+    CurrentFinalCloseGrantProof,
     require_current_close_commit,
     require_hourly_recovery_commit,
 )
@@ -967,7 +968,7 @@ class PostgresStrategyUniverseRepository:
         if recovery_authority is not None:
             await selection.require_generic_recovered_activation_proof(recovery_authority.recovery_proof)
         else:
-            if proof is None:
+            if not isinstance(proof,CurrentFinalCloseGrantProof):
                 raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
             require_current_close_commit(proof,committed_at_ms=now)
         certified = await self._try_stage_dynamic(request=request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED,"attempted_at_ms":now}),target=target)
@@ -1028,13 +1029,13 @@ class PostgresStrategyUniverseRepository:
             cursors = await signals.lock_recovery_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
                 exchange_instrument_ids=snapshot.selected_members,selection_mode="dynamic_selection",evaluated_at_ms=now)
         else:
-            if proof is None:
+            if not isinstance(proof,CurrentFinalCloseGrantProof):
                 raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
             cursors = await signals.lock_generic_close_coverage(event_spec_id=authority.event_binding.event_spec_id,
                 exchange_instrument_ids=snapshot.selected_members,closed_at_ms=proof.current_final_close_time_ms)
         if recovery_authority is not None:
             expected_cursors = recovery_authority.recovery_proof.observation_cursors
-        elif proof is not None:
+        elif isinstance(proof,CurrentFinalCloseGrantProof):
             expected_cursors = proof.observation_cursors
         else:
             raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
@@ -1043,7 +1044,7 @@ class PostgresStrategyUniverseRepository:
         if recovery_authority is not None:
             await selection.require_generic_recovered_activation_proof(recovery_authority.recovery_proof)
         else:
-            if proof is None:
+            if not isinstance(proof,CurrentFinalCloseGrantProof):
                 raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
             await selection.require_generic_close_proof(proof)
         if recovery_authority is not None:
@@ -1105,7 +1106,7 @@ class PostgresStrategyUniverseRepository:
         if recovery_authority is not None:
             require_hourly_recovery_commit(recovery_authority.recovery_proof.recovery_close_plan,committed_at_ms=committed_at)
         else:
-            if proof is None:
+            if not isinstance(proof,CurrentFinalCloseGrantProof):
                 raise UniverseInstallConflict("GENERIC_CLOSE_PROOF_REQUIRED")
             require_current_close_commit(proof,committed_at_ms=committed_at)
         if committed_at>=generation.fenced_at_ms+activation_spec.materialization_timeout_ms:

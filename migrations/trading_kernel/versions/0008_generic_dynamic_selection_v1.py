@@ -55,7 +55,9 @@ def upgrade() -> None:
         "WHERE lifecycle_state IN ('warming','staged','active')"))
     _authority_snapshot_epoch()
     _generic_close_proof_function()
+    _generic_continuity_proof_function()
     _generic_normal_binding_guard()
+    _generic_continuity_commit_guard()
     _generic_static_recovery_proof_function()
     _generic_recovered_activation_proof_function()
     _generic_static_recovery_commit_guard()
@@ -562,6 +564,150 @@ def _generic_recovered_activation_proof_function() -> None:
     """))
 
 
+def _generic_continuity_proof_function() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_continuity_proof_matches(p jsonb, spec_id text, checked_at bigint)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE source_auth brc_selection_session_authorities%ROWTYPE;
+        s brc_instrument_selection_snapshots%ROWTYPE;
+        control brc_strategy_selection_control_current%ROWTYPE;
+        owner_control brc_strategy_entry_controls_current%ROWTYPE;
+        binding brc_selection_authority_event_bindings%ROWTYPE;
+        cadence integer; rank_limit integer; member_count integer;
+        cutoff bigint; effective bigint; expiry bigint; granted bigint; close_at bigint;
+        source_effective bigint; origin_id text; ids text; digest text; cursors jsonb; consumed boolean;
+        expected jsonb; freshness jsonb;
+      BEGIN
+        IF p IS NULL OR jsonb_typeof(p)<>'object' OR checked_at IS NULL THEN RETURN false; END IF;
+        SELECT a.* INTO source_auth FROM brc_selection_authority_current current_auth
+          JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_auth.selection_authority_id
+          WHERE current_auth.selection_spec_id=spec_id;
+        IF NOT FOUND OR source_auth.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+          OR source_auth.selection_mode<>'dynamic_selection'
+          OR source_auth.authority_outcome NOT IN ('ACTIVE_NEW','NO_CHANGE','FALLBACK_PREVIOUS','PRE_FENCE_CONTINUITY')
+          OR source_auth.membership_freshness IS NULL THEN RETURN false; END IF;
+        SELECT * INTO control FROM brc_strategy_selection_control_current
+          WHERE selection_spec_id=spec_id AND strategy_group_id IN (
+            SELECT strategy_group_id FROM brc_instrument_selection_specs WHERE selection_spec_id=spec_id);
+        SELECT * INTO owner_control FROM brc_strategy_entry_controls_current
+          WHERE strategy_group_id=control.strategy_group_id;
+        SELECT cadence_hours,retain_rank INTO cadence,rank_limit FROM brc_generic_dynamic_selection_specs_v1
+          WHERE selection_spec_id=spec_id;
+        IF cadence IS NULL OR control.strategy_group_id IS NULL OR owner_control.strategy_group_id IS NULL
+          OR control.selection_mode<>'dynamic_selection' OR control.pending_selection_mode IS NOT NULL
+          OR control.selection_epoch_id IS DISTINCT FROM source_auth.selection_epoch_id
+          OR control.control_version<>source_auth.selection_control_version
+          OR owner_control.entry_state<>'enabled' OR owner_control.control_version<>source_auth.owner_control_version
+          OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v
+            WHERE v.strategy_group_id=control.strategy_group_id AND v.selection_spec_id=spec_id
+              AND v.state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','OWNER_PAUSED'))
+          THEN RETURN false; END IF;
+        SELECT * INTO binding FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=source_auth.selection_authority_id;
+        IF NOT FOUND OR (SELECT count(*) FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=source_auth.selection_authority_id)<>1 OR binding.grant_state<>'ACTIVE'
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_current current_u
+            JOIN brc_strategy_universe_versions u ON u.universe_version_id=current_u.universe_version_id
+            WHERE current_u.event_spec_id=binding.event_spec_id AND current_u.universe_version_id=binding.universe_version_id
+              AND current_u.lifecycle_state='active' AND u.lifecycle_state='active')
+          THEN RETURN false; END IF;
+        IF source_auth.comparison_universe_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_comparison_binding_current c WHERE c.event_spec_id=binding.event_spec_id
+            AND c.comparison_universe_id=source_auth.comparison_universe_id
+            AND c.comparison_transition_revision=source_auth.comparison_transition_revision)
+          THEN RETURN false; END IF;
+        SELECT * INTO s FROM brc_instrument_selection_snapshots
+          WHERE selection_snapshot_id=source_auth.membership_freshness->>'source_snapshot_id';
+        IF NOT FOUND OR s.selection_spec_id<>spec_id OR s.selection_epoch_id<>source_auth.selection_epoch_id THEN RETURN false; END IF;
+        cutoff:=(p->'period'->>'feature_cutoff_at_ms')::bigint;
+        effective:=cutoff+3600000;
+        expiry:=effective+cadence*3600000::bigint;
+        granted:=(p->>'authority_granted_at_ms')::bigint;
+        close_at:=checked_at/3600000*3600000;
+        source_effective:=(source_auth.membership_freshness->>'source_snapshot_effective_at_ms')::bigint;
+        IF cutoff IS NULL OR granted IS NULL OR cutoff%(cadence*3600000::bigint)<>0
+          OR source_auth.expires_at_ms<>effective OR source_auth.period_anchor_ms>=cutoff
+          OR source_effective+cadence*3600000::bigint<>effective
+          OR (source_auth.membership_freshness->>'membership_valid_until_ms')::bigint<>expiry
+          OR NOT (effective=close_at AND close_at<granted AND granted<=checked_at AND checked_at<expiry)
+          OR s.created_at_ms>=close_at THEN RETURN false; END IF;
+        WITH members AS (SELECT exchange_instrument_id,
+          'episode-domain:' || encode(sha256(convert_to('{"event_spec_id":' || to_json(binding.event_spec_id)::text ||
+            ',"exchange_instrument_id":' || to_json(exchange_instrument_id)::text || ',"position_side":' ||
+            to_json(binding.position_side)::text || '}','UTF8')),'hex') AS domain_key
+          FROM brc_strategy_universe_members WHERE universe_version_id=binding.universe_version_id)
+        SELECT count(*),string_agg(to_json(m.exchange_instrument_id)::text,',' ORDER BY m.exchange_instrument_id COLLATE "C"),
+          jsonb_agg(jsonb_build_object('episode_domain_key',m.domain_key,'exchange_instrument_id',m.exchange_instrument_id,
+            'episode_version',coalesce(e.projection_version,0),'comparison_checkpoint_version',coalesce(e.comparison_checkpoint_version,0),
+            'authority_recovery_checkpoint_version',coalesce(e.authority_recovery_checkpoint_version,0),
+            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms))
+            ORDER BY m.exchange_instrument_id COLLATE "C"),
+          coalesce(bool_or(greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)>=close_at),false)
+          INTO member_count,ids,cursors,consumed FROM members m
+          LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
+        IF member_count<1 OR member_count>rank_limit OR consumed THEN RETURN false; END IF;
+        digest:='sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' || ids || ']}','UTF8')),'hex');
+        IF digest<>binding.member_set_digest OR digest IS DISTINCT FROM source_auth.membership_freshness->>'source_member_set_digest'
+          THEN RETURN false; END IF;
+        freshness:=source_auth.membership_freshness || jsonb_build_object('consecutive_missed_periods',1,'state','GRACE');
+        origin_id:=CASE WHEN source_auth.recovery_grant_proof IS NOT NULL THEN source_auth.selection_authority_id
+          WHEN source_auth.authority_outcome='PRE_FENCE_CONTINUITY' THEN source_auth.current_close_proof->>'origin_recovery_authority_id'
+          ELSE source_auth.continued_from_selection_authority_id END;
+        expected:=jsonb_build_object('proof_kind','PRE_FENCE_CONTINUITY_CURRENT_CLOSE',
+          'source_selection_authority_id',source_auth.selection_authority_id,
+          'source_snapshot_id',s.selection_snapshot_id,'origin_recovery_authority_id',origin_id,
+          'period',jsonb_build_object('feature_cutoff_at_ms',cutoff,'cadence_hours',cadence,
+            'scheduled_effective_at_ms',effective,'period_expires_at_ms',expiry),
+          'current_final_close_time_ms',close_at,'authority_granted_at_ms',granted,
+          'observation_cursors',cursors);
+        RETURN coalesce(p=expected,false);
+      EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
+      END; $$
+    """))
+
+
+def _generic_continuity_commit_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_generic_continuity_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE a brc_selection_session_authorities%ROWTYPE;
+        binding brc_selection_authority_event_bindings%ROWTYPE;
+        source_binding brc_selection_authority_event_bindings%ROWTYPE;
+      BEGIN
+        SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
+        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome<>'PRE_FENCE_CONTINUITY' THEN RETURN NULL; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current
+          WHERE selection_spec_id=a.selection_spec_id AND selection_authority_id=a.selection_authority_id
+            AND updated_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current
+            WHERE selection_spec_id=a.selection_spec_id AND selection_epoch_id=a.selection_epoch_id
+              AND control_version=a.selection_control_version AND selection_mode='dynamic_selection')
+          OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current
+            WHERE strategy_group_id IN (SELECT strategy_group_id FROM brc_instrument_selection_specs
+              WHERE selection_spec_id=a.selection_spec_id)
+              AND selection_spec_id=a.selection_spec_id AND state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','OWNER_PAUSED'))
+          THEN RAISE EXCEPTION 'Generic continuity requires atomic current grant without Vacuum'; END IF;
+        SELECT * INTO binding FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=a.selection_authority_id;
+        SELECT * INTO source_binding FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=a.continued_from_selection_authority_id;
+        IF NOT FOUND OR (SELECT count(*) FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=a.selection_authority_id)<>1 OR binding.grant_state<>'ACTIVE'
+          OR binding.event_spec_id IS DISTINCT FROM source_binding.event_spec_id
+          OR binding.position_side IS DISTINCT FROM source_binding.position_side
+          OR binding.universe_version_id IS DISTINCT FROM source_binding.universe_version_id
+          OR binding.member_set_digest IS DISTINCT FROM source_binding.member_set_digest
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_current u
+            WHERE u.event_spec_id=binding.event_spec_id AND u.universe_version_id=binding.universe_version_id
+              AND u.lifecycle_state='active')
+          THEN RAISE EXCEPTION 'Generic continuity requires exact Active Event binding'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    for table in ("brc_selection_session_authorities","brc_selection_authority_event_bindings"):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_generic_continuity AFTER INSERT ON {table} "
+            "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_generic_continuity_commit()"))
+
+
 def _generic_normal_binding_guard() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_validate_generic_normal_binding() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -748,6 +894,14 @@ def _authority_snapshot_epoch() -> None:
         "selection_epoch_id='sor-v0' OR recovery_grant_proof IS NOT NULL OR COALESCE(( "
         "(authority_outcome='VALID_EMPTY' AND first_eligible_close_time_ms IS NULL AND grant_proof_kind IS NULL "
         "AND grant_predecessor_authority_id IS NULL) OR "
+        "(authority_outcome='PRE_FENCE_CONTINUITY' AND selection_mode='dynamic_selection' "
+        "AND materialization_generation_id IS NULL AND activation_authorization_id IS NULL "
+        "AND selection_snapshot_id IS NOT NULL AND continued_from_selection_authority_id IS NOT NULL "
+        "AND continuity_source_kind='SELECTION_AUTHORITY' AND grant_proof_kind='PRE_FENCE_CONTINUITY_CURRENT_CLOSE' "
+        "AND first_eligible_close_time_ms IS NOT NULL AND first_eligible_close_time_ms % 3600000=0 "
+        "AND first_eligible_close_time_ms=created_at_ms/3600000*3600000 "
+        "AND first_eligible_close_time_ms>=decision_boundary_ms AND first_eligible_close_time_ms<created_at_ms "
+        "AND current_close_proof IS NOT NULL AND membership_freshness IS NOT NULL) OR "
         "(authority_outcome IN ('NO_CHANGE','ACTIVE_NEW') AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
         "AND ((authority_outcome='NO_CHANGE' AND materialization_generation_id IS NULL) OR "
         "(authority_outcome='ACTIVE_NEW' AND materialization_generation_id IS NOT NULL)) "
@@ -841,6 +995,46 @@ def _authority_snapshot_epoch() -> None:
               END IF;
               RETURN NEW;
             END IF;
+            IF NEW.authority_outcome='PRE_FENCE_CONTINUITY' THEN
+              SELECT * INTO source_authority_row FROM brc_selection_session_authorities
+                WHERE selection_authority_id=NEW.current_close_proof->>'source_selection_authority_id';
+              IF NOT brc_generic_continuity_proof_matches(NEW.current_close_proof,NEW.selection_spec_id,NEW.created_at_ms)
+                OR NOT FOUND
+                OR NEW.selection_mode<>'dynamic_selection'
+                OR NEW.grant_proof_kind<>'PRE_FENCE_CONTINUITY_CURRENT_CLOSE'
+                OR NEW.continuity_source_kind<>'SELECTION_AUTHORITY'
+                OR NEW.continued_from_selection_authority_id IS DISTINCT FROM NEW.current_close_proof->>'source_selection_authority_id'
+                OR NEW.selection_snapshot_id IS DISTINCT FROM NEW.current_close_proof->>'source_snapshot_id'
+                OR NEW.selection_epoch_id IS DISTINCT FROM source_authority_row.selection_epoch_id
+                OR NEW.selection_control_version IS DISTINCT FROM source_authority_row.selection_control_version
+                OR NEW.owner_control_version IS DISTINCT FROM source_authority_row.owner_control_version
+                OR NEW.comparison_universe_id IS DISTINCT FROM source_authority_row.comparison_universe_id
+                OR NEW.comparison_transition_revision IS DISTINCT FROM source_authority_row.comparison_transition_revision
+                OR NEW.period_anchor_ms IS DISTINCT FROM (NEW.current_close_proof->'period'->>'feature_cutoff_at_ms')::bigint
+                OR NEW.decision_boundary_ms IS DISTINCT FROM (NEW.current_close_proof->'period'->>'scheduled_effective_at_ms')::bigint
+                OR NEW.first_eligible_close_time_ms IS DISTINCT FROM (NEW.current_close_proof->>'current_final_close_time_ms')::bigint
+                OR NEW.created_at_ms IS DISTINCT FROM (NEW.current_close_proof->>'authority_granted_at_ms')::bigint
+                OR NEW.effective_from_ms<>NEW.created_at_ms OR NEW.expires_at_ms IS DISTINCT FROM
+                  (NEW.current_close_proof->'period'->>'period_expires_at_ms')::bigint
+                OR NEW.membership_freshness->>'source_snapshot_id' IS DISTINCT FROM NEW.selection_snapshot_id
+                OR NEW.membership_freshness->>'state' IS DISTINCT FROM 'GRACE'
+                OR (NEW.membership_freshness->>'consecutive_missed_periods')::integer IS DISTINCT FROM 1
+                OR NEW.membership_freshness IS DISTINCT FROM
+                  (source_authority_row.membership_freshness ||
+                    jsonb_build_object('consecutive_missed_periods',1,'state','GRACE'))
+                OR NEW.current_close_proof->>'origin_recovery_authority_id' IS DISTINCT FROM
+                  (CASE WHEN source_authority_row.recovery_grant_proof IS NOT NULL
+                    THEN source_authority_row.selection_authority_id
+                    WHEN source_authority_row.authority_outcome='PRE_FENCE_CONTINUITY'
+                    THEN source_authority_row.current_close_proof->>'origin_recovery_authority_id'
+                    ELSE source_authority_row.continued_from_selection_authority_id END)
+                OR NEW.materialization_generation_id IS NOT NULL OR NEW.authority_gap_audit_id IS NOT NULL
+                OR NEW.activation_authorization_id IS NOT NULL OR NEW.selection_job_id IS NOT NULL
+                OR NEW.selection_attempt_id IS NOT NULL
+                OR NEW.reason_code<>'PRE_FENCE_CONTINUITY'
+              THEN RAISE EXCEPTION 'Generic continuity proof differs from locked source facts'; END IF;
+              RETURN NEW;
+            END IF;
             IF NEW.authority_outcome NOT IN ('VALID_EMPTY','NO_CHANGE','ACTIVE_NEW') THEN
               RAISE EXCEPTION 'Generic trading Authority proof contract is not installed';
             END IF;
@@ -898,7 +1092,9 @@ def _authority_snapshot_epoch() -> None:
                     AND origin.recovery_grant_proof IS NOT NULL AND origin.selection_spec_id=NEW.selection_spec_id
                     AND origin.selection_epoch_id=NEW.selection_epoch_id
                     AND (source_auth.selection_authority_id=origin.selection_authority_id
-                      OR source_auth.continued_from_selection_authority_id=origin.selection_authority_id)
+                      OR source_auth.continued_from_selection_authority_id=origin.selection_authority_id
+                      OR (source_auth.authority_outcome='PRE_FENCE_CONTINUITY'
+                        AND source_auth.current_close_proof->>'origin_recovery_authority_id'=origin.selection_authority_id))
                     AND source_auth.owner_control_version=NEW.owner_control_version
                     AND source_auth.comparison_universe_id IS NOT DISTINCT FROM NEW.comparison_universe_id
                     AND source_auth.comparison_transition_revision IS NOT DISTINCT FROM NEW.comparison_transition_revision
