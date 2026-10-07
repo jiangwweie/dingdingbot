@@ -15,7 +15,7 @@ from src.trading_kernel.application.ports import (
     RuntimeIncidentRecord,
 )
 from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
-from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
     ExchangeCommandStatus,
@@ -55,6 +55,7 @@ from src.trading_kernel.domain.reducer import reduce_event
 
 class ReconcileTicketStatus(StrEnum):
     NO_CHANGE = "no_change"
+    LATE_FILL_INCIDENT = "late_fill_incident"
     ENTRY_FILL_RECORDED = "entry_fill_recorded"
     PARTIAL_FILL_INCIDENT = "partial_fill_incident"
     EXTERNAL_FLAT_INCIDENT = "external_flat_incident"
@@ -132,12 +133,21 @@ async def reconcile_ticket(
     uow: KernelUnitOfWork,
     request: ReconcileTicketRequest,
 ) -> ReconcileTicketResult:
-    aggregate = await uow.aggregates.get(request.ticket_id)
+    aggregate = await uow.aggregates.get_for_update(request.ticket_id)
     if aggregate is None:
         raise ValueError("Ticket aggregate does not exist")
     snapshot = request.snapshot
     if snapshot.netting_domain != aggregate.identity.netting_domain:
         raise ValueError("position snapshot Netting Domain mismatch")
+    if (
+        aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+        and snapshot.quantity > 0
+    ):
+        latest = await uow.positions.get(snapshot.netting_domain.key())
+        if latest is not None and snapshot.observed_at_ms < latest.observed_at_ms:
+            return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
+        await _record_late_fill_incident(uow, aggregate, snapshot)
+        return ReconcileTicketResult(status=ReconcileTicketStatus.LATE_FILL_INCIDENT)
     await uow.positions.upsert(ticket_id=request.ticket_id, snapshot=snapshot)
     await uow.monitors.save_if_changed(
         MonitorStateRecord(
@@ -372,6 +382,52 @@ async def reconcile_ticket(
             expected_version=aggregate.version,
         )
     return ReconcileTicketResult(status=status)
+
+
+async def _record_late_fill_incident(
+    uow: KernelUnitOfWork,
+    aggregate: TradeAggregate,
+    snapshot: PositionSnapshot,
+) -> None:
+    """Fence new account ENTRY without reviving a terminal Ticket."""
+
+    ticket_id = aggregate.identity.ticket_id
+    incident_kind = "late_fill_after_entry_absence"
+    existing = await uow.incidents.get_open_for_ticket_kind(ticket_id, incident_kind)
+    incident_id = f"incident:{ticket_id}:{incident_kind}"
+    if existing is None:
+        domain = aggregate.identity.netting_domain
+        await uow.incidents.add(
+            RuntimeIncidentRecord(
+                incident_id=incident_id,
+                ticket_id=ticket_id,
+                incident_kind=incident_kind,
+                status="open",
+                first_blocker=incident_kind,
+                entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+                entry_block_key=canonical_entry_block_key(
+                    EntryBlockScope.ACCOUNT_CAPACITY,
+                    venue_id=domain.venue_id,
+                    account_id=domain.account_id,
+                ),
+                details={
+                    "observed_quantity": str(snapshot.quantity),
+                    "aggregate_version": aggregate.version,
+                },
+                opened_at_ms=snapshot.observed_at_ms,
+            )
+        )
+    await uow.monitors.save_if_changed(
+        MonitorStateRecord(
+            monitor_key=f"late-fill:{ticket_id}",
+            owner_status=MonitorOwnerStatus.NEEDS_INTERVENTION,
+            summary="Positive venue position after terminal zero-fill ENTRY closure",
+            intervention="Account ENTRY fenced; exact exposure requires controlled recovery",
+            ticket_id=ticket_id,
+            incident_id=incident_id,
+            updated_at_ms=snapshot.observed_at_ms,
+        )
+    )
 
 
 async def reconcile_post_fill_stress(

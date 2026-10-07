@@ -1872,8 +1872,13 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_owner_staged_runner_materializes_without_fixture_snapshot(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("group,cancel_before_fill", [
+    ("CPM-RO-001",False),("MPG-001",False),("MI-001",False),("BRF2-001",False),
+    ("CPM-RO-001",True),("BRF2-001",True),
+])
+async def test_owner_staged_runner_materializes_without_fixture_snapshot(
+    database: AsyncEngine, group: str, cancel_before_fill: bool,
+) -> None:
     await _exercise_generic_generation(database, group, False,
         durable=True, first_activation=True, natural_selection=True)
     if group not in {"CPM-RO-001", "BRF2-001"}:
@@ -2062,6 +2067,11 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
         assert await conn.scalar(sa.text(
             "SELECT status FROM brc_exchange_commands WHERE ticket_id=:ticket AND command_kind='entry'"
         ), {"ticket":issued.ticket_id}) == "accepted"
+    if cancel_before_fill:
+        await _assert_natural_sent_entry_cancelled_by_valid_empty(database,
+            group=group,current=current,issued=issued,ticket=ticket,venue=venue,
+            initial_source=source,entry_dispatched_at_ms=issued_at+5)
+        return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
@@ -2223,6 +2233,130 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
             "FROM brc_trade_tickets WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).one()
     assert final_pointer == f"review:natural-{group}"
     assert frozen_binding == (ticket.exit_binding_id,ticket.exit_binding_semantic_hash)
+
+
+async def _assert_natural_sent_entry_cancelled_by_valid_empty(
+    database, *, group, current, issued, ticket, venue, initial_source,
+    entry_dispatched_at_ms,
+) -> None:
+    from src.trading_kernel.application.dispatch_exchange_command import (
+        DispatchCommandRequest,
+        dispatch_one_command,
+    )
+    from src.trading_kernel.domain.aggregate import AggregateStatus
+    from src.trading_kernel.domain.commands import ExchangeCommandKind
+    from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+
+    async with PostgresKernelUnitOfWork(database) as uow:
+        parent = await uow.instrument_selection.get_generic_snapshot(
+            current.authority.selection_snapshot_id)
+    empty_source = next_input(initial_source.model_copy(update={
+        "selection_epoch_id":parent.selection_epoch_id})).model_copy(update={
+            "predecessor_snapshot":parent})
+    empty_source = empty_source.model_copy(update={"member_windows":tuple(
+        qualify_window(window,False) for window in empty_source.member_windows)})
+    class EmptyMarket:
+        async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            assert event_spec_id==empty_source.spec.event_spec_id and len(product_profiles)==24
+            return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                for window in empty_source.member_windows)
+
+        async def fetch_generic_selection_klines(self, request):
+            return next(window.candles for window in empty_source.member_windows
+                if window.exchange_instrument_id==request.exchange_instrument_id)
+    tick = empty_source.feature_cutoff_at_ms
+    def selection_clock():
+        nonlocal tick
+        tick += 1
+        return tick
+    selected = await run_instrument_selection_once(
+        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=EmptyMarket(),
+        request=RunInstrumentSelectionRequest(selection_spec_id=empty_source.spec.selection_spec_id,
+            selection_epoch_id=empty_source.selection_epoch_id,
+            period_anchor_ms=empty_source.feature_cutoff_at_ms,
+            worker_id=f"natural-{group}-cancel-selector"),clock_ms=selection_clock)
+    assert selected.outcome == "SNAPSHOT_READY", selected
+    async with PostgresKernelUnitOfWork(database) as uow:
+        empty = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+    assert not empty.selected_members
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,
+        worker_id=f"natural-{group}-cancel-materializer")
+    now = empty.effective_from_ms+1
+    for offset in range(4):
+        at = now+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda at=at:at)
+        if step.reason_code == "VACUUM_POSITION_FACTS_REQUIRED":
+            break
+    async with PostgresKernelUnitOfWork(database) as uow:
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=empty.selection_spec_id)
+        aggregate = await uow.aggregates.get(issued.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+    assert vacuum is not None and vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_ACCEPTED
+    assert len(commands)==1 and commands[0].kind is ExchangeCommandKind.ENTRY
+    assert aggregate.entry_exchange_order_id is not None
+    open_order = VenueOrderSnapshot(exchange_order_id=aggregate.entry_exchange_order_id,
+        venue_client_order_id=commands[0].venue_client_order_id,
+        position_side=ticket.identity.netting_domain.position_side,reduce_only=False,
+        order_namespace="regular")
+    opened = PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+        quantity=Decimal(0),average_entry_price=None,open_orders=(open_order,),
+        observed_at_ms=now+5)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        cancel = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+            strategy_group_id=group,selection_spec_id=empty.selection_spec_id,
+            now_ms=now+5,ticket_id=issued.ticket_id,position_snapshot=opened))
+        after_request = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+    assert cancel.status is VacuumDrainStatus.CANCEL_REQUESTED, cancel
+    assert [command.kind for command in after_request] == [
+        ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
+    assert after_request[-1].status.value == "prepared"
+    venue.now_ms = now+6
+    dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
+            ticket_id=issued.ticket_id,now_ms=now+6,lease_until_ms=now+30_000,
+            timeout_seconds=1))
+    assert dispatched.status.value == "accepted", dispatched
+    flat = PositionSnapshot(netting_domain=ticket.identity.netting_domain,
+        quantity=Decimal(0),average_entry_price=None,open_orders=(),observed_at_ms=now+7)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        absence = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+            strategy_group_id=group,selection_spec_id=empty.selection_spec_id,
+            now_ms=now+7,ticket_id=issued.ticket_id,position_snapshot=flat))
+    assert absence.status is VacuumDrainStatus.ORDER_ABSENCE_RECORDED, absence
+    async with PostgresKernelUnitOfWork(database) as uow:
+        closed = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+            strategy_group_id=group,selection_spec_id=empty.selection_spec_id,now_ms=now+8))
+        reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
+        still_active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key())
+    assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED, closed
+    assert reservation is not None and reservation.status == "released" and not still_active
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=now+9)):
+        negative = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,
+            clock_ms=lambda:now+9)
+    assert negative.disposition is MaterializationDisposition.VALID_EMPTY, negative
+    async with PostgresKernelUnitOfWork(database) as uow:
+        terminal = await uow.aggregates.get(issued.ticket_id)
+        frozen = await uow.tickets.get(issued.ticket_id)
+        final_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+        authority = await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)
+    assert terminal is not None and terminal.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert frozen is not None and frozen.selection_authority_id == current.authority.selection_authority_id
+    assert authority is not None and authority.authority.authority_outcome == "VALID_EMPTY"
+    assert [command.kind for command in final_commands] == [ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
+    assert len(venue.calls)==2 and entry_dispatched_at_ms<vacuum.fenced_at_ms
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'")) == 0
 
 
 @pytest.mark.asyncio

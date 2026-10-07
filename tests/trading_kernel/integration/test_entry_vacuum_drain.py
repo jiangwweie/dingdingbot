@@ -22,6 +22,11 @@ from src.trading_kernel.application.ports import (
     VenueSetLeverageRequest,
     VenueTruthRequest,
 )
+from src.trading_kernel.application.reconcile_ticket import (
+    ReconcileTicketRequest,
+    ReconcileTicketStatus,
+    reconcile_ticket,
+)
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
@@ -402,6 +407,83 @@ async def _assert_zero_fill_cancel(
         final_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
         assert [command.kind for command in final_commands].count(ExchangeCommandKind.ENTRY) == 1
         assert [command.kind for command in final_commands].count(ExchangeCommandKind.CANCEL_ORDER) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "BRF2-001"])
+async def test_late_fill_after_zero_fill_vacuum_closure_is_not_silent(
+    dispatch_engine, group: str | None,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine,
+        AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    await _assert_zero_fill_cancel(dispatch_engine, ticket, vacuum)
+
+    stale_positive = _position_snapshot(
+        ticket,
+        quantity=ticket.quantity,
+        average_entry_price=ticket.entry_reference_price,
+        open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms + 4,
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        stale = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(ticket_id=ticket.identity.ticket_id, snapshot=stale_positive),
+        )
+        stale_incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+    assert stale.status is ReconcileTicketStatus.NO_CHANGE
+    assert stale_incident is None
+
+    late_fill = _position_snapshot(
+        ticket,
+        quantity=ticket.quantity,
+        average_entry_price=ticket.entry_reference_price,
+        open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms + 10,
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        result = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(ticket_id=ticket.identity.ticket_id, snapshot=late_fill),
+        )
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        position = await uow.positions.get(ticket.identity.netting_domain.key())
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+        )
+
+    assert result.status is ReconcileTicketStatus.LATE_FILL_INCIDENT
+    assert incident is not None and incident.incident_kind == "late_fill_after_entry_absence"
+    assert incident.entry_block_scope.value == "account_capacity"
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert position is not None and position.quantity == 0
+    assert [command.kind for command in commands] == [
+        ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER,
+    ]
+    assert "account_capacity" in {scope.value for scope in ownership.open_incident_scopes}
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        repeated = await reconcile_ticket(
+            uow,
+            ReconcileTicketRequest(ticket_id=ticket.identity.ticket_id, snapshot=late_fill),
+        )
+    assert repeated.status is ReconcileTicketStatus.LATE_FILL_INCIDENT
+    async with dispatch_engine.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_incidents WHERE ticket_id=:ticket AND status='open'"
+        ), {"ticket":ticket.identity.ticket_id}) == 1
 
 
 @pytest.mark.asyncio
