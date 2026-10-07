@@ -1909,6 +1909,7 @@ class PostgresInstrumentSelectionRepository:
         spec = await self.get_generic_spec(generation.selection_spec_id)
         deadline = generation.fenced_at_ms+spec.materialization_timeout_ms
         expiry = generation.period_anchor_ms+(1+spec.cadence_hours)*3600000
+        next_future_close = (now//3600000+1)*3600000
         if reason_code=="MATERIALIZATION_TIMEOUT" and now<deadline or reason_code=="MATERIALIZATION_PERIOD_EXPIRED" and now<expiry:
             raise SelectionJobConflict("Generic failure deadline has not elapsed")
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,
@@ -1940,7 +1941,10 @@ class PostgresInstrumentSelectionRepository:
         await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
             materialization_event_id=f"materialization-event:{materialization_generation_id}:{sequence}",
             materialization_generation_id=materialization_generation_id,event_sequence=sequence,event_type="FAILED_CLOSED",
-            payload={"reason_code":reason_code,"entry_vacuum_id":vacuum.entry_vacuum_id,"materialization_deadline_ms":deadline},occurred_at_ms=now))
+            payload={"reason_code":reason_code,"entry_vacuum_id":vacuum.entry_vacuum_id,
+                "materialization_deadline_ms":deadline,"period_expires_at_ms":expiry,
+                "next_future_close_time_ms":next_future_close,
+                "no_eligible_close_before_expiry":next_future_close>=expiry},occurred_at_ms=now))
         updated = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
             strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
             strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(

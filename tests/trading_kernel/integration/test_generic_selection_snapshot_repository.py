@@ -2125,6 +2125,14 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             uow_factory=lambda:PostgresKernelUnitOfWork(database),request=generation_request,
             clock_ms=lambda:fail_at)
     assert failed.reason_code == "MATERIALIZATION_TIMEOUT", failed
+    async with database.connect() as conn:
+        failure_payload = await conn.scalar(sa.text(
+            "SELECT payload FROM brc_strategy_universe_materialization_events "
+            "WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),
+            {"gid":generation_id})
+    assert failure_payload is not None
+    assert failure_payload["no_eligible_close_before_expiry"] == (group in {"MPG-001","MI-001"})
+    assert failure_payload["next_future_close_time_ms"] == (fail_at//HOUR+1)*HOUR
     await make_warming_ready(database,universe_version_id=previous_uid,
         warm_closed_bar_time_ms=fail_at//HOUR*HOUR,
         valid_until_ms=fail_at+HOUR)
