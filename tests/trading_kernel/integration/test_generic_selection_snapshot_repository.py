@@ -2068,7 +2068,8 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 @pytest.mark.parametrize(("group","resolution"),(
     ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","activate_refusal"),("MPG-001","empty"),
     ("MI-001","activate"),("MI-001","activate_refusal"),("MI-001","empty"),("BRF2-001","fallback"),
-    ("MPG-001","activate_change_guard"),("MI-001","activate_change_guard")))
+    ("MPG-001","activate_change_guard"),("MI-001","activate_change_guard"),
+    ("MPG-001","activate_change_after_arm"),("MI-001","activate_change_after_arm")))
 async def test_failed_second_dynamic_generation_respects_previous_freshness(
     database: AsyncEngine,group: str,resolution: str,
 ) -> None:
@@ -2291,7 +2292,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
-        if resolution in {"activate","activate_refusal","activate_change_guard"}:
+        if resolution in {"activate","activate_refusal","activate_change_guard","activate_change_after_arm"}:
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=next_at+4)):
                 activated = await coordinate_selection_materialization_once(
@@ -2377,7 +2378,8 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             following_at = following_snapshot.effective_from_ms+1
             await make_warming_ready(database,universe_version_id=target_uid,
                 warm_closed_bar_time_ms=following_at//HOUR*HOUR,valid_until_ms=following_at+HOUR)
-            template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+            template = (mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()) if (
+                resolution=="activate_change_after_arm") else (mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot())
             shift = following_at//HOUR*HOUR-template.trigger_candle_close_time_ms
             candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
                 "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
@@ -2405,7 +2407,25 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             assert successor.authority.selection_authority_id == continuation.selection_authority_id
             assert successor.authority.continued_from_recovery_authority_id == current_recovery.authority.selection_authority_id
             assert still_pending is not None and still_pending.armed_at_close_time_ms is None
-            if resolution == "activate_change_guard":
+            if resolution in {"activate_change_guard","activate_change_after_arm"}:
+                if resolution=="activate_change_after_arm":
+                    class ArmingMarket:
+                        async def fetch_closed_candles(self, request):
+                            path = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                                "close_time_ms":c.close_time_ms+shift}) for c in path)
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                        new=AsyncMock(return_value=following_at+1)):
+                        arming = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),ArmingMarket(),
+                            ObservationRequest(runtime_scope_id=active_scope_id,runtime_commit="a"*40,
+                                schema_revision=CURRENT_SCHEMA_REVISION,
+                                trigger_candle_close_time_ms=following_at//HOUR*HOUR,
+                                attempted_at_ms=following_at+1))
+                    assert arming.status is ObservationStatus.NO_SIGNAL
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        checkpoint = await uow.signals.get_authority_recovery_checkpoint(
+                            current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key)
+                    assert checkpoint is not None and checkpoint.state=="ARMED"
                 changed_source = next_input(following_source).model_copy(update={
                     "predecessor_snapshot":following_snapshot})
                 retained = set(next_snapshot.selected_members)
@@ -2472,8 +2492,11 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         uow_factory=lambda:PostgresKernelUnitOfWork(database),request=changed_request,
                         clock_ms=lambda:changed_at+7)
                 assert staged_change.disposition is MaterializationDisposition.GENERATION_STAGED
-                assert refused_change.disposition is MaterializationDisposition.BLOCKED
-                assert refused_change.reason_code == "GENERIC_RECOVERY_REBASE_PENDING"
+                if resolution=="activate_change_guard":
+                    assert refused_change.disposition is MaterializationDisposition.BLOCKED
+                    assert refused_change.reason_code == "GENERIC_RECOVERY_REBASE_PENDING"
+                else:
+                    assert refused_change.disposition is MaterializationDisposition.ACTIVE_NEW, refused_change
                 return
             forged_successor = successor.authority.model_copy(update={
                 "selection_authority_id":"authority:forged-successor",
