@@ -61,8 +61,10 @@ def upgrade() -> None:
     _generic_continuity_commit_guard()
     _generic_static_recovery_proof_function()
     _generic_recovered_activation_proof_function()
+    _generic_gap_continuity_proof_function()
     _generic_static_recovery_commit_guard()
     _generic_recovered_activation_commit_guard()
+    _generic_gap_continuity_commit_guard()
     _grant_existing_owner_read_roles(bind)
 
 
@@ -92,7 +94,7 @@ def _generic_gap_vacuum_states() -> None:
     op.drop_constraint(f"ck_{table}_state_valid", table_name=table, type_="check")
     op.create_check_constraint(f"ck_{table}_state_valid", table,
         "state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING',"
-        "'RESOLVED_ACTIVE','RESOLVED_FALLBACK',"
+        "'RESOLVED_ACTIVE','RESOLVED_FALLBACK','RESOLVED_CONTINUITY',"
         "'VALID_EMPTY','OWNER_PAUSED','SUPERSEDED','FAILED_CLOSED')")
     op.create_check_constraint("ck_brc_strategy_entry_vacuums_current_gap_recovery_shape", table,
         "state <> 'RECOVERY_PENDING' OR ("
@@ -102,6 +104,10 @@ def _generic_gap_vacuum_states() -> None:
     op.create_check_constraint("ck_brc_strategy_entry_vacuums_current_gap_stays_fenced", table,
         "first_blocker <> 'AUTHORITY_GAP' OR source_generation_id IS NOT NULL OR "
         "state NOT IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK','VALID_EMPTY')")
+    op.create_check_constraint("ck_brc_strategy_entry_vacuums_current_gap_continuity_shape", table,
+        "state <> 'RESOLVED_CONTINUITY' OR (selection_spec_id <> 'sor-dynamic-selection-v0' "
+        "AND source_generation_id IS NULL AND first_blocker='AUTHORITY_GAP' "
+        "AND drained_at_ms IS NOT NULL AND resolved_at_ms IS NOT NULL)")
     op.drop_index("uq_brc_strategy_entry_vacuums_current_open_scope", table_name=table)
     op.create_index("uq_brc_strategy_entry_vacuums_current_open_scope", table,
         ["strategy_group_id", "selection_spec_id"], unique=True,
@@ -113,7 +119,13 @@ def _generic_gap_vacuum_states() -> None:
         IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL AND (
           NEW.first_blocker IS DISTINCT FROM OLD.first_blocker OR
           NEW.source_generation_id IS DISTINCT FROM OLD.source_generation_id OR
-          NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK','VALID_EMPTY')
+          NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK','VALID_EMPTY') OR
+          (NEW.state='RESOLVED_CONTINUITY' AND (OLD.state<>'RECOVERY_PENDING' OR NOT EXISTS (
+            SELECT 1 FROM brc_selection_session_authorities a
+            WHERE a.recovery_grant_proof->>'source_entry_vacuum_id'=OLD.entry_vacuum_id
+              AND a.authority_outcome='PRE_FENCE_CONTINUITY'
+              AND a.recovery_grant_proof->>'authority_outcome'='PRE_FENCE_CONTINUITY'
+              AND a.created_at_ms=NEW.resolved_at_ms)))
         ) THEN RAISE EXCEPTION 'Generic authority gap Vacuum cannot bypass recovery proof'; END IF;
         RETURN NEW;
       END; $$
@@ -123,6 +135,222 @@ def _generic_gap_vacuum_states() -> None:
         "EXECUTE FUNCTION brc_guard_generic_gap_vacuum_transition()"))
 
 
+def _generic_gap_continuity_proof_function() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_gap_continuity_proof_matches(p jsonb, checked_at bigint)
+      RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+      DECLARE v brc_strategy_entry_vacuums_current%ROWTYPE;
+        source_auth brc_selection_session_authorities%ROWTYPE;
+        b brc_selection_authority_event_bindings%ROWTYPE;
+        c brc_strategy_selection_control_current%ROWTYPE;
+        o brc_strategy_entry_controls_current%ROWTYPE;
+        spec brc_instrument_selection_specs%ROWTYPE;
+        cadence integer; rank_limit integer; evaluated bigint; committed bigint;
+        effective bigint; expiry bigint; first_close bigint; revision bigint;
+        fresh jsonb; cursors jsonb; expected jsonb; ids text; member_digest text;
+        n integer; interrupted boolean;
+      BEGIN
+        IF p IS NULL OR jsonb_typeof(p)<>'object' OR checked_at IS NULL
+          OR p->>'authority_outcome'<>'PRE_FENCE_CONTINUITY'
+          OR p->>'selection_mode'<>'dynamic_selection' THEN RETURN false; END IF;
+        SELECT * INTO v FROM brc_strategy_entry_vacuums_current
+          WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
+        IF NOT FOUND OR v.source_generation_id IS NOT NULL OR v.state<>'RECOVERY_PENDING'
+          OR v.first_blocker<>'AUTHORITY_GAP' OR v.drained_at_ms IS NULL OR v.resolved_at_ms IS NOT NULL
+          OR v.strategy_group_id IS DISTINCT FROM p->>'strategy_group_id'
+          OR v.selection_spec_id IS DISTINCT FROM p->>'selection_spec_id' THEN RETURN false; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
+          AND e.event_type='OPEN' AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
+          AND e.payload->>'source_selection_authority_id'=p->>'source_selection_authority_id')
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
+            AND e.event_type='ENTRY_DRAINED' AND e.payload->>'target_state'='RECOVERY_PENDING')
+          THEN RETURN false; END IF;
+        SELECT a.* INTO source_auth FROM brc_selection_authority_current current_auth
+          JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_auth.selection_authority_id
+          WHERE current_auth.selection_spec_id=v.selection_spec_id;
+        IF NOT FOUND OR source_auth.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+          OR source_auth.selection_mode<>'dynamic_selection' OR source_auth.selection_epoch_id='sor-v0'
+          OR source_auth.membership_freshness IS NULL OR source_auth.authority_outcome='VALID_EMPTY'
+          THEN RETURN false; END IF;
+        SELECT * INTO b FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=source_auth.selection_authority_id;
+        IF NOT FOUND OR b.grant_state<>'ACTIVE' OR (SELECT count(*) FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=source_auth.selection_authority_id)<>1 THEN RETURN false; END IF;
+        SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id=v.strategy_group_id;
+        SELECT * INTO o FROM brc_strategy_entry_controls_current WHERE strategy_group_id=v.strategy_group_id;
+        SELECT * INTO spec FROM brc_instrument_selection_specs WHERE selection_spec_id=v.selection_spec_id;
+        SELECT cadence_hours,retain_rank INTO cadence,rank_limit FROM brc_generic_dynamic_selection_specs_v1
+          WHERE selection_spec_id=v.selection_spec_id;
+        IF c.selection_mode<>'dynamic_selection' OR c.selection_spec_id<>v.selection_spec_id
+          OR c.selection_epoch_id IS DISTINCT FROM source_auth.selection_epoch_id
+          OR c.control_version IS DISTINCT FROM source_auth.selection_control_version
+          OR c.pending_selection_mode IS NOT NULL OR o.entry_state<>'enabled'
+          OR o.control_version<>source_auth.owner_control_version
+          OR spec.selection_kind<>'generic_dynamic_v1' OR spec.status<>'active'
+          OR spec.strategy_group_id<>v.strategy_group_id OR cadence IS NULL
+          OR b.event_spec_id IS DISTINCT FROM (SELECT event_spec_id FROM brc_instrument_selection_spec_events
+              WHERE selection_spec_id=v.selection_spec_id LIMIT 1)
+          OR b.position_side IS DISTINCT FROM (SELECT position_side FROM brc_instrument_selection_spec_events
+              WHERE selection_spec_id=v.selection_spec_id LIMIT 1)
+          OR (SELECT count(*) FROM brc_instrument_selection_spec_events WHERE selection_spec_id=v.selection_spec_id)<>1
+          THEN RETURN false; END IF;
+        effective:=v.period_anchor_ms+3600000;
+        expiry:=effective+cadence*3600000::bigint;
+        IF v.period_anchor_ms%(cadence*3600000::bigint)<>0
+          OR v.fenced_at_ms<effective+3600000 OR source_auth.expires_at_ms<>effective
+          OR source_auth.period_anchor_ms>=v.period_anchor_ms
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_current u
+            JOIN brc_strategy_universe_versions x USING(universe_version_id)
+            WHERE u.event_spec_id=b.event_spec_id AND u.universe_version_id=b.universe_version_id
+              AND u.lifecycle_state='active' AND x.lifecycle_state='active'
+              AND x.semantic_digest=u.semantic_digest AND x.strategy_group_id=v.strategy_group_id)
+          OR EXISTS (SELECT 1 FROM brc_instrument_selection_snapshots s
+            WHERE s.selection_spec_id=v.selection_spec_id AND s.selection_epoch_id=c.selection_epoch_id
+              AND s.period_anchor_ms>=v.period_anchor_ms AND s.created_at_ms<=checked_at
+              AND s.eligibility_not_before_ms<=checked_at AND s.expires_at_ms>checked_at)
+          THEN RETURN false; END IF;
+        IF source_auth.comparison_universe_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_comparison_binding_current binding
+          WHERE binding.event_spec_id=b.event_spec_id
+            AND binding.comparison_universe_id=source_auth.comparison_universe_id
+            AND binding.comparison_transition_revision=source_auth.comparison_transition_revision)
+          THEN RETURN false; END IF;
+        IF source_auth.comparison_universe_id IS DISTINCT FROM
+           (SELECT comparison_universe_id FROM brc_comparison_binding_current WHERE event_spec_id=b.event_spec_id)
+           AND source_auth.comparison_universe_id IS NOT NULL THEN RETURN false; END IF;
+        IF NOT EXISTS (SELECT 1 FROM brc_runtime_scopes_current s JOIN brc_owner_policy_current q USING(owner_policy_id)
+          WHERE s.universe_version_id=b.universe_version_id AND q.enabled AND q.new_entry_submit_enabled)
+          OR EXISTS (SELECT 1 FROM brc_runtime_scopes_current s JOIN brc_owner_policy_current q USING(owner_policy_id)
+            WHERE s.universe_version_id=b.universe_version_id AND (NOT q.enabled OR NOT q.new_entry_submit_enabled))
+          THEN RETURN false; END IF;
+        evaluated:=(p->'recovery_close_plan'->>'evaluated_at_ms')::bigint;
+        committed:=(p->>'committed_at_ms')::bigint;
+        first_close:=greatest(effective,(evaluated/3600000+1)*3600000);
+        IF evaluated IS NULL OR committed IS NULL OR evaluated<v.drained_at_ms
+          OR evaluated<o.updated_at_ms OR evaluated<c.updated_at_ms OR committed<evaluated
+          OR checked_at<committed OR checked_at>=first_close OR first_close>=expiry
+          THEN RETURN false; END IF;
+        fresh:=source_auth.membership_freshness;
+        IF (effective-(fresh->>'source_snapshot_effective_at_ms')::bigint)/(cadence*3600000::bigint)<>1
+          OR fresh->>'source_member_set_digest' IS DISTINCT FROM b.member_set_digest
+          OR fresh->>'source_snapshot_id' IS DISTINCT FROM source_auth.selection_snapshot_id
+          OR (fresh->>'consecutive_missed_periods')::int<>0
+          OR (fresh->>'membership_valid_until_ms')::bigint<=first_close
+          THEN RETURN false; END IF;
+        fresh:=fresh || jsonb_build_object('consecutive_missed_periods',1,'state','GRACE');
+        WITH members AS (
+          SELECT m.exchange_instrument_id,
+            'episode-domain:' || encode(sha256(convert_to('{"event_spec_id":' || to_json(b.event_spec_id)::text ||
+              ',"exchange_instrument_id":' || to_json(m.exchange_instrument_id)::text || ',"position_side":' ||
+              to_json(b.position_side)::text || '}','UTF8')),'hex') AS domain_key
+          FROM brc_strategy_universe_members m WHERE m.universe_version_id=b.universe_version_id
+        ) SELECT count(*),string_agg(to_json(m.exchange_instrument_id)::text,',' ORDER BY m.exchange_instrument_id COLLATE "C"),
+          jsonb_agg(jsonb_build_object('episode_domain_key',m.domain_key,'exchange_instrument_id',m.exchange_instrument_id,
+            'episode_version',coalesce(e.projection_version,0),'comparison_checkpoint_version',coalesce(e.comparison_checkpoint_version,0),
+            'authority_recovery_checkpoint_version',coalesce(e.authority_recovery_checkpoint_version,0),
+            'last_observed_at_ms',greatest(e.last_observed_at_ms,e.comparison_last_observed_at_ms,e.authority_recovery_last_observed_at_ms)) ORDER BY m.exchange_instrument_id COLLATE "C"),
+          coalesce(max(e.authority_recovery_revision),0)+1
+          INTO n,ids,cursors,revision FROM members m LEFT JOIN brc_exposure_episode_current e ON e.episode_domain_key=m.domain_key;
+        IF n<1 OR n>rank_limit OR ids IS NULL THEN RETURN false; END IF;
+        member_digest:='sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' || ids || ']}','UTF8')),'hex');
+        IF member_digest<>b.member_set_digest THEN RETURN false; END IF;
+        expected:=jsonb_build_object('proof_kind','FUTURE_CLOSE_REBASE_REQUIRED',
+          'authority_outcome','PRE_FENCE_CONTINUITY','target_snapshot_id',NULL,
+          'selection_spec_id',v.selection_spec_id,'strategy_group_id',v.strategy_group_id,
+          'selection_epoch_id',source_auth.selection_epoch_id,'selection_mode','dynamic_selection',
+          'source_entry_vacuum_id',v.entry_vacuum_id,'vacuum_fenced_at_ms',v.fenced_at_ms,
+          'materialization_generation_id',NULL,'source_selection_authority_id',source_auth.selection_authority_id,
+          'failed_activation_authorization_id',NULL,'owner_control_version',o.control_version,
+          'selection_control_version',c.control_version,
+          'event_binding',jsonb_build_object('event_spec_id',b.event_spec_id,'position_side',b.position_side,
+            'grant_state','ACTIVE','universe_version_id',b.universe_version_id,'member_set_digest',b.member_set_digest),
+          'recovery_close_plan',jsonb_build_object('recovery_id','recovery:' || encode(sha256(convert_to(
+            '{"entry_vacuum_id":' || to_json(v.entry_vacuum_id)::text || '}','UTF8')),'hex'),
+            'recovery_revision',revision,'reason','AUTHORITY_GAP',
+            'period',jsonb_build_object('feature_cutoff_at_ms',v.period_anchor_ms,'cadence_hours',cadence,
+              'scheduled_effective_at_ms',effective,'period_expires_at_ms',expiry),
+            'evaluated_at_ms',evaluated,'status','FUTURE_CLOSE_REBASE_REQUIRED',
+            'first_eligible_close_time_ms',first_close,'episode_rebase_required',true),
+          'membership_freshness',fresh,'comparison_universe_id',source_auth.comparison_universe_id,
+          'comparison_transition_revision',source_auth.comparison_transition_revision,
+          'observation_cursors',cursors,'committed_at_ms',committed,'episode_rebase_required',true);
+        RETURN coalesce(p=expected,false);
+      EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RETURN false;
+      END; $$
+    """))
+
+
+def _generic_gap_continuity_commit_guard() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_generic_gap_continuity_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+      DECLARE a brc_selection_session_authorities%ROWTYPE; p jsonb; b jsonb;
+        actual jsonb; expected jsonb;
+      BEGIN
+        SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
+        IF NOT FOUND OR a.recovery_grant_proof IS NULL OR a.authority_outcome<>'PRE_FENCE_CONTINUITY' THEN RETURN NULL; END IF;
+        p:=a.recovery_grant_proof; b:=p->'event_binding';
+        IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current current_auth
+          WHERE current_auth.selection_spec_id=a.selection_spec_id
+            AND current_auth.selection_authority_id=a.selection_authority_id
+            AND current_auth.updated_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v
+            WHERE v.entry_vacuum_id=p->>'source_entry_vacuum_id'
+              AND v.state='RESOLVED_CONTINUITY' AND v.source_generation_id IS NULL
+              AND v.first_blocker='AUTHORITY_GAP' AND v.fenced_at_ms=(p->>'vacuum_fenced_at_ms')::bigint
+              AND v.drained_at_ms IS NOT NULL AND v.resolved_at_ms=a.created_at_ms)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_controls_current o
+            WHERE o.strategy_group_id=p->>'strategy_group_id' AND o.entry_state='enabled'
+              AND o.control_version=a.owner_control_version)
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current c
+            WHERE c.strategy_group_id=p->>'strategy_group_id'
+              AND c.selection_spec_id=a.selection_spec_id AND c.selection_epoch_id=a.selection_epoch_id
+              AND c.selection_mode='dynamic_selection' AND c.pending_selection_mode IS NULL
+              AND c.control_version=a.selection_control_version)
+          THEN RAISE EXCEPTION 'Gap continuity requires atomic Vacuum Authority current'; END IF;
+        IF (SELECT count(*) FROM brc_selection_authority_event_bindings
+          WHERE selection_authority_id=a.selection_authority_id)<>1
+          OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings x
+            JOIN brc_strategy_universe_current u ON u.event_spec_id=x.event_spec_id
+              AND u.universe_version_id=x.universe_version_id AND u.lifecycle_state='active'
+            WHERE x.selection_authority_id=a.selection_authority_id
+              AND x.event_spec_id=b->>'event_spec_id' AND x.position_side=b->>'position_side'
+              AND x.grant_state='ACTIVE' AND x.universe_version_id=b->>'universe_version_id'
+              AND x.member_set_digest=b->>'member_set_digest')
+          OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
+            WHERE e.entry_vacuum_id=p->>'source_entry_vacuum_id'
+              AND e.event_type='RESOLVED_CONTINUITY'
+              AND e.payload->>'selection_authority_id'=a.selection_authority_id)
+          THEN RAISE EXCEPTION 'Gap continuity requires exact Event and resolution event'; END IF;
+        SELECT jsonb_agg(jsonb_build_object('key',e.episode_domain_key,
+          'rid',e.authority_recovery_id,'revision',e.authority_recovery_revision,
+          'effective',e.authority_recovery_effective_from_ms,
+          'first',e.authority_recovery_first_eligible_close_time_ms,
+          'armed',e.authority_recovery_armed_at_ms,
+          'observed',e.authority_recovery_last_observed_at_ms,
+          'status',e.authority_recovery_last_detector_status,
+          'version',e.authority_recovery_checkpoint_version)
+          ORDER BY e.episode_domain_key COLLATE "C") INTO actual
+          FROM jsonb_array_elements(p->'observation_cursors') cursor
+          JOIN brc_exposure_episode_current e ON e.episode_domain_key=cursor->>'episode_domain_key';
+        SELECT jsonb_agg(jsonb_build_object('key',cursor->>'episode_domain_key',
+          'rid',p->'recovery_close_plan'->>'recovery_id',
+          'revision',(p->'recovery_close_plan'->>'recovery_revision')::bigint,
+          'effective',a.created_at_ms,'first',a.first_eligible_close_time_ms,
+          'armed',NULL,'observed',cursor->'last_observed_at_ms','status',NULL,
+          'version',(cursor->>'authority_recovery_checkpoint_version')::bigint+1)
+          ORDER BY cursor->>'episode_domain_key' COLLATE "C") INTO expected
+          FROM jsonb_array_elements(p->'observation_cursors') cursor;
+        IF actual IS DISTINCT FROM expected THEN
+          RAISE EXCEPTION 'Gap continuity requires complete future-close rebase'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    for table in ("brc_selection_session_authorities", "brc_selection_authority_event_bindings"):
+        op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_{table}_generic_gap_continuity "
+            f"AFTER INSERT ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
+            "EXECUTE FUNCTION brc_validate_generic_gap_continuity_commit()"))
+
+
 def _generic_static_recovery_commit_guard() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_validate_static_recovery_commit() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -130,7 +358,7 @@ def _generic_static_recovery_commit_guard() -> None:
         n integer; actual jsonb; expected jsonb; dynamic_recovery boolean;
       BEGIN
         SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
-        IF NOT FOUND OR a.recovery_grant_proof IS NULL OR a.authority_outcome='ACTIVE_NEW' THEN RETURN NULL; END IF;
+        IF NOT FOUND OR a.recovery_grant_proof IS NULL OR a.authority_outcome IN ('ACTIVE_NEW','PRE_FENCE_CONTINUITY') THEN RETURN NULL; END IF;
         p:=a.recovery_grant_proof; b:=p->'event_binding';
         dynamic_recovery := a.selection_mode='dynamic_selection';
         IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current
@@ -712,7 +940,8 @@ def _generic_continuity_commit_guard() -> None:
         source_binding brc_selection_authority_event_bindings%ROWTYPE;
       BEGIN
         SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
-        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome<>'PRE_FENCE_CONTINUITY' THEN RETURN NULL; END IF;
+        IF NOT FOUND OR a.selection_epoch_id='sor-v0' OR a.authority_outcome<>'PRE_FENCE_CONTINUITY'
+          OR a.recovery_grant_proof IS NOT NULL THEN RETURN NULL; END IF;
         IF NOT EXISTS (SELECT 1 FROM brc_selection_authority_current
           WHERE selection_spec_id=a.selection_spec_id AND selection_authority_id=a.selection_authority_id
             AND updated_at_ms=a.created_at_ms)
@@ -893,7 +1122,7 @@ def _authority_snapshot_epoch() -> None:
     op.create_check_constraint("ck_brc_recovery_grant_shape",table,
         "recovery_grant_proof IS NULL OR (jsonb_typeof(recovery_grant_proof)='object' AND "
         "selection_epoch_id<>'sor-v0' AND ((authority_outcome='FALLBACK_PREVIOUS' AND selection_mode IN ('static_baseline','dynamic_selection')) "
-        "OR (authority_outcome='ACTIVE_NEW' AND selection_mode='dynamic_selection')))")
+        "OR (authority_outcome IN ('ACTIVE_NEW','PRE_FENCE_CONTINUITY') AND selection_mode='dynamic_selection')))")
     op.add_column(table, sa.Column("membership_freshness", sa.dialects.postgresql.JSONB(), nullable=True))
     op.add_column(table, sa.Column("comparison_universe_id", ID, nullable=True))
     op.add_column(table, sa.Column("comparison_transition_revision", sa.BigInteger(), nullable=True))
@@ -970,6 +1199,38 @@ def _authority_snapshot_epoch() -> None:
           IF kind='generic_dynamic_v1' THEN
             IF NEW.recovery_grant_proof IS NOT NULL THEN
               p:=NEW.recovery_grant_proof;
+              IF p->>'authority_outcome'='PRE_FENCE_CONTINUITY' THEN
+                IF NOT brc_generic_gap_continuity_proof_matches(p,NEW.created_at_ms)
+                  OR NEW.selection_spec_id IS DISTINCT FROM p->>'selection_spec_id'
+                  OR NEW.selection_epoch_id IS DISTINCT FROM p->>'selection_epoch_id'
+                  OR NEW.selection_control_version IS DISTINCT FROM (p->>'selection_control_version')::bigint
+                  OR NEW.owner_control_version IS DISTINCT FROM (p->>'owner_control_version')::bigint
+                  OR NEW.created_at_ms IS DISTINCT FROM (p->>'committed_at_ms')::bigint
+                  OR NEW.period_anchor_ms IS DISTINCT FROM (p->'recovery_close_plan'->'period'->>'feature_cutoff_at_ms')::bigint
+                  OR NEW.decision_boundary_ms IS DISTINCT FROM (p->'recovery_close_plan'->'period'->>'scheduled_effective_at_ms')::bigint
+                  OR NEW.effective_from_ms IS DISTINCT FROM NEW.created_at_ms
+                  OR NEW.expires_at_ms IS DISTINCT FROM least(
+                    (p->'recovery_close_plan'->'period'->>'period_expires_at_ms')::bigint,
+                    (p->'membership_freshness'->>'membership_valid_until_ms')::bigint)
+                  OR NEW.first_eligible_close_time_ms IS DISTINCT FROM (p->'recovery_close_plan'->>'first_eligible_close_time_ms')::bigint
+                  OR NEW.materialization_generation_id IS NOT NULL
+                  OR NEW.comparison_universe_id IS DISTINCT FROM p->>'comparison_universe_id'
+                  OR NEW.comparison_transition_revision IS DISTINCT FROM (p->>'comparison_transition_revision')::bigint
+                  OR NEW.reason_code<>'AUTHORITY_GAP' OR NEW.selection_mode<>'dynamic_selection'
+                  OR NEW.authority_outcome<>'PRE_FENCE_CONTINUITY'
+                  OR NEW.continuity_source_kind<>'SELECTION_AUTHORITY'
+                  OR NEW.grant_proof_kind<>'FUTURE_CLOSE_REBASE_REQUIRED'
+                  OR NEW.selection_snapshot_id IS DISTINCT FROM p->'membership_freshness'->>'source_snapshot_id'
+                  OR NEW.selection_job_id IS NOT NULL OR NEW.selection_attempt_id IS NOT NULL
+                  OR NEW.current_close_proof IS NOT NULL
+                  OR NEW.membership_freshness IS DISTINCT FROM p->'membership_freshness'
+                  OR NEW.activation_authorization_id IS NOT NULL OR NEW.authority_gap_audit_id IS NOT NULL
+                  OR NEW.continued_from_selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
+                  OR NEW.grant_predecessor_authority_id IS NOT NULL THEN
+                  RAISE EXCEPTION 'Gap continuity proof differs from locked source facts';
+                END IF;
+                RETURN NEW;
+              END IF;
               IF p->>'authority_outcome'='ACTIVE_NEW' THEN
                 IF NOT brc_generic_recovered_activation_proof_matches(p,NEW.created_at_ms)
                   OR NEW.selection_spec_id IS DISTINCT FROM p->>'selection_spec_id'

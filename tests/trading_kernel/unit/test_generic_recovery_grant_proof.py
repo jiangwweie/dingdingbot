@@ -157,6 +157,71 @@ def test_no_eligible_close_is_a_miss_not_a_recovery_grant():
         GenericRecoveryGrantProof(**values)
 
 
+@pytest.mark.parametrize("group", ["CPM-RO-001", "BRF2-001"])
+def test_late_continuity_requires_generation_free_gap_rebase(group):
+    from src.trading_kernel.domain.selection_authority import (
+        GenericRecoveryAuthority,
+        GenericRecoveryGrantProof,
+    )
+
+    values = recovery_payload(group, False)
+    values["authority_outcome"] = "PRE_FENCE_CONTINUITY"
+    spec = generic_selection_spec(group)
+    assert spec.cadence_hours == 4
+    source_period = build_generic_selection_period(feature_cutoff_at_ms=100*HOUR,cadence_hours=4)
+    period = build_generic_selection_period(feature_cutoff_at_ms=104*HOUR,cadence_hours=4)
+    now = 106*HOUR+1800_000
+    values["recovery_close_plan"] = plan_hourly_recovery_close(
+        recovery_id="recovery:vacuum",recovery_revision=1,reason="AUTHORITY_GAP",
+        period=period,evaluated_at_ms=now)
+    values["membership_freshness"] = record_dynamic_selection_miss(
+        current=build_dynamic_membership_freshness(
+            source_snapshot_id="snapshot:previous",
+            source_member_set_digest=values["event_binding"].member_set_digest,
+            period=source_period),missed_period=period)
+    values["vacuum_fenced_at_ms"] = 106*HOUR+1
+    values["committed_at_ms"] = now+1
+    proof = GenericRecoveryGrantProof(**values)
+    authority = GenericRecoveryAuthority.build(proof=proof, authority_sequence=1)
+    assert proof.materialization_generation_id is None
+    assert proof.target_snapshot_id is None
+    assert proof.recovery_close_plan.reason == "AUTHORITY_GAP"
+    assert authority.authority_outcome == "PRE_FENCE_CONTINUITY"
+    assert authority.first_eligible_close_time_ms > authority.created_at_ms
+    assert authority.selection_snapshot_id == proof.membership_freshness.source_snapshot_id
+    assert GenericRecoveryAuthority.model_validate_json(authority.model_dump_json()) == authority
+    for mutation in (
+        {"materialization_generation_id": "generation:fake"},
+        {"target_snapshot_id": "snapshot:fake"},
+        {"selection_mode": "static_baseline"},
+        {"source_selection_authority_id": None},
+        {"membership_freshness": None},
+        {"failed_activation_authorization_id": "owner:fake"},
+        {"vacuum_fenced_at_ms": period.scheduled_effective_at_ms+1},
+        {"recovery_close_plan": proof.recovery_close_plan.model_copy(update={"reason":"MATERIALIZATION_FAILURE"})},
+    ):
+        with pytest.raises(ValueError):
+            GenericRecoveryGrantProof.model_validate({**proof.model_dump(), **mutation})
+
+
+@pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
+def test_hourly_gap_after_its_only_close_cannot_create_trading_authority(group):
+    from src.trading_kernel.domain.selection_authority import GenericRecoveryGrantProof
+
+    values = recovery_payload(group, False)
+    values["authority_outcome"] = "PRE_FENCE_CONTINUITY"
+    values["materialization_generation_id"] = None
+    period = values["recovery_close_plan"].period
+    evaluated = period.scheduled_effective_at_ms+1
+    values["recovery_close_plan"] = plan_hourly_recovery_close(
+        recovery_id="recovery:vacuum",recovery_revision=1,reason="AUTHORITY_GAP",
+        period=period,evaluated_at_ms=evaluated)
+    values["vacuum_fenced_at_ms"] = evaluated
+    values["committed_at_ms"] = evaluated+1
+    with pytest.raises(ValueError,match="NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY"):
+        GenericRecoveryGrantProof(**values)
+
+
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 @pytest.mark.parametrize("static", [False, True])
 def test_recovery_authority_uses_exact_proof_and_never_claims_normal_activation(group, static):

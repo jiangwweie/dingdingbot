@@ -1175,6 +1175,17 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
                     strategy_group_id=request.strategy_group_id,selection_spec_id=spec.selection_spec_id,now_ms=now_ms))
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                     entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
+            if vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING:
+                try:
+                    gap_proof = await uow.instrument_selection.prepare_generic_gap_continuity_proof(
+                        strategy_group_id=request.strategy_group_id,selection_spec_id=spec.selection_spec_id,
+                        period_anchor_ms=request.period_anchor_ms)
+                    recovered = await uow.instrument_selection.commit_generic_gap_continuity(gap_proof)
+                except (SelectionPersistenceConflict,ValueError) as exc:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                        entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=str(exc))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.PRE_FENCE_CONTINUITY,
+                    selection_authority_id=recovered.selection_authority_id,entry_vacuum_id=vacuum.entry_vacuum_id)
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                 entry_vacuum_id=vacuum.entry_vacuum_id,reason_code="GENERIC_GAP_RECOVERY_PENDING")
         source = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id,for_update=True)

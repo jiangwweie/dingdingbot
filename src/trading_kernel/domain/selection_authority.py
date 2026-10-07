@@ -993,7 +993,7 @@ class GenericRecoveryGrantProof(BaseModel):
     """
     model_config = ConfigDict(frozen=True, extra="forbid")
     proof_kind: Literal["FUTURE_CLOSE_REBASE_REQUIRED"] = "FUTURE_CLOSE_REBASE_REQUIRED"
-    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW"] = "FALLBACK_PREVIOUS"
+    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW", "PRE_FENCE_CONTINUITY"] = "FALLBACK_PREVIOUS"
     target_snapshot_id: str | None = None
     selection_spec_id: str
     strategy_group_id: str
@@ -1069,7 +1069,23 @@ class GenericRecoveryGrantProof(BaseModel):
                 exchange_instrument_id=cursor.exchange_instrument_id,position_side=spec.position_side) or (
                 cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>self.committed_at_ms):
                 raise ValueError("recovery cursor scope or time differs")
-        if self.authority_outcome == "ACTIVE_NEW":
+        if self.authority_outcome == "PRE_FENCE_CONTINUITY":
+            fresh = self.membership_freshness
+            if (self.selection_mode != "dynamic_selection" or self.target_snapshot_id is not None
+                or self.materialization_generation_id is not None
+                or self.source_selection_authority_id is None
+                or self.failed_activation_authorization_id is not None
+                or plan.reason != "AUTHORITY_GAP" or fresh is None
+                or self.vacuum_fenced_at_ms < plan.period.scheduled_effective_at_ms+HOUR_MS):
+                raise ValueError("Gap continuity requires exact generation-free Dynamic source")
+            fresh = DynamicMembershipFreshness.model_validate(fresh.model_dump())
+            missed = (plan.period.scheduled_effective_at_ms-fresh.source_snapshot_effective_at_ms)//(spec.cadence_hours*HOUR_MS)
+            if (missed != 1 or fresh.consecutive_missed_periods != 1
+                or fresh.state is not DynamicMembershipState.GRACE
+                or fresh.source_member_set_digest != binding.member_set_digest
+                or not fresh.allows_new_entry_at(self.first_eligible_close_time_ms)):
+                raise ValueError("Gap continuity cannot refresh or extend previous membership")
+        elif self.authority_outcome == "ACTIVE_NEW":
             fresh = self.membership_freshness
             if static or self.target_snapshot_id is None or fresh is None or self.source_selection_authority_id is None or (
                 self.materialization_generation_id is None or self.failed_activation_authorization_id is not None):
@@ -1122,7 +1138,7 @@ class GenericRecoveryAuthority(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     selection_authority_id: str
     authority_sequence: int = Field(gt=0)
-    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW"] = "FALLBACK_PREVIOUS"
+    authority_outcome: Literal["FALLBACK_PREVIOUS", "ACTIVE_NEW", "PRE_FENCE_CONTINUITY"] = "FALLBACK_PREVIOUS"
     recovery_proof: GenericRecoveryGrantProof
 
     @classmethod

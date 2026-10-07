@@ -95,6 +95,7 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
+    GenericRecoveryAuthority,
     GenericSelectionAuthority,
     selected_member_set_digest,
 )
@@ -108,6 +109,7 @@ from src.trading_kernel.infrastructure.pg_instrument_selection_repository import
     SelectionJobConflict,
     generic_authority_from_storage,
     generic_authority_storage_values,
+    generic_recovery_authority_storage_values,
 )
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_selection_attempts,
@@ -2310,15 +2312,21 @@ async def test_generic_continuity_refuses_an_already_consumed_close(database: As
 
 
 @pytest.mark.asyncio
-async def test_generic_late_continuity_needs_gap_recovery_not_current_close(database: AsyncEngine) -> None:
+@pytest.mark.parametrize("group,template_factory", [
+    ("CPM-RO-001", cpm_long_snapshot),
+    ("BRF2-001", brf2_short_snapshot),
+])
+async def test_generic_late_continuity_needs_gap_recovery_not_current_close(
+    database: AsyncEngine, group: str, template_factory,
+) -> None:
     source,_,_,uid = await _exercise_generic_generation(
-        database,"CPM-RO-001",False,durable=True,first_activation=True,natural_selection=True)
+        database,group,False,durable=True,first_activation=True,natural_selection=True)
     anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
     late_close = anchor+2*HOUR
     at = late_close+1
     await make_warming_ready(database,universe_version_id=uid,
         warm_closed_bar_time_ms=late_close,valid_until_ms=at+HOUR)
-    request = CoordinateGenericPeriodRequest(strategy_group_id="CPM-RO-001",
+    request = CoordinateGenericPeriodRequest(strategy_group_id=group,
         selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
         worker_id="late-continuity")
     outcomes = []
@@ -2337,7 +2345,7 @@ async def test_generic_late_continuity_needs_gap_recovery_not_current_close(data
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(
-            strategy_group_id="CPM-RO-001",selection_spec_id=source.spec.selection_spec_id)
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
     assert current is not None and current.authority.period.feature_cutoff_at_ms < anchor
     assert vacuum is not None and vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
     assert vacuum.fenced_at_ms == at and vacuum.drained_at_ms is not None
@@ -2370,6 +2378,132 @@ async def test_generic_late_continuity_needs_gap_recovery_not_current_close(data
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuums_current "
             "WHERE state='RECOVERY_PENDING'"))==1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at+5)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            proposal = await uow.instrument_selection.prepare_generic_gap_continuity_proof(
+                strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                period_anchor_ms=anchor)
+        assert proposal.authority_outcome == "PRE_FENCE_CONTINUITY"
+        assert proposal.materialization_generation_id is None
+        assert proposal.source_entry_vacuum_id == vacuum.entry_vacuum_id
+        assert proposal.source_selection_authority_id == current.authority.selection_authority_id
+        assert proposal.first_eligible_close_time_ms == late_close+HOUR
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text(
+                "SELECT brc_generic_gap_continuity_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+                {"proof":proposal.model_dump_json(),"checked_at":proposal.committed_at_ms}) is True
+            forged = proposal.model_copy(update={"owner_control_version":proposal.owner_control_version+1})
+            assert await conn.scalar(sa.text(
+                "SELECT brc_generic_gap_continuity_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+                {"proof":forged.model_dump_json(),"checked_at":proposal.committed_at_ms}) is False
+        forged_authority = GenericRecoveryAuthority.build(proof=forged,authority_sequence=1)
+        with pytest.raises(sa.exc.DBAPIError):
+            async with database.begin() as conn:
+                await conn.execute(sa.insert(selection_session_authorities).values(
+                    **generic_recovery_authority_storage_values(forged_authority)))
+        valid_authority = GenericRecoveryAuthority.build(proof=proposal,authority_sequence=1)
+        with pytest.raises(sa.exc.DBAPIError):
+            async with database.begin() as conn:
+                await conn.execute(sa.insert(selection_session_authorities).values(
+                    **generic_recovery_authority_storage_values(valid_authority)))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert uow._connection is not None
+            pause_probe = await uow._connection.begin_nested()
+            await uow._connection.execute(sa.text("UPDATE brc_strategy_entry_controls_current "
+                "SET entry_state='paused' WHERE strategy_group_id=:group"),{"group":group})
+            with pytest.raises(SelectionJobConflict,match="Owner/Control"):
+                await uow.instrument_selection.prepare_generic_gap_continuity_proof(
+                    strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                    period_anchor_ms=anchor)
+            await pause_probe.rollback()
+            cursor_probe = await uow._connection.begin_nested()
+            cursor = proposal.observation_cursors[0]
+            changed_episode = advance_exposure_episode(
+                contract=strategy_contract_for(source.spec.event_spec_id),current=None,
+                detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,
+                observed_at_ms=late_close,exchange_instrument_id=cursor.exchange_instrument_id)
+            await uow.signals.save_exposure_episode(changed_episode.current,expected_version=0)
+            with pytest.raises(SelectionJobConflict,match="proof changed"):
+                await uow.instrument_selection.require_generic_gap_continuity_proof(proposal)
+            await cursor_probe.rollback()
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises(SelectionJobConflict,match="proof changed"):
+                await uow.instrument_selection.require_generic_gap_continuity_proof(forged)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=proposal.first_eligible_close_time_ms)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                with pytest.raises(ValueError,match="boundary"):
+                    await uow.instrument_selection.require_generic_gap_continuity_proof(proposal)
+        with patch.object(PostgresInstrumentSelectionRepository,
+            "initialize_generic_recovery_checkpoints",new=AsyncMock(side_effect=RuntimeError("injected rebase failure"))), pytest.raises(
+                RuntimeError,match="injected rebase failure"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.instrument_selection.commit_generic_gap_continuity(proposal)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert (await uow.instrument_selection.get_current_generic_authority(
+                source.spec.selection_spec_id)).authority.selection_authority_id == current.authority.selection_authority_id
+            still_open = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            assert still_open is not None and still_open.state is StrategyEntryVacuumState.RECOVERY_PENDING
+            assert await uow.signals.get_authority_recovery_checkpoint(
+                proposal.observation_cursors[0].episode_domain_key) is None
+        restored = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:at+5)
+    assert restored.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY
+    async with PostgresKernelUnitOfWork(database) as uow:
+        recovery = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+    assert recovery is not None and recovery.authority.authority_outcome == "PRE_FENCE_CONTINUITY"
+    assert recovery.authority.first_eligible_close_time_ms == late_close+HOUR
+    assert recovery.authority.event_binding == current.authority.event_binding
+    async with PostgresKernelUnitOfWork(database) as uow:
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        assert scope is not None
+        rejected = await resolve_selection_observation_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=None,observed_close_time_ms=late_close,
+            now_ms=at+6,allow_current_as_birth=True,lock_current=True)
+    assert not rejected.allowed
+    future_close = recovery.authority.first_eligible_close_time_ms
+    template = template_factory()
+    shift = future_close-template.trigger_candle_close_time_ms
+    class GapRecoveryMarket:
+        async def fetch_closed_candles(self, request):
+            candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
+                "close_time_ms":c.close_time_ms+shift}) for c in candles)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=future_close+1)):
+        suppressed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),
+            GapRecoveryMarket(),ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=future_close,
+                attempted_at_ms=future_close+1))
+    assert suppressed.status is ObservationStatus.NO_SIGNAL, suppressed
+    assert suppressed.detector_reason == "RECOVERY_REBASE_REQUIRED", suppressed
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=at+6)):
+        duplicate = await coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:at+6)
+    assert duplicate.selection_authority_id == recovery.authority.selection_authority_id
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities")) == 2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_entry_vacuums_current "
+            "WHERE state='RESOLVED_CONTINUITY'")) == 1
+        expected_members = await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_strategy_universe_members WHERE universe_version_id=:uid"),
+            {"uid":uid})
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+            "WHERE authority_recovery_id IS NOT NULL")) == expected_members
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+        new=AsyncMock(return_value=late_close+HOUR)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises(SelectionJobConflict,match="Vacuum"):
+                await uow.instrument_selection.prepare_generic_gap_continuity_proof(
+                    strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                    period_anchor_ms=anchor)
 
 
 @pytest.mark.asyncio

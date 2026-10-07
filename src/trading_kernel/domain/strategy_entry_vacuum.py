@@ -22,6 +22,7 @@ class StrategyEntryVacuumState(StrEnum):
     RECOVERY_PENDING = "RECOVERY_PENDING"
     RESOLVED_ACTIVE = "RESOLVED_ACTIVE"
     RESOLVED_FALLBACK = "RESOLVED_FALLBACK"
+    RESOLVED_CONTINUITY = "RESOLVED_CONTINUITY"
     VALID_EMPTY = "VALID_EMPTY"
     OWNER_PAUSED = "OWNER_PAUSED"
     SUPERSEDED = "SUPERSEDED"
@@ -68,6 +69,7 @@ class StrategyEntryVacuum(BaseModel):
         return self.state not in {
             StrategyEntryVacuumState.RESOLVED_ACTIVE,
             StrategyEntryVacuumState.RESOLVED_FALLBACK,
+            StrategyEntryVacuumState.RESOLVED_CONTINUITY,
         }
 
     @property
@@ -122,6 +124,7 @@ _TERMINAL_STATES = frozenset(
     {
         StrategyEntryVacuumState.RESOLVED_ACTIVE,
         StrategyEntryVacuumState.RESOLVED_FALLBACK,
+        StrategyEntryVacuumState.RESOLVED_CONTINUITY,
         StrategyEntryVacuumState.VALID_EMPTY,
         StrategyEntryVacuumState.FAILED_CLOSED,
     }
@@ -164,6 +167,7 @@ _LEGAL_TRANSITIONS: dict[
     ),
     StrategyEntryVacuumState.RECOVERY_PENDING: frozenset(
         {
+            StrategyEntryVacuumState.RESOLVED_CONTINUITY,
             StrategyEntryVacuumState.OWNER_PAUSED,
             StrategyEntryVacuumState.SUPERSEDED,
             StrategyEntryVacuumState.FAILED_CLOSED,

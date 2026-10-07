@@ -3310,6 +3310,186 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Entry Vacuum period exceeds readonly bound")
         return tuple(_entry_vacuum_from_row(row) for row in rows)
 
+    async def prepare_generic_gap_continuity_proof(self, *, strategy_group_id: str,
+        selection_spec_id: str, period_anchor_ms: int) -> GenericRecoveryGrantProof:
+        """Lock the former Active set and produce a strictly future gap proposal."""
+        from src.trading_kernel.application.advance_strategy_universe import (
+            UniverseActivationOperation,
+            UniverseActivationRequest,
+            UniverseActivationStatus,
+        )
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        spec = await self.get_generic_spec(selection_spec_id)
+        if spec.strategy_group_id != strategy_group_id:
+            raise SelectionJobConflict("Gap continuity Spec changed")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(strategy_group_id,for_update=True)
+        vacuum = await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,
+            selection_spec_id=selection_spec_id,for_update=True)
+        source = await self.get_current_generic_authority(selection_spec_id,for_update=True)
+        if (owner is None or owner["entry_state"]!="enabled" or control is None
+            or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.selection_spec_id!=selection_spec_id or control.pending_selection_mode is not None
+            or source is None or control.selection_epoch_id!=source.authority.selection_epoch_id
+            or control.control_version!=source.authority.selection_control_version
+            or owner["control_version"]!=source.authority.owner_control_version
+            or vacuum is None or vacuum.period_anchor_ms!=period_anchor_ms
+            or vacuum.state is not StrategyEntryVacuumState.RECOVERY_PENDING
+            or vacuum.source_generation_id is not None or vacuum.first_blocker!="AUTHORITY_GAP"
+            or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
+            or await self.entry_vacuum_has_drain_blockers(strategy_group_id=strategy_group_id)):
+            raise SelectionJobConflict("Gap continuity requires exact drained Owner/Control/Vacuum source")
+        origin = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
+            strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuum_events.c.event_type=="OPEN").limit(1))).scalar_one_or_none()
+        if origin is None or origin.get("source_selection_authority_id")!=source.authority.selection_authority_id:
+            raise SelectionJobConflict("Gap continuity OPEN event source changed")
+        period = build_generic_selection_period(feature_cutoff_at_ms=period_anchor_ms,cadence_hours=spec.cadence_hours)
+        prior = source.authority
+        prior_fresh = prior.recovery_proof.membership_freshness if isinstance(prior,GenericRecoveryAuthority) else prior.membership_freshness
+        if (prior_fresh is None or prior.blocks_new_entry or prior.expires_at_ms!=period.scheduled_effective_at_ms
+            or prior.event_binding.grant_state is not AuthorityEventGrantState.ACTIVE):
+            raise SelectionJobConflict("Gap continuity previous Authority is not continuous")
+        try:
+            freshness = record_dynamic_selection_miss(current=prior_fresh,missed_period=period)
+        except ValueError as exc:
+            raise SelectionJobConflict("Gap continuity absolute freshness expired") from exc
+        uid = prior.event_binding.universe_version_id
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        active = await universes.get_current(spec.event_spec_id)
+        if uid is None or active is None or active.universe_version_id!=uid:
+            raise SelectionJobConflict("Gap continuity previous Active Universe changed")
+        ready = await universes.try_activate(UniverseActivationRequest(universe_version_id=uid,
+            attempted_at_ms=vacuum.drained_at_ms,operation=UniverseActivationOperation.CERTIFY_CURRENT))
+        if ready.status is not UniverseActivationStatus.ALREADY_ACTIVE:
+            raise SelectionJobConflict("Gap continuity previous Universe not ready")
+        signals = PostgresSignalRepository(self._connection)
+        members = await signals.get_observation_universe_members(event_spec_id=spec.event_spec_id,universe_version_id=uid)
+        if members is None or members.lifecycle_state!="active" or (
+            selected_member_set_digest(members.exchange_instrument_ids)!=prior.event_binding.member_set_digest):
+            raise SelectionJobConflict("Gap continuity previous members changed")
+        if prior.comparison_universe_id is not None:
+            comparison = await self.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+            if comparison is None or comparison.comparison_universe_id!=prior.comparison_universe_id or (
+                comparison.comparison_transition_revision!=prior.comparison_transition_revision):
+                raise SelectionJobConflict("Gap continuity Comparison changed")
+        policies = (await self._connection.execute(sa.text(
+            "SELECT DISTINCT p.enabled,p.new_entry_submit_enabled FROM brc_owner_policy_current p "
+            "JOIN brc_runtime_scopes_current s USING(owner_policy_id) WHERE s.universe_version_id=:uid LIMIT 2"),
+            {"uid":uid})).mappings().all()
+        if len(policies)!=1 or not policies[0]["enabled"] or not policies[0]["new_entry_submit_enabled"]:
+            raise SelectionJobConflict("Gap continuity Owner Policy blocks ENTRY")
+        now = await self.read_authority_clock_ms()
+        if now<vacuum.drained_at_ms or now<owner["updated_at_ms"] or now<control.updated_at_ms:
+            raise SelectionJobConflict("Gap continuity clock moved backwards")
+        coverage = await signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,
+            exchange_instrument_ids=members.exchange_instrument_ids,selection_mode="dynamic_selection",evaluated_at_ms=now)
+        revision = 1
+        for cursor in coverage:
+            checkpoint = await signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+            if checkpoint is not None:
+                revision = max(revision,checkpoint.recovery_revision+1)
+        plan = plan_hourly_recovery_close(recovery_id="recovery:"+canonical_digest({
+            "entry_vacuum_id":vacuum.entry_vacuum_id})[7:],recovery_revision=revision,
+            reason="AUTHORITY_GAP",period=period,evaluated_at_ms=now)
+        if plan.first_eligible_close_time_ms is None:
+            raise SelectionJobConflict("NO_ELIGIBLE_CLOSE_BEFORE_EXPIRY")
+        committed = await self.read_authority_clock_ms()
+        require_hourly_recovery_commit(plan,committed_at_ms=committed)
+        return GenericRecoveryGrantProof(authority_outcome="PRE_FENCE_CONTINUITY",
+            selection_spec_id=selection_spec_id,strategy_group_id=strategy_group_id,
+            selection_epoch_id=prior.selection_epoch_id,selection_mode="dynamic_selection",
+            source_entry_vacuum_id=vacuum.entry_vacuum_id,vacuum_fenced_at_ms=vacuum.fenced_at_ms,
+            materialization_generation_id=None,source_selection_authority_id=prior.selection_authority_id,
+            failed_activation_authorization_id=None,owner_control_version=owner["control_version"],
+            selection_control_version=control.control_version,event_binding=prior.event_binding,
+            recovery_close_plan=plan,membership_freshness=freshness,
+            comparison_universe_id=prior.comparison_universe_id,
+            comparison_transition_revision=prior.comparison_transition_revision,
+            observation_cursors=coverage,committed_at_ms=committed)
+
+    async def require_generic_gap_continuity_proof(self, proof: GenericRecoveryGrantProof) -> int:
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        if proof.authority_outcome != "PRE_FENCE_CONTINUITY":
+            raise SelectionJobConflict("Gap continuity requires its exact future-close proof")
+        checked_at = await self.read_authority_clock_ms()
+        require_hourly_recovery_commit(proof.recovery_close_plan,committed_at_ms=checked_at)
+        fresh = await self.prepare_generic_gap_continuity_proof(
+            strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,
+            period_anchor_ms=proof.recovery_close_plan.period.feature_cutoff_at_ms)
+        expected = proof.model_dump(mode="json")
+        actual = fresh.model_dump(mode="json")
+        expected["committed_at_ms"] = actual["committed_at_ms"]
+        expected["recovery_close_plan"]["evaluated_at_ms"] = actual["recovery_close_plan"]["evaluated_at_ms"]
+        if expected != actual:
+            raise SelectionJobConflict("Gap continuity proof changed")
+        matches = await self._connection.scalar(sa.text(
+            "SELECT brc_generic_gap_continuity_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof":proof.model_dump_json(),"checked_at":checked_at})
+        if matches is not True:
+            raise SelectionJobConflict("Gap continuity PostgreSQL proof changed")
+        return checked_at
+
+    async def commit_generic_gap_continuity(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
+        """Atomically rebase the previous Event set and resolve its gap Vacuum."""
+        proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
+        if proof.authority_outcome != "PRE_FENCE_CONTINUITY":
+            raise SelectionJobConflict("Gap continuity recovery outcome differs")
+        async with self._connection.begin_nested():
+            checked_at = await self.require_generic_gap_continuity_proof(proof)
+            proof = GenericRecoveryGrantProof.model_validate({**proof.model_dump(),"committed_at_ms":checked_at})
+            current = await self.get_current_generic_authority(proof.selection_spec_id,for_update=True)
+            vacuum = await self.get_current_entry_vacuum(strategy_group_id=proof.strategy_group_id,
+                selection_spec_id=proof.selection_spec_id,for_update=True)
+            if (current is None or current.authority.selection_authority_id!=proof.source_selection_authority_id
+                or vacuum is None or vacuum.entry_vacuum_id!=proof.source_entry_vacuum_id
+                or vacuum.state is not StrategyEntryVacuumState.RECOVERY_PENDING):
+                raise SelectionJobConflict("Gap continuity current or Vacuum changed")
+            sequence = int(await self._connection.scalar(sa.select(sa.func.max(
+                selection_session_authorities.c.authority_sequence)).where(
+                    selection_session_authorities.c.selection_spec_id==proof.selection_spec_id,
+                    selection_session_authorities.c.period_anchor_ms==proof.recovery_close_plan.period.feature_cutoff_at_ms)) or 0)+1
+            authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=sequence)
+            await self._connection.execute(sa.insert(selection_session_authorities).values(
+                **generic_recovery_authority_storage_values(authority)))
+            await self._connection.execute(sa.insert(selection_authority_event_bindings).values(
+                selection_authority_id=authority.selection_authority_id,
+                **authority.event_binding.model_dump(mode="json")))
+            await self.initialize_generic_recovery_checkpoints(proof)
+            changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.state=="RECOVERY_PENDING",
+                strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(
+                    state="RESOLVED_CONTINUITY",resolved_at_ms=checked_at,
+                    projection_version=vacuum.projection_version+1))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Gap continuity Vacuum CAS changed")
+            changed = await self._connection.execute(sa.update(selection_authority_current).where(
+                selection_authority_current.c.selection_spec_id==proof.selection_spec_id,
+                selection_authority_current.c.selection_authority_id==proof.source_selection_authority_id,
+                selection_authority_current.c.projection_version==current.projection_version).values(
+                    selection_authority_id=authority.selection_authority_id,
+                    projection_version=current.projection_version+1,updated_at_ms=checked_at))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Gap continuity current CAS changed")
+            await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
+                entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,
+                event_type="RESOLVED_CONTINUITY",
+                payload={"selection_authority_id":authority.selection_authority_id,
+                    "source_selection_authority_id":proof.source_selection_authority_id},
+                occurred_at_ms=checked_at))
+            require_hourly_recovery_commit(proof.recovery_close_plan,
+                committed_at_ms=await self.read_authority_clock_ms())
+        return authority
+
     async def commit_generic_recovery(self, proof: GenericRecoveryGrantProof) -> GenericRecoveryAuthority:
         """Commit Static-first or Dynamic previous-active recovery atomically.
 
@@ -3420,6 +3600,8 @@ class PostgresInstrumentSelectionRepository:
         proof = GenericRecoveryGrantProof.model_validate(proof.model_dump())
         if proof.authority_outcome=="ACTIVE_NEW":
             await self.require_generic_recovered_activation_proof(proof)
+        elif proof.authority_outcome=="PRE_FENCE_CONTINUITY":
+            await self.require_generic_gap_continuity_proof(proof)
         else:
             await self.require_generic_recovery_grant_proof(proof)
         signals = PostgresSignalRepository(self._connection)
