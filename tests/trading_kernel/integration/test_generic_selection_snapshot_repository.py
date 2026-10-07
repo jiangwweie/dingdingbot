@@ -2066,8 +2066,8 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("group","resolution"),(
-    ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","empty"),
-    ("MI-001","activate"),("MI-001","empty"),("BRF2-001","fallback")))
+    ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","activate_refusal"),("MPG-001","empty"),
+    ("MI-001","activate"),("MI-001","activate_refusal"),("MI-001","empty"),("BRF2-001","fallback")))
 async def test_failed_second_dynamic_generation_respects_previous_freshness(
     database: AsyncEngine,group: str,resolution: str,
 ) -> None:
@@ -2290,7 +2290,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
-        if resolution == "activate":
+        if resolution in {"activate","activate_refusal"}:
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=next_at+4)):
                 activated = await coordinate_selection_materialization_once(
@@ -2606,8 +2606,21 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 ticket_id=issued.ticket_id,now_ms=issued_at+5,lease_until_ms=issued_at+30_000,
                 timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
                 admission_snapshot_validity_ms=60_000)
+            if resolution == "activate_refusal":
+                async with database.begin() as conn:
+                    await conn.execute(sa.text("UPDATE brc_exposure_episode_current "
+                        "SET authority_recovery_revision=authority_recovery_revision+1 "
+                        "WHERE episode_domain_key=:key"),
+                        {"key":current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key})
             dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
                 dispatch_request,entry_facts_source=SuccessorEntryFacts())
+            if resolution == "activate_refusal":
+                assert dispatched.status.value == "superseded", dispatched
+                assert venue.calls == []
+                async with database.connect() as conn:
+                    assert await conn.scalar(sa.text("SELECT status FROM brc_exchange_commands "
+                        "WHERE ticket_id=:ticket AND command_kind='entry'"),{"ticket":issued.ticket_id}) == "rejected"
+                return
             assert dispatched.status.value == "accepted", dispatched
             assert len(venue.calls) == 1
             repeated_dispatch = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
