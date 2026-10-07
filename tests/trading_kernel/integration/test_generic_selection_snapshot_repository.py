@@ -2025,37 +2025,84 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(databas
     assert protected.initial_stop_exchange_order_id is not None
     assert protected.tp1_exchange_order_id is not None
     async with PostgresKernelUnitOfWork(database) as uow:
+        first_snapshot = await uow.instrument_selection.get_generic_snapshot(
+            current.authority.selection_snapshot_id)
+    first_input = inputs(group).model_copy(update={
+        "selection_epoch_id":current.authority.selection_epoch_id})
+    empty_input = next_input(first_input).model_copy(update={
+        "predecessor_snapshot":first_snapshot})
+    empty_input = empty_input.model_copy(update={"member_windows":tuple(
+        qualify_window(window,False) for window in empty_input.member_windows)})
+    empty_snapshot = compute_generic_selection(empty_input)
+    assert not empty_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(empty_snapshot,
+            decision_at_ms=empty_input.decision_at_ms,
+            source_observed_at_ms=empty_input.source_observed_at_ms)
+    empty_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty_snapshot.selection_snapshot_id,
+        worker_id=f"natural-{group}-valid-empty")
+    empty_at = empty_snapshot.effective_from_ms+1
+    empty_result = None
+    for offset in range(5):
+        tick = empty_at+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=tick)):
+            outcome = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=empty_request,clock_ms=lambda tick=tick:tick)
+        if outcome.disposition is MaterializationDisposition.VALID_EMPTY:
+            empty_result = outcome
+            break
+    assert empty_result is not None
+    async with PostgresKernelUnitOfWork(database) as uow:
+        empty_authority = await uow.instrument_selection.get_current_generic_authority(
+            current.authority.selection_spec_id)
+        still_protected = await uow.aggregates.get(issued.ticket_id)
+        frozen_before_exit = await uow.tickets.get(issued.ticket_id)
+        old_scope = await uow.signals.get_runtime_scope(scope_id)
+        assert old_scope is not None
+        new_entry = await resolve_selection_entry_authority(uow,runtime_scope=old_scope,
+            birth_selection_authority_id=current.authority.selection_authority_id,
+            observed_close_time_ms=empty_snapshot.effective_from_ms,
+            now_ms=empty_at+5,allow_current_as_birth=False,lock_current=True)
+    assert empty_authority is not None and empty_authority.authority.authority_outcome == "VALID_EMPTY"
+    assert still_protected is not None and still_protected.status is AggregateStatus.POSITION_PROTECTED
+    assert frozen_before_exit is not None and frozen_before_exit.selection_authority_id == current.authority.selection_authority_id
+    assert frozen_before_exit.initial_stop_price == ticket.initial_stop_price
+    assert not new_entry.allowed and new_entry.reason_code == "selection_valid_empty"
+    exit_offset = empty_at-issued_at+400
+    async with PostgresKernelUnitOfWork(database) as uow:
         runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(
             ticket_id=issued.ticket_id,
             facts=TicketLifecycleFacts(position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
                 tp1_filled_quantity=ticket.take_profit_quantities[0],
                 tp1_average_fill_price=ticket.take_profit_prices[0],
                 allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
-                price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=issued_at+400),
-            now_ms=issued_at+400))
+                price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=issued_at+exit_offset),
+            now_ms=issued_at+exit_offset))
     assert runner.status.value == "break_even_requested"
-    await dispatch_safety(500)
-    await dispatch_safety(600)
+    await dispatch_safety(exit_offset+100)
+    await dispatch_safety(exit_offset+200)
     async with PostgresKernelUnitOfWork(database) as uow:
         external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
                 quantity=Decimal(0),average_entry_price=None,open_orders=(),
-                observed_at_ms=issued_at+700)))
+                observed_at_ms=issued_at+exit_offset+300)))
     assert external_flat.status.value == "external_flat_incident"
-    await dispatch_safety(800)
+    await dispatch_safety(exit_offset+400)
     async with PostgresKernelUnitOfWork(database) as uow:
         matched = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
                 quantity=Decimal(0),average_entry_price=None,open_orders=(),
-                observed_at_ms=issued_at+900)))
+                observed_at_ms=issued_at+exit_offset+500)))
         settled = await settle_ticket(uow,SettleTicketRequest(
-            ticket_id=issued.ticket_id,settled_at_ms=issued_at+1000))
+            ticket_id=issued.ticket_id,settled_at_ms=issued_at+exit_offset+600))
         reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
             ticket_id=issued.ticket_id,review_id=f"review:natural-{group}",
             outcome="closed",metrics={"realized_pnl":"1.25"},
-            decision_impact={"strategy_action":"keep"},recorded_at_ms=issued_at+1100))
+            decision_impact={"strategy_action":"keep"},recorded_at_ms=issued_at+exit_offset+700))
         terminal = await uow.aggregates.get(issued.ticket_id)
         frozen_ticket = await uow.tickets.get(issued.ticket_id)
         reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
@@ -4269,7 +4316,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch"])
+@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection"])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -4546,7 +4593,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    assert fault_stage in {None,"between_claim_ticket","before_dispatch"}
+    assert fault_stage in {None,"between_claim_ticket","before_dispatch","valid_empty_after_protection"}
     if fault_stage == "between_claim_ticket":
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -4693,6 +4740,79 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
     assert protected.initial_stop_exchange_order_id is not None
     assert protected.tp1_exchange_order_id is not None
+    exit_offset = 400
+    if fault_stage == "valid_empty_after_protection":
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current_authority = await uow.instrument_selection.get_current_generic_authority(
+                inputs(group).spec.selection_spec_id)
+            assert current_authority is not None
+            previous_snapshot = await uow.instrument_selection.get_generic_snapshot(
+                current_authority.authority.selection_snapshot_id)
+        empty_input = inputs(group).model_copy(update={
+            "selection_epoch_id":previous_snapshot.selection_epoch_id})
+        while empty_input.feature_cutoff_at_ms < previous_snapshot.feature_cutoff_at_ms:
+            empty_input = next_input(empty_input)
+        empty_input = next_input(empty_input).model_copy(update={
+            "predecessor_snapshot":previous_snapshot})
+        empty_input = empty_input.model_copy(update={"member_windows":tuple(
+            qualify_window(window,False) for window in empty_input.member_windows)})
+        class EmptyMarket:
+            async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+                return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
+                    for window in empty_input.member_windows)
+
+            async def fetch_generic_selection_klines(self, request):
+                return next(window.candles for window in empty_input.member_windows
+                    if window.exchange_instrument_id==request.exchange_instrument_id)
+        selection_tick = empty_input.feature_cutoff_at_ms
+        def empty_clock():
+            nonlocal selection_tick
+            selection_tick += 1
+            return selection_tick
+        selected = await run_instrument_selection_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=EmptyMarket(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=empty_input.spec.selection_spec_id,
+                selection_epoch_id=empty_input.selection_epoch_id,
+                period_anchor_ms=empty_input.feature_cutoff_at_ms,
+                worker_id=f"hourly-{group}-empty-selector"),clock_ms=empty_clock)
+        assert selected.outcome == "SNAPSHOT_READY", selected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            empty_snapshot = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+        assert not empty_snapshot.selected_members
+        empty_at = empty_snapshot.effective_from_ms+1
+        empty_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty_snapshot.selection_snapshot_id,
+            worker_id=f"hourly-{group}-empty-coordinator")
+        negative = None
+        for offset in range(5):
+            tick = empty_at+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+                new=AsyncMock(return_value=tick)):
+                outcome = await coordinate_selection_materialization_once(
+                    uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,
+                    clock_ms=lambda tick=tick:tick)
+            if outcome.disposition is MaterializationDisposition.VALID_EMPTY:
+                negative = outcome
+                break
+        assert negative is not None
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current_empty = await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id)
+            frozen = await uow.tickets.get(issued.ticket_id)
+            ongoing = await uow.aggregates.get(issued.ticket_id)
+            scope = await uow.signals.get_runtime_scope(ticket.runtime_scope_id)
+            assert scope is not None
+            denied = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+                birth_selection_authority_id=selection_authority_id,
+                observed_close_time_ms=empty_snapshot.effective_from_ms,now_ms=empty_at+4,
+                allow_current_as_birth=False,lock_current=True)
+        assert current_empty is not None and current_empty.authority.authority_outcome == "VALID_EMPTY"
+        assert frozen is not None and frozen.selection_authority_id == selection_authority_id
+        assert ongoing is not None and ongoing.status is AggregateStatus.POSITION_PROTECTED
+        assert not denied.allowed and denied.reason_code == "selection_valid_empty"
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 1
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands "
+                "WHERE command_kind='entry'")) == 1
+        exit_offset = empty_at-now_ms+400
     async with PostgresKernelUnitOfWork(database) as uow:
         runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(
             ticket_id=issued.ticket_id,
@@ -4700,31 +4820,31 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 tp1_filled_quantity=ticket.take_profit_quantities[0],
                 tp1_average_fill_price=ticket.take_profit_prices[0],
                 allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
-                price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=now_ms+400),
-            now_ms=now_ms+400))
+                price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=now_ms+exit_offset),
+            now_ms=now_ms+exit_offset))
     assert runner.status.value == "break_even_requested"
-    await dispatch_safety(500)
-    await dispatch_safety(600)
+    await dispatch_safety(exit_offset+100)
+    await dispatch_safety(exit_offset+200)
     async with PostgresKernelUnitOfWork(database) as uow:
         external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
                 quantity=Decimal(0),average_entry_price=None,open_orders=(),
-                observed_at_ms=now_ms+700)))
+                observed_at_ms=now_ms+exit_offset+300)))
     assert external_flat.status.value == "external_flat_incident"
-    await dispatch_safety(800)
+    await dispatch_safety(exit_offset+400)
     async with PostgresKernelUnitOfWork(database) as uow:
         matched = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
                 quantity=Decimal(0),average_entry_price=None,open_orders=(),
-                observed_at_ms=now_ms+900)))
+                observed_at_ms=now_ms+exit_offset+500)))
         settled = await settle_ticket(uow,SettleTicketRequest(
-            ticket_id=issued.ticket_id,settled_at_ms=now_ms+1000))
+            ticket_id=issued.ticket_id,settled_at_ms=now_ms+exit_offset+600))
         reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
             ticket_id=issued.ticket_id,review_id=f"review:hourly-{group}",
             outcome="closed",metrics={"realized_pnl":"1.25"},
-            decision_impact={"strategy_action":"keep"},recorded_at_ms=now_ms+1100))
+            decision_impact={"strategy_action":"keep"},recorded_at_ms=now_ms+exit_offset+700))
         terminal = await uow.aggregates.get(issued.ticket_id)
         frozen = await uow.tickets.get(issued.ticket_id)
         reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
