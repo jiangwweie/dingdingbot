@@ -3845,7 +3845,15 @@ class PostgresInstrumentSelectionRepository:
         current = await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
         now = await self.read_authority_clock_ms()
         if current is not None and isinstance(current.authority,GenericRecoveryAuthority):
-            raise SelectionJobConflict("Recovery successor contract is not installed")
+            if authority.authority_outcome!="NO_CHANGE" or (
+                authority.continued_from_recovery_authority_id!=current.authority.selection_authority_id
+                or current.authority.authority_outcome not in {"ACTIVE_NEW","FALLBACK_PREVIOUS"}):
+                raise SelectionJobConflict("Recovery successor origin changed")
+        elif current is not None and isinstance(current.authority,GenericSelectionAuthority):
+            if authority.continued_from_recovery_authority_id!=current.authority.continued_from_recovery_authority_id:
+                raise SelectionJobConflict("Recovery successor lineage changed")
+        elif authority.continued_from_recovery_authority_id is not None:
+            raise SelectionJobConflict("Recovery successor source Authority missing")
         if current is not None and current.authority.selection_authority_id == authority.selection_authority_id:
             if current.authority != authority:
                 raise SelectionJobConflict("NO_CHANGE idempotency identity differs")
@@ -4980,6 +4988,18 @@ class PostgresInstrumentSelectionRepository:
             generic_recovery_authority_from_storage(dict(row),spec=spec,event_bindings=tuple(dict(binding) for binding in bindings)))
         return CurrentGenericSelectionAuthority(authority=authority,projection_version=row["current_projection_version"])
 
+    async def get_generic_recovery_authority_by_id(self, selection_authority_id: str) -> GenericRecoveryAuthority | None:
+        row = (await self._connection.execute(sa.select(selection_session_authorities).where(
+            selection_session_authorities.c.selection_authority_id==selection_authority_id,
+            selection_session_authorities.c.recovery_grant_proof.is_not(None)).limit(1))).mappings().one_or_none()
+        if row is None:
+            return None
+        spec = await self.get_generic_spec(row["selection_spec_id"])
+        bindings = (await self._connection.execute(sa.select(selection_authority_event_bindings).where(
+            selection_authority_event_bindings.c.selection_authority_id==selection_authority_id).limit(2))).mappings().all()
+        return generic_recovery_authority_from_storage(dict(row),spec=spec,
+            event_bindings=tuple(dict(binding) for binding in bindings))
+
     async def get_current_authority(
         self,
         selection_spec_id: str,
@@ -5042,7 +5062,8 @@ def generic_authority_storage_values(authority: GenericSelectionAuthority) -> di
         "selection_mode":authority.selection_mode,
         "selection_job_id":None,"selection_attempt_id":None,
         "selection_snapshot_id":authority.selection_snapshot_id,
-        "continued_from_selection_authority_id":None,"continuity_source_kind":"NONE",
+        "continued_from_selection_authority_id":authority.continued_from_recovery_authority_id,
+        "continuity_source_kind":"NONE" if authority.continued_from_recovery_authority_id is None else "SELECTION_AUTHORITY",
         "authority_gap_audit_id":None,"materialization_generation_id":authority.materialization_generation_id,
         "owner_control_version":authority.owner_control_version,"authority_outcome":authority.authority_outcome,
         "grant_proof_kind":None if authority.blocks_new_entry else "PRECOMMITTED_SELECTION_CURRENT_CLOSE",
@@ -5117,6 +5138,7 @@ def generic_authority_from_storage(row: Mapping[str, object], *, spec: GenericSe
             "selection_mode","authority_outcome","current_close_proof","membership_freshness",
             "comparison_universe_id","comparison_transition_revision","effective_from_ms","created_at_ms")},
         "strategy_group_id":spec.strategy_group_id,
+        "continued_from_recovery_authority_id":row["continued_from_selection_authority_id"],
         "period":{"feature_cutoff_at_ms":row["period_anchor_ms"],"cadence_hours":spec.cadence_hours,
             "scheduled_effective_at_ms":row["decision_boundary_ms"],"period_expires_at_ms":row["expires_at_ms"]},
         "event_binding":{name:binding[name] for name in AuthorityEventBinding.model_fields},

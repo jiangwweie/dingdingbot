@@ -619,6 +619,7 @@ async def _resolve_generic_selection_authority(
             if len(targets) != 1 or targets[0].event_spec_id != runtime_scope.event_spec_id or (
                 targets[0].universe_version_id != runtime_scope.universe_version_id or targets[0].lifecycle_state.value != "active"):
                 return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_generation_target_changed")
+        comparison = None
         if authority.comparison_universe_id is not None:
             comparison = await uow.instrument_selection.get_comparison_universe_binding(runtime_scope.event_spec_id,for_update=lock_current)
             if comparison is None or comparison.comparison_universe_id != authority.comparison_universe_id or comparison.comparison_transition_revision != authority.comparison_transition_revision:
@@ -627,6 +628,44 @@ async def _resolve_generic_selection_authority(
             selection_spec_id=control.selection_spec_id,owner_policy_id=runtime_scope.owner_policy_id,
             after_ms=authority.created_at_ms,through_ms=now_ms):
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_authority_interrupted")
+        if authority.continued_from_recovery_authority_id is not None:
+            origin = await uow.instrument_selection.get_generic_recovery_authority_by_id(
+                authority.continued_from_recovery_authority_id)
+            if origin is None or origin.selection_spec_id!=authority.selection_spec_id or (
+                origin.selection_epoch_id!=authority.selection_epoch_id
+                or origin.event_binding!=authority.event_binding
+                or origin.comparison_universe_id!=authority.comparison_universe_id
+                or origin.comparison_transition_revision!=authority.comparison_transition_revision):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"RECOVERY_SUCCESSOR_ORIGIN_CHANGED")
+            recovery_proof = origin.recovery_proof
+            key = build_episode_domain_key(event_spec_id=runtime_scope.event_spec_id,
+                exchange_instrument_id=runtime_scope.exchange_instrument_id,position_side=runtime_scope.position_side)
+            if lock_current:
+                await uow.signals.lock_exposure_episode(key)
+            checkpoint = await uow.signals.get_authority_recovery_checkpoint(key)
+            if checkpoint is None or (checkpoint.recovery_id,checkpoint.recovery_revision,
+                checkpoint.effective_from_ms,checkpoint.first_eligible_close_time_ms)!=(
+                recovery_proof.recovery_close_plan.recovery_id,recovery_proof.recovery_close_plan.recovery_revision,
+                recovery_proof.committed_at_ms,recovery_proof.first_eligible_close_time_ms):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"RECOVERY_REBASE_AUTHORITY_CHANGED")
+            if not recovery_observation:
+                reason = recovery_rebase_entry_rejection(checkpoint=checkpoint,episode_domain_key=key,
+                    recovery_id=recovery_proof.recovery_close_plan.recovery_id,
+                    recovery_revision=recovery_proof.recovery_close_plan.recovery_revision,
+                    recovery_committed_at_ms=recovery_proof.committed_at_ms,
+                    first_eligible_close_time_ms=recovery_proof.first_eligible_close_time_ms,
+                    signal_close_time_ms=observed_close_time_ms)
+                if reason is not None:
+                    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+                if comparison is not None:
+                    comparison_checkpoint = await uow.signals.get_comparison_episode_checkpoint(key)
+                    reason = recovery_comparison_entry_rejection(checkpoint=comparison_checkpoint,binding=comparison,
+                        episode_domain_key=key,signal_close_time_ms=observed_close_time_ms)
+                    if reason is not None:
+                        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
+            return SelectionEntryAuthorityDecision(status=SelectionEntryAuthorityStatus.VALID,
+                selection_authority_id=authority.selection_authority_id,current_selection_authority_id=current_id,
+                reason_code="generic_recovery_observation" if recovery_observation else "generic_recovery_rebased")
         return SelectionEntryAuthorityDecision(status=SelectionEntryAuthorityStatus.VALID,
             selection_authority_id=authority.selection_authority_id,current_selection_authority_id=current_id,
             reason_code="generic_exact_authority")

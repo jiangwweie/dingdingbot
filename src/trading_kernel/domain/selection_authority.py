@@ -811,6 +811,7 @@ class GenericSelectionAuthority(BaseModel):
     owner_control_version: int = Field(gt=0)
     selection_control_version: int = Field(gt=0)
     activation_authorization_id: str | None = None
+    continued_from_recovery_authority_id: str | None = None
     period: GenericSelectionPeriod
     authority_outcome: Literal["ACTIVE_NEW", "NO_CHANGE", "VALID_EMPTY"]
     event_binding: AuthorityEventBinding
@@ -828,7 +829,8 @@ class GenericSelectionAuthority(BaseModel):
             raise ValueError("Generic Authority requires bounded identity")
         return value.strip()
 
-    @field_validator("materialization_generation_id", "comparison_universe_id", "activation_authorization_id")
+    @field_validator("materialization_generation_id", "comparison_universe_id", "activation_authorization_id",
+        "continued_from_recovery_authority_id")
     @classmethod
     def _optional_identity(cls, value: str | None) -> str | None:
         if value is not None and (not value.strip() or value != value.strip() or len(value)>160):
@@ -876,6 +878,8 @@ class GenericSelectionAuthority(BaseModel):
         if self.comparison_transition_revision is not None and self.comparison_transition_revision < 0:
             raise ValueError("Generic comparison revision is invalid")
         if self.blocks_new_entry:
+            if self.continued_from_recovery_authority_id is not None:
+                raise ValueError("VALID_EMPTY cannot inherit a positive recovery barrier")
             if self.materialization_generation_id is not None:
                 raise ValueError("VALID_EMPTY forbids a materialization Generation")
             if self.event_binding.grant_state is not AuthorityEventGrantState.EMPTY or self.current_close_proof is not None or self.membership_freshness is not None:
@@ -885,6 +889,8 @@ class GenericSelectionAuthority(BaseModel):
             raise ValueError("normal Generic Authority requires ACTIVE Event")
         if self.authority_outcome == "NO_CHANGE" and self.materialization_generation_id is not None:
             raise ValueError("NO_CHANGE forbids a materialization Generation")
+        if self.continued_from_recovery_authority_id is not None and self.authority_outcome != "NO_CHANGE":
+            raise ValueError("recovery successor must be an unchanged current membership")
         if self.authority_outcome == "ACTIVE_NEW" and (
             self.materialization_generation_id is None or not self.materialization_generation_id.strip()
             or len(self.materialization_generation_id)>160

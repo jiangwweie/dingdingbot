@@ -54,6 +54,7 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
     ContinuitySourceKind,
     GenericRecoveryAuthority,
+    GenericSelectionAuthority,
     SelectionMode,
     SelectionSessionAuthority,
     generic_recovery_entry_rejection,
@@ -358,21 +359,45 @@ class PostgresSignalRepository:
             raise RuntimeError("Recovery Observation Owner control blocked")
         vacuum = await selection.get_current_entry_vacuum(strategy_group_id=scope.strategy_group_id,selection_spec_id=control.selection_spec_id,for_update=True)
         current = await selection.get_current_generic_authority(control.selection_spec_id,for_update=True)
-        if vacuum is not None or current is None or not isinstance(current.authority,GenericRecoveryAuthority) or current.authority.selection_authority_id!=selection_authority_id:
+        if vacuum is not None or current is None or current.authority.selection_authority_id!=selection_authority_id:
             raise RuntimeError("Recovery Observation current authority changed")
         authority = current.authority
-        proof = authority.recovery_proof
+        if isinstance(authority,GenericRecoveryAuthority):
+            origin = authority
+        elif isinstance(authority,GenericSelectionAuthority) and authority.continued_from_recovery_authority_id is not None:
+            loaded_origin = await selection.get_generic_recovery_authority_by_id(authority.continued_from_recovery_authority_id)
+            if loaded_origin is None or loaded_origin.event_binding!=authority.event_binding or (
+                loaded_origin.comparison_universe_id!=authority.comparison_universe_id
+                or loaded_origin.comparison_transition_revision!=authority.comparison_transition_revision):
+                raise RuntimeError("Recovery Observation successor origin changed")
+            origin = loaded_origin
+        else:
+            raise RuntimeError("Recovery Observation current authority changed")
+        proof = origin.recovery_proof
         now = await selection.read_authority_clock_ms()
         if observed_at_ms != now//3_600_000*3_600_000:
             raise RuntimeError("Recovery Observation must consume the latest close")
-        rejection = generic_recovery_entry_rejection(authority=authority,selection_spec_id=control.selection_spec_id,
-            selection_epoch_id=control.selection_epoch_id,selection_mode=control.selection_mode.value,
-            selection_control_version=control.control_version,owner_control_version=owner.control_version,
-            event_spec_id=scope.event_spec_id,position_side=scope.position_side,universe_version_id=scope.universe_version_id,
-            exchange_instrument_id=scope.exchange_instrument_id,birth_selection_authority_id=selection_authority_id,
-            allow_current_as_birth=False,observed_close_time_ms=observed_at_ms,now_ms=now)
-        if rejection is not None:
-            raise RuntimeError(rejection)
+        if isinstance(authority,GenericRecoveryAuthority):
+            rejection = generic_recovery_entry_rejection(authority=origin,selection_spec_id=control.selection_spec_id,
+                selection_epoch_id=control.selection_epoch_id,selection_mode=control.selection_mode.value,
+                selection_control_version=control.control_version,owner_control_version=owner.control_version,
+                event_spec_id=scope.event_spec_id,position_side=scope.position_side,universe_version_id=scope.universe_version_id,
+                exchange_instrument_id=scope.exchange_instrument_id,birth_selection_authority_id=selection_authority_id,
+                allow_current_as_birth=False,observed_close_time_ms=observed_at_ms,now_ms=now)
+            if rejection is not None:
+                raise RuntimeError(rejection)
+        elif (authority.selection_spec_id!=control.selection_spec_id
+            or authority.selection_epoch_id!=control.selection_epoch_id
+            or authority.selection_control_version!=control.control_version
+            or authority.owner_control_version!=owner.control_version
+            or authority.event_binding.universe_version_id!=scope.universe_version_id
+            or authority.event_binding.event_spec_id!=scope.event_spec_id
+            or authority.event_binding.position_side!=scope.position_side
+            or authority.membership_freshness is None
+            or not authority.membership_freshness.allows_new_entry_at(now)
+            or not authority.effective_from_ms<=now<authority.expires_at_ms
+            or observed_at_ms<origin.first_eligible_close_time_ms):
+            raise RuntimeError("Recovery Observation successor authority changed")
         policy = await PostgresEntryAdmissionRepository(self._connection).get_owner_policy(scope.owner_policy_id)
         if policy is None or not policy.enabled or not policy.new_entry_submit_enabled or policy.scope is None or not policy.scope.authorizes(
             event_spec_id=scope.event_spec_id,runtime_profile_id=scope.runtime_profile_id):

@@ -751,8 +751,11 @@ def _authority_snapshot_epoch() -> None:
         "(authority_outcome IN ('NO_CHANGE','ACTIVE_NEW') AND selection_mode='dynamic_selection' AND selection_snapshot_id IS NOT NULL "
         "AND ((authority_outcome='NO_CHANGE' AND materialization_generation_id IS NULL) OR "
         "(authority_outcome='ACTIVE_NEW' AND materialization_generation_id IS NOT NULL)) "
-        "AND authority_gap_audit_id IS NULL AND continued_from_selection_authority_id IS NULL "
-        "AND continuity_source_kind='NONE' AND grant_predecessor_authority_id IS NULL "
+        "AND authority_gap_audit_id IS NULL "
+        "AND ((continued_from_selection_authority_id IS NULL AND continuity_source_kind='NONE') OR "
+        "(authority_outcome='NO_CHANGE' AND continued_from_selection_authority_id IS NOT NULL "
+        "AND continuity_source_kind='SELECTION_AUTHORITY')) "
+        "AND grant_predecessor_authority_id IS NULL "
         "AND grant_proof_kind='PRECOMMITTED_SELECTION_CURRENT_CLOSE' AND first_eligible_close_time_ms IS NOT NULL "
         "AND first_eligible_close_time_ms % 3600000=0 AND first_eligible_close_time_ms=created_at_ms/3600000*3600000 "
         "AND first_eligible_close_time_ms>=decision_boundary_ms AND first_eligible_close_time_ms<created_at_ms "
@@ -853,6 +856,27 @@ def _authority_snapshot_epoch() -> None:
                 RAISE EXCEPTION 'Generic VALID_EMPTY requires exact zero-member Snapshot and no trading proof';
               END IF;
             ELSE
+              IF NEW.continued_from_selection_authority_id IS NOT NULL AND (
+                NEW.authority_outcome<>'NO_CHANGE' OR NOT EXISTS (
+                  SELECT 1 FROM brc_selection_session_authorities origin
+                    JOIN brc_selection_authority_event_bindings origin_binding
+                      ON origin_binding.selection_authority_id=origin.selection_authority_id
+                    JOIN brc_selection_authority_current current_auth
+                      ON current_auth.selection_spec_id=NEW.selection_spec_id
+                    JOIN brc_selection_session_authorities source_auth
+                      ON source_auth.selection_authority_id=current_auth.selection_authority_id
+                  WHERE origin.selection_authority_id=NEW.continued_from_selection_authority_id
+                    AND origin.recovery_grant_proof IS NOT NULL AND origin.selection_spec_id=NEW.selection_spec_id
+                    AND origin.selection_epoch_id=NEW.selection_epoch_id
+                    AND (source_auth.selection_authority_id=origin.selection_authority_id
+                      OR source_auth.continued_from_selection_authority_id=origin.selection_authority_id)
+                    AND source_auth.owner_control_version=NEW.owner_control_version
+                    AND source_auth.comparison_universe_id IS NOT DISTINCT FROM NEW.comparison_universe_id
+                    AND source_auth.comparison_transition_revision IS NOT DISTINCT FROM NEW.comparison_transition_revision
+                    AND origin_binding.member_set_digest=NEW.membership_freshness->>'source_member_set_digest'
+                    AND origin_binding.event_spec_id IN (
+                      SELECT event_spec_id FROM brc_instrument_selection_spec_events WHERE selection_spec_id=NEW.selection_spec_id)
+                )) THEN RAISE EXCEPTION 'Generic recovery successor origin differs'; END IF;
               SELECT * INTO snapshot FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=NEW.selection_snapshot_id;
               IF NOT FOUND OR snapshot.selection_spec_id<>NEW.selection_spec_id OR snapshot.selection_epoch_id<>NEW.selection_epoch_id
                   OR snapshot.period_anchor_ms<>NEW.period_anchor_ms
