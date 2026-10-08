@@ -33,6 +33,12 @@ def upgrade() -> None:
     proofs = certify_0007_static_comparison_sources_sync(bind)
     _rename_period_storage()
     _generic_gap_vacuum_states()
+    op.create_index(
+        "ix_brc_strategy_entry_vacuums_drain_due",
+        "brc_strategy_entry_vacuums_current",
+        ["fenced_at_ms", "entry_vacuum_id"],
+        postgresql_where=sa.text("state='DRAINING_ENTRY'"),
+    )
     _generic_gap_open_ledger_guard()
     _comparison_tables()
     _episode_provenance()

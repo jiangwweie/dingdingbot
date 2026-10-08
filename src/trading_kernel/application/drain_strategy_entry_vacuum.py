@@ -9,7 +9,12 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from src.trading_kernel.application.ports import KernelUnitOfWork
+from src.trading_kernel.application.ports import (
+    KernelUnitOfWork,
+    MonitorOwnerStatus,
+    MonitorStateRecord,
+    RuntimeIncidentRecord,
+)
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -27,6 +32,10 @@ from src.trading_kernel.domain.events import (
     VacuumPartialRetained,
 )
 from src.trading_kernel.domain.exit_policy import split_tp1_quantity
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.instrument_selection import INTERVAL_MS
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
@@ -211,9 +220,13 @@ def plan_vacuum_ticket_drain(
     if aggregate.status is not AggregateStatus.ENTRY_VACUUM_CANCELLED:
         return VacuumTicketDrainPlan(None, "WAITING_EXISTING_LIFECYCLE")
     if aggregate.position_qty == 0:
+        if snapshot is None:
+            return VacuumTicketDrainPlan(None, "POSITION_FACTS_REQUIRED")
+        if snapshot.quantity > 0 or snapshot.open_orders:
+            return VacuumTicketDrainPlan(None, "VACUUM_POST_ABSENCE_CONTRADICTION")
         return VacuumTicketDrainPlan(
             EntryVacuumAbsenceConfirmed(
-                **_event_fields(aggregate, facts.now_ms),
+                **_event_fields(aggregate, snapshot.observed_at_ms),
                 entry_vacuum_id=facts.entry_vacuum_id,
             ),
             "VACUUM_ZERO_FILL_CONFIRMED",
@@ -402,6 +415,39 @@ async def drain_strategy_entry_vacuum_once(
             tp1_fraction = profile_record.profile.tp1.quantity_fraction
 
     snapshot = request.position_snapshot
+    if aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED and aggregate.position_qty == 0:
+        prior_position = await uow.positions.get(aggregate.identity.netting_domain.key())
+        if snapshot is not None and (
+            prior_position is None
+            or snapshot.observed_at_ms <= prior_position.observed_at_ms
+            or snapshot.observed_at_ms < request.now_ms
+        ):
+            return _ticket_result(
+                VacuumDrainStatus.POSITION_FACTS_REQUIRED,
+                vacuum.entry_vacuum_id,
+                aggregate,
+                "VACUUM_TERMINAL_FRESH_POSITION_FACTS_REQUIRED",
+            )
+        existing_late = await uow.incidents.get_open_for_ticket_kind(
+            ticket_id, "vacuum_post_absence_contradiction",
+        )
+        if existing_late is not None:
+            return _ticket_result(
+                VacuumDrainStatus.BLOCKED,
+                vacuum.entry_vacuum_id,
+                aggregate,
+                "VACUUM_POST_ABSENCE_INCIDENT_OPEN",
+            )
+        if snapshot is not None and (snapshot.quantity > 0 or snapshot.open_orders):
+            await _record_post_absence_contradiction(
+                uow, aggregate, vacuum.entry_vacuum_id, snapshot,
+            )
+            return _ticket_result(
+                VacuumDrainStatus.BLOCKED,
+                vacuum.entry_vacuum_id,
+                aggregate,
+                "VACUUM_POST_ABSENCE_CONTRADICTION",
+            )
     if snapshot is not None:
         await uow.positions.upsert(ticket_id=ticket_id, snapshot=snapshot)
     planned = plan_vacuum_ticket_drain(
@@ -432,6 +478,50 @@ async def drain_strategy_entry_vacuum_once(
         expected_version=aggregate.version,
     )
     return _event_result(vacuum.entry_vacuum_id, planned.event)
+
+
+async def _record_post_absence_contradiction(
+    uow: KernelUnitOfWork,
+    aggregate: TradeAggregate,
+    entry_vacuum_id: str,
+    snapshot: PositionSnapshot,
+) -> None:
+    domain = aggregate.identity.netting_domain
+    ticket_id = aggregate.identity.ticket_id
+    incident_kind = "vacuum_post_absence_contradiction"
+    incident_id = f"incident:{ticket_id}:{incident_kind}:{snapshot.observed_at_ms}"
+    await uow.incidents.add(
+        RuntimeIncidentRecord(
+            incident_id=incident_id,
+            ticket_id=ticket_id,
+            incident_kind=incident_kind,
+            status="open",
+            first_blocker=incident_kind,
+            entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+            entry_block_key=canonical_entry_block_key(
+                EntryBlockScope.ACCOUNT_CAPACITY,
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+            ),
+            details={
+                "entry_vacuum_id": entry_vacuum_id,
+                "observed_quantity": str(snapshot.quantity),
+                "open_order_count": len(snapshot.open_orders),
+            },
+            opened_at_ms=snapshot.observed_at_ms,
+        )
+    )
+    await uow.monitors.save_if_changed(
+        MonitorStateRecord(
+            monitor_key=f"vacuum-post-absence:{ticket_id}",
+            owner_status=MonitorOwnerStatus.NEEDS_INTERVENTION,
+            summary="Post-cancel position or order contradicts zero-fill closure",
+            intervention="Keep Vacuum fenced; reconcile exact ENTRY fill and order truth",
+            ticket_id=ticket_id,
+            incident_id=incident_id,
+            updated_at_ms=snapshot.observed_at_ms,
+        )
+    )
 
 
 async def _supersede_or_wait_pre_dispatch(

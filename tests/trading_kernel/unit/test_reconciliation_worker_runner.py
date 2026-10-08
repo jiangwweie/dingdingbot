@@ -47,12 +47,15 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
             return None
 
     observed_sources: list[tuple[object | None, object | None]] = []
+    observed_scan_all: list[bool] = []
 
     async def run_once(
         *args, fee_discount_capability_source=None,
         account_position_audit_source=None, **kwargs,
     ):
-        del args, kwargs
+        assert len(args) == 4
+        observed_scan_all.append(args[3].entry_vacuum_scan_all)
+        del kwargs
         observed_sources.append((
             fee_discount_capability_source,
             account_position_audit_source,
@@ -93,3 +96,4 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
     assert observed_sources == [observed_sources[0], observed_sources[0]]
     assert observed_sources[0][0] is not None
     assert observed_sources[0][1] is not None
+    assert observed_scan_all == [True, True]

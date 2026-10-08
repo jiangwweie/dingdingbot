@@ -314,7 +314,8 @@ async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
 
 
 async def _assert_zero_fill_cancel(
-    dispatch_engine, ticket, vacuum,
+    dispatch_engine, ticket, vacuum, *, late_after_order_absence: str | None = None,
+    worker_for_terminal: bool = False,
 ) -> None:
     open_order_snapshot = _position_snapshot(
         ticket,
@@ -387,10 +388,104 @@ async def _assert_zero_fill_cancel(
                 position_snapshot=flat_snapshot,
             ),
         )
+    if late_after_order_absence:
+        positive = _position_snapshot(
+            ticket,
+            quantity=(ticket.quantity if late_after_order_absence == "position" else Decimal(0)),
+            average_entry_price=(
+                ticket.entry_reference_price if late_after_order_absence == "position" else None
+            ),
+            open_entry_order=late_after_order_absence == "order",
+            observed_at_ms=vacuum.fenced_at_ms + 6,
+        )
+        if worker_for_terminal:
+            worker = await run_reconciliation_worker_once(
+                lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+                RecordingVacuumPositionSource(positive),
+                _reconciliation_request(vacuum.fenced_at_ms + 6).model_copy(update={
+                    "entry_vacuum_strategy_group_id": None,
+                    "entry_vacuum_selection_spec_id": None,
+                    "entry_vacuum_scan_all": True,
+                }),
+            )
+            assert worker.status is ReconciliationWorkerStatus.VACUUM_DRAIN_WAITING
+            assert worker.detail == VacuumDrainStatus.BLOCKED.value
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            blocked = (
+                None if worker_for_terminal else await drain_strategy_entry_vacuum_once(
+                    uow, _request(ticket, now_ms=vacuum.fenced_at_ms + 6,
+                        position_snapshot=positive),
+                )
+            )
+            aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+            reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+            incident = await uow.incidents.get_open_for_ticket_kind(
+                ticket.identity.ticket_id, "vacuum_post_absence_contradiction",
+            )
+            commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        assert worker_for_terminal or blocked is not None and blocked.status is VacuumDrainStatus.BLOCKED
+        assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED
+        assert reservation is not None and reservation.status == "active"
+        assert incident is not None and incident.entry_block_scope.value == "account_capacity"
+        assert [command.kind for command in commands] == [
+            ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER,
+        ]
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            later_flat = await drain_strategy_entry_vacuum_once(
+                uow, _request(ticket, now_ms=vacuum.fenced_at_ms + 7,
+                    position_snapshot=flat_snapshot.model_copy(update={
+                        "observed_at_ms": vacuum.fenced_at_ms + 7,
+                    })),
+            )
+            still_active = await uow.entry_admission.has_active_ticket_in_domain(
+                ticket.identity.netting_domain.key()
+            )
+        assert later_flat.status is VacuumDrainStatus.BLOCKED
+        assert still_active
+        return
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        closed = await drain_strategy_entry_vacuum_once(
+        needs_fresh = await drain_strategy_entry_vacuum_once(
             uow,
             _request(ticket, now_ms=vacuum.fenced_at_ms + 6),
+        )
+    assert needs_fresh.status is VacuumDrainStatus.POSITION_FACTS_REQUIRED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        stale = await drain_strategy_entry_vacuum_once(
+            uow,
+            _request(ticket, now_ms=vacuum.fenced_at_ms + 6,
+                position_snapshot=flat_snapshot),
+        )
+    assert stale.status is VacuumDrainStatus.POSITION_FACTS_REQUIRED
+
+    fresh_flat = _position_snapshot(
+        ticket,
+        quantity=Decimal(0),
+        average_entry_price=None,
+        open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms + 6,
+    )
+    if worker_for_terminal:
+        worker = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+            RecordingVacuumPositionSource(fresh_flat),
+            _reconciliation_request(vacuum.fenced_at_ms + 6).model_copy(update={
+                "entry_vacuum_strategy_group_id": None,
+                "entry_vacuum_selection_spec_id": None,
+                "entry_vacuum_scan_all": True,
+            }),
+        )
+        assert worker.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+        assert worker.detail == VacuumDrainStatus.ZERO_FILL_CLOSED.value
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        closed = (
+            None if worker_for_terminal else await drain_strategy_entry_vacuum_once(
+                uow,
+                _request(
+                    ticket,
+                    now_ms=vacuum.fenced_at_ms + 6,
+                    position_snapshot=fresh_flat,
+                ),
+            )
         )
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
@@ -399,7 +494,7 @@ async def _assert_zero_fill_cancel(
         )
 
     assert absent.status is VacuumDrainStatus.ORDER_ABSENCE_RECORDED
-    assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED
+    assert worker_for_terminal or closed is not None and closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED
     assert aggregate is not None
     assert aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
     assert reservation is not None and reservation.status == "released"
@@ -408,6 +503,90 @@ async def _assert_zero_fill_cancel(
         final_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
         assert [command.kind for command in final_commands].count(ExchangeCommandKind.ENTRY) == 1
         assert [command.kind for command in final_commands].count(ExchangeCommandKind.CANCEL_ORDER) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "BRF2-001"])
+@pytest.mark.parametrize("late_kind", ["position", "order"])
+async def test_vacuum_does_not_close_when_positive_position_appears_after_order_absence(
+    dispatch_engine, group: str | None, late_kind: str,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence=late_kind,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "BRF2-001"])
+async def test_reconciliation_worker_drains_sor_and_generic_zero_fill_vacuums(
+    dispatch_engine, group: str | None,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, worker_for_terminal=True,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "BRF2-001"])
+async def test_reconciliation_worker_keeps_vacuum_fenced_on_post_absence_position(
+    dispatch_engine, group: str | None,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+        worker_for_terminal=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_global_vacuum_scan_skips_earlier_scope_without_entry_ticket(
+    dispatch_engine,
+) -> None:
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_000)
+    empty_ticket = _ticket_for_group(make_ticket(), "BRF2-001")
+    active_ticket = _ticket_for_group(make_ticket(), "CPM-RO-001")
+    await seed_policy(dispatch_engine, event_spec_id=active_ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, active_ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        active_ticket.identity.ticket_id, now_ms=1_100)
+    await _open_group_vacuum(dispatch_engine, empty_ticket, "BRF2-001")
+    vacuum = await _open_group_vacuum(dispatch_engine, active_ticket, "CPM-RO-001")
+    open_order = _position_snapshot(
+        active_ticket, quantity=Decimal(0), average_entry_price=None,
+        open_entry_order=True, observed_at_ms=vacuum.fenced_at_ms + 1,
+    )
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+        RecordingVacuumPositionSource(open_order),
+        _reconciliation_request(vacuum.fenced_at_ms + 1).model_copy(update={
+            "entry_vacuum_strategy_group_id": None,
+            "entry_vacuum_selection_spec_id": None,
+            "entry_vacuum_scan_all": True,
+        }),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+    assert result.ticket_id == active_ticket.identity.ticket_id
+    assert result.detail == VacuumDrainStatus.CANCEL_REQUESTED.value
 
 
 @pytest.mark.asyncio
@@ -1071,7 +1250,9 @@ async def _assert_unknown_cancel(
                 open_entry_order=False,observed_at_ms=vacuum.fenced_at_ms+8)))
         assert absent.status == VacuumDrainStatus.ORDER_ABSENCE_RECORDED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        closed = await drain_strategy_entry_vacuum_once(uow,_request(ticket,now_ms=vacuum.fenced_at_ms+9))
+        closed = await drain_strategy_entry_vacuum_once(uow,_request(ticket,now_ms=vacuum.fenced_at_ms+9,
+            position_snapshot=_position_snapshot(ticket,quantity=Decimal(0),average_entry_price=None,
+                open_entry_order=False,observed_at_ms=vacuum.fenced_at_ms+9)))
         assert closed.status == VacuumDrainStatus.ZERO_FILL_CLOSED
         reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
         assert reservation is not None and reservation.status == "released"

@@ -3370,6 +3370,43 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _entry_vacuum_from_row(row)
 
+    async def list_draining_entry_vacuums(
+        self, *, limit: int,
+    ) -> tuple[StrategyEntryVacuum, ...]:
+        """Read the bounded current draining set across installed strategies."""
+
+        if not 1 <= limit <= 8:
+            raise ValueError("draining Vacuum read limit must be 1 through 8")
+        rows = (
+            await self._connection.execute(
+                sa.select(strategy_entry_vacuums_current)
+                .where(
+                    sa.text("brc_strategy_entry_vacuums_current.state='DRAINING_ENTRY'"),
+                    sa.exists(
+                        sa.select(1).select_from(
+                            trade_tickets.join(
+                                trade_aggregates,
+                                trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+                            )
+                        ).where(
+                            trade_tickets.c.strategy_group_id
+                            == strategy_entry_vacuums_current.c.strategy_group_id,
+                            trade_tickets.c.terminal_at_ms.is_(None),
+                            trade_aggregates.c.status.in_(_ENTRY_VACUUM_DRAIN_BLOCKING_STATUSES),
+                        )
+                    ),
+                )
+                .order_by(
+                    strategy_entry_vacuums_current.c.fenced_at_ms,
+                    strategy_entry_vacuums_current.c.entry_vacuum_id,
+                )
+                .limit(limit + 1)
+            )
+        ).mappings().all()
+        if len(rows) > limit:
+            raise RuntimeError("draining Vacuum scope count exceeds bounded strategy set")
+        return tuple(_entry_vacuum_from_row(row) for row in rows)
+
     async def list_entry_vacuums_for_period(
         self,
         *,

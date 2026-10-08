@@ -2331,7 +2331,8 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
     assert absence.status is VacuumDrainStatus.ORDER_ABSENCE_RECORDED, absence
     async with PostgresKernelUnitOfWork(database) as uow:
         closed = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
-            strategy_group_id=group,selection_spec_id=empty.selection_spec_id,now_ms=now+8))
+            strategy_group_id=group,selection_spec_id=empty.selection_spec_id,now_ms=now+8,
+            ticket_id=issued.ticket_id,position_snapshot=flat.model_copy(update={"observed_at_ms":now+8})))
         reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
         still_active = await uow.entry_admission.has_active_ticket_in_domain(
             ticket.identity.netting_domain.key())

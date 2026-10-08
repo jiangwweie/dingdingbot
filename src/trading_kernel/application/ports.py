@@ -1894,6 +1894,10 @@ class InstrumentSelectionRepository(Protocol):
         for_update: bool = False,
     ) -> StrategyEntryVacuum | None: ...
 
+    async def list_draining_entry_vacuums(
+        self, *, limit: int,
+    ) -> tuple[StrategyEntryVacuum, ...]: ...
+
     async def list_entry_vacuums_for_period(
         self,
         *,

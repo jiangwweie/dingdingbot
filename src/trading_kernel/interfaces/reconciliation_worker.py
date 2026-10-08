@@ -76,7 +76,11 @@ from src.trading_kernel.domain.aggregate import (
     AggregateStatus,
     TradeAggregate,
 )
-from src.trading_kernel.domain.commands import ExchangeCommand
+from src.trading_kernel.domain.commands import (
+    ExchangeCommand,
+    ExchangeCommandKind,
+    ExchangeCommandStatus,
+)
 from src.trading_kernel.domain.events import (
     EntryFilled,
     EntryPartiallyFilled,
@@ -147,6 +151,7 @@ class ReconciliationWorkerRequest(BaseModel):
     housekeeping_lease_ms: int = 60_000
     entry_vacuum_strategy_group_id: str | None = None
     entry_vacuum_selection_spec_id: str | None = None
+    entry_vacuum_scan_all: bool = False
 
     @field_validator("worker_id", "runtime_commit", "schema_revision", mode="before")
     @classmethod
@@ -193,6 +198,8 @@ class ReconciliationWorkerRequest(BaseModel):
             raise ValueError(
                 "reconciliation Vacuum scope requires StrategyGroup and SelectionSpec"
             )
+        if self.entry_vacuum_scan_all and self.entry_vacuum_strategy_group_id is not None:
+            raise ValueError("global Vacuum scan cannot also name an exact scope")
         return self
 
 
@@ -307,24 +314,61 @@ async def _run_entry_vacuum_position_fact_drain_once(
 ) -> ReconciliationWorkerResult | None:
     strategy_group_id = request.entry_vacuum_strategy_group_id
     selection_spec_id = request.entry_vacuum_selection_spec_id
-    if strategy_group_id is None or selection_spec_id is None:
+    if not request.entry_vacuum_scan_all and (strategy_group_id is None or selection_spec_id is None):
         return None
     async with uow_factory() as uow:
-        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
-            strategy_group_id=strategy_group_id,
-            selection_spec_id=selection_spec_id,
-        )
-        ticket_id = (
-            None
-            if vacuum is None
-            or vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY
-            else await uow.instrument_selection.get_next_entry_vacuum_ticket(
-                strategy_group_id=strategy_group_id
+        if request.entry_vacuum_scan_all:
+            vacuums = await uow.instrument_selection.list_draining_entry_vacuums(limit=8)
+        else:
+            assert strategy_group_id is not None and selection_spec_id is not None
+            exact = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=strategy_group_id,
+                selection_spec_id=selection_spec_id,
             )
-        )
-        candidate = (
-            None if ticket_id is None else await uow.aggregates.get(ticket_id)
-        )
+            vacuums = () if exact is None else (exact,)
+        vacuum = None
+        ticket_id = None
+        candidate = None
+        for contender in vacuums:
+            if contender.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
+                continue
+            contender_ticket_id = await uow.instrument_selection.get_next_entry_vacuum_ticket(
+                strategy_group_id=contender.strategy_group_id,
+            )
+            if contender_ticket_id is None:
+                continue
+            contender_aggregate = await uow.aggregates.get(contender_ticket_id)
+            if contender_aggregate is None or contender_aggregate.status not in {
+                AggregateStatus.ENTRY_ACCEPTED,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
+                AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+                AggregateStatus.ENTRY_VACUUM_CANCELLED,
+            }:
+                continue
+            if contender_aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED:
+                incident = await uow.incidents.get_open_for_ticket_kind(
+                    contender_ticket_id, "vacuum_post_absence_contradiction",
+                )
+                if incident is not None:
+                    continue
+            if contender_aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING:
+                commands = await uow.exchange_commands.list_for_ticket(contender_ticket_id)
+                cancellations = tuple(
+                    command for command in commands
+                    if command.kind is ExchangeCommandKind.CANCEL_ORDER
+                )
+                if not cancellations or max(
+                    cancellations, key=lambda command: command.generation,
+                ).status in {
+                    ExchangeCommandStatus.PREPARED,
+                    ExchangeCommandStatus.CLAIMED,
+                    ExchangeCommandStatus.OUTCOME_UNKNOWN,
+                }:
+                    continue
+            vacuum = contender
+            ticket_id = contender_ticket_id
+            candidate = contender_aggregate
+            break
     if (
         vacuum is None
         or ticket_id is None
@@ -334,6 +378,7 @@ async def _run_entry_vacuum_position_fact_drain_once(
             AggregateStatus.ENTRY_ACCEPTED,
             AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
             AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
+            AggregateStatus.ENTRY_VACUUM_CANCELLED,
         }
     ):
         return None
@@ -344,8 +389,8 @@ async def _run_entry_vacuum_position_fact_drain_once(
         drain = await drain_strategy_entry_vacuum_once(
             uow,
             DrainStrategyEntryVacuumRequest(
-                strategy_group_id=strategy_group_id,
-                selection_spec_id=selection_spec_id,
+                strategy_group_id=vacuum.strategy_group_id,
+                selection_spec_id=vacuum.selection_spec_id,
                 now_ms=request.now_ms,
             ),
         )
@@ -392,8 +437,8 @@ async def _run_entry_vacuum_position_fact_drain_once(
             advanced = await drain_strategy_entry_vacuum_once(
                 uow,
                 DrainStrategyEntryVacuumRequest(
-                    strategy_group_id=strategy_group_id,
-                    selection_spec_id=selection_spec_id,
+                    strategy_group_id=vacuum.strategy_group_id,
+                    selection_spec_id=vacuum.selection_spec_id,
                     now_ms=request.now_ms,
                     ticket_id=drain.ticket_id,
                     position_snapshot=snapshot,

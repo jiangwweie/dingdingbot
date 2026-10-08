@@ -1018,6 +1018,12 @@ sa.Index(
         )
     ),
 )
+sa.Index(
+    "ix_brc_strategy_entry_vacuums_drain_due",
+    strategy_entry_vacuums_current.c.fenced_at_ms,
+    strategy_entry_vacuums_current.c.entry_vacuum_id,
+    postgresql_where=sa.text("state='DRAINING_ENTRY'"),
+)
 
 strategy_entry_vacuum_events = sa.Table(
     "brc_strategy_entry_vacuum_events",
