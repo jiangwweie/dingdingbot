@@ -15,6 +15,7 @@ class ReconciliationActionKind(StrEnum):
     REVIEW = "review"
     CERTIFICATION = "certification"
     FEE_MONITOR = "fee_monitor"
+    ACCOUNT_POSITION_AUDIT = "account_position_audit"
 
 
 class ReconciliationActionCandidate(BaseModel):

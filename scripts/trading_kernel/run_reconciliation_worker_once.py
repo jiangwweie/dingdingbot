@@ -25,6 +25,7 @@ from src.trading_kernel.application.certify_universe_instrument import (
 )
 from src.trading_kernel.application.ports import VenueTruthPort
 from src.trading_kernel.application.runtime_facts import (
+    AccountPositionAuditSource,
     AccountRiskSnapshotSource,
     InstrumentRulesSource,
     PositionSnapshotSource,
@@ -106,6 +107,8 @@ async def _run(args: argparse.Namespace) -> int:
         raise TypeError("venue factory must provide PositionSnapshotSource")
     if not callable(getattr(adapter, "read_account_risk_snapshot", None)):
         raise TypeError("venue factory must provide AccountRiskSnapshotSource")
+    if not callable(getattr(adapter, "read_account_position_audit", None)):
+        raise TypeError("venue factory must provide AccountPositionAuditSource")
     if not callable(getattr(adapter, "read_instrument_rules", None)):
         raise TypeError("venue factory must provide InstrumentRulesSource")
     if not callable(getattr(adapter, "read_review_economics", None)):
@@ -150,6 +153,10 @@ async def _run(args: argparse.Namespace) -> int:
                     InstrumentCertificationSource,
                     adapter,
                 ),
+                account_position_audit_source=cast(
+                    AccountPositionAuditSource,
+                    adapter,
+                ),
             )
 
         return await run_worker_process(
@@ -157,7 +164,7 @@ async def _run(args: argparse.Namespace) -> int:
             run_forever=args.run_forever,
             poll_interval_ms=args.poll_interval_ms,
             idle_log_interval_ms=args.idle_log_interval_ms,
-            idle_statuses={"no_work"},
+            idle_statuses={"no_work", "account_position_audited"},
         )
     finally:
         close = getattr(adapter, "close", None)

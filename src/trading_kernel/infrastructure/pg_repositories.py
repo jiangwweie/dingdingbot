@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from hashlib import sha256
 from typing import Literal, cast
 from uuid import uuid4
 
@@ -1595,6 +1596,18 @@ class PostgresIncidentRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def lock_account_position_audit(self, account_block_key: str) -> None:
+        if not account_block_key.strip():
+            raise ValueError("account audit lock requires an account block key")
+        digest = sha256(
+            f"brc:account-position-audit:{account_block_key}".encode()
+        ).digest()
+        lock_key = int.from_bytes(digest[:8], "big", signed=True)
+        await self._connection.execute(
+            sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
+
     async def add(self, incident: RuntimeIncidentRecord) -> None:
         await self._connection.execute(
             pg_insert(runtime_incidents)
@@ -1637,6 +1650,22 @@ class PostgresIncidentRepository:
                 runtime_incidents.c.opened_at_ms.desc(),
                 runtime_incidents.c.incident_id.desc(),
             )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        return None if row is None else RuntimeIncidentRecord.model_validate(row)
+
+    async def get_open_account_position_incident(
+        self, account_block_key: str,
+    ) -> RuntimeIncidentRecord | None:
+        result = await self._connection.execute(
+            sa.select(runtime_incidents)
+            .where(
+                sa.text("incident_kind='unowned_account_position' AND status='open'"),
+                runtime_incidents.c.entry_block_scope == EntryBlockScope.ACCOUNT_CAPACITY.value,
+                runtime_incidents.c.entry_block_key == account_block_key,
+            )
+            .order_by(runtime_incidents.c.opened_at_ms.desc())
             .limit(1)
         )
         row = result.mappings().one_or_none()

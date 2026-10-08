@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 import pytest
@@ -484,6 +485,264 @@ async def test_late_fill_after_zero_fill_vacuum_closure_is_not_silent(
         assert await conn.scalar(sa.text(
             "SELECT count(*) FROM brc_runtime_incidents WHERE ticket_id=:ticket AND status='open'"
         ), {"ticket":ticket.identity.ticket_id}) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_worker_detects_orphan_position_after_terminal_zero_fill(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(
+        dispatch_engine, AcceptingVenue(dispatch_engine), ticket.identity.ticket_id,
+        now_ms=1_100,
+    )
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(dispatch_engine, ticket, vacuum)
+
+    from src.trading_kernel.application.runtime_facts import (
+        AccountPositionAuditSnapshot,
+    )
+    from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
+
+    class LateAccountPositionSource:
+        calls = 0
+        positions_present = True
+
+        async def read_account_position_audit(self, *, observed_at_ms: int):
+            self.calls += 1
+            return AccountPositionAuditSnapshot(
+                venue_id=ticket.identity.netting_domain.venue_id,
+                account_id=ticket.identity.netting_domain.account_id,
+                positions=(AccountRiskPosition(
+                    exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+                    position_side=ticket.identity.netting_domain.position_side,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    current_unrealized_pnl=Decimal(0),
+                    current_maintenance_margin=Decimal(0),
+                ),) if self.positions_present else (),
+                observed_at_ms=observed_at_ms,
+            )
+
+    source = LateAccountPositionSource()
+    worker_request = _reconciliation_request(vacuum.fenced_at_ms + 20)
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+        RecordingVacuumPositionSource(_position_snapshot(
+            ticket, quantity=Decimal(0), average_entry_price=None,
+            open_entry_order=False, observed_at_ms=worker_request.now_ms,
+        )),
+        worker_request,
+        account_position_audit_source=source,
+    )
+    assert result.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT
+    assert source.calls == 1
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        ownership = await uow.entry_admission.read_admission_ownership(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert "account_capacity" in {scope.value for scope in ownership.open_incident_scopes}
+    assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert [command.kind for command in commands] == [
+        ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER,
+    ]
+
+    before_due = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+        RecordingVacuumPositionSource(_position_snapshot(
+            ticket, quantity=Decimal(0), average_entry_price=None,
+            open_entry_order=False, observed_at_ms=worker_request.now_ms + 1,
+        )),
+        worker_request.model_copy(update={"now_ms": worker_request.now_ms + 1}),
+        account_position_audit_source=source,
+    )
+    assert before_due.status is ReconciliationWorkerStatus.NO_WORK
+    assert source.calls == 1
+
+    source.positions_present = False
+    recovered = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+        RecordingVacuumPositionSource(_position_snapshot(
+            ticket, quantity=Decimal(0), average_entry_price=None,
+            open_entry_order=False, observed_at_ms=worker_request.now_ms + 60_001,
+        )),
+        worker_request.model_copy(update={"now_ms": worker_request.now_ms + 60_001}),
+        account_position_audit_source=source,
+    )
+    assert recovered.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        ownership_after = await uow.entry_admission.read_admission_ownership(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+        )
+    assert "account_capacity" in {
+        scope.value for scope in ownership_after.open_incident_scopes
+    }
+    assert source.calls == 2
+    async with dispatch_engine.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_incidents WHERE incident_kind='unowned_account_position'"
+        )) == 1
+
+
+@pytest.mark.asyncio
+async def test_account_position_audit_healthy_and_source_retry_are_bounded(
+    dispatch_engine,
+) -> None:
+    from src.trading_kernel.application.runtime_facts import (
+        AccountPositionAuditSnapshot,
+    )
+
+    await seed_policy(dispatch_engine)
+
+    async with dispatch_engine.begin() as conn:
+        await conn.execute(sa.text(
+            "INSERT INTO brc_runtime_capabilities_current "
+            "(capability_key,enabled,certified_commit,schema_revision,certification,updated_at_ms) "
+            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{}'::jsonb,1000)"
+        ), {"schema": CURRENT_SCHEMA_REVISION})
+
+    class Source:
+        calls = 0
+        fails = False
+        stale = False
+
+        async def read_account_position_audit(self, *, observed_at_ms: int):
+            self.calls += 1
+            if self.fails:
+                raise TimeoutError("account_read_unavailable")
+            return AccountPositionAuditSnapshot(
+                venue_id="binance-usdm", account_id="experiment-1",
+                positions=(), observed_at_ms=(
+                    observed_at_ms - 1 if self.stale else observed_at_ms
+                ),
+            )
+
+    source = Source()
+    request = _reconciliation_request(10_000)
+    async def tick(now_ms: int):
+        return await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+            FailingVacuumPositionSource(),
+            request.model_copy(update={"now_ms": now_ms}),
+            account_position_audit_source=source,
+        )
+
+    first = await tick(10_000)
+    before_due = await tick(10_001)
+    source.fails = True
+    failed = await tick(70_001)
+    retry_not_due = await tick(70_002)
+    source.fails = False
+    source.stale = True
+    stale = await tick(130_002)
+    source.stale = False
+    restored = await tick(190_003)
+
+    assert first.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_AUDITED
+    assert before_due.status is ReconciliationWorkerStatus.NO_WORK
+    assert failed.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    assert retry_not_due.status is ReconciliationWorkerStatus.NO_WORK
+    assert stale.status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    assert restored.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_AUDITED
+    assert source.calls == 4
+    async with dispatch_engine.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"
+        )) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_account_audits_create_one_open_incident(dispatch_engine) -> None:
+    from src.trading_kernel.application.runtime_facts import (
+        AccountPositionAuditSnapshot,
+    )
+    from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
+
+    async with dispatch_engine.begin() as conn:
+        await conn.execute(sa.text(
+            "INSERT INTO brc_runtime_capabilities_current "
+            "(capability_key,enabled,certified_commit,schema_revision,certification,updated_at_ms) "
+            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{}'::jsonb,1000)"
+        ), {"schema": CURRENT_SCHEMA_REVISION})
+
+    class Source:
+        async def read_account_position_audit(self, *, observed_at_ms: int):
+            return AccountPositionAuditSnapshot(
+                venue_id="binance-usdm", account_id="experiment-1",
+                positions=(AccountRiskPosition(
+                    exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+                    position_side="long", quantity=Decimal("0.01"),
+                    average_entry_price=Decimal(100),
+                    current_unrealized_pnl=Decimal(0),
+                    current_maintenance_margin=Decimal(0),
+                ),), observed_at_ms=observed_at_ms,
+            )
+
+    async def audit(worker_id: str):
+        return await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+            FailingVacuumPositionSource(),
+            _reconciliation_request(10_000).model_copy(update={"worker_id":worker_id}),
+            account_position_audit_source=Source(),
+        )
+
+    left, right = await asyncio.gather(audit("audit-left"), audit("audit-right"))
+    assert left.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT
+    assert right.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT
+    async with dispatch_engine.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_incidents "
+            "WHERE incident_kind='unowned_account_position' AND status='open'"
+        )) == 1
+
+
+@pytest.mark.asyncio
+async def test_account_position_audit_does_not_fence_an_active_ticket_domain(
+    dispatch_engine,
+) -> None:
+    from src.trading_kernel.application.runtime_facts import (
+        AccountPositionAuditSnapshot,
+    )
+    from src.trading_kernel.domain.cross_margin_stress import AccountRiskPosition
+
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+
+    class Source:
+        async def read_account_position_audit(self, *, observed_at_ms: int):
+            return AccountPositionAuditSnapshot(
+                venue_id=ticket.identity.netting_domain.venue_id,
+                account_id=ticket.identity.netting_domain.account_id,
+                positions=(AccountRiskPosition(
+                    exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+                    position_side=ticket.identity.netting_domain.position_side,
+                    quantity=ticket.quantity,
+                    average_entry_price=ticket.entry_reference_price,
+                    current_unrealized_pnl=Decimal(0),
+                    current_maintenance_margin=Decimal(0),
+                ),), observed_at_ms=observed_at_ms,
+            )
+
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine), NoVenueTruth(),
+        FailingVacuumPositionSource(), _reconciliation_request(10_000),
+        account_position_audit_source=Source(),
+    )
+
+    assert result.status is ReconciliationWorkerStatus.ACCOUNT_POSITION_AUDITED
+    async with dispatch_engine.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"
+        )) == 0
 
 
 @pytest.mark.asyncio

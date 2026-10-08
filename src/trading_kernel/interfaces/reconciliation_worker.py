@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from enum import StrEnum
+from hashlib import sha256
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -27,6 +28,7 @@ from src.trading_kernel.application.owner_control import advance_flatten_operati
 from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     MonitorStateRecord,
+    RuntimeIncidentRecord,
     UnitOfWorkFactory,
     VenueTruthPort,
 )
@@ -50,6 +52,7 @@ from src.trading_kernel.application.recover_unknown_command import (
     recover_unknown_command,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountPositionAuditSource,
     AccountRiskSnapshotRequest,
     AccountRiskSnapshotSource,
     FeeDiscountCapabilitySource,
@@ -81,6 +84,11 @@ from src.trading_kernel.domain.events import (
     PositionFlatConfirmed,
     TradeEvent,
 )
+from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.incident_blocking import (
+    EntryBlockScope,
+    canonical_entry_block_key,
+)
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
     TicketOrderReference,
@@ -111,6 +119,8 @@ class ReconciliationWorkerStatus(StrEnum):
     FEE_CAPABILITY_OBSERVED = "fee_capability_observed"
     VACUUM_DRAIN_ADVANCED = "vacuum_drain_advanced"
     VACUUM_DRAIN_WAITING = "vacuum_drain_waiting"
+    ACCOUNT_POSITION_AUDITED = "account_position_audited"
+    ACCOUNT_POSITION_INCIDENT = "account_position_incident"
 
 
 class ReconciliationWorkerRequest(BaseModel):
@@ -132,6 +142,7 @@ class ReconciliationWorkerRequest(BaseModel):
     certification_owner_action_check_interval_ms: int = 300_000
     certification_transient_retry_interval_ms: int = 30_000
     fee_capability_monitor_interval_ms: int = 300_000
+    account_position_audit_interval_ms: int = 60_000
     fee_capability_max_wait_ms: int = 600_000
     housekeeping_lease_ms: int = 60_000
     entry_vacuum_strategy_group_id: str | None = None
@@ -171,6 +182,7 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.certification_owner_action_check_interval_ms <= 0
             or self.certification_transient_retry_interval_ms <= 0
             or self.fee_capability_monitor_interval_ms <= 0
+            or self.account_position_audit_interval_ms <= 0
             or self.fee_capability_max_wait_ms <= 0
             or self.housekeeping_lease_ms <= 0
         ):
@@ -210,6 +222,7 @@ async def run_reconciliation_worker_once(
     review_economics_source: ReviewEconomicsSource | None = None,
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
     instrument_certification_source: InstrumentCertificationSource | None = None,
+    account_position_audit_source: AccountPositionAuditSource | None = None,
 ) -> ReconciliationWorkerResult:
     """Advance at most one safety and one housekeeping action."""
 
@@ -265,6 +278,7 @@ async def run_reconciliation_worker_once(
         review_economics_source=review_economics_source,
         fee_discount_capability_source=fee_discount_capability_source,
         instrument_certification_source=instrument_certification_source,
+        account_position_audit_source=account_position_audit_source,
     )
     await advance_flatten_operation_once(
         uow_factory,
@@ -426,10 +440,12 @@ async def _run_housekeeping_once(
     review_economics_source: ReviewEconomicsSource | None,
     fee_discount_capability_source: FeeDiscountCapabilitySource | None,
     instrument_certification_source: InstrumentCertificationSource | None,
+    account_position_audit_source: AccountPositionAuditSource | None,
 ) -> ReconciliationWorkerResult:
     routine_candidate: ReconciliationActionCandidate | None = None
     certification_candidate: ReconciliationActionCandidate | None = None
     fee_candidate: ReconciliationActionCandidate | None = None
+    account_audit_candidate: ReconciliationActionCandidate | None = None
     routine_scheduler_available = False
     certification_scheduler_available = instrument_certification_source is None
     async with uow_factory() as uow:
@@ -468,6 +484,17 @@ async def _run_housekeeping_once(
                 due_at_ms=due_at_ms,
                 max_wait_ms=request.fee_capability_max_wait_ms,
             )
+        if account_position_audit_source is not None:
+            audit_monitor = await uow.monitors.get("account:binance-usdm:position-audit")
+            account_audit_candidate = ReconciliationActionCandidate(
+                kind=ReconciliationActionKind.ACCOUNT_POSITION_AUDIT,
+                stable_identity="account:binance-usdm:position-audit",
+                due_at_ms=(
+                    0 if audit_monitor is None else
+                    audit_monitor.updated_at_ms + request.account_position_audit_interval_ms
+                ),
+                max_wait_ms=request.account_position_audit_interval_ms,
+            )
 
     advanced_scheduler_available = (
         routine_scheduler_available and certification_scheduler_available
@@ -479,6 +506,7 @@ async def _run_housekeeping_once(
             routine_candidate,
             certification_candidate,
             fee_candidate,
+            account_audit_candidate,
         )
         if candidate is not None
     )
@@ -505,6 +533,13 @@ async def _run_housekeeping_once(
             )
             return ReconciliationWorkerResult(
                 status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
+            )
+        if selected.kind is ReconciliationActionKind.ACCOUNT_POSITION_AUDIT:
+            assert account_position_audit_source is not None
+            return await _audit_account_positions(
+                uow_factory,
+                account_position_audit_source,
+                request,
             )
         if selected.kind is ReconciliationActionKind.CERTIFICATION:
             assert instrument_certification_source is not None
@@ -584,7 +619,155 @@ async def _run_housekeeping_once(
         return ReconciliationWorkerResult(
             status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
         )
+
+    if (
+        not advanced_scheduler_available
+        and account_position_audit_source is not None
+        and account_audit_candidate is not None
+        and account_audit_candidate.due_at_ms <= request.now_ms
+    ):
+        return await _audit_account_positions(
+            uow_factory,
+            account_position_audit_source,
+            request,
+        )
     return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.NO_WORK)
+
+
+async def _audit_account_positions(
+    uow_factory: UnitOfWorkFactory,
+    source: AccountPositionAuditSource,
+    request: ReconciliationWorkerRequest,
+) -> ReconciliationWorkerResult:
+    """Compare one bounded external account view with current Ticket ownership."""
+
+    if not await _runtime_writer_is_certified(uow_factory, request):
+        return _runtime_fenced_result()
+    monitor_key = "account:binance-usdm:position-audit"
+    try:
+        snapshot = await asyncio.wait_for(
+            source.read_account_position_audit(observed_at_ms=request.now_ms),
+            timeout=request.timeout_seconds,
+        )
+        if not (
+            request.now_ms <= snapshot.observed_at_ms
+            <= request.now_ms + int(request.timeout_seconds * 1_000) + 1_000
+        ):
+            raise ValueError("account audit source observation time is invalid")
+        if snapshot.venue_id != "binance-usdm":
+            raise ValueError("account audit returned unsupported Venue identity")
+    except Exception as exc:  # noqa: BLE001 - read-only source failure retries.
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result()
+        async with uow_factory() as uow:
+            await uow.monitors.save_if_changed(
+                MonitorStateRecord(
+                    monitor_key=monitor_key,
+                    owner_status=MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE,
+                    summary="Account position audit unavailable",
+                    intervention="Automatic bounded retry",
+                    updated_at_ms=request.now_ms,
+                )
+            )
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+            detail=f"account_position_audit:{type(exc).__name__}",
+        )
+    if not await _runtime_writer_is_certified(uow_factory, request):
+        return _runtime_fenced_result()
+    account_key = canonical_entry_block_key(
+        EntryBlockScope.ACCOUNT_CAPACITY,
+        venue_id=snapshot.venue_id,
+        account_id=snapshot.account_id,
+    )
+    assert account_key is not None
+    incident_kind = "unowned_account_position"
+    new_incident_id = (
+        "incident:account-position-audit:"
+        + sha256(account_key.encode("utf-8")).hexdigest()
+        + f":{snapshot.observed_at_ms}"
+    )
+    async with uow_factory() as uow:
+        await uow.incidents.lock_account_position_audit(account_key)
+        owned_domains: frozenset[str] = frozenset()
+        if snapshot.positions:
+            ownership = await uow.entry_admission.read_admission_ownership(
+                venue_id=snapshot.venue_id,
+                account_id=snapshot.account_id,
+                exchange_instrument_id=snapshot.positions[0].exchange_instrument_id,
+            )
+            owned_domains = frozenset(ownership.owned_position_domain_keys)
+        unowned = tuple(
+            position for position in snapshot.positions
+            if NettingDomain(
+                venue_id=snapshot.venue_id,
+                account_id=snapshot.account_id,
+                exchange_instrument_id=position.exchange_instrument_id,
+                position_side=position.position_side,
+            ).key() not in owned_domains
+        )
+        existing = await uow.incidents.get_open_account_position_incident(account_key)
+        if unowned:
+            if existing is None:
+                await uow.incidents.add(
+                    RuntimeIncidentRecord(
+                        incident_id=new_incident_id,
+                        ticket_id=None,
+                        incident_kind=incident_kind,
+                        status="open",
+                        first_blocker=incident_kind,
+                        entry_block_scope=EntryBlockScope.ACCOUNT_CAPACITY,
+                        entry_block_key=account_key,
+                        details={
+                            "unowned_count": len(unowned),
+                            "first_instrument": unowned[0].exchange_instrument_id,
+                            "first_side": unowned[0].position_side,
+                            "first_quantity": str(unowned[0].quantity),
+                        },
+                        opened_at_ms=snapshot.observed_at_ms,
+                    )
+                )
+            await uow.monitors.save_if_changed(
+                MonitorStateRecord(
+                    monitor_key=monitor_key,
+                    owner_status=MonitorOwnerStatus.NEEDS_INTERVENTION,
+                    summary="Unowned exchange position blocks account ENTRY",
+                    intervention="Verify external exposure and recover through Owner control",
+                    incident_id=(existing.incident_id if existing else new_incident_id),
+                    updated_at_ms=snapshot.observed_at_ms,
+                )
+            )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT,
+                detail=f"unowned_domains:{len(unowned)}",
+            )
+        if existing is not None:
+            await uow.monitors.save_if_changed(
+                MonitorStateRecord(
+                    monitor_key=monitor_key,
+                    owner_status=MonitorOwnerStatus.NEEDS_INTERVENTION,
+                    summary="Unowned position absent; Incident requires controlled closure",
+                    intervention="Verify exact external flatness and close the Incident",
+                    incident_id=existing.incident_id,
+                    updated_at_ms=snapshot.observed_at_ms,
+                )
+            )
+            return ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.ACCOUNT_POSITION_INCIDENT,
+                detail="unresolved_account_position_incident",
+            )
+        await uow.monitors.save_if_changed(
+            MonitorStateRecord(
+                monitor_key=monitor_key,
+                owner_status=MonitorOwnerStatus.RUNNING,
+                summary="Account positions match current Ticket ownership",
+                intervention="none",
+                updated_at_ms=snapshot.observed_at_ms,
+            )
+        )
+    return ReconciliationWorkerResult(
+        status=ReconciliationWorkerStatus.ACCOUNT_POSITION_AUDITED,
+    )
 
 
 async def _certify_one_due_instrument(

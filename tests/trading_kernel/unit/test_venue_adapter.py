@@ -64,6 +64,7 @@ class FakeAsyncExchange:
     def __init__(self) -> None:
         self.call = None
 
+
     async def create_order(self, symbol, order_type, side, amount, price, params):
         self.call = (symbol, order_type, side, amount, price, params)
         return {
@@ -159,6 +160,42 @@ class FakeAsyncExchange:
 
     async def close(self) -> object:
         return None
+
+
+class AccountAuditExchange:
+    def __init__(self) -> None:
+        self.reads = 0
+
+    async def fapiPrivateV2GetAccount(self, params):
+        assert params == {}
+        self.reads += 1
+        return {
+            "multiAssetsMargin": False,
+            "positions": [
+                {"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "0.01",
+                 "entryPrice": "100", "unrealizedProfit": "0", "maintMargin": "0"},
+                {"symbol": "ETHUSDT", "positionSide": "SHORT", "positionAmt": "0",
+                 "entryPrice": "0", "unrealizedProfit": "0", "maintMargin": "0"},
+            ],
+        }
+
+
+@pytest.mark.asyncio
+async def test_account_position_audit_uses_readonly_account_fact_without_target_symbol() -> None:
+    exchange = AccountAuditExchange()
+    adapter = CcxtVenueAdapter(
+        exchanges={("binance-usdm", "experiment-1"): exchange},
+        clock_ms=lambda: 2_001,
+    )
+
+    snapshot = await adapter.read_account_position_audit(observed_at_ms=2_000)
+
+    assert exchange.reads == 1
+    assert snapshot.venue_id == "binance-usdm" and snapshot.account_id == "experiment-1"
+    assert len(snapshot.positions) == 1
+    assert snapshot.positions[0].exchange_instrument_id == "binance-usdm:BTCUSDT:perpetual"
+    assert snapshot.positions[0].quantity == Decimal("0.01")
+    assert snapshot.observed_at_ms == 2_001
 
 
 class InsufficientFunds(Exception):

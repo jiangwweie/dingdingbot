@@ -2772,6 +2772,15 @@ runtime_incidents = sa.Table(
         name="incident_entry_block_key_canonical",
     ),
 )
+sa.Index(
+    "uq_brc_runtime_incidents_open_account_position_audit",
+    runtime_incidents.c.incident_kind,
+    runtime_incidents.c.entry_block_key,
+    unique=True,
+    postgresql_where=sa.text(
+        "status='open' AND incident_kind='unowned_account_position'"
+    ),
+)
 
 trade_reviews = sa.Table(
     "brc_trade_reviews",

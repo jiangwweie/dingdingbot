@@ -834,6 +834,8 @@ class CapacityClaimRepository(Protocol):
 
 
 class IncidentRepository(Protocol):
+    async def lock_account_position_audit(self, account_block_key: str) -> None: ...
+
     async def add(self, incident: RuntimeIncidentRecord) -> None: ...
 
     async def get_open_for_ticket(
@@ -845,6 +847,10 @@ class IncidentRepository(Protocol):
         self,
         ticket_id: str,
         incident_kind: str,
+    ) -> RuntimeIncidentRecord | None: ...
+
+    async def get_open_account_position_incident(
+        self, account_block_key: str,
     ) -> RuntimeIncidentRecord | None: ...
 
     async def resolve(self, incident_id: str, *, resolved_at_ms: int) -> None: ...

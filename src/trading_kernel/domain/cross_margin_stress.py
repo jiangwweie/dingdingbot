@@ -93,7 +93,7 @@ class MaintenanceMarginBracket(BaseModel):
 
 
 class AccountRiskPosition(BaseModel):
-    """One open Side from the target instrument in the account response."""
+    """One open Side from an instrument in the account response."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

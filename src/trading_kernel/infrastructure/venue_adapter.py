@@ -33,6 +33,7 @@ from src.trading_kernel.application.ports import (
     VenueTruthRequest,
 )
 from src.trading_kernel.application.runtime_facts import (
+    AccountPositionAuditSnapshot,
     AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
     FeeDiscountCapabilityFacts,
@@ -388,6 +389,45 @@ class CcxtVenueAdapter:
             exchange_instrument_id=request.exchange_instrument_id,
             observed_at_ms=request.observed_at_ms,
             valid_for_ms=request.valid_for_ms,
+        )
+
+    async def read_account_position_audit(
+        self, *, observed_at_ms: int,
+    ) -> AccountPositionAuditSnapshot:
+        """Read one configured account without needing a tradable target instrument."""
+
+        if observed_at_ms <= 0:
+            raise ValueError("account position audit requires positive request time")
+        candidates = tuple(
+            (venue_id, account_id, exchange)
+            for (venue_id, account_id), exchange in self._exchanges.items()
+            if venue_id == "binance-usdm"
+        )
+        if len(candidates) != 1:
+            raise RuntimeError("account position audit requires one Binance USD-M account")
+        venue_id, account_id, exchange = candidates[0]
+        raw_account = getattr(exchange, "fapiPrivateV2GetAccount", None)
+        if not callable(raw_account):
+            raise TypeError("Binance venue lacks USD-M account readonly lookup")
+        account = _require_mapping(
+            await _call_raw_exchange(raw_account, {}),
+            name="USD-M account audit",
+        )
+        if account.get("multiAssetsMargin") is not False:
+            raise RuntimeError("account audit requires standard USD-M single-asset mode")
+        positions = tuple(
+            position
+            for position in (
+                _account_risk_position(row, venue_id=venue_id)
+                for row in _require_list(account.get("positions"), name="USD-M account positions")
+            )
+            if position is not None
+        )
+        return AccountPositionAuditSnapshot(
+            venue_id=venue_id,
+            account_id=account_id,
+            positions=positions,
+            observed_at_ms=self._clock_ms(),
         )
 
     async def _read_account_risk_snapshot(

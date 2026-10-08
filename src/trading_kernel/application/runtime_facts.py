@@ -11,6 +11,7 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
 )
 from src.trading_kernel.domain.cross_margin_stress import (
+    AccountRiskPosition,
     AccountRiskSnapshot,
     MaintenanceMarginBracket,
 )
@@ -99,6 +100,38 @@ class AccountRiskSnapshotSource(Protocol):
         self,
         request: AccountRiskSnapshotRequest,
     ) -> AccountRiskSnapshot: ...
+
+
+class AccountPositionAuditSnapshot(BaseModel):
+    """One bounded read-only account position view for Reconciliation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    venue_id: str
+    account_id: str
+    positions: tuple[AccountRiskPosition, ...]
+    observed_at_ms: int
+
+    @model_validator(mode="after")
+    def _validate_positions(self) -> AccountPositionAuditSnapshot:
+        if not self.venue_id.strip() or not self.account_id.strip():
+            raise ValueError("account audit requires exact Venue and account identity")
+        if self.observed_at_ms <= 0 or len(self.positions) > 64:
+            raise ValueError("account audit time or position bound is invalid")
+        keys = (
+            (position.exchange_instrument_id, position.position_side)
+            for position in self.positions
+        )
+        keys_tuple = tuple(keys)
+        if len(keys_tuple) != len(set(keys_tuple)):
+            raise ValueError("account audit has duplicate Netting Domain")
+        return self
+
+
+class AccountPositionAuditSource(Protocol):
+    async def read_account_position_audit(
+        self, *, observed_at_ms: int,
+    ) -> AccountPositionAuditSnapshot: ...
 
 
 class InstrumentRulesRequest(BaseModel):

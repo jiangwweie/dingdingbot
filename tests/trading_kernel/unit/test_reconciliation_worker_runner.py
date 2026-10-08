@@ -27,6 +27,9 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
         async def read_account_risk_snapshot(self, request):
             del request
 
+        async def read_account_position_audit(self, *, observed_at_ms):
+            del observed_at_ms
+
         async def read_instrument_rules(self, request):
             del request
 
@@ -43,11 +46,17 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
         async def dispose(self):
             return None
 
-    observed_sources: list[object | None] = []
+    observed_sources: list[tuple[object | None, object | None]] = []
 
-    async def run_once(*args, fee_discount_capability_source=None, **kwargs):
+    async def run_once(
+        *args, fee_discount_capability_source=None,
+        account_position_audit_source=None, **kwargs,
+    ):
         del args, kwargs
-        observed_sources.append(fee_discount_capability_source)
+        observed_sources.append((
+            fee_discount_capability_source,
+            account_position_audit_source,
+        ))
         return ReconciliationWorkerResult(
             status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
         )
@@ -82,4 +91,5 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
 
     assert await runner._run(args) == 0
     assert observed_sources == [observed_sources[0], observed_sources[0]]
-    assert observed_sources[0] is not None
+    assert observed_sources[0][0] is not None
+    assert observed_sources[0][1] is not None
