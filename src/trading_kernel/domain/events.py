@@ -214,6 +214,73 @@ class EntryVacuumOrderAbsenceConfirmed(_TicketEvent):
         return self
 
 
+class VacuumLateFillAttributed(_TicketEvent):
+    """Exact original ENTRY fill found after an initial zero-fill observation."""
+
+    entry_vacuum_id: str
+    entry_command_id: str
+    exchange_order_id: str
+    venue_client_order_id: str
+    filled_qty: Decimal
+    average_fill_price: Decimal
+    position_observed_at_ms: int
+    venue_observed_at_ms: int
+    attribution_digest: str
+
+    @model_validator(mode="after")
+    def _validate_attribution(self) -> VacuumLateFillAttributed:
+        if any(not value.strip() for value in (
+            self.entry_vacuum_id, self.entry_command_id,
+            self.exchange_order_id, self.venue_client_order_id,
+        )):
+            raise ValueError("late fill attribution requires exact identities")
+        if (
+            self.filled_qty <= 0
+            or self.average_fill_price <= 0
+            or not self.filled_qty.is_finite()
+            or not self.average_fill_price.is_finite()
+        ):
+            raise ValueError("late fill attribution requires positive finite quantity and price")
+        if not (
+            0 < self.position_observed_at_ms
+            <= self.venue_observed_at_ms
+            <= self.occurred_at_ms
+        ):
+            raise ValueError("late fill attribution observation times are invalid")
+        if _SHA256_DIGEST.fullmatch(self.attribution_digest) is None:
+            raise ValueError("late fill attribution requires canonical digest")
+        return self
+
+
+class VacuumPostAbsenceNoFillVerified(_TicketEvent):
+    """Exact final ENTRY truth resolves an earlier contradictory zero-fill view."""
+
+    entry_vacuum_id: str
+    entry_command_id: str
+    exchange_order_id: str
+    venue_client_order_id: str
+    position_observed_at_ms: int
+    venue_observed_at_ms: int
+    proof_digest: str
+
+    @model_validator(mode="after")
+    def _validate_proof(self) -> VacuumPostAbsenceNoFillVerified:
+        if any(not value.strip() for value in (
+            self.entry_vacuum_id, self.entry_command_id,
+            self.exchange_order_id, self.venue_client_order_id,
+        )):
+            raise ValueError("post-absence no-fill proof requires exact identities")
+        if not (
+            0 < self.position_observed_at_ms
+            <= self.venue_observed_at_ms
+            <= self.occurred_at_ms
+        ):
+            raise ValueError("post-absence no-fill proof times are invalid")
+        if _SHA256_DIGEST.fullmatch(self.proof_digest) is None:
+            raise ValueError("post-absence no-fill proof requires canonical digest")
+        return self
+
+
 class EntryVacuumAbsenceConfirmed(_TicketEvent):
     entry_vacuum_id: str
 
@@ -508,6 +575,8 @@ TradeEvent = (
     | EntryVacuumCancelRejected
     | EntryVacuumCancelOutcomeUnknown
     | EntryVacuumOrderAbsenceConfirmed
+    | VacuumLateFillAttributed
+    | VacuumPostAbsenceNoFillVerified
     | EntryVacuumAbsenceConfirmed
     | VacuumPartialRetained
     | VacuumPartialFlattenRequired

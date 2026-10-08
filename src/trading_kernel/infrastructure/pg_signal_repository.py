@@ -1409,11 +1409,16 @@ class PostgresSignalRepository:
     async def get_runtime_capability(
         self,
         capability_key: str,
+        *,
+        for_update: bool = False,
     ) -> RuntimeCapabilitySnapshot | None:
+        statement = sa.select(runtime_capabilities_current).where(
+            runtime_capabilities_current.c.capability_key == capability_key
+        )
+        if for_update:
+            statement = statement.with_for_update(of=runtime_capabilities_current)
         result = await self._connection.execute(
-            sa.select(runtime_capabilities_current).where(
-                runtime_capabilities_current.c.capability_key == capability_key
-            )
+            statement
         )
         row = result.mappings().one_or_none()
         return (

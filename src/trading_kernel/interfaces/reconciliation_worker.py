@@ -51,6 +51,11 @@ from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
+from src.trading_kernel.application.recover_vacuum_late_fill import (
+    RecoverVacuumLateFillRequest,
+    RecoverVacuumLateFillStatus,
+    recover_vacuum_late_fill,
+)
 from src.trading_kernel.application.runtime_facts import (
     AccountPositionAuditSource,
     AccountRiskSnapshotRequest,
@@ -147,6 +152,7 @@ class ReconciliationWorkerRequest(BaseModel):
     certification_transient_retry_interval_ms: int = 30_000
     fee_capability_monitor_interval_ms: int = 300_000
     account_position_audit_interval_ms: int = 60_000
+    vacuum_late_fill_retry_interval_ms: int = 30_000
     fee_capability_max_wait_ms: int = 600_000
     housekeeping_lease_ms: int = 60_000
     entry_vacuum_strategy_group_id: str | None = None
@@ -188,6 +194,7 @@ class ReconciliationWorkerRequest(BaseModel):
             or self.certification_transient_retry_interval_ms <= 0
             or self.fee_capability_monitor_interval_ms <= 0
             or self.account_position_audit_interval_ms <= 0
+            or self.vacuum_late_fill_retry_interval_ms <= 0
             or self.fee_capability_max_wait_ms <= 0
             or self.housekeeping_lease_ms <= 0
         ):
@@ -251,6 +258,7 @@ async def run_reconciliation_worker_once(
     else:
         safety = await _run_entry_vacuum_position_fact_drain_once(
             uow_factory,
+            venue_truth,
             position_source,
             request,
         )
@@ -309,6 +317,7 @@ async def run_reconciliation_worker_once(
 
 async def _run_entry_vacuum_position_fact_drain_once(
     uow_factory: UnitOfWorkFactory,
+    venue_truth: VenueTruthPort,
     position_source: PositionSnapshotSource,
     request: ReconciliationWorkerRequest,
 ) -> ReconciliationWorkerResult | None:
@@ -329,6 +338,7 @@ async def _run_entry_vacuum_position_fact_drain_once(
         vacuum = None
         ticket_id = None
         candidate = None
+        post_absence_incident = False
         for contender in vacuums:
             if contender.state is not StrategyEntryVacuumState.DRAINING_ENTRY:
                 continue
@@ -349,8 +359,19 @@ async def _run_entry_vacuum_position_fact_drain_once(
                 incident = await uow.incidents.get_open_for_ticket_kind(
                     contender_ticket_id, "vacuum_post_absence_contradiction",
                 )
-                if incident is not None:
-                    continue
+                contender_incident = incident is not None
+                if contender_incident and contender_aggregate.position_qty == 0:
+                    retry_monitor = await uow.monitors.get(
+                        f"vacuum-late-fill-retry:{contender_ticket_id}"
+                    )
+                    if (
+                        retry_monitor is not None
+                        and retry_monitor.updated_at_ms + request.vacuum_late_fill_retry_interval_ms
+                        > request.now_ms
+                    ):
+                        continue
+            else:
+                contender_incident = False
             if contender_aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING:
                 commands = await uow.exchange_commands.list_for_ticket(contender_ticket_id)
                 cancellations = tuple(
@@ -368,6 +389,7 @@ async def _run_entry_vacuum_position_fact_drain_once(
             vacuum = contender
             ticket_id = contender_ticket_id
             candidate = contender_aggregate
+            post_absence_incident = contender_incident
             break
     if (
         vacuum is None
@@ -384,6 +406,45 @@ async def _run_entry_vacuum_position_fact_drain_once(
         return None
     if not await _runtime_writer_is_certified(uow_factory, request):
         return _runtime_fenced_result()
+
+    if post_absence_incident and candidate.position_qty == 0:
+        recovered = await recover_vacuum_late_fill(
+            uow_factory,
+            position_source,
+            venue_truth,
+            RecoverVacuumLateFillRequest(
+                ticket_id=ticket_id,
+                worker_id=request.worker_id,
+                runtime_commit=request.runtime_commit,
+                schema_revision=request.schema_revision,
+                now_ms=request.now_ms,
+                timeout_seconds=request.timeout_seconds,
+            ),
+        )
+        if recovered.status is RecoverVacuumLateFillStatus.UNVERIFIED:
+            async with uow_factory() as uow:
+                await uow.monitors.save_if_changed(
+                    MonitorStateRecord(
+                        monitor_key=f"vacuum-late-fill-retry:{ticket_id}",
+                        owner_status=MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE,
+                        summary="Late-fill attribution pending",
+                        intervention="Keep Vacuum fenced; retry exact original ENTRY truth",
+                        ticket_id=ticket_id,
+                        updated_at_ms=request.now_ms,
+                    )
+                )
+        return ReconciliationWorkerResult(
+            status=(
+                ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+                if recovered.status in {
+                    RecoverVacuumLateFillStatus.ATTRIBUTED,
+                    RecoverVacuumLateFillStatus.NO_FILL_CLOSED,
+                }
+                else ReconciliationWorkerStatus.VACUUM_DRAIN_WAITING
+            ),
+            ticket_id=ticket_id,
+            detail=f"late_fill:{recovered.reason_code}",
+        )
 
     async with uow_factory() as uow:
         drain = await drain_strategy_entry_vacuum_once(

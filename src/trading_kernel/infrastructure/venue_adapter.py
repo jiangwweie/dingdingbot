@@ -8,7 +8,7 @@ import itertools
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from typing import Literal, Protocol, cast
 
 from ccxt.base import errors as ccxt_errors  # type: ignore[import-untyped]
@@ -1371,6 +1371,9 @@ class CcxtVenueAdapter:
             if order is not None
             else []
         )
+        matching_fills = _matching_fill_facts(
+            fills, exchange_order_id=(order.exchange_order_id if order else None),
+        )
         return VenueTruthSnapshot(
             lookup_status=(
                 VenueLookupStatus.ABSENT
@@ -1383,12 +1386,9 @@ class CcxtVenueAdapter:
                 expected_symbol=symbol,
                 position_side=request.position_side,
             ),
-            matching_fill_quantity=_matching_fill_quantity(
-                fills,
-                exchange_order_id=(
-                    order.exchange_order_id if order is not None else None
-                ),
-            ),
+            matching_fill_quantity=matching_fills.quantity,
+            matching_fill_average_price=matching_fills.average_price,
+            matching_fill_complete=matching_fills.complete,
             regular_open_client_order_ids=_open_client_order_ids(regular_orders),
             conditional_open_client_order_ids=_open_client_order_ids(
                 conditional_orders
@@ -2821,28 +2821,61 @@ def _order_side_literal(value: str) -> Literal["buy", "sell"]:
     raise RuntimeError("venue order truth has invalid order side")
 
 
-def _matching_fill_quantity(
-    rows: list[object],
-    *,
-    exchange_order_id: str | None,
-) -> Decimal:
+@dataclass(frozen=True)
+class _MatchingFillFacts:
+    quantity: Decimal
+    average_price: Decimal | None
+    complete: bool
+
+
+def _matching_fill_facts(
+    rows: list[object], *, exchange_order_id: str | None,
+) -> _MatchingFillFacts:
     if exchange_order_id is None:
-        return Decimal(0)
-    total = Decimal(0)
-    for value in rows:
+        return _MatchingFillFacts(Decimal(0), None, False)
+    complete = len(rows) < 100
+    fills: dict[str, tuple[Decimal, Decimal | None]] = {}
+    for index, value in enumerate(rows):
         if not isinstance(value, Mapping):
             raise TypeError("venue fill row is not a mapping")
         info = value.get("info")
         raw_info = info if isinstance(info, Mapping) else {}
         row_order_id = str(
-            value.get("order")
-            or value.get("orderId")
-            or raw_info.get("orderId")
-            or ""
+            value.get("order") or value.get("orderId") or raw_info.get("orderId") or ""
         )
-        if row_order_id == exchange_order_id:
-            total += abs(Decimal(str(value.get("amount") or "0")))
-    return total
+        if row_order_id != exchange_order_id:
+            complete = False
+            continue
+        quantity = Decimal(str(value.get("amount") or "0")).copy_abs()
+        if not quantity.is_finite() or quantity <= 0:
+            complete = False
+            continue
+        price_value = value.get("price") or raw_info.get("price")
+        price = None if price_value is None else Decimal(str(price_value))
+        if price is None or not price.is_finite() or price <= 0:
+            complete = False
+            price = None
+        trade_id = str(value.get("id") or raw_info.get("id") or raw_info.get("tradeId") or "").strip()
+        if not trade_id:
+            complete = False
+            trade_id = f"missing:{index}"
+        row = (quantity, price)
+        if trade_id in fills:
+            if fills[trade_id] != row:
+                complete = False
+            continue
+        fills[trade_id] = row
+    with localcontext() as context:
+        context.prec = 38
+        context.rounding = ROUND_HALF_EVEN
+        total_qty = sum((quantity for quantity, _ in fills.values()), Decimal(0))
+        priced = all(price is not None for _, price in fills.values())
+        total_quote = sum(
+            (quantity * price for quantity, price in fills.values() if price is not None),
+            Decimal(0),
+        )
+        average = total_quote / total_qty if total_qty > 0 and priced else None
+    return _MatchingFillFacts(total_qty, average, complete)
 
 
 def _open_client_order_ids(rows: list[object]) -> tuple[str, ...]:

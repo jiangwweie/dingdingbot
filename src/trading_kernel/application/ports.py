@@ -1285,6 +1285,8 @@ class SignalRepository(Protocol):
     async def get_runtime_capability(
         self,
         capability_key: str,
+        *,
+        for_update: bool = False,
     ) -> RuntimeCapabilitySnapshot | None: ...
 
     async def get_required_facts(
@@ -1892,6 +1894,10 @@ class InstrumentSelectionRepository(Protocol):
         strategy_group_id: str,
         selection_spec_id: str,
         for_update: bool = False,
+    ) -> StrategyEntryVacuum | None: ...
+
+    async def get_entry_vacuum_by_id(
+        self, entry_vacuum_id: str, *, for_update: bool = False,
     ) -> StrategyEntryVacuum | None: ...
 
     async def list_draining_entry_vacuums(

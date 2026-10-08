@@ -16,6 +16,11 @@ from src.trading_kernel.application.drain_strategy_entry_vacuum import (
     VacuumDrainStatus,
     drain_strategy_entry_vacuum_once,
 )
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    LifecycleMaintenanceRequest,
+    TicketLifecycleFacts,
+    maintain_ticket_lifecycle,
+)
 from src.trading_kernel.application.ports import (
     LeverageTruthRequest,
     LeverageTruthSnapshot,
@@ -32,9 +37,20 @@ from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
 )
+from src.trading_kernel.application.recover_vacuum_late_fill import (
+    RecoverVacuumLateFillRequest,
+    RecoverVacuumLateFillStatus,
+    recover_vacuum_late_fill,
+)
 from src.trading_kernel.application.runtime_facts import (
     InstrumentRulesRequest,
     PositionSnapshotRequest,
+)
+from src.trading_kernel.application.settle_ticket import (
+    RecordTradeReviewRequest,
+    SettleTicketRequest,
+    record_trade_review,
+    settle_ticket,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import (
@@ -45,6 +61,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
+from src.trading_kernel.domain.events import PostFillStressAssessed
 from src.trading_kernel.domain.exit_policy import registered_event_exit_bindings
 from src.trading_kernel.domain.generic_selection_spec import (
     SpecNumericInstallationEvidence,
@@ -52,6 +69,7 @@ from src.trading_kernel.domain.generic_selection_spec import (
 )
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 from src.trading_kernel.domain.ticket import TradeTicket, build_ticket_id
 from src.trading_kernel.domain.venue_truth import (
@@ -71,6 +89,7 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerStatus,
     run_reconciliation_worker_once,
 )
+from tests.trading_kernel.support.capacity_claims import make_stress_evidence
 from tests.trading_kernel.support.command_dispatch import (
     dispatch_for_ticket,
     issue,
@@ -316,6 +335,7 @@ async def test_entry_vacuum_clears_prepared_or_zero_fill_entry(
 async def _assert_zero_fill_cancel(
     dispatch_engine, ticket, vacuum, *, late_after_order_absence: str | None = None,
     worker_for_terminal: bool = False,
+    late_quantity: Decimal | None = None,
 ) -> None:
     open_order_snapshot = _position_snapshot(
         ticket,
@@ -391,7 +411,8 @@ async def _assert_zero_fill_cancel(
     if late_after_order_absence:
         positive = _position_snapshot(
             ticket,
-            quantity=(ticket.quantity if late_after_order_absence == "position" else Decimal(0)),
+            quantity=((late_quantity or ticket.quantity)
+                if late_after_order_absence == "position" else Decimal(0)),
             average_entry_price=(
                 ticket.entry_reference_price if late_after_order_absence == "position" else None
             ),
@@ -520,6 +541,736 @@ async def test_vacuum_does_not_close_when_positive_position_appears_after_order_
     await _assert_zero_fill_cancel(
         dispatch_engine, ticket, vacuum, late_after_order_absence=late_kind,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", [None, "CPM-RO-001", "BRF2-001"])
+@pytest.mark.parametrize("via_worker", [False, True])
+async def test_exact_late_fill_rejoins_original_ticket_and_prepares_protection(
+    dispatch_engine, group: str | None, via_worker: bool,
+) -> None:
+    ticket = _ticket_for_group(make_ticket(), group)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_000)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    position = _position_snapshot(
+        ticket, quantity=ticket.quantity, average_entry_price=ticket.entry_reference_price,
+        open_entry_order=False, observed_at_ms=vacuum.fenced_at_ms + 7,
+    )
+    truth = VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(
+            exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id=str(entry.venue_client_order_id),
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy" if ticket.identity.netting_domain.position_side == "long" else "sell",
+            quantity=ticket.quantity, reduce_only=False,
+            order_namespace="regular", is_open=False,
+        ),
+        position_quantity=ticket.quantity,
+        matching_fill_quantity=ticket.quantity,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(), conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms + 8,
+    )
+    source = RecordingVacuumPositionSource(position)
+    truth_port = StaticTruthPort(truth)
+    if via_worker:
+        worker_request = _reconciliation_request(vacuum.fenced_at_ms + 7).model_copy(update={
+            "entry_vacuum_strategy_group_id": None,
+            "entry_vacuum_selection_spec_id": None,
+            "entry_vacuum_scan_all": True,
+        })
+        recovered_worker = await run_reconciliation_worker_once(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine), truth_port,
+            source, worker_request,
+        )
+        assert recovered_worker.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+        assert recovered_worker.detail == "late_fill:exact_original_entry_fill"
+    else:
+        recovered = await recover_vacuum_late_fill(
+            lambda: PostgresKernelUnitOfWork(dispatch_engine),
+            source, truth_port,
+            RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+                worker_id="late-fill-test",runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=vacuum.fenced_at_ms + 7, timeout_seconds=1),
+        )
+        assert recovered.status is RecoverVacuumLateFillStatus.ATTRIBUTED
+    if via_worker:
+        advanced_worker = await run_reconciliation_worker_once(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),truth_port,source,
+            _reconciliation_request(vacuum.fenced_at_ms+9).model_copy(update={
+                "entry_vacuum_strategy_group_id":None,
+                "entry_vacuum_selection_spec_id":None,
+                "entry_vacuum_scan_all":True,
+            }),
+        )
+        assert advanced_worker.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+        assert advanced_worker.detail == VacuumDrainStatus.FULL_FILL_PROTECTION_REQUESTED.value
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        advanced = (
+            None if via_worker else await drain_strategy_entry_vacuum_once(
+                uow, _request(ticket, now_ms=vacuum.fenced_at_ms + 9),
+            )
+        )
+        new_aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        new_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key())
+        monitor = await uow.monitors.get(
+            f"vacuum-post-absence:{ticket.identity.ticket_id}"
+        )
+    assert via_worker or advanced is not None and advanced.status is VacuumDrainStatus.FULL_FILL_PROTECTION_REQUESTED
+    assert new_aggregate is not None and new_aggregate.status is AggregateStatus.PROTECTION_PENDING
+    assert reservation is not None and reservation.status == "active" and active
+    assert [command.kind for command in new_commands] == [
+        ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER,
+        ExchangeCommandKind.INITIAL_STOP,
+    ]
+    assert sum(type(event).__name__ == "VacuumLateFillAttributed" for event in events) == 1
+    assert monitor is not None and monitor.owner_status.value == "processing"
+
+    class TimedVenue:
+        now_ms = vacuum.fenced_at_ms + 10
+
+        async def execute(self, request):
+            async with PostgresKernelUnitOfWork(dispatch_engine) as durable_uow:
+                command = await durable_uow.exchange_commands.get(request.command_id)
+                assert command is not None and command.status is ExchangeCommandStatus.CLAIMED
+            return ExchangeCommandResult(
+                status=ExchangeCommandStatus.ACCEPTED,
+                observed_at_ms=self.now_ms,
+                exchange_order_id=f"late-{request.kind.value}-1",
+            )
+
+        async def set_leverage(self, request):
+            del request
+            raise AssertionError("late fill protection must not mutate leverage")
+
+    venue = TimedVenue()
+    dispatched_stop = await dispatch_one_command(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(worker_id="late-fill-stop",ticket_id=ticket.identity.ticket_id,
+            now_ms=vacuum.fenced_at_ms+10,lease_until_ms=vacuum.fenced_at_ms+5_010,
+            timeout_seconds=1,runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000),
+        entry_facts_source=PreflightFacts(),
+    )
+    assert dispatched_stop.status is DispatchCommandStatus.ACCEPTED, dispatched_stop
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        pending_stress = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert pending_stress is not None
+        assert pending_stress.status is AggregateStatus.POST_FILL_RISK_PENDING
+        stress = PostFillStressAssessed(
+            event_id=f"event:{ticket.identity.ticket_id}:{pending_stress.last_event_sequence+1}",
+            ticket_id=ticket.identity.ticket_id,
+            sequence=pending_stress.last_event_sequence+1,
+            occurred_at_ms=vacuum.fenced_at_ms+11,
+            status="passed",evidence=make_stress_evidence(pending_stress.ticket),
+            owner_policy_id=pending_stress.ticket.owner_policy_id,
+            owner_policy_version=pending_stress.ticket.owner_policy_version,
+            filled_qty=pending_stress.position_qty,
+            average_fill_price=pending_stress.average_fill_price,
+            initial_stop_price=pending_stress.ticket.initial_stop_price,
+            initial_stop_exchange_order_id=pending_stress.initial_stop_exchange_order_id,
+        )
+        await uow.commit_reduction(
+            event=stress,reduction=reduce_event(pending_stress,stress),
+            expected_version=pending_stress.version,
+        )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        after_stop = await uow.aggregates.get(ticket.identity.ticket_id)
+        after_stop_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert after_stop is not None and after_stop.status is AggregateStatus.TP1_PENDING, (
+        after_stop, after_stop_commands,
+    )
+    assert len(after_stop_commands) == 4
+    assert {command.kind for command in after_stop_commands} == {
+        ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER,
+        ExchangeCommandKind.INITIAL_STOP,ExchangeCommandKind.TAKE_PROFIT,
+    }
+    venue.now_ms = vacuum.fenced_at_ms + 12
+    dispatched_tp1 = await dispatch_one_command(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(worker_id="late-fill-tp1",ticket_id=ticket.identity.ticket_id,
+            now_ms=vacuum.fenced_at_ms+12,lease_until_ms=vacuum.fenced_at_ms+5_012,
+            timeout_seconds=1,runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000),
+        entry_facts_source=PreflightFacts(),
+    )
+    assert dispatched_tp1.status is DispatchCommandStatus.ACCEPTED, dispatched_tp1
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        protected = await uow.aggregates.get(ticket.identity.ticket_id)
+        protected_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket_kind(
+            ticket.identity.ticket_id,"vacuum_post_absence_contradiction")
+    assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
+    assert protected.protected_qty == ticket.quantity
+    assert [command.kind for command in protected_commands] == [
+        ExchangeCommandKind.ENTRY, ExchangeCommandKind.CANCEL_ORDER,
+        ExchangeCommandKind.INITIAL_STOP, ExchangeCommandKind.TAKE_PROFIT,
+    ]
+    assert incident is not None
+    if not via_worker:
+        await _finish_exact_late_fill_ticket(
+            dispatch_engine, ticket, vacuum, venue,
+        )
+
+
+async def _finish_exact_late_fill_ticket(dispatch_engine, ticket, vacuum, venue) -> None:
+    base_time = vacuum.fenced_at_ms + 100
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        runner = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
+                    tp1_filled_quantity=ticket.take_profit_quantities[0],
+                    tp1_average_fill_price=ticket.take_profit_prices[0],
+                    allocated_entry_fee_quote=Decimal("0.01"),
+                    exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.01"),
+                    market_facts=None,
+                    observed_at_ms=base_time,
+                ),
+                now_ms=base_time,
+            ),
+        )
+    assert runner.status.value == "break_even_requested"
+
+    for offset in (10, 20):
+        venue.now_ms = base_time + offset
+        dispatched = await dispatch_one_command(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+            DispatchCommandRequest(
+                worker_id=f"late-fill-runner-{offset}",
+                ticket_id=ticket.identity.ticket_id,
+                now_ms=venue.now_ms,
+                lease_until_ms=venue.now_ms+5_000,
+                timeout_seconds=1,
+                runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                admission_snapshot_validity_ms=1_000,
+            ),
+            entry_facts_source=PreflightFacts(),
+        )
+        assert dispatched.status is DispatchCommandStatus.ACCEPTED, dispatched
+
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=ticket.identity.ticket_id,
+            snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                average_entry_price=None,open_entry_order=False,
+                observed_at_ms=base_time+30),
+        ))
+    assert external_flat.status is ReconcileTicketStatus.EXTERNAL_FLAT_INCIDENT
+    venue.now_ms = base_time + 40
+    dispatched_cleanup = await dispatch_one_command(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(
+            worker_id="late-fill-cleanup",ticket_id=ticket.identity.ticket_id,
+            now_ms=venue.now_ms,lease_until_ms=venue.now_ms+5_000,
+            timeout_seconds=1,runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000,
+        ),entry_facts_source=PreflightFacts(),
+    )
+    assert dispatched_cleanup.status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        matched = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=ticket.identity.ticket_id,
+            snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                average_entry_price=None,open_entry_order=False,
+                observed_at_ms=base_time+50),
+        ))
+        settled = await settle_ticket(uow,SettleTicketRequest(
+            ticket_id=ticket.identity.ticket_id,settled_at_ms=base_time+60))
+        reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
+            ticket_id=ticket.identity.ticket_id,
+            review_id=f"review:late-fill-{ticket.identity.runtime.strategy_group_id}",
+            outcome="closed",metrics={"realized_pnl":"1.25"},
+            decision_impact={"strategy_action":"keep"},recorded_at_ms=base_time+70))
+        terminal = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key())
+    assert matched.status is ReconcileTicketStatus.MATCHED
+    assert settled.status.value == "budget_settled"
+    assert reviewed.status.value == "review_recorded"
+    assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+    assert incident is None and reservation is not None and reservation.status == "released"
+    assert not active
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group,expected", [
+    (None, VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED),
+    ("MPG-001", VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED),
+])
+async def test_exact_partial_late_fill_uses_existing_vacuum_reduction(
+    dispatch_engine, group: str | None, expected: VacuumDrainStatus,
+) -> None:
+    ticket = _ticket_for_group(_retained_partial_ticket(), group)
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1_000)
+    await seed_policy(dispatch_engine, event_spec_id=ticket.identity.runtime.event_spec_id)
+    await issue(dispatch_engine, ticket, ticket_margin_budget=Decimal(90))
+    await _seed_instrument_rules(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await _open_group_vacuum(dispatch_engine, ticket, group)
+    partial_qty = Decimal("0.002")
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+        late_quantity=partial_qty,
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    position = _position_snapshot(ticket, quantity=partial_qty,
+        average_entry_price=ticket.entry_reference_price, open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms + 7)
+    truth = VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(
+            exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id=str(entry.venue_client_order_id),
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy" if ticket.identity.netting_domain.position_side == "long" else "sell",
+            quantity=ticket.quantity, reduce_only=False,
+            order_namespace="regular", is_open=False,
+        ),
+        position_quantity=partial_qty,
+        matching_fill_quantity=partial_qty,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(), conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms + 8,
+    )
+    recovered = await recover_vacuum_late_fill(
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        RecordingVacuumPositionSource(position), StaticTruthPort(truth),
+        RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+            worker_id="late-fill-test",runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=vacuum.fenced_at_ms + 7, timeout_seconds=1),
+    )
+    assert recovered.status is RecoverVacuumLateFillStatus.ATTRIBUTED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        advanced = await drain_strategy_entry_vacuum_once(
+            uow, _request(ticket, now_ms=vacuum.fenced_at_ms + 9),
+        )
+        persisted = await uow.aggregates.get(ticket.identity.ticket_id)
+        persisted_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+    assert advanced.status is expected
+    assert persisted is not None and persisted.position_qty == partial_qty
+    assert reservation is not None and reservation.status == "active"
+    assert len([command for command in persisted_commands if command.kind is ExchangeCommandKind.ENTRY]) == 1
+    if expected is VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED:
+        assert persisted.status is AggregateStatus.PROTECTION_PENDING
+        assert persisted_commands[-1].kind is ExchangeCommandKind.INITIAL_STOP
+    else:
+        assert persisted.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+        assert persisted_commands[-1].kind is ExchangeCommandKind.CONTROLLED_FLATTEN
+        await dispatch_for_ticket(
+            dispatch_engine,KindAwareAcceptingVenue(),ticket.identity.ticket_id,
+            now_ms=vacuum.fenced_at_ms+10,
+        )
+        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+            flattened = await reconcile_ticket(uow,ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                    average_entry_price=None,open_entry_order=False,
+                    observed_at_ms=vacuum.fenced_at_ms+11),
+            ))
+            matched = await reconcile_ticket(uow,ReconcileTicketRequest(
+                ticket_id=ticket.identity.ticket_id,
+                snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                    average_entry_price=None,open_entry_order=False,
+                    observed_at_ms=vacuum.fenced_at_ms+12),
+            ))
+            settled = await settle_ticket(uow,SettleTicketRequest(
+                ticket_id=ticket.identity.ticket_id,settled_at_ms=vacuum.fenced_at_ms+13))
+            reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
+                ticket_id=ticket.identity.ticket_id,
+                review_id="review:late-partial-flatten-mpg",
+                outcome="closed",metrics={"realized_pnl":"-1.0"},
+                decision_impact={"strategy_action":"review"},
+                recorded_at_ms=vacuum.fenced_at_ms+14))
+            terminal = await uow.aggregates.get(ticket.identity.ticket_id)
+            incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+            released = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+            active = await uow.entry_admission.has_active_ticket_in_domain(
+                ticket.identity.netting_domain.key())
+        assert flattened.status is ReconcileTicketStatus.POSITION_FLAT_RECORDED
+        assert matched.status is ReconcileTicketStatus.MATCHED
+        assert settled.status.value == "budget_settled"
+        assert reviewed.status.value == "review_recorded"
+        assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+        assert incident is None and released is not None and released.status == "released"
+        assert not active
+
+
+@pytest.mark.asyncio
+async def test_late_fill_recovery_keeps_incident_and_vacuum_on_wrong_venue_identity(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands_before = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        events_before = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands_before if command.kind is ExchangeCommandKind.ENTRY)
+    position = _position_snapshot(ticket,quantity=ticket.quantity,
+        average_entry_price=ticket.entry_reference_price,open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms+7)
+    wrong_truth = VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id="wrong-client-id",
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy",quantity=ticket.quantity,reduce_only=False,is_open=False),
+        position_quantity=ticket.quantity,matching_fill_quantity=ticket.quantity,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(),conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms+8,
+    )
+    result = await recover_vacuum_late_fill(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),
+        RecordingVacuumPositionSource(position),StaticTruthPort(wrong_truth),
+        RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+            worker_id="late-fill-test",runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=vacuum.fenced_at_ms+7,timeout_seconds=1),
+    )
+    assert result.status is RecoverVacuumLateFillStatus.UNVERIFIED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        after = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands_after = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        events_after = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket_kind(
+            ticket.identity.ticket_id,"vacuum_post_absence_contradiction")
+        position_after = await uow.positions.get(ticket.identity.netting_domain.key())
+    assert after is not None and after.status is AggregateStatus.ENTRY_VACUUM_CANCELLED
+    assert after.position_qty == 0
+    assert commands_after == commands_before and events_after == events_before
+    assert incident is not None and position_after is not None and position_after.quantity == 0
+    assert entry.venue_client_order_id != wrong_truth.order.venue_client_order_id
+
+
+@pytest.mark.asyncio
+async def test_late_fill_recovery_rechecks_runtime_identity_after_external_reads(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    position = _position_snapshot(ticket,quantity=ticket.quantity,
+        average_entry_price=ticket.entry_reference_price,open_entry_order=False,
+        observed_at_ms=vacuum.fenced_at_ms+7)
+    truth = VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id=str(entry.venue_client_order_id),
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy",quantity=ticket.quantity,reduce_only=False,is_open=False),
+        position_quantity=ticket.quantity,matching_fill_quantity=ticket.quantity,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(),conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms+8,
+    )
+
+    class DriftDuringRead(RecordingVacuumPositionSource):
+        async def read_position_snapshot(self, request):
+            result = await super().read_position_snapshot(request)
+            async with dispatch_engine.begin() as conn:
+                await conn.execute(sa.text(
+                    "UPDATE brc_runtime_capabilities_current SET certified_commit=:commit "
+                    "WHERE capability_key='exchange_commands'"
+                ), {"commit":"f"*40})
+            return result
+
+    recovered = await recover_vacuum_late_fill(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),
+        DriftDuringRead(position),StaticTruthPort(truth),
+        RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+            worker_id="late-fill-test",runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=vacuum.fenced_at_ms+7,timeout_seconds=1),
+    )
+    assert recovered.status is RecoverVacuumLateFillStatus.UNVERIFIED
+    assert recovered.reason_code == "runtime_fenced"
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        after = await uow.aggregates.get(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket_kind(
+            ticket.identity.ticket_id,"vacuum_post_absence_contradiction")
+    assert after is not None and after.status is AggregateStatus.ENTRY_VACUUM_CANCELLED
+    assert after.position_qty == 0 and incident is not None
+    assert not any(type(event).__name__ == "VacuumLateFillAttributed" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_exact_late_fill_recovery_appends_one_event(dispatch_engine) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    source = RecordingVacuumPositionSource(_position_snapshot(ticket,
+        quantity=ticket.quantity,average_entry_price=ticket.entry_reference_price,
+        open_entry_order=False,observed_at_ms=vacuum.fenced_at_ms+7))
+    truth = StaticTruthPort(VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id=str(entry.venue_client_order_id),
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy",quantity=ticket.quantity,reduce_only=False,is_open=False),
+        position_quantity=ticket.quantity,matching_fill_quantity=ticket.quantity,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(),conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms+8,
+    ))
+    request = RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+        worker_id="late-fill-concurrent",runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        now_ms=vacuum.fenced_at_ms+7,timeout_seconds=1)
+    results = await asyncio.gather(*(
+        recover_vacuum_late_fill(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),source,truth,request,
+        ) for _ in range(2)
+    ))
+    assert sum(result.status is RecoverVacuumLateFillStatus.ATTRIBUTED
+        for result in results) == 1
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        commands_after = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        frozen = await uow.tickets.get(ticket.identity.ticket_id)
+    assert sum(type(event).__name__ == "VacuumLateFillAttributed" for event in events) == 1
+    assert commands_after == commands
+    assert frozen is not None and frozen.identity == ticket.identity
+
+
+@pytest.mark.asyncio
+async def test_worker_late_fill_retry_is_bounded_and_then_attributes_exact_entry(
+    dispatch_engine,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    source = RecordingVacuumPositionSource(_position_snapshot(
+        ticket, quantity=ticket.quantity, average_entry_price=ticket.entry_reference_price,
+        open_entry_order=False, observed_at_ms=vacuum.fenced_at_ms+7,
+    ))
+    truth = StaticTruthPort(VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(
+            exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id="wrong-client-id",
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy", quantity=ticket.quantity, reduce_only=False,
+            order_namespace="regular", is_open=False,
+        ),
+        position_quantity=ticket.quantity, matching_fill_quantity=ticket.quantity,
+        matching_fill_average_price=ticket.entry_reference_price,
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(), conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms+8,
+    ))
+
+    async def tick(at_ms: int):
+        return await run_reconciliation_worker_once(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),truth,source,
+            _reconciliation_request(at_ms).model_copy(update={
+                "entry_vacuum_strategy_group_id":None,
+                "entry_vacuum_selection_spec_id":None,
+                "entry_vacuum_scan_all":True,
+            }),
+        )
+
+    unverified = await tick(vacuum.fenced_at_ms+7)
+    await tick(vacuum.fenced_at_ms+8)
+    assert unverified.status is ReconciliationWorkerStatus.VACUUM_DRAIN_WAITING
+    assert len(truth.requests) == 1
+
+    retry_at = vacuum.fenced_at_ms + 30_008
+    source.snapshot = source.snapshot.model_copy(update={"observed_at_ms":retry_at})
+    assert truth.truth.order is not None
+    truth.truth = truth.truth.model_copy(update={
+        "order":truth.truth.order.model_copy(update={
+            "venue_client_order_id":str(entry.venue_client_order_id),
+        }),
+        "observed_at_ms":retry_at+1,
+    })
+    attributed = await tick(retry_at)
+    assert attributed.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+    assert attributed.detail == "late_fill:exact_original_entry_fill"
+    assert len(truth.requests) == 2
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        updated = await uow.aggregates.get(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        retry_monitor = await uow.monitors.get(
+            f"vacuum-late-fill-retry:{ticket.identity.ticket_id}"
+        )
+    assert updated is not None and updated.position_qty == ticket.quantity
+    assert sum(type(event).__name__ == "VacuumLateFillAttributed" for event in events) == 1
+    assert retry_monitor is not None and retry_monitor.owner_status.value == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("via_worker", [False, True])
+async def test_exact_post_absence_no_fill_proof_closes_incident_without_new_command(
+    dispatch_engine, via_worker: bool,
+) -> None:
+    ticket = make_ticket()
+    await seed_policy(dispatch_engine)
+    await issue(dispatch_engine, ticket)
+    await dispatch_for_ticket(dispatch_engine, AcceptingVenue(dispatch_engine),
+        ticket.identity.ticket_id, now_ms=1_100)
+    vacuum = await open_entry_vacuum(dispatch_engine, ticket)
+    await _assert_zero_fill_cancel(
+        dispatch_engine, ticket, vacuum, late_after_order_absence="position",
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and aggregate.entry_exchange_order_id is not None
+    entry = next(command for command in commands if command.kind is ExchangeCommandKind.ENTRY)
+    flat = _position_snapshot(ticket,quantity=Decimal(0),average_entry_price=None,
+        open_entry_order=False,observed_at_ms=vacuum.fenced_at_ms+7)
+    truth = VenueTruthSnapshot(
+        lookup_status=VenueLookupStatus.VISIBLE,
+        order=VenueOrderTruth(
+            exchange_order_id=aggregate.entry_exchange_order_id,
+            venue_client_order_id=str(entry.venue_client_order_id),
+            exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
+            position_side=ticket.identity.netting_domain.position_side,
+            order_side="buy",quantity=ticket.quantity,reduce_only=False,
+            order_namespace="regular",is_open=False,
+        ),
+        position_quantity=Decimal(0),matching_fill_quantity=Decimal(0),
+        matching_fill_complete=True,
+        regular_open_client_order_ids=(),conditional_open_client_order_ids=(),
+        observed_at_ms=vacuum.fenced_at_ms+8,
+    )
+    if via_worker:
+        worked = await run_reconciliation_worker_once(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),StaticTruthPort(truth),
+            RecordingVacuumPositionSource(flat),
+            _reconciliation_request(vacuum.fenced_at_ms+7).model_copy(update={
+                "entry_vacuum_strategy_group_id":None,
+                "entry_vacuum_selection_spec_id":None,
+                "entry_vacuum_scan_all":True,
+            }),
+        )
+        assert worked.status is ReconciliationWorkerStatus.VACUUM_DRAIN_ADVANCED
+        assert worked.detail == "late_fill:exact_original_entry_no_fill"
+    else:
+        result = await recover_vacuum_late_fill(
+            lambda:PostgresKernelUnitOfWork(dispatch_engine),
+            RecordingVacuumPositionSource(flat),StaticTruthPort(truth),
+            RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+                worker_id="late-fill-test",runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                now_ms=vacuum.fenced_at_ms+7,timeout_seconds=1),
+        )
+        assert result.status is RecoverVacuumLateFillStatus.NO_FILL_CLOSED
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        closed = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands_after = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key())
+        open_incident = await uow.incidents.get_open_for_ticket_kind(
+            ticket.identity.ticket_id,"vacuum_post_absence_contradiction")
+        monitor = await uow.monitors.get(
+            f"vacuum-post-absence:{ticket.identity.ticket_id}"
+        )
+    assert closed is not None and closed.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert reservation is not None and reservation.status == "released" and not active
+    assert commands_after == commands
+    assert sum(type(event).__name__ == "VacuumPostAbsenceNoFillVerified" for event in events) == 1
+    assert open_incident is None
+    assert monitor is not None and monitor.owner_status.value == "completed"
+    repeated = await recover_vacuum_late_fill(
+        lambda:PostgresKernelUnitOfWork(dispatch_engine),
+        RecordingVacuumPositionSource(flat),StaticTruthPort(truth),
+        RecoverVacuumLateFillRequest(ticket_id=ticket.identity.ticket_id,
+            worker_id="late-fill-test",runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=vacuum.fenced_at_ms+9,timeout_seconds=1),
+    )
+    assert repeated.status is RecoverVacuumLateFillStatus.NO_CHANGE
 
 
 @pytest.mark.asyncio

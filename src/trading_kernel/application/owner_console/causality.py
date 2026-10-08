@@ -90,6 +90,8 @@ _ENTRY_EVENTS = {
     "EntryVacuumCancelRejected",
     "EntryVacuumCancelOutcomeUnknown",
     "EntryVacuumOrderAbsenceConfirmed",
+    "VacuumLateFillAttributed",
+    "VacuumPostAbsenceNoFillVerified",
     "EntryVacuumAbsenceConfirmed",
     "VacuumPartialRetained",
     "VacuumPartialFlattenRequired",

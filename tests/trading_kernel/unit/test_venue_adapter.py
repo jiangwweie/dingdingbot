@@ -2672,6 +2672,61 @@ async def test_ccxt_adapter_reads_complete_visible_command_truth() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("page_at_limit", [False, True])
+async def test_command_truth_freezes_order_fill_vwap_and_page_completeness(
+    page_at_limit: bool,
+) -> None:
+    class FillTruthExchange(TruthExchange):
+        async def fetch_order(self, order_id, symbol, params):
+            row = await super().fetch_order(order_id, symbol, params)
+            row["status"] = "closed"
+            return row
+
+        async def fetch_my_trades(self, symbol, since, limit, params):
+            assert limit == 100 and params == {"orderId":"venue-order-1"}
+            if page_at_limit:
+                return [{"id":str(index),"order":"venue-order-1","amount":"0.00001","price":"56000"}
+                    for index in range(100)]
+            return [
+                {"id":"1","order":"venue-order-1","amount":"0.0004","price":"50000"},
+                {"id":"2","order":"venue-order-1","amount":"0.0006","price":"60000"},
+            ]
+
+    truth = await _cancel_adapter(FillTruthExchange(visible=True)).lookup_command_truth(
+        _truth_request()
+    )
+
+    assert truth.matching_fill_quantity == Decimal("0.001")
+    assert truth.matching_fill_average_price == Decimal(56000)
+    assert truth.matching_fill_complete is not page_at_limit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["missing_trade_id", "wrong_order", "missing_price", "duplicate"])
+async def test_command_truth_cannot_certify_missing_or_duplicate_fill_rows(case: str) -> None:
+    class FillTruthExchange(TruthExchange):
+        async def fetch_my_trades(self, symbol, since, limit, params):
+            row = {"id":"1","order":"venue-order-1","amount":"0.001","price":"56000"}
+            if case == "missing_trade_id":
+                row.pop("id")
+            elif case == "wrong_order":
+                row["order"] = "other-order"
+            elif case == "missing_price":
+                row.pop("price")
+            return [row, dict(row)] if case == "duplicate" else [row]
+
+    truth = await _cancel_adapter(FillTruthExchange(visible=True)).lookup_command_truth(
+        _truth_request()
+    )
+
+    if case == "duplicate":
+        assert truth.matching_fill_quantity == Decimal("0.001")
+        assert truth.matching_fill_complete
+    else:
+        assert not truth.matching_fill_complete
+
+
+@pytest.mark.asyncio
 async def test_ccxt_adapter_proves_absence_only_after_all_truth_surfaces() -> None:
     exchange = TruthExchange(visible=False)
     adapter = _cancel_adapter(exchange)

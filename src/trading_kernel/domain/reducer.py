@@ -7,6 +7,11 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandKind,
+    build_command_id,
+    build_venue_client_order_id,
+)
 from src.trading_kernel.domain.effects import (
     CancelEntryRemainder,
     CancelProtectionOrders,
@@ -93,10 +98,16 @@ from src.trading_kernel.domain.events import (
     TicketIssued,
     TradeEvent,
     UnownedOrderDetected,
+    VacuumLateFillAttributed,
     VacuumPartialFlattenRequired,
     VacuumPartialRetained,
+    VacuumPostAbsenceNoFillVerified,
 )
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
+from src.trading_kernel.domain.vacuum_late_fill import (
+    vacuum_late_fill_proof_digest,
+    vacuum_no_fill_proof_digest,
+)
 
 
 class InvalidLifecycleTransition(ValueError):
@@ -645,6 +656,88 @@ def reduce_event(
                 "entry_vacuum_id": event.entry_vacuum_id,
             },
             effects=absence_effects,
+        )
+
+    if isinstance(event, VacuumLateFillAttributed):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
+        expected_command_id = build_command_id(
+            ticket_id=current.identity.ticket_id,
+            kind=ExchangeCommandKind.ENTRY,
+            generation=1,
+        )
+        if (
+            event.entry_vacuum_id != current.entry_vacuum_id
+            or event.exchange_order_id != current.entry_exchange_order_id
+            or event.entry_command_id != expected_command_id
+            or event.venue_client_order_id
+            != build_venue_client_order_id(expected_command_id)
+            or current.position_qty != 0
+            or event.filled_qty > current.ticket.quantity
+            or event.attribution_digest != vacuum_late_fill_proof_digest(
+                ticket_id=current.identity.ticket_id,
+                entry_command_id=event.entry_command_id,
+                exchange_order_id=event.exchange_order_id,
+                venue_client_order_id=event.venue_client_order_id,
+                netting_domain_key=current.identity.netting_domain.key(),
+                filled_qty=event.filled_qty,
+                average_fill_price=event.average_fill_price,
+                position_observed_at_ms=event.position_observed_at_ms,
+                venue_observed_at_ms=event.venue_observed_at_ms,
+            )
+        ):
+            raise InvalidLifecycleTransition(
+                "late fill attribution differs from cancelled ENTRY"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_VACUUM_CANCELLED,
+            updates={
+                "position_qty": event.filled_qty,
+                "average_fill_price": event.average_fill_price,
+            },
+        )
+
+    if isinstance(event, VacuumPostAbsenceNoFillVerified):
+        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
+        expected_command_id = build_command_id(
+            ticket_id=current.identity.ticket_id,
+            kind=ExchangeCommandKind.ENTRY,
+            generation=1,
+        )
+        if (
+            event.entry_vacuum_id != current.entry_vacuum_id
+            or event.exchange_order_id != current.entry_exchange_order_id
+            or event.entry_command_id != expected_command_id
+            or event.venue_client_order_id != build_venue_client_order_id(expected_command_id)
+            or current.position_qty != 0
+            or event.proof_digest != vacuum_no_fill_proof_digest(
+                ticket_id=current.identity.ticket_id,
+                entry_command_id=event.entry_command_id,
+                exchange_order_id=event.exchange_order_id,
+                venue_client_order_id=event.venue_client_order_id,
+                netting_domain_key=current.identity.netting_domain.key(),
+                position_observed_at_ms=event.position_observed_at_ms,
+                venue_observed_at_ms=event.venue_observed_at_ms,
+            )
+        ):
+            raise InvalidLifecycleTransition(
+                "post-absence no-fill proof differs from cancelled ENTRY"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.ENTRY_RECONCILED_ABSENT,
+            updates={"entry_lane_held": False},
+            effects=(
+                ResolveIncident(
+                    ticket_id=current.identity.ticket_id,
+                    incident_kind="vacuum_post_absence_contradiction",
+                ),
+                ReleaseBudget(ticket_id=current.identity.ticket_id),
+                ReleaseEntryLane(ticket_id=current.identity.ticket_id),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
+            ),
         )
 
     if isinstance(event, EntryVacuumAbsenceConfirmed):

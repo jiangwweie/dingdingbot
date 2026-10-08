@@ -6,6 +6,11 @@ from typing import Literal
 import pytest
 
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandKind,
+    build_command_id,
+    build_venue_client_order_id,
+)
 from src.trading_kernel.domain.cross_margin_stress import (
     AccountRiskPosition,
     AccountRiskSnapshot,
@@ -35,6 +40,7 @@ from src.trading_kernel.domain.effects import (
     ResolveIncident,
     ResolveTicketIncidentsAtClosure,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
     BudgetSettled,
     CancelOrderAbsenceConfirmed,
@@ -86,14 +92,17 @@ from src.trading_kernel.domain.events import (
     TakeProfitOutcomeUnknown,
     TicketIssued,
     UnownedOrderDetected,
+    VacuumLateFillAttributed,
     VacuumPartialFlattenRequired,
     VacuumPartialRetained,
+    VacuumPostAbsenceNoFillVerified,
 )
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
     assess_post_fill_risk,
 )
 from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
+from src.trading_kernel.domain.vacuum_late_fill import vacuum_no_fill_proof_digest
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
@@ -792,6 +801,115 @@ def test_vacuum_zero_fill_closes_only_after_cancel_and_final_absence() -> None:
         ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
         ProjectTerminalOwnerState(ticket_id=ticket.identity.ticket_id),
     )
+
+
+def test_exact_late_fill_rejoins_original_vacuum_ticket_without_new_entry() -> None:
+    ticket = _ticket()
+    issued = reduce_event(None, TicketIssued(
+        event_id="event-1", ticket=ticket, sequence=1, occurred_at_ms=1_001,
+    )).aggregate
+    cancelled = issued.model_copy(update={
+        "status": AggregateStatus.ENTRY_VACUUM_CANCELLED,
+        "version": 5,
+        "last_event_sequence": 5,
+        "entry_exchange_order_id": "entry-1",
+        "entry_vacuum_id": "vacuum:SOR-001:1704067200000",
+        "position_qty": Decimal(0),
+        "average_fill_price": None,
+    })
+    command_id = build_command_id(
+        ticket_id=ticket.identity.ticket_id,
+        kind=ExchangeCommandKind.ENTRY,
+        generation=1,
+    )
+    client_id = build_venue_client_order_id(command_id)
+    late = VacuumLateFillAttributed(
+        event_id="event-6", ticket_id=ticket.identity.ticket_id,
+        sequence=6, occurred_at_ms=2_002,
+        entry_vacuum_id="vacuum:SOR-001:1704067200000",
+        entry_command_id=command_id,
+        exchange_order_id="entry-1",
+        venue_client_order_id=client_id,
+        filled_qty=ticket.quantity,
+        average_fill_price=ticket.entry_reference_price,
+        position_observed_at_ms=2_001,
+        venue_observed_at_ms=2_002,
+        attribution_digest=canonical_digest({
+            "ticket_id": ticket.identity.ticket_id,
+            "entry_command_id": command_id,
+            "exchange_order_id": "entry-1",
+            "venue_client_order_id": client_id,
+            "netting_domain_key": ticket.identity.netting_domain.key(),
+            "filled_qty": ticket.quantity,
+            "average_fill_price": ticket.entry_reference_price,
+            "position_observed_at_ms": 2_001,
+            "venue_observed_at_ms": 2_002,
+        }),
+    )
+
+    reduced = reduce_event(cancelled, late)
+
+    assert reduced.aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED
+    assert reduced.aggregate.position_qty == ticket.quantity
+    assert reduced.aggregate.average_fill_price == ticket.entry_reference_price
+    assert reduced.effects == ()
+    with pytest.raises(InvalidLifecycleTransition):
+        reduce_event(cancelled, late.model_copy(update={"entry_vacuum_id":"other"}))
+    with pytest.raises(InvalidLifecycleTransition):
+        reduce_event(cancelled, late.model_copy(update={"attribution_digest":"sha256:" + "b" * 64}))
+
+
+def test_exact_post_absence_no_fill_closes_original_ticket_and_resolves_incident() -> None:
+    ticket = _ticket()
+    issued = reduce_event(None, TicketIssued(
+        event_id="event-1", ticket=ticket, sequence=1, occurred_at_ms=1_001,
+    )).aggregate
+    cancelled = issued.model_copy(update={
+        "status": AggregateStatus.ENTRY_VACUUM_CANCELLED,
+        "version": 5,
+        "last_event_sequence": 5,
+        "entry_exchange_order_id": "entry-1",
+        "entry_vacuum_id": "vacuum:SOR-001:1704067200000",
+        "position_qty": Decimal(0),
+        "average_fill_price": None,
+    })
+    command_id = build_command_id(
+        ticket_id=ticket.identity.ticket_id,
+        kind=ExchangeCommandKind.ENTRY,
+        generation=1,
+    )
+    client_id = build_venue_client_order_id(command_id)
+    event = VacuumPostAbsenceNoFillVerified(
+        event_id="event-6", ticket_id=ticket.identity.ticket_id,
+        sequence=6, occurred_at_ms=2_002,
+        entry_vacuum_id="vacuum:SOR-001:1704067200000",
+        entry_command_id=command_id, exchange_order_id="entry-1",
+        venue_client_order_id=client_id,
+        position_observed_at_ms=2_001, venue_observed_at_ms=2_002,
+        proof_digest=vacuum_no_fill_proof_digest(
+            ticket_id=ticket.identity.ticket_id,
+            entry_command_id=command_id,
+            exchange_order_id="entry-1",
+            venue_client_order_id=client_id,
+            netting_domain_key=ticket.identity.netting_domain.key(),
+            position_observed_at_ms=2_001,
+            venue_observed_at_ms=2_002,
+        ),
+    )
+
+    reduced = reduce_event(cancelled, event)
+
+    assert reduced.aggregate.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert reduced.aggregate.entry_lane_held is False
+    assert reduced.effects == (
+        ResolveIncident(ticket_id=ticket.identity.ticket_id,
+            incident_kind="vacuum_post_absence_contradiction"),
+        ReleaseBudget(ticket_id=ticket.identity.ticket_id),
+        ReleaseEntryLane(ticket_id=ticket.identity.ticket_id),
+        ProjectTerminalOwnerState(ticket_id=ticket.identity.ticket_id),
+    )
+    with pytest.raises(InvalidLifecycleTransition):
+        reduce_event(cancelled, event.model_copy(update={"proof_digest":"sha256:" + "b"*64}))
 
 
 def test_initial_stop_rejection_opens_hard_incident_and_requests_flatten() -> None:

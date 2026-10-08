@@ -3370,6 +3370,17 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _entry_vacuum_from_row(row)
 
+    async def get_entry_vacuum_by_id(
+        self, entry_vacuum_id: str, *, for_update: bool = False,
+    ) -> StrategyEntryVacuum | None:
+        statement = sa.select(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id == entry_vacuum_id,
+        )
+        if for_update:
+            statement = statement.with_for_update(of=strategy_entry_vacuums_current)
+        row = (await self._connection.execute(statement)).mappings().one_or_none()
+        return None if row is None else _entry_vacuum_from_row(row)
+
     async def list_draining_entry_vacuums(
         self, *, limit: int,
     ) -> tuple[StrategyEntryVacuum, ...]:

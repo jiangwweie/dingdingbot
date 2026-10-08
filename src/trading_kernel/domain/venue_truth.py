@@ -73,6 +73,8 @@ class VenueTruthSnapshot(BaseModel):
     order: VenueOrderTruth | None = None
     position_quantity: Decimal
     matching_fill_quantity: Decimal
+    matching_fill_average_price: Decimal | None = None
+    matching_fill_complete: bool = False
     regular_open_client_order_ids: tuple[str, ...]
     conditional_open_client_order_ids: tuple[str, ...]
     observed_at_ms: int
@@ -92,8 +94,17 @@ class VenueTruthSnapshot(BaseModel):
             raise ValueError("venue truth observation time must be positive")
         return value
 
+    @field_validator("matching_fill_average_price")
+    @classmethod
+    def _require_optional_positive_fill_price(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and (not value.is_finite() or value <= 0):
+            raise ValueError("matching fill average price must be positive and finite")
+        return value
+
     @model_validator(mode="after")
     def _validate_lookup_shape(self) -> VenueTruthSnapshot:
+        if self.matching_fill_quantity == 0 and self.matching_fill_average_price is not None:
+            raise ValueError("zero matching fills cannot carry an average fill price")
         if self.lookup_status is VenueLookupStatus.VISIBLE:
             if self.order is None or self.reason is not None:
                 raise ValueError("visible lookup requires order truth only")
