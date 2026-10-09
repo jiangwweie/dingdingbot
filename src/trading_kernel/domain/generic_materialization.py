@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -48,6 +49,88 @@ class MaterializationEventBaseline(AuthorityEventBinding):
         ):
             raise ValueError("previous comparison identity is invalid")
         return self
+
+
+class GenericStaticRollbackEvent(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    event_spec_id: str
+    position_side: Literal["long", "short"]
+    universe_version_id: str
+    universe_semantic_digest: str
+    member_set_digest: str
+    comparison_universe_id: str | None
+
+    @model_validator(mode="after")
+    def _exact_refs(self) -> GenericStaticRollbackEvent:
+        if (
+            any(not value.strip() or value != value.strip() or len(value)>160
+                for value in (self.event_spec_id,self.universe_version_id))
+            or any(re.fullmatch(r"sha256:[0-9a-f]{64}",digest) is None
+                for digest in (self.universe_semantic_digest,self.member_set_digest))
+            or self.comparison_universe_id is not None
+            and re.fullmatch(r"comparison:[0-9a-f]{64}",self.comparison_universe_id) is None
+        ):
+            raise ValueError("Static rollback Event source references are invalid")
+        return self
+
+
+class GenericStaticRollbackBaseline(BaseModel):
+    """Frozen source references; immutable Universe rows retain the member list."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rollback_baseline_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    selection_spec_id: str
+    selection_algorithm_digest: str
+    source_event: GenericStaticRollbackEvent
+    captured_at_ms: int
+
+    @property
+    def semantic_digest(self) -> str:
+        return canonical_digest(self.model_dump(mode="json",exclude={
+            "rollback_baseline_id","captured_at_ms",
+        }))
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> GenericStaticRollbackBaseline:
+        spec = generic_selection_spec(self.strategy_group_id)
+        source = self.source_event
+        if (
+            self.strategy_version_id != spec.strategy_version_id
+            or self.selection_spec_id != spec.selection_spec_id
+            or self.selection_algorithm_digest != spec.algorithm_semantic_digest
+            or source.event_spec_id != spec.event_spec_id
+            or source.position_side != spec.position_side
+            or not source.universe_version_id.strip()
+            or not source.universe_semantic_digest.startswith("sha256:")
+            or not source.member_set_digest.startswith("sha256:")
+            or (self.strategy_group_id in {"MPG-001","MI-001"})
+            != (source.comparison_universe_id is not None)
+            or self.captured_at_ms <= 0
+            or self.rollback_baseline_id != "rollback-baseline:"+self.semantic_digest[7:]
+        ):
+            raise ValueError("Static rollback baseline source identity differs")
+        return self
+
+    @classmethod
+    def build(
+        cls, *, strategy_group_id: str, source_event: GenericStaticRollbackEvent,
+        captured_at_ms: int,
+    ) -> GenericStaticRollbackBaseline:
+        spec = generic_selection_spec(strategy_group_id)
+        payload = {
+            "strategy_group_id":spec.strategy_group_id,
+            "strategy_version_id":spec.strategy_version_id,
+            "selection_spec_id":spec.selection_spec_id,
+            "selection_algorithm_digest":spec.algorithm_semantic_digest,
+            "source_event":source_event.model_dump(mode="json"),
+        }
+        return cls.model_validate({**payload,
+            "rollback_baseline_id":"rollback-baseline:"+canonical_digest(payload)[7:],
+            "captured_at_ms":captured_at_ms})
 
 
 class GenericMaterializationGeneration(BaseModel):

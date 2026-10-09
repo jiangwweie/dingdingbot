@@ -1846,6 +1846,9 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_rollback_baseline_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE bid text; b brc_strategy_selection_rollback_baselines%ROWTYPE; expected integer; actual integer; matching integer;
+          spec brc_instrument_selection_specs%ROWTYPE; baseline_event brc_selection_rollback_baseline_events%ROWTYPE;
+          source_universe brc_strategy_universe_versions%ROWTYPE; source_current brc_strategy_universe_current%ROWTYPE;
+          member_digest text; source_json text; expected_digest text;
         BEGIN
           bid := NEW.rollback_baseline_id;
           SELECT * INTO b FROM brc_strategy_selection_rollback_baselines WHERE rollback_baseline_id=bid;
@@ -1859,6 +1862,58 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
             WHERE r.rollback_baseline_id=bid AND (u.event_spec_id<>r.event_spec_id OR u.strategy_group_id<>b.strategy_group_id OR e.strategy_version_id<>b.strategy_version_id
               OR ((b.strategy_group_id IN ('MPG-001','MI-001'))<>(r.comparison_universe_id IS NOT NULL)))) THEN
             RAISE EXCEPTION 'Static baseline Universe/comparison mismatch';
+          END IF;
+          IF b.strategy_group_id<>'SOR-001' THEN
+            IF (SELECT count(*) FROM brc_instrument_selection_specs
+              WHERE strategy_group_id=b.strategy_group_id AND strategy_version_id=b.strategy_version_id
+                AND selection_kind='generic_dynamic_v1')<>1 THEN
+              RAISE EXCEPTION 'Generic Static baseline requires exact installed Spec';
+            END IF;
+            SELECT * INTO spec FROM brc_instrument_selection_specs
+              WHERE strategy_group_id=b.strategy_group_id AND strategy_version_id=b.strategy_version_id
+                AND selection_kind='generic_dynamic_v1';
+            IF NOT FOUND OR spec.installed_at_ms>b.captured_at_ms THEN
+              RAISE EXCEPTION 'Generic Static baseline requires installed Spec'; END IF;
+            SELECT * INTO baseline_event FROM brc_selection_rollback_baseline_events WHERE rollback_baseline_id=bid;
+            SELECT * INTO source_universe FROM brc_strategy_universe_versions WHERE universe_version_id=baseline_event.universe_version_id;
+            SELECT * INTO source_current FROM brc_strategy_universe_current WHERE event_spec_id=baseline_event.event_spec_id;
+            IF NOT FOUND OR source_current.universe_version_id<>source_universe.universe_version_id OR source_current.lifecycle_state<>'active'
+               OR source_universe.lifecycle_state<>'active' OR source_universe.materialization_generation_id IS NOT NULL
+               OR source_current.semantic_digest<>source_universe.semantic_digest OR source_current.activated_at_ms>b.captured_at_ms
+               OR source_universe.installed_at_ms>b.captured_at_ms
+               OR (SELECT count(*) FROM brc_strategy_universe_members WHERE universe_version_id=source_universe.universe_version_id) NOT BETWEEN 1 AND 10 THEN
+              RAISE EXCEPTION 'Generic Static baseline requires exact current Static source';
+            END IF;
+            IF b.strategy_group_id IN ('MPG-001','MI-001') AND NOT EXISTS (
+              SELECT 1 FROM brc_comparison_binding_current cb
+              WHERE cb.event_spec_id=baseline_event.event_spec_id AND cb.comparison_universe_id=baseline_event.comparison_universe_id
+                AND cb.source_static_universe_version_id=source_universe.universe_version_id
+            ) THEN RAISE EXCEPTION 'Generic Static baseline comparison source mismatch'; END IF;
+            member_digest:=brc_selected_universe_member_digest_v1(source_universe.universe_version_id);
+            source_json:='{"comparison_universe_id":' || coalesce(to_json(baseline_event.comparison_universe_id)::text,'null') ||
+              ',"event_spec_id":' || to_json(baseline_event.event_spec_id)::text || ',"member_set_digest":' || to_json(member_digest)::text ||
+              ',"position_side":' || to_json(baseline_event.position_side)::text || ',"universe_semantic_digest":' || to_json(source_universe.semantic_digest)::text ||
+              ',"universe_version_id":' || to_json(source_universe.universe_version_id)::text || '}';
+            expected_digest:='sha256:' || encode(sha256(convert_to(
+              '{"selection_algorithm_digest":' || to_json(spec.algorithm_semantic_digest)::text ||
+              ',"selection_spec_id":' || to_json(spec.selection_spec_id)::text || ',"source_event":' || source_json ||
+              ',"strategy_group_id":' || to_json(b.strategy_group_id)::text ||
+              ',"strategy_version_id":' || to_json(b.strategy_version_id)::text || '}','UTF8')),'hex');
+            IF b.semantic_digest<>expected_digest OR b.rollback_baseline_id<>'rollback-baseline:' || substring(expected_digest from 8) THEN
+              RAISE EXCEPTION 'Generic Static baseline semantic identity mismatch';
+            END IF;
+            IF NOT EXISTS (
+              SELECT 1 FROM brc_strategy_selection_control_current sc
+                JOIN brc_owner_authorizations oa ON oa.authorization_id=sc.pending_authorization_id
+              WHERE sc.strategy_group_id=b.strategy_group_id AND sc.selection_spec_id=spec.selection_spec_id
+                AND sc.selection_mode='static_baseline' AND sc.pending_selection_mode='dynamic_selection'
+                AND sc.rollback_baseline_id=b.rollback_baseline_id AND sc.updated_at_ms=b.captured_at_ms
+                AND oa.purpose='selection_mode_change' AND oa.authentication_strength='totp_step_up'
+                AND oa.authorized_at_ms=b.captured_at_ms
+                AND oa.target_scope->>'strategy_group_id'=b.strategy_group_id
+                AND oa.target_scope->>'selection_spec_id'=spec.selection_spec_id
+                AND oa.target_scope->>'selection_epoch_id'=sc.selection_epoch_id
+            ) THEN RAISE EXCEPTION 'Generic Static baseline requires atomic Owner capture'; END IF;
           END IF;
           RETURN NULL;
         END; $$
@@ -1940,15 +1995,25 @@ def _selection_job_epochs() -> None:
         ["selection_snapshot_id", "selection_spec_id", "selection_epoch_id", "period_anchor_ms"])
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_selection_control_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
-        DECLARE kind text; spec_group text; cadence integer; needs_epoch boolean;
+        DECLARE kind text; spec_group text; spec_version text; cadence integer; needs_epoch boolean;
           owner_proof brc_owner_authorizations%ROWTYPE;
         BEGIN
-          SELECT selection_kind,strategy_group_id INTO kind,spec_group FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
+          SELECT selection_kind,strategy_group_id,strategy_version_id INTO kind,spec_group,spec_version FROM brc_instrument_selection_specs WHERE selection_spec_id=NEW.selection_spec_id;
           IF spec_group IS DISTINCT FROM NEW.strategy_group_id THEN RAISE EXCEPTION 'Selection Control parent Spec mismatch'; END IF;
           IF kind='sor_dynamic_v0' THEN
             IF NEW.selection_epoch_id IS NOT NULL THEN RAISE EXCEPTION 'SOR Control cannot carry Generic epoch'; END IF;
             RETURN NEW;
           END IF;
+          IF TG_OP='UPDATE' AND OLD.rollback_baseline_id IS NOT NULL
+             AND NEW.rollback_baseline_id IS DISTINCT FROM OLD.rollback_baseline_id THEN
+            RAISE EXCEPTION 'Generic Static rollback baseline pointer is immutable';
+          END IF;
+          IF NEW.rollback_baseline_id IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM brc_strategy_selection_rollback_baselines b
+            WHERE b.rollback_baseline_id=NEW.rollback_baseline_id
+              AND b.strategy_group_id=NEW.strategy_group_id AND b.strategy_version_id=spec_version
+              AND b.captured_at_ms<=NEW.updated_at_ms
+          ) THEN RAISE EXCEPTION 'Generic Static rollback baseline parent mismatch'; END IF;
           needs_epoch := NEW.selection_mode='dynamic_selection' OR coalesce(NEW.pending_selection_mode='dynamic_selection',false);
           IF needs_epoch THEN
             IF NEW.selection_epoch_id IS NULL OR NEW.selection_epoch_id='sor-v0' OR length(trim(NEW.selection_epoch_id))=0 THEN

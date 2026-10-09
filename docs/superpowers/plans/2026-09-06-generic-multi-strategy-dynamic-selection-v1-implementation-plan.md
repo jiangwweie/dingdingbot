@@ -65,6 +65,21 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 
 **GS-04～GS-09仍在实施中，未完成、未通过release certification。** 先前对GS-00～03的完成摘要仅对应首版component测试，不足以证明全部Task Done。本轮在继续GS-04时补齐并修复数值来源认证、Decimal排序精度、重复miss/absolute有效期、current-close时点、comparison revision回退与重试幂等问题；不能以旧摘要跳过这些前置。
 
+#### 2026-10-09逐卡验收审计（替代下方早期表格的当前缺口解释）
+
+以下审计基于tracked source与正式入口tests，不把测试名或历史PASS摘要直接提升为Done。GS-04～09的本地卡级验收与GS-10～13的hosting/API/soak/最终R4交付分开，后者仍在完整计划内。
+
+| 卡 | 当前可定位的实现／证据 | 尚需闭合的明确要求 |
+| --- | --- | --- |
+| GS-04 | `0008` source logical preservation、Static MPG/MI exact0007 producer差分、terminal/FALLBACK/EMPTY/pause保全、Owner role ACL、Spec失败拒绝、Event/epoch/deferred攻击已有真实PG测试；首次Generic授权实际Static rollback来源捕获和独立PG摘要验算已补 | 对全部显式约束与权限作卡级核对；既有低层epoch夹具不能代替Owner/完整回退入口验收 |
+| GS-05 | 四策略Runner→immutable24-member Snapshot、缺源/未来/qualification、三次temporary retry、EXPIRED/SUPERSEDED、lease reclaim、response-loss幂等均有正式PG入口 | 卡级完整验收矩阵及SOR子集重验；五策略resident due调度属于GS-10，不宣称已完成 |
+| GS-06 | fixed24 production Observation、独立comparison cache身份、A→B→A/revision、未观察成员重入、首TRIGGERED抑制→NOT_TRIGGERED→后TRIGGERED已存在 | 实际Static rollback下的新Comparison revision/rebase仍需随GS-08真实切换验证 |
+| GS-07 | single LONG/SHORT与SOR pair目标、trusted16/10/7 limits、global slot、staged无交易权限、retry不刷新deadline及事故路径真实Coordinator tests已有 | 卡级slot/lease/abandon/恢复及SOR子集全矩阵核对，不能仅用单次成功路径声明Done |
+| GS-08 | ACTIVE_NEW/NO_CHANGE/VALID_EMPTY、firstStatic失败恢复、跨period future-close recovery、continuity、Owner pause优先、空集/failed目标接管已有正式PG路径 | 冻结baseline→新Static Materialization→原子tradable/comparison/mode切换尚无正式入口；非空最新Snapshot对DESIRED/STAGED目标接管待证明；consume与grant真实并发顺序需逐项核对 |
+| GS-09 | 四策略自然Selection→Signal→Claim/Ticket→durableENTRY→terminal、已有持仓遇EMPTY生命周期继续、Unknown/partial、exact late-fill归因/保护/受控退出已有实测 | MPG/MI有自然入场fault矩阵；CPM LONG/BRF2 SHORT应补同等Claim/issuance/dispatch/stale攻击并核对四边界；最小immutable证据链验收完成后才标卡Done |
+
+本审计不重开Feature/经济研究，不执行生产操作。已终态Ticket后出现不可归因外部Exposure的既有账户Incident/Owner containment属于明确fail-closed边界，不通过复活terminal Ticket或新增平行订单链伪造自动恢复。
+
 | 范围 | 当前已验证结果 | 仍需交付 |
 | --- | --- | --- |
 | 数值证据 | 96份原始1h ZIP哈希逐一验证；从冻结commit重建research函数并核对artifact完整排序；CPM/BRF2各463、MPG/MI各1852 cutoff的决策集合零差异；SOR961×24 Core verified | exact最终candidate再次认证，认证证据与受审安装集合绑定 |
@@ -280,6 +295,8 @@ candidate的installed Spec集合、Spec digests及证据绑定在release freeze�
 **Done**：`GS-STALE-01`、INV-03纯域通过；对每个period有明确cutoff/effective/expiry/source identity/系统blocker，无无界续期或hourly永久零close。
 
 ### GS-04 — Forward Schema / PostgreSQL constraints
+
+2026-10-09首次Generic Static rollback来源冻结：原`stage_generic_dynamic_selection_mode`只提交pending epoch而遗漏rollback来源的四策略Docker PG RED已复现。现Owner application在同一事务从实际current Active Static Universe、完整1..10成员、当前原Static Comparison、Registry版本及已安装SelectionSpec构造typed不可变Baseline；parent和单Event row只引用原Universe/Comparison，不复制成员。Control CAS冻结baseline FK，原idempotency重放不再次捕获；首次授权失败/来源缺失/Comparison缺源/CAS失败完整回滚。0008 deferred trigger独立重算完整semantic digest和ID，校验当时current/source lifecycle、Spec/Universe时间及同事务Owner/TOTP authorization/pending Control链；直接SQL伪造digest、跨策略Control借用、清除已冻结pointer、更新Event和孤立baseline提交均拒绝。真实Dynamic激活后原Static Universe已retired，readonly exact-load仍重建相同Baseline。初轮Generic/SOR/migration广范围324 passed，随后最终source-time/Owner-atomicity/concurrency改动按17项来源专项、13项首次activation/Static失败恢复、migration全模块21 passed复验；Unit/Architecture1315 passed，Ruff、Mypy161 files/diff通过。初轮广范围结果不是最终exact R4。Owner ACL测试另修复共享Docker集群NOLOGIN角色清理竞态：测试仅清理自己的可处置数据库，避免删除其他template/并发数据库仍持有权限的共享角色。**该来源冻结不是Static rollback执行成功**；新Static目标的materialization、原子comparison/mode切换及rebase仍属于GS-08未完成要求。
 
 0007→0008 source-preservation增量（基于`6a28b680`）：`verify_schema.py`新增exact0007物理表/列inventory与逐record logical manifest；0008侧只对period列重命名、Generation previous pair、Rollback baseline pair及Authority pair做可核验反投影，新Generic表/字段不伪装源数据。`--compatible-source-revision 0007_exit_profile_authority_v1`在只读事务内组合source shape、flat/quiescence gate、runtime/Registry/Policy/Control identity及所有Static MPG/MI Comparison provenance；缺证据返回FAIL，不触发migration。`--preserve-source-revision`可用原digest复核0008目标，篡改一条旧SOR Job即FAIL。Docker PG验证空/旧SOR Job+Attempt、Static rollback baseline、MPG/MI ARMED/TRIGGERED四种来源的迁移前后逐record digest相同；0007 inventory同真实Schema一致，缺Comparison来源在目标DDL前STOP。相关迁移/Source verifier组合20 passed，Unit/Architecture1257 passed，verify_schema Mypy、相关Ruff/diff通过；不是完整R4。该增量未证明完整GS-MIG-COMP-01的source/target首根与后续Signal差分、所有History与非交易Authority的production-shaped样本、role grants及Owner epoch控制转换，GS-04仍IN_PROGRESS，生产未修改。
 

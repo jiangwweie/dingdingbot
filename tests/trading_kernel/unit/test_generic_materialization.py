@@ -4,12 +4,45 @@ from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBind
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
+    GenericStaticRollbackBaseline,
+    GenericStaticRollbackEvent,
     MaterializationEventBaseline,
     generic_input_is_unchanged,
 )
 from src.trading_kernel.domain.generic_selection_core import compute_generic_selection
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
 from tests.trading_kernel.support.generic_selection import CUTOFF, HOUR, inputs
+
+
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+def test_static_rollback_identity_freezes_source_refs_and_selection_spec(group: str) -> None:
+    spec = inputs(group).spec
+    event = GenericStaticRollbackEvent(
+        event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+        universe_version_id="universe:static-source",universe_semantic_digest="sha256:"+"a"*64,
+        member_set_digest=selected_member_set_digest(spec.candidate_ids[:1]),
+        comparison_universe_id="comparison:"+"b"*64 if group in {"MPG-001","MI-001"} else None,
+    )
+    baseline = GenericStaticRollbackBaseline.build(
+        strategy_group_id=group,source_event=event,captured_at_ms=CUTOFF-1,
+    )
+    recaptured = GenericStaticRollbackBaseline.build(
+        strategy_group_id=group,source_event=event,captured_at_ms=CUTOFF,
+    )
+    assert baseline.rollback_baseline_id == recaptured.rollback_baseline_id
+    assert baseline.semantic_digest == recaptured.semantic_digest
+    assert baseline.selection_algorithm_digest == spec.algorithm_semantic_digest
+    assert baseline.source_event == event
+    with pytest.raises(ValueError,match="source identity"):
+        GenericStaticRollbackBaseline.model_validate(baseline.model_copy(update={
+            "selection_algorithm_digest":"sha256:"+"c"*64,
+        }).model_dump())
+    with pytest.raises(ValueError,match="source identity"):
+        GenericStaticRollbackBaseline.model_validate(baseline.model_copy(update={
+            "source_event":event.model_copy(update={
+                "position_side":"long" if spec.position_side=="short" else "short",
+            }),
+        }).model_dump())
 
 
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])

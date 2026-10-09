@@ -161,12 +161,227 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
         ))
         for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
             spec = inputs(group).spec
-            await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF, certification=SpecNumericInstallationEvidence(
+            await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF-HOUR, certification=SpecNumericInstallationEvidence(
                 selection_spec_id=spec.selection_spec_id, algorithm_semantic_digest=spec.algorithm_semantic_digest,
                 checked_cutoffs=463 if spec.cadence_hours == 4 else 1852, mismatch_count=0, source_archive_count=96,
                 reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
             ))
     yield head_template_engine
+
+
+async def _install_static_selection_source(database: AsyncEngine, group: str):
+    spec = inputs(group).spec
+    members = spec.candidate_ids[:1]
+    async with PostgresKernelUnitOfWork(database) as uow:
+        installed = await install_strategy_universe(uow,UniverseInstallRequest(
+            event_spec_id=spec.event_spec_id,runtime_profile_id="tiny-live-v1",
+            owner_policy_id="policy-main",exchange_instrument_ids=members,
+            installed_at_ms=CUTOFF-1,
+        ))
+    assert installed.universe is not None
+    uid = installed.universe.universe_version_id
+    comparison_id = None
+    async with database.begin() as conn:
+        await conn.execute(sa.text(
+            "UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:at "
+            "WHERE universe_version_id=:uid"
+        ),{"uid":uid,"at":CUTOFF-1})
+        await conn.execute(sa.text(
+            "UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,"
+            "observation_enabled=true,warm_closed_bar_time_ms=:closed,warm_completed_at_ms=:at,"
+            "warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"
+        ),{"uid":uid,"closed":CUTOFF-HOUR,"at":CUTOFF-1,
+            "digest":"sha256:"+"1"*64,"valid":CUTOFF+2*HOUR})
+        await conn.execute(sa.text(
+            "INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:at)"
+        ),{"event":spec.event_spec_id,"uid":uid,
+            "digest":installed.universe.semantic_digest,"at":CUTOFF-1})
+        if group in {"MPG-001","MI-001"}:
+            digest = canonical_digest({"exchange_instrument_ids":members})
+            comparison_id = "comparison:"+digest[7:]
+            await conn.execute(sa.text(
+                "INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,1)"
+            ),{"id":comparison_id,"digest":digest})
+            await conn.execute(sa.text(
+                "INSERT INTO brc_comparison_universe_members VALUES(:id,:member)"
+            ),{"id":comparison_id,"member":members[0]})
+            await conn.execute(sa.text(
+                "INSERT INTO brc_comparison_binding_current VALUES(:event,:id,0,:uid)"
+            ),{"event":spec.event_spec_id,"id":comparison_id,"uid":uid})
+    return uid,comparison_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_first_generic_owner_request_freezes_actual_static_rollback_source(
+    database: AsyncEngine, group: str,
+) -> None:
+    uid,comparison_id = await _install_static_selection_source(database,group)
+    request = ControlMutationRequest(expected_version=1,reason="capture_static_source",
+        idempotency_key=f"owner:baseline:{group}",owner_identity="owner",now_ms=CUTOFF-1)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        staged = await stage_generic_dynamic_selection_mode(
+            uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=request,authentication_strength="totp_step_up",
+        )
+    assert staged.rollback_baseline_id is not None
+    async with database.connect() as conn:
+        baseline = (await conn.execute(sa.text(
+            "SELECT * FROM brc_strategy_selection_rollback_baselines WHERE rollback_baseline_id=:id"
+        ),{"id":staged.rollback_baseline_id})).mappings().one()
+        events = (await conn.execute(sa.text(
+            "SELECT * FROM brc_selection_rollback_baseline_events WHERE rollback_baseline_id=:id"
+        ),{"id":staged.rollback_baseline_id})).mappings().all()
+        assert baseline["strategy_group_id"] == group
+        assert baseline["strategy_version_id"] == inputs(group).spec.strategy_version_id
+        assert len(events) == 1
+        assert events[0]["universe_version_id"] == uid
+        assert events[0]["comparison_universe_id"] == comparison_id
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_members "
+            "WHERE universe_version_id=:uid"),{"uid":uid}) == 1
+    async with PostgresKernelUnitOfWork(database) as uow:
+        repeated = await stage_generic_dynamic_selection_mode(
+            uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=request,authentication_strength="totp_step_up",
+        )
+    assert repeated == staged
+    with pytest.raises(sa.exc.DBAPIError,match="rollback baseline pointer is immutable"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text(
+                "UPDATE brc_strategy_selection_control_current SET rollback_baseline_id=NULL "
+                "WHERE strategy_group_id=:group"
+            ),{"group":group})
+    other_group = "CPM-RO-001" if group != "CPM-RO-001" else "BRF2-001"
+    with pytest.raises(sa.exc.DBAPIError,match="rollback baseline parent mismatch"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text(
+                "UPDATE brc_strategy_selection_control_current SET rollback_baseline_id=:id "
+                "WHERE strategy_group_id=:group"
+            ),{"id":staged.rollback_baseline_id,"group":other_group})
+    with pytest.raises(sa.exc.DBAPIError,match="immutable"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text(
+                "UPDATE brc_selection_rollback_baseline_events SET comparison_universe_id=NULL "
+                "WHERE rollback_baseline_id=:id"
+            ),{"id":staged.rollback_baseline_id})
+    async with database.connect() as conn:
+        await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
+        frozen = await PostgresInstrumentSelectionRepository(conn).get_generic_static_rollback_baseline(
+            staged.rollback_baseline_id)
+        assert frozen.source_event.universe_version_id == uid
+        assert frozen.source_event.comparison_universe_id == comparison_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", ["missing_universe","missing_comparison","commit_fault"])
+async def test_generic_owner_baseline_failure_commits_no_authorization_or_pending_mode(
+    database: AsyncEngine, defect: str,
+) -> None:
+    group = "MPG-001"
+    if defect != "missing_universe":
+        await _install_static_selection_source(database,group)
+    if defect == "missing_comparison":
+        async with database.begin() as conn:
+            await conn.execute(sa.text("DELETE FROM brc_comparison_binding_current WHERE event_spec_id=:event"),
+                {"event":inputs(group).spec.event_spec_id})
+    request = ControlMutationRequest(expected_version=1,reason="baseline_refusal",
+        idempotency_key=f"owner:baseline:{defect}",owner_identity="owner",now_ms=CUTOFF-1)
+    if defect == "commit_fault":
+        with pytest.raises(OwnerControlConflict,match="version_conflict"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                with patch.object(uow.instrument_selection,"stage_pending_generic_selection_mode",
+                    new=AsyncMock(return_value=None)):
+                    await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,
+                        effective_period_anchor_ms=CUTOFF,request=request,
+                        authentication_strength="totp_step_up")
+    else:
+        with pytest.raises(OwnerControlBlocked,match="static_baseline_source_invalid"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,
+                    effective_period_anchor_ms=CUTOFF,request=request,
+                    authentication_strength="totp_step_up")
+    async with database.connect() as conn:
+        for table in ("brc_strategy_selection_rollback_baselines",
+            "brc_selection_rollback_baseline_events",
+            "brc_instrument_selection_jobs_current","brc_strategy_universe_materialization_generations"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0,table
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_owner_authorizations WHERE idempotency_key=:key"
+        ),{"key":request.idempotency_key}) == 0
+        control = (await conn.execute(sa.text("SELECT * FROM brc_strategy_selection_control_current "
+            "WHERE strategy_group_id=:group"),{"group":group})).mappings().one()
+        assert control["selection_mode"] == "static_baseline"
+        assert control["pending_selection_mode"] is None
+        assert control["rollback_baseline_id"] is None and control["control_version"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_direct_sql_cannot_forge_static_rollback_baseline_digest(
+    database: AsyncEngine, group: str,
+) -> None:
+    uid,comparison_id = await _install_static_selection_source(database,group)
+    spec = inputs(group).spec
+    bid = "rollback-baseline:"+"b"*64
+    with pytest.raises(sa.exc.DBAPIError,match="Static baseline semantic identity mismatch"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text(
+                "INSERT INTO brc_strategy_selection_rollback_baselines "
+                "(rollback_baseline_id,strategy_group_id,strategy_version_id,semantic_digest,captured_at_ms) "
+                "VALUES(:id,:group,:version,:digest,:at)"
+            ),{"id":bid,"group":group,"version":spec.strategy_version_id,
+                "digest":"sha256:"+"b"*64,"at":CUTOFF-1})
+            await conn.execute(sa.text(
+                "INSERT INTO brc_selection_rollback_baseline_events "
+                "(rollback_baseline_id,event_spec_id,position_side,universe_version_id,comparison_universe_id) "
+                "VALUES(:id,:event,:side,:uid,:comparison)"
+            ),{"id":bid,"event":spec.event_spec_id,"side":spec.position_side,
+                "uid":uid,"comparison":comparison_id})
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_rollback_baseline_events")) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_owner_requests_commit_one_static_capture(database: AsyncEngine) -> None:
+    group = "MPG-001"
+    await _install_static_selection_source(database,group)
+
+    async def stage(key: str):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            return await stage_generic_dynamic_selection_mode(
+                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="concurrent_capture",
+                    idempotency_key=key,owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up",
+            )
+    results = await asyncio.gather(stage("baseline:concurrent:a"),
+        stage("baseline:concurrent:b"),return_exceptions=True)
+    assert sum(not isinstance(result,BaseException) for result in results) == 1
+    assert sum(isinstance(result,OwnerControlConflict) for result in results) == 1
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_rollback_baseline_events")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations "
+            "WHERE idempotency_key LIKE 'baseline:concurrent:%'")) == 1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current")) == 0
+
+
+@pytest.mark.asyncio
+async def test_static_baseline_fact_cannot_commit_outside_owner_activation_transaction(
+    database: AsyncEngine,
+) -> None:
+    group = "MPG-001"
+    await _install_static_selection_source(database,group)
+    with pytest.raises(sa.exc.DBAPIError,match="requires atomic Owner capture"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.capture_generic_static_rollback_baseline(
+                selection_spec_id=inputs(group).spec.selection_spec_id,
+                captured_at_ms=CUTOFF-1,
+            )
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines")) == 0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_rollback_baseline_events")) == 0
 
 
 @pytest.mark.asyncio
@@ -1043,6 +1258,7 @@ async def test_generic_first_activation_stages_exact_owner_epoch_without_runtime
     database: AsyncEngine, group: str,
 ) -> None:
     source = inputs(group)
+    await _install_static_selection_source(database,group)
     request = ControlMutationRequest(
         expected_version=1,reason="first_generic_shadow_live",
         idempotency_key=f"owner:generic:first:{group}",owner_identity="owner",
@@ -1881,6 +2097,16 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
 ) -> None:
     await _exercise_generic_generation(database, group, False,
         durable=True, first_activation=True, natural_selection=True)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        selection_control = await uow.instrument_selection.get_selection_control(group)
+        assert selection_control is not None and selection_control.rollback_baseline_id is not None
+        frozen_baseline = await uow.instrument_selection.get_generic_static_rollback_baseline(
+            selection_control.rollback_baseline_id)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions "
+            "WHERE universe_version_id=:uid"),{"uid":frozen_baseline.source_event.universe_version_id}) == "retired"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines "
+            "WHERE strategy_group_id=:group"),{"group":group}) == 1
     if group not in {"CPM-RO-001", "BRF2-001"}:
         return
     source = inputs(group)
@@ -5190,6 +5416,17 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
             w.model_copy(update={"candles":source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0])
             for w in source.member_windows)})
+    uid,comparison_id = await _install_static_selection_source(database,group)
+    if first_activation and not natural_selection:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            first_control = await stage_generic_dynamic_selection_mode(
+                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,
+                    reason="first_activation_fixture",idempotency_key=f"owner:fixture:first:{group}",
+                    owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up",
+            )
+        source = source.model_copy(update={"selection_epoch_id":first_control.selection_epoch_id})
     if natural_selection:
         assert first_activation and failure_case is None
         async with PostgresKernelUnitOfWork(database) as owner_uow:
@@ -5235,29 +5472,7 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     async with PostgresKernelUnitOfWork(database) as uow:
         if not natural_selection:
             await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
-        installed = await install_strategy_universe(uow, UniverseInstallRequest(
-            event_spec_id=source.spec.event_spec_id, runtime_profile_id="tiny-live-v1", owner_policy_id="policy-main",
-            exchange_instrument_ids=source.spec.candidate_ids[:1], installed_at_ms=CUTOFF-1,
-        ))
-    assert installed.universe is not None
-    uid = installed.universe.universe_version_id
-    comparison_id = None
-    async with database.begin() as conn:
-        # A schema prerequisite, not a Warming/Owner activation certification.
-        await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"), {"now": CUTOFF, "uid": uid})
-        await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,observation_enabled=true,warm_closed_bar_time_ms=:closed,"
-            "warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"),
-            {"uid":uid,"closed":CUTOFF-HOUR,"now":CUTOFF,"digest":"sha256:"+"1"*64,"valid":CUTOFF+2*HOUR})
-        await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),
-            {"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":CUTOFF})
-        if group in {"MPG-001", "MI-001"}:
-            digest = canonical_digest({"exchange_instrument_ids": source.spec.candidate_ids[:1]})
-            comparison_id = "comparison:" + digest[7:]
-            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:cid,:digest,1)"), {"cid": comparison_id, "digest": digest})
-            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:cid,:member)"), {"cid": comparison_id, "member": source.spec.candidate_ids[0]})
-            await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,0,:uid)"),
-                {"event":source.spec.event_spec_id,"cid":comparison_id,"uid":uid})
-    if not natural_selection:
+    if not natural_selection and not first_activation:
         await enable_epoch(database, group, pending=first_activation)
     generation = GenericMaterializationGeneration.build(snapshot=snapshot, selection_control_version=2, created_at_ms=CUTOFF+HOUR+1,
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,

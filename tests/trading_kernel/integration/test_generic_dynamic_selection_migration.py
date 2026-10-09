@@ -101,14 +101,16 @@ NEW_OWNER_READ_TABLES = (
 @pytest.mark.asyncio
 async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> None:
     admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
-    created_roles: list[str] = []
     name: str | None = None
     engine: AsyncEngine | None = None
     try:
         for role in ("brc_owner_console", "brc_owner_control"):
             if not await admin.fetchval("SELECT 1 FROM pg_roles WHERE rolname=$1", role):
-                await admin.execute(f'CREATE ROLE "{role}" NOLOGIN')
-                created_roles.append(role)
+                try:
+                    await admin.execute(f'CREATE ROLE "{role}" NOLOGIN')
+                except (asyncpg.DuplicateObjectError,asyncpg.UniqueViolationError):
+                    # Another disposable test may provision the same cluster role.
+                    assert await admin.fetchval("SELECT 1 FROM pg_roles WHERE rolname=$1",role)
         name, url = await create_empty_database()
         engine = create_async_engine(url)
         await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
@@ -131,8 +133,8 @@ async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> No
             await engine.dispose()
         if name is not None:
             await drop_disposable_database(name)
-        for role in reversed(created_roles):
-            await admin.execute(f'DROP ROLE "{role}"')
+        # Cluster roles are shared by head templates and concurrent disposable DBs.
+        # This test owns its database, not the lifetime of those NOLOGIN identities.
         await admin.close()
 
 

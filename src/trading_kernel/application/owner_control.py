@@ -18,6 +18,7 @@ from src.trading_kernel.application.ports import (
     ExitProfileAuthorityConflict,
     KernelUnitOfWork,
     OwnerPolicySnapshot,
+    SelectionPersistenceConflict,
     UnitOfWorkFactory,
 )
 from src.trading_kernel.application.reconcile_ticket import (
@@ -432,6 +433,12 @@ async def stage_generic_dynamic_selection_mode(
     next_anchor_ms = (request.now_ms // cadence_ms + 1) * cadence_ms
     if effective_period_anchor_ms != next_anchor_ms:
         raise OwnerControlBlocked("selection_effective_period_not_next")
+    try:
+        baseline = await uow.instrument_selection.capture_generic_static_rollback_baseline(
+            selection_spec_id=spec.selection_spec_id,captured_at_ms=request.now_ms,
+        )
+    except (SelectionPersistenceConflict,ValueError) as exc:
+        raise OwnerControlBlocked("selection_static_baseline_source_invalid") from exc
     authorization = _authorization(
         purpose="selection_mode_change", request=request,
         authentication_strength="totp_step_up", target_scope=target_scope,
@@ -444,6 +451,7 @@ async def stage_generic_dynamic_selection_mode(
         selection_epoch_id=selection_epoch_id,
         effective_period_anchor_ms=effective_period_anchor_ms,
         authorization_id=authorization.authorization_id,
+        rollback_baseline_id=baseline.rollback_baseline_id,
         updated_at_ms=request.now_ms,
     )
     if staged is None:

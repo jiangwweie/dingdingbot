@@ -49,6 +49,8 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
+    GenericStaticRollbackBaseline,
+    GenericStaticRollbackEvent,
     MaterializationEventBaseline,
 )
 from src.trading_kernel.domain.generic_selection_core import (
@@ -116,6 +118,7 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuum,
     StrategyEntryVacuumState,
 )
+from src.trading_kernel.domain.strategy_universe import StrategyUniverseVersion
 from src.trading_kernel.infrastructure.pg_models import (
     comparison_binding_current,
     comparison_universe_definitions,
@@ -139,12 +142,14 @@ from src.trading_kernel.infrastructure.pg_models import (
     selection_authority_gap_audit_events,
     selection_authority_gap_audits_current,
     selection_authority_projection_columns,
+    selection_rollback_baseline_events,
     selection_session_authorities,
     sor_dynamic_selection_specs_v0,
     strategy_entry_controls_current,
     strategy_entry_vacuum_events,
     strategy_entry_vacuums_current,
     strategy_selection_control_current,
+    strategy_selection_rollback_baselines,
     strategy_trigger_suppressions,
     strategy_universe_current,
     strategy_universe_materialization_events,
@@ -1293,8 +1298,12 @@ class PostgresInstrumentSelectionRepository:
         selection_epoch_id: str,
         effective_period_anchor_ms: int,
         authorization_id: str,
+        rollback_baseline_id: str,
         updated_at_ms: int,
     ) -> SelectionControl | None:
+        baseline = await self.get_generic_static_rollback_baseline(rollback_baseline_id)
+        if baseline.strategy_group_id != strategy_group_id or baseline.selection_spec_id != selection_spec_id:
+            raise SelectionJobConflict("Generic rollback baseline does not match Control")
         result = await self._connection.execute(
             sa.update(strategy_selection_control_current)
             .where(
@@ -1304,12 +1313,17 @@ class PostgresInstrumentSelectionRepository:
                 strategy_selection_control_current.c.selection_mode == "static_baseline",
                 strategy_selection_control_current.c.pending_selection_mode.is_(None),
                 strategy_selection_control_current.c.selection_epoch_id.is_(None),
+                sa.or_(
+                    strategy_selection_control_current.c.rollback_baseline_id.is_(None),
+                    strategy_selection_control_current.c.rollback_baseline_id == rollback_baseline_id,
+                ),
             )
             .values(
                 pending_selection_mode="dynamic_selection",
                 pending_effective_period_anchor_ms=effective_period_anchor_ms,
                 pending_authorization_id=authorization_id,
                 selection_epoch_id=selection_epoch_id,
+                rollback_baseline_id=rollback_baseline_id,
                 control_version=expected_control_version + 1,
                 updated_at_ms=updated_at_ms,
             )
@@ -1317,6 +1331,144 @@ class PostgresInstrumentSelectionRepository:
         )
         row = result.mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
+
+    async def _read_static_baseline_universe(
+        self, universe_version_id: str, *, require_active: bool = False,
+    ) -> StrategyUniverseVersion:
+        row = (await self._connection.execute(sa.select(strategy_universe_versions).where(
+            strategy_universe_versions.c.universe_version_id == universe_version_id,
+        ))).mappings().one_or_none()
+        if row is None or row["materialization_generation_id"] is not None:
+            raise SelectionJobConflict("Static rollback source Universe missing or Dynamic")
+        if require_active and row["lifecycle_state"] != "active":
+            raise SelectionJobConflict("Static rollback source Universe is not Active")
+        members = tuple((await self._connection.execute(sa.select(
+            strategy_universe_members.c.exchange_instrument_id,
+        ).where(strategy_universe_members.c.universe_version_id == universe_version_id)
+            .order_by(strategy_universe_members.c.exchange_instrument_id).limit(11))).scalars())
+        if not 1 <= len(members) <= 10:
+            raise SelectionJobConflict("Static rollback source membership is not bounded")
+        return StrategyUniverseVersion(
+            universe_version_id=universe_version_id,strategy_group_id=row["strategy_group_id"],
+            event_spec_id=row["event_spec_id"],universe_version=row["universe_version"],
+            exchange_instrument_ids=members,semantic_digest=row["semantic_digest"],
+            installed_at_ms=row["installed_at_ms"],
+        )
+
+    async def get_generic_static_rollback_baseline(
+        self, rollback_baseline_id: str,
+    ) -> GenericStaticRollbackBaseline:
+        parent = (await self._connection.execute(sa.select(strategy_selection_rollback_baselines).where(
+            strategy_selection_rollback_baselines.c.rollback_baseline_id == rollback_baseline_id,
+        ))).mappings().one_or_none()
+        if parent is None:
+            raise SelectionJobConflict("Generic rollback baseline missing")
+        spec_rows = (await self._connection.execute(sa.select(instrument_selection_specs).where(
+            instrument_selection_specs.c.strategy_group_id == parent["strategy_group_id"],
+            instrument_selection_specs.c.strategy_version_id == parent["strategy_version_id"],
+            instrument_selection_specs.c.selection_kind == "generic_dynamic_v1",
+        ).limit(2))).mappings().all()
+        if len(spec_rows) != 1:
+            raise SelectionJobConflict("Generic rollback baseline installed Spec differs")
+        spec = await self.get_generic_spec(spec_rows[0]["selection_spec_id"])
+        events = (await self._connection.execute(sa.select(selection_rollback_baseline_events).where(
+            selection_rollback_baseline_events.c.rollback_baseline_id == rollback_baseline_id,
+        ).limit(2))).mappings().all()
+        if len(events) != 1:
+            raise SelectionJobConflict("Generic rollback baseline requires exact Event set")
+        event = events[0]
+        universe = await self._read_static_baseline_universe(event["universe_version_id"])
+        if universe.strategy_group_id != spec.strategy_group_id or universe.event_spec_id != spec.event_spec_id:
+            raise SelectionJobConflict("Generic rollback baseline Universe identity differs")
+        comparison_id = event["comparison_universe_id"]
+        if comparison_id is not None:
+            definition = (await self._connection.execute(sa.select(comparison_universe_definitions).where(
+                comparison_universe_definitions.c.comparison_universe_id == comparison_id,
+            ))).mappings().one_or_none()
+            members = tuple((await self._connection.execute(sa.select(comparison_universe_members.c.exchange_instrument_id).where(
+                comparison_universe_members.c.comparison_universe_id == comparison_id,
+            ).order_by(comparison_universe_members.c.exchange_instrument_id).limit(11))).scalars())
+            digest = canonical_digest({"exchange_instrument_ids":members})
+            if definition is None or members != universe.exchange_instrument_ids or (
+                definition["member_count"] != len(members) or definition["member_set_digest"] != digest
+                or comparison_id != "comparison:"+digest[7:]
+            ):
+                raise SelectionJobConflict("Generic rollback comparison source differs")
+        baseline = GenericStaticRollbackBaseline.build(
+            strategy_group_id=spec.strategy_group_id,
+            source_event=GenericStaticRollbackEvent(
+                event_spec_id=event["event_spec_id"],position_side=event["position_side"],
+                universe_version_id=universe.universe_version_id,
+                universe_semantic_digest=universe.semantic_digest,
+                member_set_digest=selected_member_set_digest(universe.exchange_instrument_ids),
+                comparison_universe_id=comparison_id,
+            ),captured_at_ms=parent["captured_at_ms"],
+        )
+        if baseline.rollback_baseline_id != rollback_baseline_id or baseline.semantic_digest != parent["semantic_digest"]:
+            raise SelectionJobConflict("Generic rollback baseline semantic identity differs")
+        return baseline
+
+    async def capture_generic_static_rollback_baseline(
+        self, *, selection_spec_id: str, captured_at_ms: int,
+    ) -> GenericStaticRollbackBaseline:
+        spec = await self.get_generic_spec(selection_spec_id)
+        installed_at = await self._connection.scalar(sa.select(instrument_selection_specs.c.installed_at_ms).where(
+            instrument_selection_specs.c.selection_spec_id == selection_spec_id,
+        ))
+        if installed_at is None or installed_at > captured_at_ms:
+            raise SelectionJobConflict("Generic Static baseline capture predates installed Spec")
+        control = await self.get_selection_control(spec.strategy_group_id,for_update=True)
+        if control is None or control.selection_mode is not SelectionMode.STATIC_BASELINE:
+            raise SelectionJobConflict("Generic baseline capture requires current Static Control")
+        if control.rollback_baseline_id is not None:
+            return await self.get_generic_static_rollback_baseline(control.rollback_baseline_id)
+        previous = await self._connection.scalar(sa.select(strategy_selection_rollback_baselines.c.rollback_baseline_id).where(
+            strategy_selection_rollback_baselines.c.strategy_group_id == spec.strategy_group_id,
+            strategy_selection_rollback_baselines.c.strategy_version_id == spec.strategy_version_id,
+        ))
+        if previous is not None:
+            raise SelectionJobConflict("Generic Static baseline Control linkage is missing")
+        current = (await self._connection.execute(sa.select(strategy_universe_current).where(
+            strategy_universe_current.c.event_spec_id == spec.event_spec_id,
+        ).with_for_update(of=strategy_universe_current))).mappings().one_or_none()
+        if current is None or current["lifecycle_state"] != "active" or current["activated_at_ms"] > captured_at_ms:
+            raise SelectionJobConflict("Generic Static baseline source is missing or not active")
+        universe = await self._read_static_baseline_universe(
+            current["universe_version_id"],require_active=True,
+        )
+        if (universe.strategy_group_id != spec.strategy_group_id
+            or universe.semantic_digest != current["semantic_digest"]
+            or universe.installed_at_ms > captured_at_ms):
+            raise SelectionJobConflict("Generic Static source current pointer differs")
+        comparison = await self.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+        if spec.strategy_group_id in {"MPG-001","MI-001"} and (
+            comparison is None or comparison.source_static_universe_version_id != universe.universe_version_id
+            or comparison.exchange_instrument_ids != universe.exchange_instrument_ids
+        ):
+            raise SelectionJobConflict("Generic Static comparison source is missing or differs")
+        if spec.strategy_group_id not in {"MPG-001","MI-001"} and comparison is not None:
+            raise SelectionJobConflict("Generic Static non-comparative source carries comparison")
+        baseline = GenericStaticRollbackBaseline.build(
+            strategy_group_id=spec.strategy_group_id,
+            source_event=GenericStaticRollbackEvent(
+                event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+                universe_version_id=universe.universe_version_id,
+                universe_semantic_digest=universe.semantic_digest,
+                member_set_digest=selected_member_set_digest(universe.exchange_instrument_ids),
+                comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
+            ),captured_at_ms=captured_at_ms,
+        )
+        await self._connection.execute(sa.insert(strategy_selection_rollback_baselines).values(
+            rollback_baseline_id=baseline.rollback_baseline_id,
+            strategy_group_id=baseline.strategy_group_id,strategy_version_id=baseline.strategy_version_id,
+            semantic_digest=baseline.semantic_digest,captured_at_ms=baseline.captured_at_ms,
+        ))
+        await self._connection.execute(sa.insert(selection_rollback_baseline_events).values(
+            rollback_baseline_id=baseline.rollback_baseline_id,event_spec_id=spec.event_spec_id,
+            position_side=spec.position_side,universe_version_id=universe.universe_version_id,
+            comparison_universe_id=baseline.source_event.comparison_universe_id,
+        ))
+        return baseline
 
     async def recover_expired_dynamic_activation(
         self,
