@@ -2177,13 +2177,7 @@ async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1"
             strategy_selection_control_current.c.strategy_group_id == group,
         ))).mappings().one()
         if row["selection_mode"] == "dynamic_selection":
-            await conn.execute(sa.update(strategy_selection_control_current).where(
-                strategy_selection_control_current.c.strategy_group_id == group,
-            ).values(selection_mode="static_baseline",selection_epoch_id=None,
-                control_version=int(row["control_version"])+1))
-            row = (await conn.execute(sa.select(strategy_selection_control_current).where(
-                strategy_selection_control_current.c.strategy_group_id == group,
-            ))).mappings().one()
+            raise AssertionError("Epoch rotation fixtures must use formal Owner Static/Dynamic transitions")
         auth_id = "owner:first:"+group if epoch == "epoch:1" else f"owner:first:{group}:{epoch}"
         await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
             {"id":auth_id,"digest":"sha256:"+"8"*64,"at":pending_anchor_ms-1,
@@ -2201,6 +2195,38 @@ async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1"
             ).values(selection_mode="dynamic_selection",pending_selection_mode=None,
                 pending_effective_period_anchor_ms=None,pending_authorization_id=None,
                 control_version=int(row["control_version"])+1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+@pytest.mark.parametrize("installed", [True,False])
+async def test_generic_runner_short_circuits_static_or_uninstalled_without_artifacts(
+    head_template_engine: AsyncEngine, group: str, installed: bool,
+) -> None:
+    database = head_template_engine
+    source = inputs(group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="selector-short-circuit",
+            runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=CUTOFF-HOUR))
+        if installed:
+            await uow.instrument_selection.install_generic_spec(source.spec,installed_at_ms=CUTOFF-HOUR,
+                certification=SpecNumericInstallationEvidence(selection_spec_id=source.spec.selection_spec_id,
+                    algorithm_semantic_digest=source.spec.algorithm_semantic_digest,
+                    checked_cutoffs=463 if source.spec.cadence_hours==4 else 1852,mismatch_count=0,source_archive_count=96,
+                    reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb",common_numeric_authority="PASS",sor_golden="PASS",spec_cert="PASS"))
+    class NetworkForbidden:
+        def __getattr__(self,name):
+            raise AssertionError(f"Static/uninstalled Selector requested market I/O: {name}")
+    result = await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+        market_source=NetworkForbidden(),request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+            selection_epoch_id="epoch:inactive",period_anchor_ms=CUTOFF,worker_id="inactive-selector"),clock_ms=lambda:CUTOFF+1)
+    assert result.outcome==("NOT_DUE" if installed else "NOT_INSTALLED"),result
+    async with database.connect() as conn:
+        for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_attempts",
+            "brc_instrument_selection_snapshots","brc_instrument_selection_member_decisions",
+            "brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current",
+            "brc_trade_tickets","brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
 
 
 @pytest.mark.asyncio
@@ -2406,7 +2432,7 @@ async def test_generic_job_commits_attempt_snapshot_and_epoch_atomically(databas
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("defect", ["epoch_changed", "control_changed", "lease_expired", "lease_reclaimed", "predecessor_changed"])
+@pytest.mark.parametrize("defect", ["claim_epoch_mismatch", "control_changed", "lease_expired", "lease_reclaimed", "predecessor_changed"])
 async def test_generic_completion_revalidates_claim_control_epoch_and_predecessor(database: AsyncEngine, defect: str) -> None:
     source = inputs("MPG-001")
     await enable_epoch(database, "MPG-001")
@@ -2418,8 +2444,8 @@ async def test_generic_completion_revalidates_claim_control_epoch_and_predecesso
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id=source.selection_epoch_id,
             feature_cutoff_at_ms=source.feature_cutoff_at_ms, worker_id="selection:old", now_ms=source.feature_cutoff_at_ms + 1, lease_duration_ms=1000,
         )
-    if defect == "epoch_changed":
-        await enable_epoch(database, "MPG-001", "epoch:2")
+    if defect == "claim_epoch_mismatch":
+        claim = claim.model_copy(update={"selection_epoch_id":"epoch:wrong"})
     elif defect == "control_changed":
         async with database.begin() as conn:
             await conn.execute(sa.update(strategy_selection_control_current).where(
@@ -2437,7 +2463,7 @@ async def test_generic_completion_revalidates_claim_control_epoch_and_predecesso
             await uow.instrument_selection.save_generic_snapshot(compute_generic_selection(earlier_source), decision_at_ms=earlier_source.decision_at_ms, source_observed_at_ms=earlier_source.source_observed_at_ms)
     completed_at = source.feature_cutoff_at_ms + (1001 if defect == "lease_expired" else 20)
     source = source.model_copy(update={"committed_at_ms": completed_at})
-    with pytest.raises(SelectionJobConflict):
+    with pytest.raises(ValueError if defect=="claim_epoch_mismatch" else SelectionJobConflict):
         async with PostgresKernelUnitOfWork(database) as uow:
             await uow.instrument_selection.complete_generic_selection_snapshot(
                 claim=claim, snapshot=compute_generic_selection(source), source_observed_at_ms=source.source_observed_at_ms,
@@ -2688,7 +2714,7 @@ async def test_generic_source_integrity_gap_never_enters_retry(database: AsyncEn
 
 
 @pytest.mark.asyncio
-async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(database: AsyncEngine) -> None:
+async def test_unauthorized_epoch_cannot_reuse_job_or_snapshot_hysteresis(database: AsyncEngine) -> None:
     source = inputs("MPG-001")
     await enable_epoch(database, "MPG-001")
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -2696,35 +2722,28 @@ async def test_same_period_in_new_epoch_does_not_reuse_old_job_or_hysteresis(dat
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:1",
             feature_cutoff_at_ms=CUTOFF, worker_id="epoch:old", now_ms=CUTOFF + 1, lease_duration_ms=1000,
         )
-    # A new Owner transition is represented only as a repository prerequisite here.
-    await enable_epoch(database, "MPG-001", "epoch:2")
-    with pytest.raises(SelectionJobConflict, match="control or epoch changed"):
-        async with PostgresKernelUnitOfWork(database) as uow:
-            await uow.instrument_selection.complete_selection_failure(
-                claim=original,
-                outcome=SelectionAttemptOutcome.SOURCE_FAILED,
-                reason_code="SOURCE_INCOMPLETE",
-                source_member_count=23,
-                source_digest=None,
-                completed_at_ms=CUTOFF + 2,
-            )
+    # An unauthorized epoch cannot read/reuse another epoch's existing Job.
+    # Positive Owner epoch rotation is covered by the full Static/Dynamic chain.
     async with PostgresKernelUnitOfWork(database) as uow:
         fresh = await uow.instrument_selection.claim_generic_selection_job(
             selection_spec_id=source.spec.selection_spec_id, selection_epoch_id="epoch:2",
             feature_cutoff_at_ms=CUTOFF, worker_id="epoch:new", now_ms=CUTOFF + 2, lease_duration_ms=1000,
         )
-        assert isinstance(original, GenericSelectionJobClaim) and isinstance(fresh, GenericSelectionJobClaim)
-        assert fresh.selection_job_id != original.selection_job_id
-        assert fresh.predecessor_snapshot_id is None
-        assert await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id, period_anchor_ms=CUTOFF, selection_epoch_id="epoch:2") is not None
+        assert isinstance(original, GenericSelectionJobClaim) and fresh is None
+        assert await uow.instrument_selection.get_selection_job(selection_spec_id=source.spec.selection_spec_id, period_anchor_ms=CUTOFF, selection_epoch_id="epoch:2") is None
         prior = await uow.instrument_selection.get_selection_job(
             selection_spec_id=source.spec.selection_spec_id,
             period_anchor_ms=CUTOFF,
             selection_epoch_id="epoch:1",
         )
-        assert prior is not None and prior.state == "SUPERSEDED"
-        assert prior.first_blocker == "SUPERSEDED_BY_SELECTION_EPOCH"
-        assert prior.lease_owner is None
+        assert prior is not None and prior.state == "CLAIMED" and prior.lease_owner=="epoch:old"
+    first = compute_generic_selection(source)
+    next_epoch = compute_generic_selection(source.model_copy(update={"selection_epoch_id":"epoch:2","predecessor_snapshot":None}))
+    assert next_epoch.selection_snapshot_id!=first.selection_snapshot_id
+    assert next_epoch.predecessor_snapshot_id is None
+    assert all(not member.retained for member in next_epoch.members)
+    with pytest.raises(ValueError,match="epoch"):
+        compute_generic_selection(next_input(source).model_copy(update={"selection_epoch_id":"epoch:2","predecessor_snapshot":first}))
 
 
 @pytest.mark.asyncio
@@ -2734,18 +2753,47 @@ async def test_generic_snapshot_commit_response_loss_retries_without_second_mark
 ) -> None:
     source = inputs(group)
     await enable_epoch(database,group)
+    active_transactions = 0
+    allowed_selection_methods = frozenset({"get_generic_spec","claim_generic_selection_job","get_selection_job",
+        "get_generic_snapshot","get_selection_product_profiles","complete_generic_selection_snapshot","complete_selection_failure"})
+    class SelectionOnlyRepository:
+        def __init__(self,repository):
+            self.repository = repository
+
+        def __getattr__(self,name):
+            assert name in allowed_selection_methods, f"Selection Runner read runtime authority: {name}"
+            return getattr(self.repository,name)
+    class TradingReadsForbidden:
+        def __getattr__(self,name):
+            raise AssertionError(f"Selection Runner read Trading Plane: {name}")
+    @asynccontextmanager
+    async def selection_uow():
+        nonlocal active_transactions
+        active_transactions += 1
+        try:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                uow.instrument_selection = SelectionOnlyRepository(uow.instrument_selection)
+                uow.strategy_universes = TradingReadsForbidden()
+                uow.tickets = TradingReadsForbidden()
+                uow.capacity_claims = TradingReadsForbidden()
+                uow.exchange_commands = TradingReadsForbidden()
+                yield uow
+        finally:
+            active_transactions -= 1
     class CompleteMarket:
         def __init__(self):
             self.qualifications = 0
             self.klines = 0
 
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
+            assert active_transactions==0
             self.qualifications += 1
             assert event_spec_id == source.spec.event_spec_id and len(product_profiles) == 24
             return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms})
                 for window in source.member_windows)
 
         async def fetch_generic_selection_klines(self, request):
+            assert active_transactions==0
             self.klines += 1
             return next(window.candles for window in source.member_windows
                 if window.exchange_instrument_id==request.exchange_instrument_id)
@@ -2762,7 +2810,7 @@ async def test_generic_snapshot_commit_response_loss_retries_without_second_mark
     @asynccontextmanager
     async def lost_commit_response():
         nonlocal injected
-        async with PostgresKernelUnitOfWork(database) as uow:
+        async with selection_uow() as uow:
             yield uow
         if not injected:
             async with database.connect() as conn:
@@ -2777,10 +2825,11 @@ async def test_generic_snapshot_commit_response_loss_retries_without_second_mark
             market_source=market,request=request,clock_ms=clock)
     assert injected and market.qualifications == 1 and market.klines == 24
     retry = await run_instrument_selection_once(
-        uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+        uow_factory=selection_uow,market_source=market,
         request=request,clock_ms=clock)
     assert retry.outcome == "ALREADY_READY"
     assert market.qualifications == 1 and market.klines == 24
+    assert active_transactions==0
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts "
             "WHERE selection_spec_id=:spec"),{"spec":source.spec.selection_spec_id}) == 1
