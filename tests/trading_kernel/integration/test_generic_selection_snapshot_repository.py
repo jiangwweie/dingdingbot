@@ -2092,6 +2092,8 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001",False),("MPG-001",False),("MI-001",False),("BRF2-001",False),
     ("CPM-RO-001",True),("BRF2-001",True),
     ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
+    ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
+    ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -2295,10 +2297,12 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
             "SELECT status FROM brc_exchange_commands WHERE ticket_id=:ticket AND command_kind='entry'"
         ), {"ticket":issued.ticket_id}) == "accepted"
     if cancel_before_fill:
-        await _assert_natural_sent_entry_cancelled_by_valid_empty(database,
+        await _assert_natural_sent_entry_drained_by_selection(database,
             group=group,current=current,issued=issued,ticket=ticket,venue=venue,
             initial_source=source,entry_dispatched_at_ms=issued_at+5,
-            supersede_with_nonempty=cancel_before_fill=="latest_nonempty")
+            supersede_with_nonempty=isinstance(cancel_before_fill,str) and cancel_before_fill.startswith("latest_nonempty"),
+            unknown_cancel=cancel_before_fill=="latest_nonempty_unknown",
+            partial_fill=cancel_before_fill=="latest_nonempty_partial")
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
@@ -2463,10 +2467,12 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     assert frozen_binding == (ticket.exit_binding_id,ticket.exit_binding_semantic_hash)
 
 
-async def _assert_natural_sent_entry_cancelled_by_valid_empty(
+async def _assert_natural_sent_entry_drained_by_selection(
     database, *, group, current, issued, ticket, venue, initial_source,
     entry_dispatched_at_ms,
     supersede_with_nonempty: bool = False,
+    unknown_cancel: bool = False,
+    partial_fill: bool = False,
 ) -> None:
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
@@ -2565,8 +2571,10 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         venue_client_order_id=commands[0].venue_client_order_id,
         position_side=ticket.identity.netting_domain.position_side,reduce_only=False,
         order_namespace="regular")
+    partial_qty = ticket.quantity//Decimal("0.002")*Decimal("0.001") if partial_fill else Decimal(0)
+    assert not partial_fill or Decimal(0)<partial_qty<ticket.quantity
     opened = PositionSnapshot(netting_domain=ticket.identity.netting_domain,
-        quantity=Decimal(0),average_entry_price=None,open_orders=(open_order,),
+        quantity=partial_qty,average_entry_price=ticket.entry_reference_price if partial_fill else None,open_orders=(open_order,),
         observed_at_ms=now+5)
     async with PostgresKernelUnitOfWork(database) as uow:
         cancel = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
@@ -2585,13 +2593,73 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         assert waiting_cancel.disposition is MaterializationDisposition.WAITING_VACUUM, waiting_cancel
         assert waiting_cancel.reason_code == "VACUUM_CANCEL_NOT_DISPATCHED"
     venue.now_ms = now+6
-    dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
-        DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
-            ticket_id=issued.ticket_id,now_ms=now+6,lease_until_ms=now+30_000,
-            timeout_seconds=1))
-    assert dispatched.status.value == "accepted", dispatched
+    dispatch_request = DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
+        ticket_id=issued.ticket_id,now_ms=now+6,lease_until_ms=now+30_000,timeout_seconds=1)
+    if unknown_cancel:
+        from src.trading_kernel.application.recover_unknown_command import (
+            RecoverUnknownCommandRequest,
+            recover_unknown_command,
+        )
+        from src.trading_kernel.domain.commands import (
+            ExchangeCommandResult,
+            ExchangeCommandStatus,
+        )
+        from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
+
+        async def unknown_execution(command_request):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                durable = await uow.exchange_commands.get(command_request.command_id)
+            assert durable is not None and durable.status is ExchangeCommandStatus.CLAIMED
+            assert command_request.kind is ExchangeCommandKind.CANCEL_ORDER
+            venue.calls.append(command_request)
+            return ExchangeCommandResult(status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
+                observed_at_ms=now+6,reason="recording_cancel_response_lost")
+
+        with patch.object(venue,"execute",new=unknown_execution):
+            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request)
+        assert dispatched.status.value == "outcome_unknown", dispatched
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now+7)):
+            blocked = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+7)
+        assert blocked.disposition is MaterializationDisposition.WAITING_VACUUM, blocked
+        assert blocked.reason_code == "VACUUM_DRAIN_UNKNOWN_OUTCOME"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            held = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group,selection_spec_id=empty.selection_spec_id)
+            assert held == original_vacuum
+            assert await uow.strategy_universes.get_generation_universe_targets(original_vacuum.source_generation_id) == ()
+            assert await uow.instrument_selection.get_generic_materialization_generation(
+                GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
+            held_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+        no_resend = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            dispatch_request.model_copy(update={"now_ms":now+7}))
+        assert no_resend.status.value == "no_command", no_resend
+        assert len(venue.calls) == 2
+        unknown_command = held_commands[-1]
+
+        class CancelTruth:
+            async def lookup_command_truth(self, truth_request):
+                assert truth_request.command_id == unknown_command.command_id
+                assert truth_request.kind is ExchangeCommandKind.CANCEL_ORDER
+                assert truth_request.payload.exchange_order_id == aggregate.entry_exchange_order_id
+                assert truth_request.exchange_instrument_id == ticket.identity.netting_domain.exchange_instrument_id
+                assert truth_request.position_side == ticket.identity.netting_domain.position_side
+                assert truth_request.account_id == ticket.identity.netting_domain.account_id
+                return VenueTruthSnapshot(lookup_status="absent",position_quantity=Decimal(0),
+                    matching_fill_quantity=Decimal(0),regular_open_client_order_ids=(),
+                    conditional_open_client_order_ids=(),observed_at_ms=now+7)
+
+        recovered = await recover_unknown_command(lambda:PostgresKernelUnitOfWork(database),CancelTruth(),
+            RecoverUnknownCommandRequest(command_id=unknown_command.command_id,now_ms=now+7,
+                visibility_deadline_ms=now+6,timeout_seconds=1))
+        assert recovered.status.value == "reconciled_absent", recovered
+    else:
+        dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request)
+        assert dispatched.status.value == "accepted", dispatched
     flat = PositionSnapshot(netting_domain=ticket.identity.netting_domain,
-        quantity=Decimal(0),average_entry_price=None,open_orders=(),observed_at_ms=now+7)
+        quantity=partial_qty,average_entry_price=ticket.entry_reference_price if partial_fill else None,
+        open_orders=(),observed_at_ms=now+7)
     async with PostgresKernelUnitOfWork(database) as uow:
         absence = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
             strategy_group_id=group,selection_spec_id=empty.selection_spec_id,
@@ -2604,9 +2672,66 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
         still_active = await uow.entry_admission.has_active_ticket_in_domain(
             ticket.identity.netting_domain.key())
-    assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED, closed
-    assert reservation is not None and reservation.status == "released" and not still_active
-    for offset in range(9,12):
+    if partial_fill:
+        assert closed.status is VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED, closed
+        assert reservation is not None and reservation.status == "active" and still_active
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now+9)):
+            waiting_protection = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+9)
+        assert waiting_protection.disposition is MaterializationDisposition.WAITING_VACUUM, waiting_protection
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.strategy_universes.get_generation_universe_targets(original_vacuum.source_generation_id) == ()
+            assert await uow.instrument_selection.get_generic_materialization_generation(
+                GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
+        venue.now_ms = now+10
+        stop = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            dispatch_request.model_copy(update={"now_ms":now+10}))
+        assert stop.status.value == "accepted", stop
+        async with PostgresKernelUnitOfWork(database) as uow:
+            protected = await uow.aggregates.get(issued.ticket_id)
+            assert protected is not None and protected.position_qty == partial_qty
+            assert protected.initial_stop_exchange_order_id is not None
+            assert protected.status is AggregateStatus.POST_FILL_RISK_PENDING
+            assert await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=group)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now+11)):
+            waiting_stress = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+11)
+        assert waiting_stress.disposition is MaterializationDisposition.WAITING_VACUUM, waiting_stress
+        from src.trading_kernel.domain.cross_margin_stress import (
+            evaluate_cross_margin_stress,
+        )
+        from src.trading_kernel.domain.events import PostFillStressAssessed
+        from src.trading_kernel.domain.reducer import reduce_event
+        from tests.trading_kernel.support.capacity_claims import make_stress_evidence
+
+        # Recorded local risk fixture evaluates the actual partial quantity.
+        # It is evidence input only; never rewrite the immutable Ticket.
+        async with PostgresKernelUnitOfWork(database) as uow:
+            pending = await uow.aggregates.get(issued.ticket_id)
+            assert pending is not None
+            base_stress = make_stress_evidence(pending.ticket)
+            actual_stress = evaluate_cross_margin_stress(base_stress.request.model_copy(update={
+                "projected_instrument_positions":tuple(position.model_copy(update={"quantity":partial_qty})
+                    for position in base_stress.request.projected_instrument_positions)}))
+            stress = PostFillStressAssessed(
+                event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
+                ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
+                occurred_at_ms=now+12,status="passed",
+                evidence=actual_stress,
+                owner_policy_id=pending.ticket.owner_policy_id,
+                owner_policy_version=pending.ticket.owner_policy_version,
+                filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
+                initial_stop_price=pending.ticket.initial_stop_price,
+                initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+            await uow.commit_reduction(event=stress,reduction=reduce_event(pending,stress),expected_version=pending.version)
+            assert not await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=group)
+    else:
+        assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED, closed
+        assert reservation is not None and reservation.status == "released" and not still_active
+    resume_offset = 13 if partial_fill else 9
+    for offset in range(resume_offset,resume_offset+3):
         at = now+offset
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=at)):
@@ -2622,7 +2747,13 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         frozen = await uow.tickets.get(issued.ticket_id)
         final_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
         authority = await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)
-    assert terminal is not None and terminal.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
+    assert terminal is not None
+    if partial_fill:
+        assert terminal.position_qty == partial_qty and terminal.initial_stop_exchange_order_id is not None
+        assert terminal.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED"
+        assert terminal.ticket.model_dump(exclude={"status"}) == ticket.model_dump(exclude={"status"})
+    else:
+        assert terminal.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
     assert frozen is not None and frozen.selection_authority_id == current.authority.selection_authority_id
     assert authority is not None
     if supersede_with_nonempty:
@@ -2636,12 +2767,79 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
     else:
         assert authority.authority.authority_outcome == "VALID_EMPTY"
-    assert [command.kind for command in final_commands] == [ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
-    assert len(venue.calls)==2 and entry_dispatched_at_ms<vacuum.fenced_at_ms
+    if partial_fill:
+        assert sum(command.kind is ExchangeCommandKind.ENTRY for command in final_commands) == 1
+        assert sum(command.kind is ExchangeCommandKind.CANCEL_ORDER for command in final_commands) == 1
+        assert sum(command.kind is ExchangeCommandKind.INITIAL_STOP for command in final_commands) == 1
+        assert len(venue.calls)==3
+    else:
+        assert [command.kind for command in final_commands] == [ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
+        assert len(venue.calls)==2
+    assert entry_dispatched_at_ms<vacuum.fenced_at_ms
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'")) == 0
+    if partial_fill:
+        from src.trading_kernel.application.maintain_ticket_lifecycle import (
+            LifecycleMaintenanceRequest,
+            TicketLifecycleFacts,
+            maintain_ticket_lifecycle,
+        )
+        from src.trading_kernel.application.reconcile_ticket import (
+            ReconcileTicketRequest,
+            reconcile_ticket,
+        )
+        from src.trading_kernel.application.settle_ticket import (
+            RecordTradeReviewRequest,
+            SettleTicketRequest,
+            record_trade_review,
+            settle_ticket,
+        )
+
+        async def safety_dispatch(offset):
+            venue.now_ms = now+offset
+            result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                dispatch_request.model_copy(update={"now_ms":now+offset}))
+            assert result.status.value == "accepted", result
+
+        await safety_dispatch(20)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            protected = await uow.aggregates.get(issued.ticket_id)
+            assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
+            assert protected.tp1_target_qty is not None and Decimal(0)<protected.tp1_target_qty<partial_qty
+            runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(ticket_id=issued.ticket_id,
+                facts=TicketLifecycleFacts(position_quantity=partial_qty-protected.tp1_target_qty,
+                    tp1_filled_quantity=protected.tp1_target_qty,tp1_average_fill_price=ticket.take_profit_prices[0],
+                    allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
+                    price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=now+21),now_ms=now+21))
+        assert runner.status.value == "break_even_requested", runner
+        await safety_dispatch(22)
+        await safety_dispatch(23)
+        truly_flat = flat.model_copy(update={"quantity":Decimal(0),"average_entry_price":None,
+            "observed_at_ms":now+24})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,snapshot=truly_flat))
+        assert external_flat.status.value == "external_flat_incident", external_flat
+        await safety_dispatch(25)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            matched = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
+                snapshot=truly_flat.model_copy(update={"observed_at_ms":now+26})))
+            settled = await settle_ticket(uow,SettleTicketRequest(ticket_id=issued.ticket_id,settled_at_ms=now+27))
+            reviewed = await record_trade_review(uow,RecordTradeReviewRequest(ticket_id=issued.ticket_id,
+                review_id=f"review:selection-partial-{group}",outcome="closed",metrics={"realized_pnl":"1.25"},
+                decision_impact={"strategy_action":"keep"},recorded_at_ms=now+28))
+            terminal = await uow.aggregates.get(issued.ticket_id)
+            reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
+            assert await uow.incidents.get_open_for_ticket(issued.ticket_id) is None
+            assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+            final_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+        assert matched.status.value == "matched" and settled.status.value == "budget_settled"
+        assert reviewed.status.value == "review_recorded"
+        assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+        assert terminal.ticket.selection_authority_id == current.authority.selection_authority_id
+        assert reservation is not None and reservation.status == "released"
+        assert sum(command.kind is ExchangeCommandKind.ENTRY for command in final_commands) == 1
 
 
 @pytest.mark.asyncio
