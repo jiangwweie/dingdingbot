@@ -2519,6 +2519,21 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                     OR greatest(ep.last_observed_at_ms,ep.comparison_last_observed_at_ms,ep.authority_recovery_last_observed_at_ms)>=(activation_source->>'first_eligible_close_time_ms')::bigint)
               ) THEN RAISE EXCEPTION 'Static NORMAL cursor evidence changed'; END IF;
               IF activation_source IS NULL OR target_id IS NULL OR g.activated_at_ms IS NULL
+                OR activation_source->>'strategy_group_id' IS DISTINCT FROM g.strategy_group_id
+                OR (activation_source->>'effective_period_anchor_ms')::bigint IS DISTINCT FROM (owner_source->>'effective_period_anchor_ms')::bigint
+                OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_controls_current o
+                  WHERE o.strategy_group_id=g.strategy_group_id AND o.entry_state='enabled'
+                    AND o.control_version=(activation_source->>'owner_control_version')::bigint
+                    AND o.updated_at_ms<=g.activated_at_ms)
+                OR NOT EXISTS (SELECT 1 FROM brc_runtime_scopes_current scoped_policy_source
+                  JOIN brc_owner_policy_current activation_policy USING(owner_policy_id)
+                  WHERE scoped_policy_source.universe_version_id=target_id AND activation_policy.enabled AND activation_policy.new_entry_submit_enabled)
+                OR EXISTS (SELECT 1 FROM brc_runtime_scopes_current scoped_policy_source
+                  JOIN brc_owner_policy_current activation_policy USING(owner_policy_id)
+                  WHERE scoped_policy_source.universe_version_id=target_id AND (NOT activation_policy.enabled OR NOT activation_policy.new_entry_submit_enabled))
+                OR activation_source->'target_event'->>'event_spec_id' IS DISTINCT FROM frozen_source.event_spec_id
+                OR activation_source->'target_event'->>'position_side' IS DISTINCT FROM frozen_source.position_side
+                OR activation_source->'target_event'->>'grant_state' IS DISTINCT FROM 'ACTIVE'
                 OR g.activated_at_ms IS DISTINCT FROM g.terminal_at_ms OR active_at IS DISTINCT FROM g.activated_at_ms
                 OR g.lease_owner IS NOT NULL OR g.lease_expires_at_ms IS NOT NULL
                 OR activation_source->>'materialization_generation_id' IS DISTINCT FROM gid
@@ -2566,6 +2581,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 OR EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id)
                 OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v WHERE v.entry_vacuum_id=activation_source->>'entry_vacuum_id'
                   AND v.source_generation_id=gid AND v.state='RESOLVED_ACTIVE' AND v.resolved_at_ms=g.activated_at_ms
+                  AND v.projection_version=(activation_source->>'vacuum_version')::bigint+1
                   AND v.fenced_at_ms=(activation_source->>'fenced_at_ms')::bigint
                   AND v.drained_at_ms=(activation_source->>'drained_at_ms')::bigint AND v.drained_at_ms IS NOT NULL)
               THEN RAISE EXCEPTION 'Static activation requires atomic current Control Vacuum and source'; END IF;
@@ -2679,6 +2695,17 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
     op.execute(sa.text("""
         CREATE FUNCTION brc_preserve_generation_source_identity_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
+          IF OLD.selection_epoch_id<>'sor-v0' AND OLD.selection_mode='static_baseline'
+            AND NEW.lifecycle_state='ACTIVE' AND OLD.lifecycle_state<>'ACTIVE' AND (
+              OLD.lifecycle_state<>'STAGED' OR OLD.lease_owner IS NULL OR OLD.lease_expires_at_ms IS NULL
+              OR OLD.lease_epoch<=0 OR NEW.lease_epoch IS DISTINCT FROM OLD.lease_epoch
+              OR NEW.activated_at_ms IS NULL OR NEW.activated_at_ms>=OLD.lease_expires_at_ms
+              OR OLD.fenced_at_ms IS NULL OR NEW.activated_at_ms<OLD.fenced_at_ms
+              OR NOT EXISTS (SELECT 1 FROM brc_generic_dynamic_selection_specs_v1 s
+                WHERE s.selection_spec_id=OLD.selection_spec_id
+                  AND NEW.activated_at_ms<OLD.fenced_at_ms+s.materialization_timeout_ms)) THEN
+            RAISE EXCEPTION 'Static activation requires live staged lease and original deadline';
+          END IF;
           IF ROW(NEW.materialization_generation_id,NEW.selection_spec_id,NEW.strategy_group_id,NEW.strategy_version_id,
               NEW.selection_mode,NEW.selection_snapshot_id,NEW.rollback_baseline_id,NEW.period_anchor_ms,
               NEW.desired_member_count,NEW.semantic_digest,NEW.created_at_ms,NEW.selection_epoch_id,NEW.selection_control_version)

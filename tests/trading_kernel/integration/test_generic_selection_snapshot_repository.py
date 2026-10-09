@@ -1467,6 +1467,42 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
                 restored_checkpoint = await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
                 assert restored_checkpoint is None or restored_checkpoint.recovery_id!=proof.recovery_id
     actual_execute = sa.ext.asyncio.AsyncConnection.execute
+    if second_entry_fault is None:
+        async def pause_policy_after_application_check(connection,statement,*args,**kwargs):
+            if (getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_generations"
+                and getattr(statement,"is_update",False) and statement.compile().params.get("lifecycle_state")=="ACTIVE"):
+                await actual_execute(connection,sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false WHERE owner_policy_id='policy-main'"))
+            return await actual_execute(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"execute",new=pause_policy_after_application_check), pytest.raises(sa.exc.DBAPIError,match="Static activation requires atomic current Control Vacuum and source"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
+        async def expire_static_lease_after_application_check(connection,statement,*args,**kwargs):
+            if (getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_generations"
+                and getattr(statement,"is_update",False) and statement.compile().params.get("lifecycle_state")=="ACTIVE"):
+                await actual_execute(connection,sa.text("UPDATE brc_strategy_universe_materialization_generations SET lease_expires_at_ms=:at WHERE materialization_generation_id=:gid"),
+                    {"at":due+6,"gid":created.materialization_generation_id})
+            return await actual_execute(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"execute",new=expire_static_lease_after_application_check), pytest.raises(sa.exc.DBAPIError,match="Static activation requires live staged lease"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
+        for mutation in ({"owner_control_version":999},{"strategy_group_id":"SOR-001"},
+                         {"vacuum_version":proof.vacuum_version+1},
+                         {"effective_period_anchor_ms":anchor+source.spec.cadence_hours*HOUR},
+                         {"target_event":{**proof.target_event.model_dump(mode="json"),"position_side":"long" if source.spec.position_side=="short" else "short"}}):
+            async def forge_static_identity_payload(connection,statement,*args,changes=mutation,**kwargs):
+                if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
+                    params=statement.compile().params
+                    if params.get("event_type")=="ACTIVE" and "static_activation_proof" in params.get("payload",{}):
+                        payload=params["payload"]
+                        statement=statement.values(payload={**payload,"static_activation_proof":{**payload["static_activation_proof"],**changes}})
+                return await actual_execute(connection,statement,*args,**kwargs)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+                sa.ext.asyncio.AsyncConnection,"execute",new=forge_static_identity_payload), pytest.raises(sa.exc.DBAPIError):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_selection_control(group)==scheduled
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==authority
+                assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
     async def omit_static_cursor_payload(connection, statement, *args, **kwargs):
         if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
             params = statement.compile().params
@@ -11011,7 +11047,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 with pytest.raises(RuntimeError,match="current authority"):
                     await observed_uow.signals.advance_recovery_observation(runtime_scope_id=recovery_scope,
                         selection_authority_id="authority:wrong",observed_at_ms=first_close,detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=first_close)
-                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[first_close+1,committed_recovery.expires_at_ms])), pytest.raises(RuntimeError,match="expired"):
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(side_effect=[first_close+1,committed_recovery.expires_at_ms])), pytest.raises(RuntimeError,match="latest close changed during commit"):
                     await observed_uow.signals.advance_recovery_observation(runtime_scope_id=recovery_scope,
                         selection_authority_id=committed_recovery.selection_authority_id,observed_at_ms=first_close,detector_status=DetectorStatus.TRIGGERED,occurred_at_ms=first_close)
                 old_checkpoint = await observed_uow.signals.get_authority_recovery_checkpoint(proposal.observation_cursors[0].episode_domain_key)
