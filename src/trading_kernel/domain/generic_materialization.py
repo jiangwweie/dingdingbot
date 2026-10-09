@@ -9,12 +9,17 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBinding
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.exposure_episode import (
+    LockedObservationCursor,
+    build_episode_domain_key,
+)
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
     MaterializationGenerationClaimStatus,
     MaterializationGenerationState,
+    selected_member_set_digest,
 )
 
 
@@ -321,6 +326,97 @@ class GenericStaticMaterializationGeneration(BaseModel):
                 raise ValueError("Static Generation fallback requires terminal evidence")
         elif self.fallback_reason_code is not None:
             raise ValueError("Static Generation nonfallback cannot claim reason")
+        return self
+
+
+class GenericStaticActivationProof(BaseModel):
+    """Locked handoff evidence only; preparing it grants no Entry authority."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_spec_id: str
+    strategy_group_id: str
+    selection_epoch_id: str
+    selection_control_version: int
+    owner_control_version: int
+    authorization_id: str
+    owner_authorized_at_ms: int
+    rollback_baseline_id: str
+    materialization_generation_id: str
+    effective_period_anchor_ms: int
+    entry_vacuum_id: str
+    vacuum_version: int
+    fenced_at_ms: int
+    drained_at_ms: int
+    previous_event: MaterializationEventBaseline
+    source_selection_authority_id: str
+    target_event: AuthorityEventBinding
+    transition_rule: Literal["NORMAL_TRANSITION","RECOVERY_TRANSITION"]
+    recovery_reason: Literal["AUTHORITY_GAP","OWNER_INTERRUPTION","RECOVERY_PROVENANCE"] | None
+    first_eligible_close_time_ms: int
+    prepared_at_ms: int
+    comparison_universe_id: str | None
+    comparison_transition_revision: int | None
+    observation_cursors: tuple[LockedObservationCursor,...]
+
+    @property
+    def episode_rebase_required(self) -> bool:
+        return self.transition_rule=="RECOVERY_TRANSITION"
+
+    @property
+    def comparison_rebase_required(self) -> bool:
+        return self.comparison_universe_id!=self.previous_event.comparison_universe_id
+
+    @property
+    def result_selection_control_version(self) -> int:
+        return self.selection_control_version+1
+
+    @property
+    def semantic_digest(self) -> str:
+        return canonical_digest(self.model_dump(mode="json"))
+
+    @model_validator(mode="after")
+    def _contract(self) -> GenericStaticActivationProof:
+        spec = generic_selection_spec(self.strategy_group_id)
+        ids = (self.selection_spec_id,self.selection_epoch_id,self.authorization_id,self.rollback_baseline_id,
+            self.materialization_generation_id,self.entry_vacuum_id,self.source_selection_authority_id)
+        if any(not value.strip() or value!=value.strip() or len(value)>160 for value in ids) or (
+            self.selection_spec_id!=spec.selection_spec_id or self.selection_epoch_id=="sor-v0"
+            or self.materialization_generation_id!=GenericStaticMaterializationGeneration.id_for_authorization(self.authorization_id)
+            or re.fullmatch(r"rollback-baseline:[0-9a-f]{64}",self.rollback_baseline_id) is None
+            or min(self.selection_control_version,self.owner_control_version,self.vacuum_version)<=0
+            or self.effective_period_anchor_ms<=0 or self.effective_period_anchor_ms%(spec.cadence_hours*3600000)
+            or not 0<self.owner_authorized_at_ms<self.effective_period_anchor_ms
+            or not self.effective_period_anchor_ms+3600000<=self.fenced_at_ms<=self.drained_at_ms<=self.prepared_at_ms):
+            raise ValueError("Static activation source/time identity differs")
+        for event in (self.previous_event,self.target_event):
+            if (event.event_spec_id,event.position_side)!=(spec.event_spec_id,spec.position_side) or event.grant_state.value!="ACTIVE":
+                raise ValueError("Static activation Event identity differs")
+        if self.target_event.universe_version_id==self.previous_event.universe_version_id:
+            raise ValueError("Static activation requires a new Universe")
+        members = tuple(cursor.exchange_instrument_id for cursor in self.observation_cursors)
+        if not 1<=len(members)<=10 or tuple(sorted(set(members)))!=members or selected_member_set_digest(members)!=self.target_event.member_set_digest:
+            raise ValueError("Static activation complete member coverage differs")
+        expected_close = self.prepared_at_ms//3600000*3600000
+        if self.transition_rule=="RECOVERY_TRANSITION":
+            expected_close += 3600000
+            if self.recovery_reason is None:
+                raise ValueError("Static recovery requires classified provenance")
+        elif self.recovery_reason is not None or self.owner_authorized_at_ms>=expected_close or self.prepared_at_ms<=expected_close:
+            raise ValueError("Static normal close requires precommitted Owner input")
+        if self.first_eligible_close_time_ms!=expected_close or self.first_eligible_close_time_ms<self.effective_period_anchor_ms+3600000:
+            raise ValueError("Static activation close identity differs")
+        for cursor in self.observation_cursors:
+            if cursor.episode_domain_key!=build_episode_domain_key(event_spec_id=spec.event_spec_id,
+                exchange_instrument_id=cursor.exchange_instrument_id,position_side=spec.position_side) or (
+                cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>=self.first_eligible_close_time_ms):
+                raise ValueError("Static activation close already consumed or scope changed")
+        if spec.strategy_group_id in {"MPG-001","MI-001"}:
+            expected_comparison = "comparison:"+canonical_digest({"exchange_instrument_ids":members})[7:]
+            old_revision = self.previous_event.comparison_transition_revision
+            if self.comparison_universe_id!=expected_comparison or old_revision is None or self.comparison_transition_revision!=old_revision+int(
+                self.comparison_universe_id!=self.previous_event.comparison_universe_id):
+                raise ValueError("Static activation comparison transition differs")
+        elif self.comparison_universe_id is not None or self.comparison_transition_revision is not None:
+            raise ValueError("Static noncomparative activation cannot claim comparison")
         return self
 
 

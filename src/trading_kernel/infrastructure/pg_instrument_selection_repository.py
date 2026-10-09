@@ -49,6 +49,7 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
+    GenericStaticActivationProof,
     GenericStaticMaterializationGeneration,
     GenericStaticRollbackBaseline,
     GenericStaticRollbackEvent,
@@ -138,7 +139,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     materialization_generation_event_baselines,
     materialization_generation_projection_columns,
     owner_authorizations,
+    owner_policy_current,
     runtime_release_compatibility_facts,
+    runtime_scopes_current,
     selection_authority_current,
     selection_authority_event_bindings,
     selection_authority_gap_audit_events,
@@ -1925,6 +1928,8 @@ class PostgresInstrumentSelectionRepository:
         owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
             strategy_entry_controls_current.c.strategy_group_id==initial.strategy_group_id).with_for_update())).mappings().one_or_none()
         control = await self.get_selection_control(initial.strategy_group_id,for_update=True)
+        await self.get_current_entry_vacuum(strategy_group_id=initial.strategy_group_id,
+            selection_spec_id=initial.selection_spec_id,for_update=True)
         current = await self.get_generic_static_materialization_generation(materialization_generation_id,for_update=True)
         if owner is None or owner["entry_state"]!="enabled" or current is None or control is None or (
             control.selection_spec_id!=current.selection_spec_id
@@ -2060,6 +2065,113 @@ class PostgresInstrumentSelectionRepository:
             entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RECOVERY_REQUIRED",
             payload={"reason_code":reason_code,"source_generation_id":materialization_generation_id},occurred_at_ms=now))
         return failed
+
+    async def prepare_generic_static_activation_proof(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int,
+    ) -> GenericStaticActivationProof:
+        from src.trading_kernel.application.advance_strategy_universe import (
+            UniverseActivationOperation,
+            UniverseActivationRequest,
+            UniverseActivationStatus,
+        )
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        generation = await self._require_current_static_generation(materialization_generation_id)
+        now = await self.read_authority_clock_ms()
+        spec = await self.get_generic_spec(generation.selection_spec_id)
+        if generation.lifecycle_state is not MaterializationGenerationState.STAGED or generation.fenced_at_ms is None or (
+            generation.lease_owner!=worker_id or generation.lease_epoch!=lease_epoch
+            or generation.lease_expires_at_ms is None or now>=generation.lease_expires_at_ms
+            or now>=generation.fenced_at_ms+spec.materialization_timeout_ms):
+            raise SelectionJobConflict("Static activation requires current staged lease and deadline")
+        vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,
+            selection_spec_id=generation.selection_spec_id,for_update=True)
+        if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or (
+            vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None
+            or vacuum.resolved_at_ms is not None or vacuum.fenced_at_ms!=generation.fenced_at_ms
+            or await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)):
+            raise SelectionJobConflict("Static activation requires exact completed drain")
+        source = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
+        if source is None or source.authority.selection_epoch_id!=generation.selection_epoch_id or (
+            source.authority.selection_control_version!=generation.selection_control_version):
+            raise SelectionJobConflict("Static activation previous Authority changed")
+        previous = generation.previous_events[0]
+        if not source.authority.blocks_new_entry and (source.authority.event_binding.event_spec_id!=previous.event_spec_id
+            or source.authority.event_binding.position_side!=previous.position_side
+            or source.authority.event_binding.universe_version_id!=previous.universe_version_id
+            or source.authority.event_binding.member_set_digest!=previous.member_set_digest
+            or source.authority.comparison_universe_id!=previous.comparison_universe_id
+            or source.authority.comparison_transition_revision!=previous.comparison_transition_revision):
+            raise SelectionJobConflict("Static activation previous Authority scope changed")
+        baseline = await self.get_generic_static_rollback_baseline(generation.rollback_baseline_id)
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)
+        if len(targets)!=1 or targets[0].lifecycle_state.value!="staged":
+            raise SelectionJobConflict("Static activation exact staged target missing")
+        target_id = targets[0].universe_version_id
+        members = await universes.get_members(target_id)
+        if selected_member_set_digest(members)!=baseline.source_event.member_set_digest:
+            raise SelectionJobConflict("Static activation target differs from baseline")
+        certified = await universes.try_activate(UniverseActivationRequest(universe_version_id=target_id,
+            attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_STAGED,
+            materialization_generation_id=materialization_generation_id,
+            materialization_lease_owner=worker_id,materialization_lease_epoch=lease_epoch))
+        if certified.status is not UniverseActivationStatus.STAGED:
+            raise SelectionJobConflict("Static activation target not ready: "+str(certified.reason_code))
+        scopes = (await self._connection.execute(sa.select(runtime_scopes_current.c.owner_policy_id).where(
+            runtime_scopes_current.c.universe_version_id==target_id).distinct().limit(2))).scalars().all()
+        if len(scopes)!=1:
+            raise SelectionJobConflict("Static activation Policy scope changed")
+        policy = (await self._connection.execute(sa.select(owner_policy_current).where(
+            owner_policy_current.c.owner_policy_id==scopes[0]).with_for_update())).mappings().one_or_none()
+        if policy is None or not policy["enabled"] or not policy["new_entry_submit_enabled"]:
+            raise SelectionJobConflict("Static activation Policy blocks Entry")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==generation.strategy_group_id))).mappings().one()
+        authorization = (await self._connection.execute(sa.select(owner_authorizations).where(
+            owner_authorizations.c.authorization_id==generation.authorization_id))).mappings().one()
+        signals = PostgresSignalRepository(self._connection)
+        reason: Literal["AUTHORITY_GAP","OWNER_INTERRUPTION","RECOVERY_PROVENANCE"] | None = None
+        if source.authority.blocks_new_entry or source.authority.expires_at_ms<generation.effective_period_anchor_ms+3600000:
+            reason = "AUTHORITY_GAP"
+        elif source.authority.owner_control_version!=owner["control_version"] or await signals.selection_authority_was_interrupted(strategy_group_id=generation.strategy_group_id,
+            selection_spec_id=generation.selection_spec_id,owner_policy_id=scopes[0],after_ms=source.authority.created_at_ms,
+            through_ms=now,excluded_entry_vacuum_id=vacuum.entry_vacuum_id):
+            reason = "OWNER_INTERRUPTION"
+        elif isinstance(source.authority,GenericRecoveryAuthority) or source.authority.continued_from_recovery_authority_id is not None:
+            blocker = await self.generic_recovery_transition_blocker(selection_spec_id=generation.selection_spec_id,target_members=members)
+            if blocker=="GENERIC_RECOVERY_REBASE_PENDING":
+                reason = "RECOVERY_PROVENANCE"
+            elif blocker is not None:
+                raise SelectionJobConflict("Static activation recovery source changed: "+blocker)
+        cursors = await signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,exchange_instrument_ids=members,
+            selection_mode="static_baseline",evaluated_at_ms=now)
+        comparison_id = baseline.source_event.comparison_universe_id
+        old_comparison = generation.previous_events[0].comparison_universe_id
+        old_revision = generation.previous_events[0].comparison_transition_revision
+        prepared = await self.read_authority_clock_ms()
+        if prepared<now or prepared//3600000!=now//3600000 or prepared>=generation.fenced_at_ms+spec.materialization_timeout_ms or (
+            generation.lease_expires_at_ms is None or prepared>=generation.lease_expires_at_ms):
+            raise SelectionJobConflict("Static activation preparation crossed close/deadline")
+        return GenericStaticActivationProof(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,
+            selection_epoch_id=generation.selection_epoch_id,selection_control_version=generation.selection_control_version,
+            owner_control_version=owner["control_version"],authorization_id=generation.authorization_id,
+            owner_authorized_at_ms=authorization["authorized_at_ms"],rollback_baseline_id=generation.rollback_baseline_id,
+            materialization_generation_id=materialization_generation_id,effective_period_anchor_ms=generation.effective_period_anchor_ms,
+            entry_vacuum_id=vacuum.entry_vacuum_id,vacuum_version=vacuum.projection_version,
+            fenced_at_ms=vacuum.fenced_at_ms,drained_at_ms=vacuum.drained_at_ms,
+            previous_event=generation.previous_events[0],source_selection_authority_id=source.authority.selection_authority_id,
+            target_event=AuthorityEventBinding(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+                grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=target_id,member_set_digest=baseline.source_event.member_set_digest),
+            transition_rule="NORMAL_TRANSITION" if reason is None else "RECOVERY_TRANSITION",recovery_reason=reason,
+            first_eligible_close_time_ms=(prepared//3600000+int(reason is not None))*3600000,prepared_at_ms=prepared,
+            comparison_universe_id=comparison_id,comparison_transition_revision=None if old_revision is None else (
+                old_revision+int(comparison_id!=old_comparison)),observation_cursors=cursors)
 
     async def get_generic_materialization_generation(
         self, materialization_generation_id: str, *, for_update: bool = False,

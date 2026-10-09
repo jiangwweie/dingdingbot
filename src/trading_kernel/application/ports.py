@@ -93,6 +93,7 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
+    GenericStaticActivationProof,
     GenericStaticMaterializationGeneration,
     GenericStaticRollbackBaseline,
 )
@@ -1315,6 +1316,7 @@ class SignalRepository(Protocol):
         owner_policy_id: str,
         after_ms: int,
         through_ms: int,
+        excluded_entry_vacuum_id: str | None = None,
     ) -> bool: ...
 
     async def is_strategy_trigger_suppressed(
@@ -1772,6 +1774,9 @@ class InstrumentSelectionRepository(Protocol):
     async def fail_generic_static_materialization_generation(self, materialization_generation_id: str, *,
         worker_id: str, lease_epoch: int, expected_projection_version: int,
         reason_code: str) -> GenericStaticMaterializationGeneration: ...
+
+    async def prepare_generic_static_activation_proof(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int) -> GenericStaticActivationProof: ...
 
     async def recover_expired_dynamic_activation(
         self,

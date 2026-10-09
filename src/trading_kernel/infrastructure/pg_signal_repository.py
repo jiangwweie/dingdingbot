@@ -1557,7 +1557,9 @@ class PostgresSignalRepository:
         owner_policy_id: str,
         after_ms: int,
         through_ms: int,
+        excluded_entry_vacuum_id: str | None = None,
     ) -> bool:
+        """Default trading checks see every fence; planned handoff may exclude its exact own Vacuum."""
         if after_ms <= 0 or through_ms < after_ms:
             raise ValueError("Selection Authority interruption window is invalid")
         vacuum = await self._connection.scalar(
@@ -1570,6 +1572,8 @@ class PostgresSignalRepository:
                 == selection_spec_id,
                 strategy_entry_vacuums_current.c.fenced_at_ms > after_ms,
                 strategy_entry_vacuums_current.c.fenced_at_ms <= through_ms,
+                (sa.true() if excluded_entry_vacuum_id is None else
+                    strategy_entry_vacuums_current.c.entry_vacuum_id!=excluded_entry_vacuum_id),
             )
             .limit(1)
         )

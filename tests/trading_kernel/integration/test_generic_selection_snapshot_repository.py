@@ -1264,6 +1264,80 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         assert await uow.instrument_selection.get_selection_control(group) == scheduled
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            claim = await uow.instrument_selection.claim_generic_static_materialization_generation(created.materialization_generation_id,
+                worker_id="static-proof-preparer",now_ms=due+6,lease_duration_ms=30000)
+            assert claim is not None
+            with pytest.raises(SelectionJobConflict,match="staged lease"):
+                await uow.instrument_selection.prepare_generic_static_activation_proof(created.materialization_generation_id,
+                    worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch+1)
+            proof = await uow.instrument_selection.prepare_generic_static_activation_proof(created.materialization_generation_id,
+                worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch)
+            assert proof.materialization_generation_id == created.materialization_generation_id
+            assert proof.authorization_id == scheduled.pending_authorization_id
+            assert proof.source_selection_authority_id == authority.authority.selection_authority_id
+            assert proof.target_event.universe_version_id == target_uid
+            assert proof.target_event.member_set_digest == baseline.source_event.member_set_digest
+            assert proof.previous_event.universe_version_id == uid
+            assert proof.result_selection_control_version == scheduled.control_version+1
+            if group in {"MPG-001","MI-001"}:
+                assert proof.transition_rule == "RECOVERY_TRANSITION"
+                assert proof.recovery_reason == "AUTHORITY_GAP"
+                assert proof.first_eligible_close_time_ms > proof.prepared_at_ms
+                assert proof.comparison_universe_id == baseline.source_event.comparison_universe_id
+                assert proof.comparison_transition_revision == authority.authority.comparison_transition_revision+1
+            else:
+                assert proof.transition_rule == "NORMAL_TRANSITION"
+                assert proof.first_eligible_close_time_ms == anchor+HOUR
+            from src.trading_kernel.infrastructure.pg_signal_repository import (
+                PostgresSignalRepository,
+            )
+            assert uow._connection is not None
+            signal_repo = PostgresSignalRepository(uow._connection)
+            assert await signal_repo.selection_authority_was_interrupted(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id,owner_policy_id="policy-main",
+                after_ms=authority.authority.created_at_ms,through_ms=due+6)
+            assert not await signal_repo.selection_authority_was_interrupted(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id,owner_policy_id="policy-main",
+                after_ms=authority.authority.created_at_ms,through_ms=due+6,excluded_entry_vacuum_id=proof.entry_vacuum_id)
+            assert await signal_repo.selection_authority_was_interrupted(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id,owner_policy_id="policy-main",
+                after_ms=authority.authority.created_at_ms,through_ms=due+6,excluded_entry_vacuum_id="vacuum:wrong")
+            assert await uow.instrument_selection.get_selection_control(group) == scheduled
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+            assert uow._connection is not None
+            policy_probe = await uow._connection.begin_nested()
+            await uow._connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false "
+                "WHERE owner_policy_id='policy-main'"))
+            with pytest.raises(SelectionJobConflict,match="Policy blocks Entry"):
+                await uow.instrument_selection.prepare_generic_static_activation_proof(created.materialization_generation_id,
+                    worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch)
+            await policy_probe.rollback()
+            from src.trading_kernel.domain.exposure_episode import (
+                advance_exposure_episode,
+            )
+            cursor_probe = await uow._connection.begin_nested()
+            member_cursor = proof.observation_cursors[0]
+            old_episode = await uow.signals.lock_exposure_episode(member_cursor.episode_domain_key)
+            observed_close = proof.prepared_at_ms//HOUR*HOUR
+            consumption = advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),
+                current=old_episode,detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,
+                observed_at_ms=observed_close,exchange_instrument_id=member_cursor.exchange_instrument_id)
+            await uow.signals.save_exposure_episode(consumption.current,
+                expected_version=0 if old_episode is None else old_episode.projection_version)
+            if proof.transition_rule=="NORMAL_TRANSITION":
+                with pytest.raises(ValueError,match="consumed"):
+                    await uow.instrument_selection.prepare_generic_static_activation_proof(created.materialization_generation_id,
+                        worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch)
+            else:
+                future_proof = await uow.instrument_selection.prepare_generic_static_activation_proof(created.materialization_generation_id,
+                    worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch)
+                assert future_proof.first_eligible_close_time_ms>observed_close
+            await cursor_probe.rollback()
+            assert await uow.instrument_selection.release_generic_materialization_generation_lease(created.materialization_generation_id,
+                worker_id="static-proof-preparer",lease_epoch=claim.lease_epoch)
+            finalized_staging = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
     from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.domain.owner_control import StrategyEntryState
     async with PostgresKernelUnitOfWork(database) as uow:

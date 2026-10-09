@@ -121,3 +121,59 @@ def test_valid_empty_has_no_materialization_generation() -> None:
     with pytest.raises(ValueError, match="empty"):
         GenericMaterializationGeneration.build(snapshot=compute_generic_selection(source), previous_events=(), selection_control_version=2,
             created_at_ms=CUTOFF+HOUR+1)
+
+
+@pytest.mark.parametrize("rule", ["NORMAL_TRANSITION","RECOVERY_TRANSITION"])
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+def test_static_activation_proof_keeps_normal_and_recovery_close_rules_distinct(rule: str, group: str) -> None:
+    from src.trading_kernel.domain.exposure_episode import (
+        LockedObservationCursor,
+        build_episode_domain_key,
+    )
+    from src.trading_kernel.domain.generic_materialization import (
+        GenericStaticActivationProof,
+    )
+    from src.trading_kernel.domain.selection_authority import AuthorityEventBinding
+
+    spec = inputs(group).spec
+    member = spec.candidate_ids[0]
+    comparative = group in {"MPG-001","MI-001"}
+    prior = MaterializationEventBaseline(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+        grant_state="ACTIVE",universe_version_id="universe:dynamic",member_set_digest=selected_member_set_digest((member,)),
+        comparison_universe_id="comparison:"+canonical_digest({"exchange_instrument_ids":spec.candidate_ids})[7:] if comparative else None,
+        comparison_transition_revision=1 if comparative else None)
+    auth = "owner:static"
+    at = CUTOFF+HOUR+8_000
+    close = CUTOFF+HOUR if rule=="NORMAL_TRANSITION" else CUTOFF+2*HOUR
+    proof = GenericStaticActivationProof(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,
+        selection_epoch_id="epoch:1",selection_control_version=3,owner_control_version=1,
+        authorization_id=auth,owner_authorized_at_ms=CUTOFF-1,rollback_baseline_id="rollback-baseline:"+"a"*64,
+        materialization_generation_id=GenericStaticMaterializationGeneration.id_for_authorization(auth),
+        effective_period_anchor_ms=CUTOFF,entry_vacuum_id="vacuum:static",vacuum_version=3,
+        fenced_at_ms=CUTOFF+HOUR+2,drained_at_ms=CUTOFF+HOUR+3,
+        previous_event=prior,source_selection_authority_id="authority:dynamic",target_event=AuthorityEventBinding(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+            grant_state="ACTIVE",universe_version_id="universe:static-new",member_set_digest=prior.member_set_digest),
+        transition_rule=rule,recovery_reason=None if rule=="NORMAL_TRANSITION" else "AUTHORITY_GAP",
+        first_eligible_close_time_ms=close,prepared_at_ms=at,
+        comparison_universe_id="comparison:"+canonical_digest({"exchange_instrument_ids":(member,)})[7:] if comparative else None,
+        comparison_transition_revision=2 if comparative else None,
+        observation_cursors=(LockedObservationCursor(exchange_instrument_id=member,
+            episode_domain_key=build_episode_domain_key(event_spec_id=spec.event_spec_id,
+                exchange_instrument_id=member,position_side=spec.position_side),episode_version=0,last_observed_at_ms=None,
+            comparison_checkpoint_version=0,authority_recovery_checkpoint_version=0),))
+    assert proof.episode_rebase_required is (rule=="RECOVERY_TRANSITION")
+    assert proof.comparison_rebase_required is comparative
+    assert proof.result_selection_control_version == 4
+    wrong_close = CUTOFF+HOUR if rule=="RECOVERY_TRANSITION" else CUTOFF+2*HOUR
+    with pytest.raises(ValueError,match="close"):
+        GenericStaticActivationProof.model_validate({**proof.model_dump(),"first_eligible_close_time_ms":wrong_close})
+    observed = CUTOFF+HOUR
+    consumed = proof.observation_cursors[0].model_copy(update={"episode_version":1,"last_observed_at_ms":observed})
+    values = {**proof.model_dump(),"observation_cursors":(consumed,)}
+    if rule=="NORMAL_TRANSITION":
+        with pytest.raises(ValueError,match="consumed"):
+            GenericStaticActivationProof.model_validate(values)
+    else:
+        assert GenericStaticActivationProof.model_validate(values).first_eligible_close_time_ms>observed
+    with pytest.raises(ValueError,match="close"):
+        GenericStaticActivationProof.model_validate({**proof.model_dump(),"prepared_at_ms":at+HOUR})
