@@ -3015,7 +3015,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
-        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
+        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket")),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -6398,7 +6398,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection"])
+@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket"])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -6641,6 +6641,31 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
             notional_coefficient=Decimal(1),notional_coefficient_certified=True,
             observed_at_ms=now_ms,valid_until_ms=now_ms+60_000)
+    if fault_stage == "stale_before_claim":
+        stale_risk = AccountRiskSnapshot.create(**{
+            **risk.model_dump(exclude={"snapshot_digest"}),
+            "observed_at_ms":now_ms-60_000,"valid_until_ms":now_ms-1})
+        stale_admission = admission.model_copy(update={
+            "account_risk_snapshot":stale_risk,
+            "observed_at_ms":now_ms-60_000,"valid_until_ms":now_ms-1})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            refused = await issue_ready_signal(uow,IssueReadySignalRequest(
+                signal_event_id=signal_event_id,admission_snapshot=stale_admission,
+                claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
+        assert refused.status.value == "signal_invalid_or_stale", refused
+        async with PostgresKernelUnitOfWork(database) as uow:
+            decision = await uow.admission_decisions.get_for_signal(signal_event_id)
+            assert decision is not None
+            assert decision.decision_status.value == "rejected"
+            assert decision.selection_authority_id == selection_authority_id
+            assert decision.entry_admission_snapshot_digest == stale_admission.digest()
+            assert decision.capacity_claim_id is None and decision.ticket_id is None
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_capacity_claims")) == 0
+        return
     if fault_stage == "comparison_switch_before_claim":
         async with database.begin() as conn:
             await conn.execute(sa.text("""
@@ -6675,7 +6700,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection"}
+    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket"}
     if fault_stage == "between_claim_ticket":
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -6698,11 +6723,41 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    async with PostgresKernelUnitOfWork(database) as uow:
-        issued = await issue_ready_signal(uow,IssueReadySignalRequest(
-            signal_event_id=signal_event_id,admission_snapshot=admission,
-            claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
-            schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
+    async def issue_natural_signal():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            return await issue_ready_signal(uow,IssueReadySignalRequest(
+                signal_event_id=signal_event_id,admission_snapshot=admission,
+                claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
+
+    if fault_stage == "pending_static_between_claim_ticket":
+        from src.trading_kernel.application.issue_ticket import (
+            issue_ticket as actual_issue_ticket,
+        )
+        from src.trading_kernel.application.owner_control import (
+            stage_generic_static_selection_mode,
+        )
+
+        async def schedule_after_claim(uow, issue_request):
+            assert issue_request.capacity_claim.selection_authority_id == selection_authority_id
+            async with PostgresKernelUnitOfWork(database) as owner_uow:
+                control = await owner_uow.instrument_selection.get_selection_control(group)
+                assert control is not None and control.rollback_baseline_id is not None
+                cadence = inputs(group).spec.cadence_hours*HOUR
+                await stage_generic_static_selection_mode(owner_uow,strategy_group_id=group,
+                    rollback_baseline_id=control.rollback_baseline_id,
+                    selection_epoch_id=control.selection_epoch_id,
+                    effective_period_anchor_ms=((now_ms+1)//cadence+1)*cadence,
+                    authentication_strength="totp_step_up",
+                    request=ControlMutationRequest(expected_version=control.control_version,
+                        reason="future_static_intent_during_claim",
+                        idempotency_key=f"static:during-claim:{group}",owner_identity="owner",now_ms=now_ms+1))
+            return await actual_issue_ticket(uow,issue_request)
+
+        with patch("src.trading_kernel.application.issue_ready_signal.issue_ticket",new=schedule_after_claim):
+            issued = await issue_natural_signal()
+    else:
+        issued = await issue_natural_signal()
     assert issued.status.value == "issued", issued
     async with PostgresKernelUnitOfWork(database) as uow:
         ticket = await uow.tickets.get(issued.ticket_id)
@@ -6710,6 +6765,14 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         assert ticket is not None and claim is not None
         assert ticket.selection_authority_id == selection_authority_id
         assert claim.selection_authority_id == selection_authority_id
+        if fault_stage == "pending_static_between_claim_ticket":
+            control = await uow.instrument_selection.get_selection_control(group)
+            current = await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id)
+            assert control.pending_selection_mode.value == "static_baseline"
+            assert control.selection_mode.value == "dynamic_selection"
+            assert current.authority.selection_authority_id == selection_authority_id
+            assert current.authority.selection_control_version == control.control_version
+            assert current.authority.event_binding.universe_version_id == universe_version_id
 
     class ActionFacts:
         async def read_entry_admission_snapshot(self, request):
