@@ -1837,19 +1837,6 @@ class PostgresInstrumentSelectionRepository:
             if existing.semantic_digest!=generation.semantic_digest:
                 raise SelectionJobConflict("Generation already exists with different frozen facts")
             return existing
-        actionable = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
-            strategy_universe_materialization_generations.c.strategy_group_id==generation.strategy_group_id,
-            strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED")),
-        ).limit(2).with_for_update())).mappings().all()
-        if len(actionable)>1:
-            raise SelectionJobConflict("multiple actionable Generic Generations")
-        superseded: list[GenericMaterializationGeneration] = []
-        for row in actionable:
-            prior_generation = await self.get_generic_materialization_generation(row["materialization_generation_id"])
-            if (prior_generation is None or prior_generation.lifecycle_state is not MaterializationGenerationState.PENDING
-                or prior_generation.fenced_at_ms is not None or prior_generation.period_anchor_ms>=generation.period_anchor_ms):
-                raise SelectionJobConflict("existing Generation requires coordinated handoff")
-            superseded.append(prior_generation)
         for previous in generation.previous_events:
             if previous.grant_state.value == "ACTIVE":
                 current = (await self._connection.execute(sa.select(strategy_universe_current).where(
@@ -1877,20 +1864,9 @@ class PostgresInstrumentSelectionRepository:
                     raise SelectionJobConflict("Generation previous comparison changed")
         # All business validation precedes mutation, including supersession.
         values = generation.model_dump(mode="json",exclude={"previous_events"})
-        for prior_generation in superseded:
-            changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
-                strategy_universe_materialization_generations.c.materialization_generation_id==prior_generation.materialization_generation_id,
-                strategy_universe_materialization_generations.c.projection_version==prior_generation.projection_version,
-            ).values(lifecycle_state="SUPERSEDED",terminal_at_ms=generation.created_at_ms,
-                projection_version=prior_generation.projection_version+1,lease_owner=None,lease_expires_at_ms=None))
-            if changed.rowcount!=1:
-                raise SelectionJobConflict("pending Generation changed before supersession")
-            sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
-                strategy_universe_materialization_events.c.materialization_generation_id==prior_generation.materialization_generation_id)) or 0)+1
-            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
-                materialization_event_id="materialization-event:"+canonical_digest({"generation":prior_generation.materialization_generation_id,"sequence":sequence})[7:],
-                materialization_generation_id=prior_generation.materialization_generation_id,event_sequence=sequence,event_type="SUPERSEDED",
-                payload={"replacement_generation_id":generation.materialization_generation_id,"reason_code":"NEWER_EFFECTIVE_SELECTION"},occurred_at_ms=generation.created_at_ms))
+        await self._supersede_unfenced_generic_predecessors(snapshot,
+            selection_control_version=generation.selection_control_version,
+            superseded_at_ms=generation.created_at_ms,replacement_generation_id=generation.materialization_generation_id)
         await self._connection.execute(sa.insert(strategy_universe_materialization_generations).values(
             **values,rollback_baseline_id=None,semantic_digest=generation.semantic_digest))
         await self._connection.execute(sa.insert(materialization_generation_event_baselines),[
@@ -1907,6 +1883,43 @@ class PostgresInstrumentSelectionRepository:
             payload={"selection_snapshot_id":generation.selection_snapshot_id,"selection_epoch_id":generation.selection_epoch_id,
                 "desired_member_count":generation.desired_member_count},occurred_at_ms=generation.created_at_ms))
         return generation
+
+    async def _supersede_unfenced_generic_predecessors(self, snapshot: GenericSelectionSnapshotV1, *,
+        selection_control_version: int, superseded_at_ms: int, replacement_generation_id: str | None = None,
+    ) -> None:
+        """Every newer outcome invalidates obsolete unfenced work.
+
+        Called inside the outcome transaction with the Selection Control locked.
+        Never releases a fence or supersedes a drain instead of completing it.
+        """
+        rows = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.strategy_group_id==snapshot.strategy_group_id,
+            strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED")),
+        ).limit(2).with_for_update())).mappings().all()
+        if len(rows)>1:
+            raise SelectionJobConflict("multiple actionable Generic Generations")
+        for row in rows:
+            old = await self.get_generic_materialization_generation(row["materialization_generation_id"])
+            if old is None or old.lifecycle_state not in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED} or (
+                old.fenced_at_ms is not None or old.period_anchor_ms>=snapshot.feature_cutoff_at_ms
+                or old.selection_spec_id!=snapshot.selection_spec_id or old.selection_epoch_id!=snapshot.selection_epoch_id
+                or old.selection_control_version!=selection_control_version or superseded_at_ms<old.created_at_ms):
+                raise SelectionJobConflict("existing Generation requires coordinated handoff")
+            changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==old.materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version==old.projection_version).values(
+                    lifecycle_state="SUPERSEDED",terminal_at_ms=superseded_at_ms,projection_version=old.projection_version+1,
+                    lease_owner=None,lease_expires_at_ms=None))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("unfenced Generation changed before supersession")
+            seq = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==old.materialization_generation_id)) or 0)+1
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=f"materialization-event:{old.materialization_generation_id}:{seq}",
+                materialization_generation_id=old.materialization_generation_id,event_sequence=seq,event_type="SUPERSEDED",
+                payload={"replacement_snapshot_id":snapshot.selection_snapshot_id,
+                    "replacement_generation_id":replacement_generation_id,"reason_code":"NEWER_EFFECTIVE_SELECTION"},
+                occurred_at_ms=superseded_at_ms))
 
     async def retarget_generic_gap_vacuum_with_generation(self,
         generation: GenericMaterializationGeneration, *, entry_vacuum_id: str,
@@ -4459,6 +4472,8 @@ class PostgresInstrumentSelectionRepository:
             comparison = await self.get_comparison_universe_binding(authority.event_binding.event_spec_id,for_update=True)
             if comparison is None or comparison.comparison_universe_id != authority.comparison_universe_id or comparison.comparison_transition_revision != authority.comparison_transition_revision:
                 raise SelectionJobConflict("NO_CHANGE comparison changed")
+        await self._supersede_unfenced_generic_predecessors(snapshot,
+            selection_control_version=control.control_version,superseded_at_ms=now)
         if first_activation:
             await self.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,
                 expected_control_version=control.control_version,expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,
@@ -4587,6 +4602,8 @@ class PostgresInstrumentSelectionRepository:
                 raise SelectionJobConflict("Generic empty period is stale")
         if authority.authority_sequence != sequence:
             raise SelectionJobConflict("Generic empty sequence changed")
+        await self._supersede_unfenced_generic_predecessors(snapshot,
+            selection_control_version=control.control_version,superseded_at_ms=authority.created_at_ms)
         await self.mark_entry_vacuum_drained(vacuum,target_state="VALID_EMPTY",drained_at_ms=authority.created_at_ms)
         if first_activation:
             await self.activate_pending_selection_mode(strategy_group_id=authority.strategy_group_id,

@@ -2091,9 +2091,10 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
 @pytest.mark.parametrize("group,cancel_before_fill", [
     ("CPM-RO-001",False),("MPG-001",False),("MI-001",False),("BRF2-001",False),
     ("CPM-RO-001",True),("BRF2-001",True),
+    ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
-    database: AsyncEngine, group: str, cancel_before_fill: bool,
+    database: AsyncEngine, group: str, cancel_before_fill: bool | str,
 ) -> None:
     await _exercise_generic_generation(database, group, False,
         durable=True, first_activation=True, natural_selection=True)
@@ -2296,7 +2297,8 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     if cancel_before_fill:
         await _assert_natural_sent_entry_cancelled_by_valid_empty(database,
             group=group,current=current,issued=issued,ticket=ticket,venue=venue,
-            initial_source=source,entry_dispatched_at_ms=issued_at+5)
+            initial_source=source,entry_dispatched_at_ms=issued_at+5,
+            supersede_with_nonempty=cancel_before_fill=="latest_nonempty")
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
@@ -2464,6 +2466,7 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
 async def _assert_natural_sent_entry_cancelled_by_valid_empty(
     database, *, group, current, issued, ticket, venue, initial_source,
     entry_dispatched_at_ms,
+    supersede_with_nonempty: bool = False,
 ) -> None:
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
@@ -2480,7 +2483,8 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         "selection_epoch_id":parent.selection_epoch_id})).model_copy(update={
             "predecessor_snapshot":parent})
     empty_source = empty_source.model_copy(update={"member_windows":tuple(
-        qualify_window(window,False) for window in empty_source.member_windows)})
+        qualify_window(window,supersede_with_nonempty and window.exchange_instrument_id==empty_source.spec.candidate_ids[0])
+        for window in empty_source.member_windows)})
     class EmptyMarket:
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
             assert event_spec_id==empty_source.spec.event_spec_id and len(product_profiles)==24
@@ -2504,7 +2508,7 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
     assert selected.outcome == "SNAPSHOT_READY", selected
     async with PostgresKernelUnitOfWork(database) as uow:
         empty = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
-    assert not empty.selected_members
+    assert bool(empty.selected_members) == supersede_with_nonempty
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,
         worker_id=f"natural-{group}-cancel-materializer")
     now = empty.effective_from_ms+1
@@ -2526,6 +2530,37 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
     assert aggregate is not None and aggregate.status is AggregateStatus.ENTRY_ACCEPTED
     assert len(commands)==1 and commands[0].kind is ExchangeCommandKind.ENTRY
     assert aggregate.entry_exchange_order_id is not None
+    original_vacuum = vacuum
+    if supersede_with_nonempty:
+        # The exact original ENTRY is still open when a third-period Desired arrives.
+        # Reuse Runner/source acquisition; do not mutate the old Vacuum pointer.
+        empty_source = next_input(empty_source).model_copy(update={"predecessor_snapshot": empty})
+        tick = empty_source.feature_cutoff_at_ms
+        selected = await run_instrument_selection_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=EmptyMarket(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=empty_source.spec.selection_spec_id,
+                selection_epoch_id=empty_source.selection_epoch_id,
+                period_anchor_ms=empty_source.feature_cutoff_at_ms,
+                worker_id=f"natural-{group}-latest-nonempty-selector"),clock_ms=selection_clock)
+        assert selected.outcome == "SNAPSHOT_READY", selected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            empty = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+        assert empty.selected_members
+        request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,
+            worker_id=f"natural-{group}-latest-nonempty-materializer")
+        now = empty.effective_from_ms+1
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now)):
+            waiting = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now)
+        assert waiting.disposition is MaterializationDisposition.WAITING_VACUUM, waiting
+        async with PostgresKernelUnitOfWork(database) as uow:
+            still_draining = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group,selection_spec_id=empty.selection_spec_id)
+            assert still_draining == original_vacuum
+            assert await uow.instrument_selection.get_generic_materialization_generation(
+                GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
+            assert await uow.strategy_universes.get_generation_universe_targets(original_vacuum.source_generation_id) == ()
     open_order = VenueOrderSnapshot(exchange_order_id=aggregate.entry_exchange_order_id,
         venue_client_order_id=commands[0].venue_client_order_id,
         position_side=ticket.identity.netting_domain.position_side,reduce_only=False,
@@ -2542,6 +2577,13 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
     assert [command.kind for command in after_request] == [
         ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
     assert after_request[-1].status.value == "prepared"
+    if supersede_with_nonempty:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=now+5)):
+            waiting_cancel = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+5)
+        assert waiting_cancel.disposition is MaterializationDisposition.WAITING_VACUUM, waiting_cancel
+        assert waiting_cancel.reason_code == "VACUUM_CANCEL_NOT_DISPATCHED"
     venue.now_ms = now+6
     dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
         DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
@@ -2564,12 +2606,17 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
             ticket.identity.netting_domain.key())
     assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED, closed
     assert reservation is not None and reservation.status == "released" and not still_active
-    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
-        new=AsyncMock(return_value=now+9)):
-        negative = await coordinate_selection_materialization_once(
-            uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,
-            clock_ms=lambda:now+9)
-    assert negative.disposition is MaterializationDisposition.VALID_EMPTY, negative
+    for offset in range(9,12):
+        at = now+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            negative = await coordinate_selection_materialization_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,
+                clock_ms=lambda at=at:at)
+        if negative.disposition in {MaterializationDisposition.VALID_EMPTY,MaterializationDisposition.GENERATION_MATERIALIZING}:
+            break
+    assert negative.disposition is (MaterializationDisposition.GENERATION_MATERIALIZING
+        if supersede_with_nonempty else MaterializationDisposition.VALID_EMPTY), negative
     async with PostgresKernelUnitOfWork(database) as uow:
         terminal = await uow.aggregates.get(issued.ticket_id)
         frozen = await uow.tickets.get(issued.ticket_id)
@@ -2577,7 +2624,18 @@ async def _assert_natural_sent_entry_cancelled_by_valid_empty(
         authority = await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)
     assert terminal is not None and terminal.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
     assert frozen is not None and frozen.selection_authority_id == current.authority.selection_authority_id
-    assert authority is not None and authority.authority.authority_outcome == "VALID_EMPTY"
+    assert authority is not None
+    if supersede_with_nonempty:
+        assert authority == current
+        async with PostgresKernelUnitOfWork(database) as uow:
+            inherited = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group,selection_spec_id=empty.selection_spec_id)
+            superseded = await uow.instrument_selection.get_generic_materialization_generation(original_vacuum.source_generation_id)
+        assert inherited is not None and inherited.entry_vacuum_id == original_vacuum.entry_vacuum_id
+        assert inherited.fenced_at_ms == original_vacuum.fenced_at_ms and inherited.drained_at_ms is not None
+        assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
+    else:
+        assert authority.authority.authority_outcome == "VALID_EMPTY"
     assert [command.kind for command in final_commands] == [ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
     assert len(venue.calls)==2 and entry_dispatched_at_ms<vacuum.fenced_at_ms
     async with database.connect() as conn:
@@ -3756,6 +3814,207 @@ async def test_generic_continuity_preserves_event_side_and_comparison(database: 
     assert current.authority.comparison_universe_id==original.authority.comparison_universe_id
     assert current.authority.comparison_transition_revision==original.authority.comparison_transition_revision
     assert current.authority.membership_freshness.source_snapshot_id==snapshot.selection_snapshot_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("latest_outcome", ["NO_CHANGE", "VALID_EMPTY"])
+async def test_new_no_change_snapshot_supersedes_unfenced_desired_after_continuity(
+    database: AsyncEngine, latest_outcome: str,
+) -> None:
+    group = "CPM-RO-001"
+    source, first, _, uid = await _exercise_generic_generation(
+        database, group, False, durable=True, first_activation=True, natural_selection=True)
+    shifted = next_input(source)
+    second_source = shifted.model_copy(update={
+        "predecessor_snapshot": first,
+        "member_windows": tuple(qualify_window(
+            window.model_copy(update={"candles": shifted.member_windows[0].candles}),
+            window.exchange_instrument_id == source.spec.candidate_ids[0])
+            for window in shifted.member_windows),
+    })
+    second = compute_generic_selection(second_source)
+    at = second.effective_from_ms+1
+    await make_warming_ready(database, universe_version_id=uid,
+        warm_closed_bar_time_ms=second.effective_from_ms, valid_until_ms=at+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        continuity = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id, period_anchor_ms=second.feature_cutoff_at_ms,
+                worker_id="continuity-before-unfenced-desired"), clock_ms=lambda: at)
+    assert continuity.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY, continuity
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(second,
+            decision_at_ms=second_source.decision_at_ms, source_observed_at_ms=second_source.source_observed_at_ms)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=second.selection_snapshot_id,
+        worker_id="unfenced-desired")
+    for tick in (at+1, at+2):
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=tick)):
+            old = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda tick=tick: tick)
+    assert old.disposition is MaterializationDisposition.GENERATION_DESIRED, old
+    third_source = next_input(next_input(source)).model_copy(update={"predecessor_snapshot": second})
+    if latest_outcome == "VALID_EMPTY":
+        third_source = third_source.model_copy(update={"member_windows": tuple(
+            qualify_window(window, False) for window in third_source.member_windows)})
+    third = compute_generic_selection(third_source)
+    assert third.selected_members == (first.selected_members if latest_outcome == "NO_CHANGE" else ())
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(third,
+            decision_at_ms=third_source.decision_at_ms, source_observed_at_ms=third_source.source_observed_at_ms)
+    at = third.effective_from_ms+1
+    await make_warming_ready(database, universe_version_id=uid,
+        warm_closed_bar_time_ms=third.effective_from_ms, valid_until_ms=at+HOUR)
+    async def apply_latest_outcome():
+        for _ in range(4):
+            result = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database),
+                request=CoordinateGenericSnapshotRequest(selection_snapshot_id=third.selection_snapshot_id,
+                    worker_id="latest-no-change-or-empty"), clock_ms=lambda: at)
+            if result.disposition in {MaterializationDisposition.NO_CHANGE, MaterializationDisposition.VALID_EMPTY}:
+                return result
+        raise AssertionError(result)
+
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)), patch.object(
+            PostgresInstrumentSelectionRepository, "_supersede_unfenced_generic_predecessors",
+            new=AsyncMock(return_value=None)), pytest.raises(sa.exc.DBAPIError, match="unfinished Generation"):
+        await apply_latest_outcome()
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        unchanged = await apply_latest_outcome()
+    assert unchanged.disposition.value == latest_outcome, unchanged
+    async with PostgresKernelUnitOfWork(database) as uow:
+        superseded = await uow.instrument_selection.get_generic_materialization_generation(old.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+    assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
+    assert vacuum is None
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at+1)):
+        stale = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda: at+1)
+    assert stale.disposition is MaterializationDisposition.BLOCKED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+@pytest.mark.parametrize("old_stage", ["DESIRED", "DRAINING_ENTRY"])
+async def test_latest_nonempty_snapshot_takes_over_early_generation_after_drain(
+    database: AsyncEngine, group: str, old_stage: str,
+) -> None:
+    source, first_snapshot, _, active_uid = await _exercise_generic_generation(
+        database, group, False, durable=True, first_activation=True, natural_selection=True)
+    shifted = next_input(source)
+    second_source = shifted.model_copy(update={
+        "predecessor_snapshot": first_snapshot,
+        "member_windows": tuple(qualify_window(
+            window.model_copy(update={"candles": shifted.member_windows[0].candles}),
+            window.exchange_instrument_id == source.spec.candidate_ids[0])
+            for window in shifted.member_windows),
+    })
+    second = compute_generic_selection(second_source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(second,
+            decision_at_ms=second_source.decision_at_ms,
+            source_observed_at_ms=second_source.source_observed_at_ms)
+        original_authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=second.selection_snapshot_id,
+        worker_id="early-generation-owner")
+    stop = MaterializationDisposition.GENERATION_DESIRED if old_stage == "DESIRED" else MaterializationDisposition.WAITING_VACUUM
+    for offset in range(4):
+        tick = second.effective_from_ms+1+offset
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=tick)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request,
+                clock_ms=lambda tick=tick: tick)
+        if step.disposition is stop:
+            break
+    assert step.disposition is stop, step
+    old_id = step.materialization_generation_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        old = await uow.instrument_selection.get_generic_materialization_generation(old_id)
+        original_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+    assert old is not None and old.lifecycle_state.value == old_stage
+    assert (original_vacuum is None) == (old_stage == "DESIRED")
+    newest_source = next_input(second_source)
+    newest = compute_generic_selection(newest_source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(newest,
+            decision_at_ms=newest_source.decision_at_ms,
+            source_observed_at_ms=newest_source.source_observed_at_ms)
+    newest_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=newest.selection_snapshot_id,
+        worker_id="newest-early-target-owner")
+    at = newest.effective_from_ms+1
+    @asynccontextmanager
+    async def paused_early_handoff():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert uow._connection is not None
+            pause_probe = await uow._connection.begin_nested()
+            await uow._connection.execute(sa.text("UPDATE brc_strategy_entry_controls_current "
+                "SET entry_state='paused' WHERE strategy_group_id=:group"), {"group": group})
+            yield uow
+            await pause_probe.rollback()
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        paused = await coordinate_selection_materialization_once(uow_factory=paused_early_handoff,
+            request=newest_request, clock_ms=lambda: at)
+    assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+    # Rollback of the entire handoff must retain both unfenced and fenced sources.
+    @asynccontextmanager
+    async def interrupted_early_handoff():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected early handoff rollback")
+
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)), pytest.raises(RuntimeError, match="early handoff rollback"):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_early_handoff,
+            request=newest_request, clock_ms=lambda: at)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_generic_materialization_generation(old_id) == old
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id) == original_vacuum
+    steps = []
+    for offset in range(6):
+        tick = newest.effective_from_ms+1+offset
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=tick)):
+            takeover = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request,
+                clock_ms=lambda tick=tick: tick)
+        steps.append(takeover)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == original_authority
+            active = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+            assert active is not None and active.universe_version_id == active_uid
+            assert await uow.strategy_universes.get_generation_universe_targets(old_id) == ()
+        if takeover.disposition is MaterializationDisposition.GENERATION_MATERIALIZING:
+            break
+    assert takeover.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, steps
+    async with PostgresKernelUnitOfWork(database) as uow:
+        superseded = await uow.instrument_selection.get_generic_materialization_generation(old_id)
+        replacement = await uow.instrument_selection.get_generic_materialization_generation(takeover.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+    assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
+    assert replacement is not None and replacement.previous_events == old.previous_events
+    assert vacuum is not None and vacuum.drained_at_ms is not None
+    assert vacuum.source_generation_id == replacement.materialization_generation_id
+    if original_vacuum is not None:
+        assert vacuum.entry_vacuum_id == original_vacuum.entry_vacuum_id
+        assert vacuum.fenced_at_ms == original_vacuum.fenced_at_ms
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=tick+1)):
+        stale = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda: tick+1)
+    assert stale.disposition is MaterializationDisposition.BLOCKED
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
 
 
 @pytest.mark.asyncio

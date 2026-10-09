@@ -1189,6 +1189,13 @@ def _generic_normal_binding_guard() -> None:
             AND c.pending_effective_period_anchor_ms IS NULL AND c.updated_at_ms=a.effective_from_ms) THEN
           RAISE EXCEPTION 'Generic first activation requires atomic authorized mode transition';
         END IF;
+        IF a.authority_outcome IN ('NO_CHANGE','VALID_EMPTY') AND EXISTS (
+          SELECT 1 FROM brc_strategy_universe_materialization_generations g
+          WHERE g.selection_spec_id=a.selection_spec_id
+            AND g.period_anchor_ms<a.period_anchor_ms
+            AND g.lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')) THEN
+          RAISE EXCEPTION 'Generic latest outcome retains an unfinished Generation';
+        END IF;
         IF a.recovery_grant_proof IS NOT NULL OR a.authority_outcome NOT IN ('NO_CHANGE','ACTIVE_NEW') THEN RETURN NULL; END IF;
         SELECT count(*) INTO matches FROM brc_selection_authority_event_bindings b
           JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id

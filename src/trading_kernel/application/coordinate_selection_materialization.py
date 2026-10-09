@@ -1334,6 +1334,16 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     strategy_group_id=snapshot.strategy_group_id,selection_spec_id=snapshot.selection_spec_id,now_ms=now_ms))
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                     entry_vacuum_id=prior_vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
+            if prior_vacuum is not None and prior_vacuum.source_generation_id is not None and (
+                prior_vacuum.state in {StrategyEntryVacuumState.OPEN, StrategyEntryVacuumState.DRAINING_ENTRY}
+                and prior_vacuum.period_anchor_ms < snapshot.feature_cutoff_at_ms):
+                # Latest Desired owns subsequent warming, never the unfinished
+                # ENTRY cancellation. Drain the original fence before retargeting.
+                drain = await drain_strategy_entry_vacuum_once(uow, DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=snapshot.strategy_group_id, selection_spec_id=snapshot.selection_spec_id,
+                    now_ms=now_ms))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=prior_vacuum.entry_vacuum_id, reason_code=drain.reason_code or drain.status.value)
             if not snapshot.selected_members:
                 return await _coordinate_generic_empty(uow=uow,snapshot=snapshot,control=control,
                     owner_control_version=owner.control_version,now_ms=now_ms)
