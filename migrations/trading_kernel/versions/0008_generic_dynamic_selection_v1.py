@@ -144,6 +144,32 @@ def _generic_vacuum_owner_resume_proof() -> None:
               OR (p.event_type='OWNER_PAUSE_REQUESTED' AND g.terminal_at_ms<=v.drained_at_ms AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
                 WHERE d.entry_vacuum_id=vid AND d.event_type='OWNER_PAUSED' AND d.occurred_at_ms=v.drained_at_ms
                   AND d.payload->'entry_drain_complete'='true'::jsonb)))
+        ) OR EXISTS (
+          SELECT 1 FROM brc_strategy_entry_vacuums_current v
+          JOIN brc_strategy_entry_vacuum_events opened ON opened.entry_vacuum_id=v.entry_vacuum_id AND opened.event_type='OPEN'
+          JOIN brc_strategy_entry_vacuum_events drained ON drained.entry_vacuum_id=v.entry_vacuum_id AND drained.event_type='OWNER_PAUSED'
+          JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=v.strategy_group_id
+          JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+          JOIN brc_strategy_entry_control_events paused ON paused.strategy_group_id=o.strategy_group_id AND paused.control_version=r.control_version-1
+          JOIN brc_owner_authorizations auth ON auth.authorization_id=r.authorization_id
+          JOIN brc_owner_authorizations pause_auth ON pause_auth.authorization_id=paused.authorization_id
+          JOIN brc_selection_authority_current current_a ON current_a.selection_spec_id=v.selection_spec_id AND current_a.selection_authority_id=source_id
+          JOIN brc_selection_session_authorities src ON src.selection_authority_id=source_id
+          JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=v.strategy_group_id
+          WHERE v.entry_vacuum_id=vid AND v.selection_spec_id<>'sor-dynamic-selection-v0'
+            AND opened.payload->>'intended_outcome'='OWNER_PAUSED' AND opened.occurred_at_ms=v.fenced_at_ms
+            AND drained.payload->'entry_drain_complete'='true'::jsonb AND drained.occurred_at_ms=v.drained_at_ms
+            AND drained.payload->>'materialization_generation_id' IS NULL
+            AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=v.drained_at_ms AND r.created_at_ms<=checked_at
+            AND paused.operation='pause' AND paused.target_state='paused' AND paused.created_at_ms=v.fenced_at_ms
+            AND pause_auth.purpose='strategy_pause' AND pause_auth.authorized_at_ms=paused.created_at_ms
+            AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND auth.purpose='strategy_resume' AND auth.authentication_strength='totp_step_up' AND auth.authorized_at_ms=r.created_at_ms
+            AND auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND c.selection_mode='dynamic_selection' AND c.selection_epoch_id=src.selection_epoch_id
+            AND c.selection_spec_id=v.selection_spec_id AND c.control_version=src.selection_control_version
+            AND src.owner_control_version<paused.control_version AND src.created_at_ms<=paused.created_at_ms
         );
       $$
     """))
@@ -252,8 +278,9 @@ def _generic_gap_vacuum_states() -> None:
           THEN RAISE EXCEPTION 'Owner Pause EMPTY requires exact resumed completion and latest intent'; END IF;
           RETURN NEW;
         END IF;
-        IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL
-          AND OLD.state='RECOVERY_PENDING' AND NEW.state='RECONFIGURING'
+        IF OLD.source_generation_id IS NULL AND NEW.state='RECONFIGURING'
+          AND ((OLD.first_blocker='AUTHORITY_GAP' AND OLD.state='RECOVERY_PENDING')
+            OR (OLD.first_blocker='OWNER_PAUSED' AND OLD.state='OWNER_PAUSED'))
           AND NEW.first_blocker='AUTHORITY_GAP' AND NEW.source_generation_id IS NOT NULL
           AND NEW.period_anchor_ms>=OLD.period_anchor_ms
           AND NEW.fenced_at_ms=OLD.fenced_at_ms AND NEW.drained_at_ms=OLD.drained_at_ms
@@ -263,7 +290,7 @@ def _generic_gap_vacuum_states() -> None:
               ON g.materialization_generation_id=e.payload->>'replacement_generation_id'
             JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=g.selection_snapshot_id
             WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_sequence=NEW.projection_version
-              AND e.event_type='SUPERSEDED' AND e.payload->>'recovery_origin'='AUTHORITY_GAP'
+              AND e.event_type='SUPERSEDED' AND e.payload->>'recovery_origin'=(CASE WHEN OLD.state='OWNER_PAUSED' THEN 'OWNER_PAUSE_NO_GENERATION' ELSE 'AUTHORITY_GAP' END)
               AND e.payload->>'previous_generation_id' IS NULL
               AND g.materialization_generation_id=NEW.source_generation_id
               AND g.lifecycle_state='MATERIALIZING' AND g.fenced_at_ms=e.occurred_at_ms
@@ -276,14 +303,24 @@ def _generic_gap_vacuum_states() -> None:
             JOIN brc_selection_authority_current current_auth
               ON current_auth.selection_spec_id=OLD.selection_spec_id
             WHERE opened.entry_vacuum_id=OLD.entry_vacuum_id AND opened.event_type='OPEN'
-              AND opened.payload->>'source_selection_authority_id'=current_auth.selection_authority_id
+              AND ((opened.payload->>'source_selection_authority_id'=current_auth.selection_authority_id AND OLD.state='RECOVERY_PENDING')
+                OR (OLD.state='OWNER_PAUSED' AND brc_generic_vacuum_owner_resume_matches(OLD.entry_vacuum_id,current_auth.selection_authority_id,change.occurred_at_ms)))
               AND change.event_sequence=NEW.projection_version
               AND change.payload->>'source_selection_authority_id'=current_auth.selection_authority_id)
           THEN RETURN NEW; END IF;
+        IF OLD.state='OWNER_PAUSED' AND OLD.source_generation_id IS NULL AND NEW.state='RECONFIGURING'
+          AND EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations g
+            WHERE g.materialization_generation_id=NEW.source_generation_id AND g.selection_mode='dynamic_selection')
+          THEN RAISE EXCEPTION 'Owner Pause generation-free handoff requires exact resumed proof'; END IF;
         IF NEW.state IN ('RESOLVED_ACTIVE','RESOLVED_FALLBACK') AND EXISTS (
           SELECT 1 FROM brc_strategy_entry_vacuum_events e
           WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_type='OPEN'
-            AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
+            AND (e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY'
+              OR (e.payload->>'intended_outcome'='OWNER_PAUSED' AND EXISTS (
+                SELECT 1 FROM brc_strategy_entry_vacuum_events handoff
+                  WHERE handoff.entry_vacuum_id=OLD.entry_vacuum_id AND handoff.event_type='SUPERSEDED'
+                    AND handoff.payload->>'recovery_origin'='OWNER_PAUSE_NO_GENERATION'
+                    AND handoff.payload->>'replacement_generation_id'=NEW.source_generation_id)))
         ) AND (NEW.state<>'RESOLVED_ACTIVE' OR NOT EXISTS (
           SELECT 1 FROM brc_selection_session_authorities a
           WHERE a.recovery_grant_proof->>'source_entry_vacuum_id'=OLD.entry_vacuum_id
@@ -986,13 +1023,13 @@ def _generic_recovered_activation_proof_function() -> None:
           ORDER BY event_sequence DESC LIMIT 1;
         IF old_event IS NULL OR old_event->>'replacement_generation_id' IS DISTINCT FROM g.materialization_generation_id
           THEN RETURN false; END IF;
-        gap_origin:=old_event->>'recovery_origin'='AUTHORITY_GAP';
+        gap_origin:=old_event->>'recovery_origin' IN ('AUTHORITY_GAP','OWNER_PAUSE_NO_GENERATION');
         IF gap_origin THEN
           SELECT payload INTO opened FROM brc_strategy_entry_vacuum_events
             WHERE entry_vacuum_id=v.entry_vacuum_id AND event_type='OPEN' LIMIT 1;
           IF old_event->>'previous_generation_id' IS NOT NULL OR v.first_blocker<>'AUTHORITY_GAP'
-            OR opened IS NULL OR opened->>'intended_outcome'<>'PRE_FENCE_CONTINUITY'
-            OR opened->>'source_selection_authority_id' IS DISTINCT FROM old_event->>'source_selection_authority_id'
+            OR opened IS NULL OR opened->>'intended_outcome'<>(CASE WHEN old_event->>'recovery_origin'='OWNER_PAUSE_NO_GENERATION' THEN 'OWNER_PAUSED' ELSE 'PRE_FENCE_CONTINUITY' END)
+            OR (old_event->>'recovery_origin'='AUTHORITY_GAP' AND opened->>'source_selection_authority_id' IS DISTINCT FROM old_event->>'source_selection_authority_id')
             THEN RETURN false; END IF;
           reason:='AUTHORITY_GAP';
         ELSE
@@ -1043,9 +1080,9 @@ def _generic_recovered_activation_proof_function() -> None:
           JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_a.selection_authority_id
           WHERE current_a.selection_spec_id=g.selection_spec_id;
         IF NOT FOUND OR src.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
-          OR (gap_origin AND src.selection_authority_id IS DISTINCT FROM opened->>'source_selection_authority_id')
+          OR (gap_origin AND src.selection_authority_id IS DISTINCT FROM old_event->>'source_selection_authority_id')
           OR src.selection_epoch_id<>g.selection_epoch_id OR src.selection_control_version<>c.control_version
-          OR (old_event->>'recovery_origin'='OWNER_PAUSE' AND NOT brc_generic_vacuum_owner_resume_matches(v.entry_vacuum_id,src.selection_authority_id,checked_at))
+          OR (old_event->>'recovery_origin' IN ('OWNER_PAUSE','OWNER_PAUSE_NO_GENERATION') AND NOT brc_generic_vacuum_owner_resume_matches(v.entry_vacuum_id,src.selection_authority_id,checked_at))
           OR (src.owner_control_version<>o.control_version AND NOT brc_generic_vacuum_owner_resume_matches(v.entry_vacuum_id,src.selection_authority_id,checked_at))
           OR src.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
           OR src.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision

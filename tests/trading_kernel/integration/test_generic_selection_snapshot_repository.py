@@ -5182,22 +5182,54 @@ async def test_hourly_new_selection_after_unobserved_expired_period_is_recovery_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001", "BRF2-001"])
+@pytest.mark.parametrize("group,owner_pause,corrupt_completion", [(g,False,None) for g in ("CPM-RO-001","BRF2-001")]+
+    [(g,True,c) for g in ("CPM-RO-001","BRF2-001","MPG-001","MI-001") for c in (None,"false","string")])
 @pytest.mark.parametrize("same_members", [False,True])
 async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_normal_grant(
-    database: AsyncEngine, group: str, same_members: bool,
+    database: AsyncEngine, group: str, same_members: bool,owner_pause: bool,corrupt_completion: str | None,
 ) -> None:
     source,first_snapshot,_,uid = await _exercise_generic_generation(
         database,group,False,durable=True,first_activation=True,natural_selection=True)
     anchor = source.feature_cutoff_at_ms+source.spec.cadence_hours*HOUR
-    late_close = anchor+2*HOUR
+    late_close = anchor+(HOUR if owner_pause else 2*HOUR)
     at = late_close+1
     await make_warming_ready(database,universe_version_id=uid,
         warm_closed_bar_time_ms=late_close,valid_until_ms=at+4*HOUR)
     period_request = CoordinateGenericPeriodRequest(strategy_group_id=group,
         selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=anchor,
         worker_id="gap-before-nonempty")
-    for offset in range(4):
+    if owner_pause:
+        from src.trading_kernel.application.owner_control import (
+            set_strategy_entry_state,
+        )
+        from src.trading_kernel.domain.owner_control import StrategyEntryState
+        async with PostgresKernelUnitOfWork(database) as uow:
+            previous=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            owner=await uow.owner_controls.get_strategy_control(group)
+            pause_at=previous.authority.created_at_ms+1000
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="generation_free_nonempty_recovery",
+                    idempotency_key=f"pause-free:{group}:{same_members}:{corrupt_completion}",owner_identity="owner",now_ms=pause_at),authentication_strength="totp_step_up")
+        actual_execute=sa.ext.asyncio.AsyncConnection.execute
+        async def corrupt_completion_event(connection,statement,*args,**kwargs):
+            if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+                params=statement.compile().params
+                if params.get("event_type")=="OWNER_PAUSED" and params.get("payload",{}).get("entry_drain_complete"):
+                    statement=statement.values(payload={"entry_drain_complete":"true" if corrupt_completion=="string" else False})
+            return await actual_execute(connection,statement,*args,**kwargs)
+        for drain_at in (pause_at+1,pause_at+2):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                if corrupt_completion:
+                    with patch.object(sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_completion_event):
+                        await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,now_ms=drain_at))
+                else:
+                    await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,now_ms=drain_at))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_generation_free_nonempty",
+                    idempotency_key=f"resume-free:{group}:{same_members}:{corrupt_completion}",owner_identity="owner",now_ms=pause_at+3),authentication_strength="totp_step_up")
+    for offset in range(0 if owner_pause else 4):
         now = at+offset
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=now)):
@@ -5210,7 +5242,7 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
         gap = await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         previous = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
-    assert gap is not None and gap.state is StrategyEntryVacuumState.RECOVERY_PENDING
+    assert gap is not None and gap.state is (StrategyEntryVacuumState.OWNER_PAUSED if owner_pause else StrategyEntryVacuumState.RECOVERY_PENDING)
     assert previous is not None
     successor = next_input(source).model_copy(update={"predecessor_snapshot":first_snapshot})
     removed = first_snapshot.selected_members[0]
@@ -5228,6 +5260,22 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,
         worker_id="new-desired-after-gap")
     now = at+5
+    if corrupt_completion:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)), pytest.raises(SelectionJobConflict,match="Pause"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now)
+        actual_scalar=sa.ext.asyncio.AsyncConnection.scalar
+        async def bypass_python_resume(connection,statement,*args,**kwargs):
+            if "brc_generic_vacuum_owner_resume_matches" in str(statement):
+                return True
+            return await actual_scalar(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"scalar",new=bypass_python_resume), pytest.raises(sa.exc.DBAPIError,match="Owner Pause generation-free handoff"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==gap
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==previous
+            assert await uow.instrument_selection.get_generic_materialization_generation(GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)) is None
+        return
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
         new=AsyncMock(return_value=now)):
         result = await coordinate_selection_materialization_once(
@@ -5268,6 +5316,15 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
         if targets:
             await make_warming_ready(database,universe_version_id=targets[0].universe_version_id,
                 warm_closed_bar_time_ms=late_close,valid_until_ms=tick+HOUR)
+            if group in {"MPG-001","MI-001"}:
+                template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                shift=late_close-template.trigger_candle_close_time_ms
+                candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+                projection=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=targets[0].universe_version_id,
+                    strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=late_close,lookback_bars=8 if group=="MPG-001" else 12,
+                    freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow.strategy_universes.save_comparative_projection(projection)
         if step.disposition is MaterializationDisposition.GENERATION_STAGED:
             staged = step
             break
@@ -5367,8 +5424,20 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
     first_future = live.authority.first_eligible_close_time_ms
     await make_warming_ready(database,universe_version_id=switched.universe_version_id,
         warm_closed_bar_time_ms=first_future,valid_until_ms=first_future+HOUR)
-    template = cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot()
+    template = {"CPM-RO-001":cpm_long_snapshot,"BRF2-001":brf2_short_snapshot,"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot}[group]()
     delta = first_future-template.trigger_candle_close_time_ms
+    if group in {"MPG-001","MI-001"}:
+        async with database.connect() as conn:
+            focus=await conn.scalar(sa.text("SELECT exchange_instrument_id FROM brc_runtime_scopes_current WHERE runtime_scope_id=:id"),{"id":target_scope})
+        candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+        flat=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+        flat_delta=first_future-flat.trigger_candle_close_time_ms
+        flat_candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+flat_delta,"close_time_ms":c.close_time_ms+flat_delta}) for c in flat.candles_1h)
+        projection=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=switched.universe_version_id,
+            strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=first_future,lookback_bars=8 if group=="MPG-001" else 12,
+            freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles if m==focus else flat_candles) for m in source.spec.candidate_ids))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection.model_copy(update={"comparison_transition_revision":live.authority.comparison_transition_revision}))
     class RecoveredGapMarket:
         async def fetch_closed_candles(self, request):
             candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h

@@ -2557,9 +2557,10 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Gap replacement requires latest effective nonempty Snapshot")
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,
             selection_spec_id=generation.selection_spec_id,for_update=True)
+        paused_origin = vacuum is not None and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED and vacuum.first_blocker=="OWNER_PAUSED"
         if (vacuum is None or vacuum.entry_vacuum_id!=entry_vacuum_id
-            or vacuum.state is not StrategyEntryVacuumState.RECOVERY_PENDING
-            or vacuum.first_blocker!="AUTHORITY_GAP" or vacuum.source_generation_id is not None
+            or (not paused_origin and (vacuum.state is not StrategyEntryVacuumState.RECOVERY_PENDING or vacuum.first_blocker!="AUTHORITY_GAP"))
+            or vacuum.source_generation_id is not None
             or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
             or vacuum.period_anchor_ms>generation.period_anchor_ms
             or await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)
@@ -2569,12 +2570,16 @@ class PostgresInstrumentSelectionRepository:
             strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
             strategy_entry_vacuum_events.c.event_type=="OPEN").limit(1))).scalar_one_or_none()
         current = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
+        if paused_origin and (current is None or not await self._connection.scalar(sa.text(
+            "SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+            {"vid":entry_vacuum_id,"source":current.authority.selection_authority_id,"at":now})):
+            raise SelectionJobConflict("Generation-free Owner Pause resume proof missing")
         prior = generation.previous_events[0]
-        if (origin is None or origin.get("intended_outcome")!="PRE_FENCE_CONTINUITY"
-            or current is None or origin.get("source_selection_authority_id")!=current.authority.selection_authority_id
+        if (origin is None or origin.get("intended_outcome")!=("OWNER_PAUSED" if paused_origin else "PRE_FENCE_CONTINUITY")
+            or current is None or (not paused_origin and origin.get("source_selection_authority_id")!=current.authority.selection_authority_id)
             or current.authority.selection_epoch_id!=generation.selection_epoch_id
             or current.authority.selection_control_version!=control.control_version
-            or current.authority.owner_control_version!=owner["control_version"]
+            or (not paused_origin and current.authority.owner_control_version!=owner["control_version"])
             or current.authority.event_binding.event_spec_id!=prior.event_spec_id
             or current.authority.event_binding.position_side!=prior.position_side
             or current.authority.event_binding.universe_version_id!=prior.universe_version_id
@@ -2595,20 +2600,20 @@ class PostgresInstrumentSelectionRepository:
                 materialization_event_id=f"materialization-event:{generation.materialization_generation_id}:{sequence}",
                 materialization_generation_id=generation.materialization_generation_id,event_sequence=sequence,
                 event_type=event_type,payload={"entry_vacuum_id":vacuum.entry_vacuum_id,
-                    "recovery_origin":"AUTHORITY_GAP","original_fenced_at_ms":vacuum.fenced_at_ms,
+                    "recovery_origin":"OWNER_PAUSE_NO_GENERATION" if paused_origin else "AUTHORITY_GAP","original_fenced_at_ms":vacuum.fenced_at_ms,
                     "original_drained_at_ms":vacuum.drained_at_ms},occurred_at_ms=now))
         next_version = vacuum.projection_version+1
         await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
             entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{next_version}",
             entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=next_version,event_type="SUPERSEDED",
-            payload={"recovery_origin":"AUTHORITY_GAP","previous_generation_id":None,
+            payload={"recovery_origin":"OWNER_PAUSE_NO_GENERATION" if paused_origin else "AUTHORITY_GAP","previous_generation_id":None,
                 "source_selection_authority_id":current.authority.selection_authority_id,
                 "replacement_generation_id":generation.materialization_generation_id},occurred_at_ms=now))
         changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
             strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
-            strategy_entry_vacuums_current.c.state=="RECOVERY_PENDING",
+            strategy_entry_vacuums_current.c.state==vacuum.state.value,
             strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(
-                state="RECONFIGURING",source_generation_id=generation.materialization_generation_id,
+                state="RECONFIGURING",first_blocker="AUTHORITY_GAP",source_generation_id=generation.materialization_generation_id,
                 period_anchor_ms=generation.period_anchor_ms,projection_version=next_version))
         if changed.rowcount!=1:
             raise SelectionJobConflict("Gap replacement Vacuum CAS changed")
@@ -4699,14 +4704,14 @@ class PostgresInstrumentSelectionRepository:
         ).order_by(strategy_entry_vacuum_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
         if predecessor is None or predecessor.get("replacement_generation_id")!=materialization_generation_id:
             raise SelectionJobConflict("Recovered activation lacks interrupted predecessor lineage")
-        if predecessor.get("recovery_origin")=="AUTHORITY_GAP":
+        if predecessor.get("recovery_origin") in {"AUTHORITY_GAP","OWNER_PAUSE_NO_GENERATION"}:
             opened = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
                 strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
                 strategy_entry_vacuum_events.c.event_type=="OPEN").limit(1))).scalar_one_or_none()
             if (predecessor.get("previous_generation_id") is not None
                 or vacuum.first_blocker!="AUTHORITY_GAP" or opened is None
-                or opened.get("intended_outcome")!="PRE_FENCE_CONTINUITY"
-                or opened.get("source_selection_authority_id")!=predecessor.get("source_selection_authority_id")):
+                or opened.get("intended_outcome")!=("OWNER_PAUSED" if predecessor.get("recovery_origin")=="OWNER_PAUSE_NO_GENERATION" else "PRE_FENCE_CONTINUITY")
+                or (predecessor.get("recovery_origin")=="AUTHORITY_GAP" and opened.get("source_selection_authority_id")!=predecessor.get("source_selection_authority_id"))):
                 raise SelectionJobConflict("Recovered activation original Authority gap changed")
             recovery_reason: Literal["AUTHORITY_GAP","MATERIALIZATION_FAILURE","MATERIALIZATION_TIMEOUT"] = "AUTHORITY_GAP"
         else:
@@ -4748,7 +4753,7 @@ class PostgresInstrumentSelectionRepository:
         resumed_source = source is not None and bool(await self._connection.scalar(sa.text(
             "SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
             {"vid":vacuum.entry_vacuum_id,"source":source.authority.selection_authority_id,"at":now}))
-        if predecessor.get("recovery_origin")=="OWNER_PAUSE" and not resumed_source:
+        if predecessor.get("recovery_origin") in {"OWNER_PAUSE","OWNER_PAUSE_NO_GENERATION"} and not resumed_source:
             raise SelectionJobConflict("Recovered activation Owner resume provenance changed")
         previous = generation.previous_events[0]
         if source is None or (
@@ -4763,7 +4768,7 @@ class PostgresInstrumentSelectionRepository:
             or source.authority.comparison_universe_id!=previous.comparison_universe_id
             or source.authority.comparison_transition_revision!=previous.comparison_transition_revision):
             raise SelectionJobConflict("Recovered activation source Authority changed")
-        if predecessor.get("recovery_origin")=="AUTHORITY_GAP" and predecessor.get("source_selection_authority_id")!=source.authority.selection_authority_id:
+        if predecessor.get("recovery_origin") in {"AUTHORITY_GAP","OWNER_PAUSE_NO_GENERATION"} and predecessor.get("source_selection_authority_id")!=source.authority.selection_authority_id:
             raise SelectionJobConflict("Recovered activation gap source Authority changed")
         universes = PostgresStrategyUniverseRepository(self._connection)
         active = await universes.get_current(spec.event_spec_id)

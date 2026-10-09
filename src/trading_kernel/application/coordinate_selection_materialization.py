@@ -1528,8 +1528,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return await _coordinate_generic_empty(uow=uow,snapshot=snapshot,control=control,
                     owner_control_version=owner.control_version,now_ms=now_ms)
             gap_handoff = (prior_vacuum is not None and prior_vacuum.source_generation_id is None
-                and prior_vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
-                and prior_vacuum.first_blocker == "AUTHORITY_GAP")
+                and ((prior_vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING and prior_vacuum.first_blocker == "AUTHORITY_GAP")
+                    or (prior_vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED and prior_vacuum.first_blocker == "OWNER_PAUSED")))
             if prior_vacuum is not None and (not gap_handoff and (prior_vacuum.source_generation_id is None
                 or prior_vacuum.state not in {StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.OWNER_PAUSED})
                 or prior_vacuum.drained_at_ms is None or (
