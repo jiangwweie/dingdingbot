@@ -348,6 +348,7 @@ class GenericStaticActivationProof(BaseModel):
     vacuum_version: int
     fenced_at_ms: int
     drained_at_ms: int
+    materialization_started_at_ms: int
     previous_event: MaterializationEventBaseline
     source_selection_authority_id: str
     target_event: AuthorityEventBinding
@@ -402,7 +403,9 @@ class GenericStaticActivationProof(BaseModel):
             or min(self.selection_control_version,self.owner_control_version,self.vacuum_version)<=0
             or self.effective_period_anchor_ms<=0 or self.effective_period_anchor_ms%(spec.cadence_hours*3600000)
             or not 0<self.owner_authorized_at_ms<self.effective_period_anchor_ms
-            or not self.effective_period_anchor_ms+3600000<=self.fenced_at_ms<=self.drained_at_ms<=self.prepared_at_ms):
+            or not 0<self.fenced_at_ms<=self.drained_at_ms<=self.prepared_at_ms
+            or not self.effective_period_anchor_ms+3600000<=self.materialization_started_at_ms<=self.prepared_at_ms
+            or self.fenced_at_ms>self.materialization_started_at_ms):
             raise ValueError("Static activation source/time identity differs")
         for event in (self.previous_event,self.target_event):
             if (event.event_spec_id,event.position_side)!=(spec.event_spec_id,spec.position_side) or event.grant_state.value!="ACTIVE":
@@ -419,6 +422,9 @@ class GenericStaticActivationProof(BaseModel):
                 raise ValueError("Static recovery requires classified provenance")
         elif self.recovery_reason is not None or self.owner_authorized_at_ms>=expected_close or self.prepared_at_ms<=expected_close:
             raise ValueError("Static normal close requires precommitted Owner input")
+        if self.transition_rule=="NORMAL_TRANSITION" and (
+            self.materialization_started_at_ms!=self.fenced_at_ms or self.materialization_started_at_ms>self.drained_at_ms):
+            raise ValueError("Static normal transition requires continuous original drain")
         if self.first_eligible_close_time_ms!=expected_close or self.first_eligible_close_time_ms<self.effective_period_anchor_ms+3600000:
             raise ValueError("Static activation close identity differs")
         for cursor in self.observation_cursors:

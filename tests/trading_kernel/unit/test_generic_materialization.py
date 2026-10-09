@@ -150,7 +150,7 @@ def test_static_activation_proof_keeps_normal_and_recovery_close_rules_distinct(
         authorization_id=auth,owner_authorized_at_ms=CUTOFF-1,rollback_baseline_id="rollback-baseline:"+"a"*64,
         materialization_generation_id=GenericStaticMaterializationGeneration.id_for_authorization(auth),
         effective_period_anchor_ms=CUTOFF,entry_vacuum_id="vacuum:static",vacuum_version=3,
-        fenced_at_ms=CUTOFF+HOUR+2,drained_at_ms=CUTOFF+HOUR+3,
+        fenced_at_ms=CUTOFF+HOUR+2,drained_at_ms=CUTOFF+HOUR+3,materialization_started_at_ms=CUTOFF+HOUR+2,
         previous_event=prior,source_selection_authority_id="authority:dynamic",target_event=AuthorityEventBinding(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
             grant_state="ACTIVE",universe_version_id="universe:static-new",member_set_digest=prior.member_set_digest),
         transition_rule=rule,recovery_reason=None if rule=="NORMAL_TRANSITION" else "AUTHORITY_GAP",
@@ -164,6 +164,15 @@ def test_static_activation_proof_keeps_normal_and_recovery_close_rules_distinct(
     assert proof.episode_rebase_required is (rule=="RECOVERY_TRANSITION")
     assert proof.comparison_rebase_required is comparative
     assert proof.result_selection_control_version == 4
+    inherited_drain = {**proof.model_dump(),"fenced_at_ms":CUTOFF-HOUR,
+        "drained_at_ms":CUTOFF+HOUR-1}
+    if rule=="NORMAL_TRANSITION":
+        with pytest.raises(ValueError,match="original drain"):
+            GenericStaticActivationProof.model_validate(inherited_drain)
+    else:
+        inherited = GenericStaticActivationProof.model_validate(inherited_drain)
+        assert inherited.materialization_started_at_ms>inherited.drained_at_ms
+        assert inherited.first_eligible_close_time_ms>inherited.prepared_at_ms
     from src.trading_kernel.domain.selection_authority import SelectionControl
     static_control = SelectionControl(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,
         selection_mode="static_baseline",selection_epoch_id=None,control_version=4,

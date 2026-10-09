@@ -495,7 +495,8 @@ async def coordinate_selection_materialization_once(
             if existing_static is None:
                 created_static = await uow.instrument_selection.create_generic_static_materialization_generation(
                     strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
-                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
+                return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.GENERATION_MATERIALIZING
+                    if created_static.lifecycle_state is MaterializationGenerationState.MATERIALIZING else MaterializationDisposition.GENERATION_PENDING),
                     materialization_generation_id=created_static.materialization_generation_id)
             if existing_static.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
                 failed_static_vacuum = await uow.instrument_selection.get_current_entry_vacuum(

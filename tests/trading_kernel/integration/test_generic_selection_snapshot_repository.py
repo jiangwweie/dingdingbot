@@ -6926,6 +6926,120 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
                 rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
                 effective_period_anchor_ms=anchor,request=request.model_copy(update={"idempotency_key":request.idempotency_key+":duplicate"}),
                 authentication_strength="totp_step_up")
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateGenericStaticRequest,
+    )
+    due = anchor+HOUR+1
+    @asynccontextmanager
+    async def interrupted_retry_handoff():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected retry handoff commit failure")
+    retry_request = CoordinateGenericStaticRequest(strategy_group_id=group,worker_id="static-retry-materializer")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due)), pytest.raises(RuntimeError,match="retry handoff commit"):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_retry_handoff,request=retry_request,clock_ms=lambda:due)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=control.selection_spec_id)==vacuum
+        assert await uow.instrument_selection.get_generic_static_materialization_generation(
+            GenericStaticMaterializationGeneration.id_for_authorization(new.pending_authorization_id)) is None
+    actual_execute = sa.ext.asyncio.AsyncConnection.execute
+    async def corrupt_handoff_payload(connection,statement,*args,**kwargs):
+        if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+            params = statement.compile().params
+            if params.get("event_type")=="SUPERSEDED" and params.get("payload",{}).get("recovery_origin")=="STATIC_RETRY":
+                statement = statement.values(payload={**params["payload"],"previous_generation_id":"generation:wrong"})
+        return await actual_execute(connection,statement,*args,**kwargs)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due)), patch.object(
+        sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_handoff_payload), pytest.raises(sa.exc.DBAPIError,match="Static retry requires exact"):
+        await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:due)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due)):
+        retargeted = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:due)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        replacement = await uow.instrument_selection.get_generic_static_materialization_generation(retargeted.materialization_generation_id)
+        retained_vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=control.selection_spec_id)
+        assert await uow.instrument_selection.get_generic_static_materialization_generation(old.materialization_generation_id)==old
+        assert await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id)==authority
+    assert replacement.lifecycle_state.value=="MATERIALIZING"
+    assert replacement.materialization_generation_id!=old.materialization_generation_id and replacement.fenced_at_ms==due
+    assert replacement.previous_events==old.previous_events
+    assert retained_vacuum.entry_vacuum_id==vacuum.entry_vacuum_id
+    assert retained_vacuum.fenced_at_ms==vacuum.fenced_at_ms and retained_vacuum.drained_at_ms==vacuum.drained_at_ms
+    assert retained_vacuum.source_generation_id==replacement.materialization_generation_id
+    assert retained_vacuum.state is StrategyEntryVacuumState.RECONFIGURING and retained_vacuum.blocks_new_entry
+    # A new Owner intent does not cure permanent certification failure.
+    # Supply renewed eligible certification facts before testing recovery.
+    async with PostgresKernelUnitOfWork(database) as uow:
+        retry_baseline = await uow.instrument_selection.get_generic_static_rollback_baseline(old.rollback_baseline_id)
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL,"
+            "observed_at_ms=:at,valid_until_ms=:valid,next_check_at_ms=:valid WHERE exchange_instrument_id IN "
+            "(SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),
+            {"at":anchor+HOUR,"valid":due+HOUR,"uid":retry_baseline.source_event.universe_version_id})
+    async def omit_retry_budget_payload(connection,statement,*args,**kwargs):
+        if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
+            params = statement.compile().params
+            if params.get("event_type")=="ACTIVE" and "static_activation_proof" in params.get("payload",{}):
+                original_payload = params["payload"]
+                forged = dict(original_payload["static_activation_proof"])
+                forged.pop("materialization_started_at_ms")
+                statement = statement.values(payload={**original_payload,"static_activation_proof":forged})
+        return await actual_execute(connection,statement,*args,**kwargs)
+    target = None
+    for offset in range(2,10):
+        tick = due+offset
+        async with PostgresKernelUnitOfWork(database) as uow:
+            pending = await uow.instrument_selection.get_generic_static_materialization_generation(replacement.materialization_generation_id)
+        if pending.lifecycle_state.value=="STAGED":
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)), patch.object(
+                sa.ext.asyncio.AsyncConnection,"execute",new=omit_retry_budget_payload), pytest.raises(sa.exc.DBAPIError,match="Static activation requires atomic"):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda tick=tick:tick)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            progressed = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda tick=tick:tick)
+        if progressed.disposition is MaterializationDisposition.ACTIVE_NEW:
+            break
+        async with PostgresKernelUnitOfWork(database) as uow:
+            targets = await uow.strategy_universes.get_generation_universe_targets(replacement.materialization_generation_id)
+        if targets:
+            target = targets[0]
+            await make_warming_ready(database,universe_version_id=target.universe_version_id,warm_closed_bar_time_ms=anchor+HOUR,valid_until_ms=due+HOUR)
+            if group in {"MPG-001","MI-001"}:
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    members = await uow.strategy_universes.get_members(target.universe_version_id)
+                template = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                delta = anchor+HOUR-template.trigger_candle_close_time_ms
+                candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+                projection = build_comparative_universe_projection(event_spec_id=inputs(group).spec.event_spec_id,
+                    universe_version_id=target.universe_version_id,strategy_group_id=group,exchange_instrument_ids=members,
+                    closed_bar_time_ms=anchor+HOUR,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                    member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles) for member in members))
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow.strategy_universes.save_comparative_projection(projection)
+    assert progressed.disposition is MaterializationDisposition.ACTIVE_NEW, progressed
+    async with PostgresKernelUnitOfWork(database) as uow:
+        proof = await uow.instrument_selection.get_generic_static_activation_proof(replacement.materialization_generation_id)
+        activated = await uow.instrument_selection.get_selection_control(group)
+        closed_vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=control.selection_spec_id)
+        assert await uow.instrument_selection.get_generic_static_materialization_generation(old.materialization_generation_id)==old
+    assert proof.transition_rule=="RECOVERY_TRANSITION" and proof.episode_rebase_required
+    assert proof.first_eligible_close_time_ms==(proof.prepared_at_ms//HOUR+1)*HOUR
+    assert proof.materialization_started_at_ms==due and proof.fenced_at_ms==vacuum.fenced_at_ms
+    assert target.universe_version_id!=old.previous_events[0].universe_version_id
+    assert activated.selection_mode.value=="static_baseline" and activated.pending_selection_mode is None
+    assert closed_vacuum is None
+    async with PostgresKernelUnitOfWork(database) as uow:
+        for cursor in proof.observation_cursors:
+            checkpoint = await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+            assert checkpoint is not None and checkpoint.recovery_id==proof.recovery_id
+            assert checkpoint.first_eligible_close_time_ms==proof.first_eligible_close_time_ms
+            assert checkpoint.armed_at_close_time_ms is None
+        assert uow._connection is not None
+        scope_id = await uow._connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":target.universe_version_id})
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        past = await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=None,
+            observed_close_time_ms=proof.first_eligible_close_time_ms-HOUR,now_ms=proof.prepared_at_ms+1,
+            allow_current_as_birth=True,lock_current=True)
+    assert not past.allowed
 
 
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,

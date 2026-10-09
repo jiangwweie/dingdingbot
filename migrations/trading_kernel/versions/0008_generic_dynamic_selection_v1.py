@@ -1829,6 +1829,57 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         END; $$
     """))
     op.execute(sa.text("""
+        CREATE FUNCTION brc_static_retry_handoff_matches_v1(gid text) RETURNS boolean LANGUAGE plpgsql AS $$
+        DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE;
+          oldg brc_strategy_universe_materialization_generations%ROWTYPE; src jsonb; oldid text;
+          v brc_strategy_entry_vacuums_current%ROWTYPE; newproof brc_owner_authorizations%ROWTYPE;
+        BEGIN
+          SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
+          SELECT payload INTO src FROM brc_strategy_universe_materialization_events
+            WHERE materialization_generation_id=gid AND event_sequence=1 AND event_type='PENDING';
+          oldid:=src->>'previous_static_generation_id';
+          IF oldid IS NULL THEN RETURN false; END IF;
+          SELECT * INTO oldg FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=oldid;
+          IF NOT FOUND OR oldg.lifecycle_state NOT IN ('FAILED_CLOSED','ABANDONED')
+            OR oldg.selection_mode<>'static_baseline' OR g.selection_mode<>'static_baseline'
+            OR oldg.selection_spec_id<>g.selection_spec_id OR oldg.strategy_group_id<>g.strategy_group_id
+            OR oldg.selection_epoch_id<>g.selection_epoch_id OR oldg.rollback_baseline_id<>g.rollback_baseline_id
+            OR oldg.selection_control_version<>g.selection_control_version OR oldg.terminal_at_ms IS NULL
+            OR oldg.terminal_at_ms>g.created_at_ms OR g.fenced_at_ms IS NULL OR g.fenced_at_ms<g.created_at_ms
+            OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE materialization_generation_id=oldid AND lifecycle_state<>'abandoned')
+            OR NOT EXISTS(SELECT 1 FROM brc_materialization_generation_event_baselines b
+              JOIN brc_materialization_generation_event_baselines oldb ON oldb.materialization_generation_id=oldid
+              WHERE b.materialization_generation_id=gid AND b.event_spec_id=oldb.event_spec_id
+                AND b.position_side=oldb.position_side AND b.universe_version_id=oldb.universe_version_id
+                AND b.member_set_digest=oldb.member_set_digest
+                AND b.comparison_universe_id IS NOT DISTINCT FROM oldb.comparison_universe_id
+                AND b.comparison_transition_revision IS NOT DISTINCT FROM oldb.comparison_transition_revision) THEN RETURN false; END IF;
+          SELECT * INTO newproof FROM brc_owner_authorizations WHERE authorization_id=src->>'authorization_id';
+          IF NOT FOUND OR newproof.authentication_strength<>'totp_step_up' OR newproof.purpose<>'selection_mode_change'
+            OR NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e WHERE e.materialization_generation_id=oldid
+              AND e.event_type='OWNER_REAUTHORIZED' AND e.payload->>'authorization_id'=newproof.authorization_id
+              AND e.occurred_at_ms=newproof.authorized_at_ms
+              AND (e.payload->>'effective_period_anchor_ms')::bigint=(src->>'effective_period_anchor_ms')::bigint) THEN RETURN false; END IF;
+          SELECT v0.* INTO v FROM brc_strategy_entry_vacuums_current v0
+            JOIN brc_strategy_entry_vacuum_events handoff USING(entry_vacuum_id)
+            WHERE handoff.event_type='SUPERSEDED' AND handoff.payload->>'recovery_origin'='STATIC_RETRY'
+              AND handoff.payload->>'previous_generation_id'=oldid AND handoff.payload->>'replacement_generation_id'=gid
+              AND handoff.occurred_at_ms=g.fenced_at_ms LIMIT 1;
+          IF NOT FOUND OR v.source_generation_id<>gid OR v.selection_spec_id<>g.selection_spec_id
+            OR v.strategy_group_id<>g.strategy_group_id OR v.fenced_at_ms>v.drained_at_ms
+            OR v.drained_at_ms IS NULL OR v.drained_at_ms>=g.fenced_at_ms
+            OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
+              AND e.event_type='OPEN' AND e.occurred_at_ms=v.fenced_at_ms)
+            OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
+              AND e.event_type='ENTRY_DRAINED' AND e.occurred_at_ms=v.drained_at_ms)
+            OR NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e WHERE e.materialization_generation_id=gid
+              AND e.event_type='MATERIALIZING' AND e.payload->>'entry_vacuum_id'=v.entry_vacuum_id
+              AND (e.payload->>'original_fenced_at_ms')::bigint=v.fenced_at_ms
+              AND (e.payload->>'original_drained_at_ms')::bigint=v.drained_at_ms) THEN RETURN false; END IF;
+          RETURN true;
+        END; $$
+    """))
+    op.execute(sa.text("""
         CREATE FUNCTION brc_validate_generation_baseline_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE gid text; g brc_strategy_universe_materialization_generations%ROWTYPE;
                 spec brc_instrument_selection_specs%ROWTYPE; s brc_instrument_selection_snapshots%ROWTYPE;
@@ -1928,6 +1979,8 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
               ',"strategy_group_id":' || to_json(g.strategy_group_id)::text ||
               ',"strategy_version_id":' || to_json(g.strategy_version_id)::text || '}','UTF8')),'hex');
             IF g.semantic_digest IS DISTINCT FROM expected_digest THEN RAISE EXCEPTION 'Static Generation source digest mismatch'; END IF;
+            IF owner_source->>'previous_static_generation_id' IS NOT NULL AND NOT brc_static_retry_handoff_matches_v1(gid) THEN
+              RAISE EXCEPTION 'Static retry requires exact original Vacuum handoff'; END IF;
             IF g.lifecycle_state='PENDING' AND NOT EXISTS (
               SELECT 1 FROM brc_strategy_selection_control_current c
                 JOIN brc_strategy_entry_controls_current o USING(strategy_group_id)
@@ -1963,7 +2016,8 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
               SELECT * INTO failure_vacuum FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=failure_source->>'entry_vacuum_id';
               IF NOT FOUND OR failure_vacuum.source_generation_id<>gid OR failure_vacuum.state<>'RECONFIGURING'
                 OR failure_vacuum.strategy_group_id<>g.strategy_group_id OR failure_vacuum.selection_spec_id<>g.selection_spec_id
-                OR failure_vacuum.fenced_at_ms<>g.fenced_at_ms OR failure_vacuum.drained_at_ms IS NULL
+                OR failure_vacuum.fenced_at_ms>g.fenced_at_ms OR failure_vacuum.drained_at_ms IS NULL
+                OR (owner_source->>'previous_static_generation_id' IS NULL AND failure_vacuum.fenced_at_ms<>g.fenced_at_ms)
                 OR failure_vacuum.resolved_at_ms IS NOT NULL OR failure_vacuum.first_blocker IS DISTINCT FROM failure_source->>'reason_code' THEN
                 RAISE EXCEPTION 'Static failure requires unresolved original Vacuum'; END IF;
             END IF;
@@ -2037,7 +2091,9 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                   (owner_proof.authorized_at_ms>=(activation_source->>'first_eligible_close_time_ms')::bigint
                     OR activation_source->>'recovery_reason' IS NOT NULL))
                 OR (activation_source->>'transition_rule'='RECOVERY_TRANSITION' AND activation_source->>'recovery_reason' IS NULL)
-                OR (activation_source->>'fenced_at_ms')::bigint IS DISTINCT FROM g.fenced_at_ms
+                OR (activation_source->>'materialization_started_at_ms')::bigint IS DISTINCT FROM g.fenced_at_ms
+                OR (owner_source->>'previous_static_generation_id' IS NULL AND (activation_source->>'fenced_at_ms')::bigint IS DISTINCT FROM g.fenced_at_ms)
+                OR (owner_source->>'previous_static_generation_id' IS NOT NULL AND activation_source->>'transition_rule'<>'RECOVERY_TRANSITION')
                 OR activation_source->'previous_event' IS DISTINCT FROM (to_jsonb(previous_source)-'materialization_generation_id')
                 OR NOT EXISTS (SELECT 1 FROM brc_selection_session_authorities a
                   JOIN brc_selection_authority_event_bindings b USING(selection_authority_id)
@@ -2061,7 +2117,8 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 OR EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id)
                 OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v WHERE v.entry_vacuum_id=activation_source->>'entry_vacuum_id'
                   AND v.source_generation_id=gid AND v.state='RESOLVED_ACTIVE' AND v.resolved_at_ms=g.activated_at_ms
-                  AND v.fenced_at_ms=g.fenced_at_ms AND v.drained_at_ms IS NOT NULL)
+                  AND v.fenced_at_ms=(activation_source->>'fenced_at_ms')::bigint
+                  AND v.drained_at_ms=(activation_source->>'drained_at_ms')::bigint AND v.drained_at_ms IS NOT NULL)
               THEN RAISE EXCEPTION 'Static activation requires atomic current Control Vacuum and source'; END IF;
               IF frozen_source.comparison_universe_id IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM brc_comparison_binding_current cb WHERE cb.event_spec_id=frozen_source.event_spec_id

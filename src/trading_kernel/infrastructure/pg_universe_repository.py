@@ -1000,7 +1000,7 @@ class PostgresStrategyUniverseRepository:
         spec = await selection.get_generic_spec(proof.selection_spec_id)
         source_lease = request.materialization_lease_epoch
         if generation.lease_epoch!=source_lease or generation.lease_expires_at_ms is None or (
-            ended>=generation.lease_expires_at_ms or ended>=proof.fenced_at_ms+spec.materialization_timeout_ms):
+            ended>=generation.lease_expires_at_ms or ended>=proof.materialization_started_at_ms+spec.materialization_timeout_ms):
             raise UniverseInstallConflict("STATIC_ACTIVATION_COMMIT_DEADLINE_EXPIRED")
         if ended<checked or ended//3_600_000!=proof.prepared_at_ms//3_600_000:
             raise UniverseInstallConflict("STATIC_ACTIVATION_COMMIT_CROSSED_CLOSE")
@@ -4098,9 +4098,10 @@ class PostgresStrategyUniverseRepository:
             vacuum = await selection.get_current_entry_vacuum(strategy_group_id=static_source.strategy_group_id,
                 selection_spec_id=static_source.selection_spec_id,for_update=True)
             if vacuum is None or vacuum.source_generation_id!=generation_id or vacuum.state.value!="RECONFIGURING" or (
-                vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None or static_source.fenced_at_ms!=vacuum.fenced_at_ms
+                vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None or static_source.fenced_at_ms is None or static_source.fenced_at_ms<vacuum.fenced_at_ms
                 or await selection.entry_vacuum_has_drain_blockers(strategy_group_id=static_source.strategy_group_id)):
                 raise UniverseInstallConflict("GENERATION_STATIC_DRAIN_AUTHORITY_CONFLICT")
+            await selection.require_static_materialization_vacuum(static_source,vacuum)
             static_spec = await selection.get_generic_spec(static_source.selection_spec_id)
             if static_source.fenced_at_ms is None or request.installed_at_ms>=static_source.fenced_at_ms+static_spec.materialization_timeout_ms:
                 raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")

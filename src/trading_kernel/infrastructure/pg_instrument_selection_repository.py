@@ -1941,8 +1941,26 @@ class PostgresInstrumentSelectionRepository:
             if existing.authorization_id!=control.pending_authorization_id or existing.selection_control_version!=control.control_version:
                 raise SelectionJobConflict("Static Generation current source changed")
             return existing
-        if await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,
-            for_update=True) is not None or await self._connection.scalar(sa.select(sa.exists().where(
+        retry_vacuum = await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,for_update=True)
+        retry_source = None
+        if retry_vacuum is not None:
+            if retry_vacuum.source_generation_id is None:
+                raise SelectionJobConflict("Static retry requires exact terminal source")
+            retry_source = await self.get_generic_static_materialization_generation(retry_vacuum.source_generation_id,for_update=True)
+            link = await self._connection.scalar(sa.select(strategy_universe_materialization_events.c.materialization_event_id).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==retry_vacuum.source_generation_id,
+                strategy_universe_materialization_events.c.event_type=="OWNER_REAUTHORIZED",
+                strategy_universe_materialization_events.c.payload["authorization_id"].astext==control.pending_authorization_id).limit(1))
+            if retry_source is None or retry_source.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED} or (
+                link is None or retry_source.rollback_baseline_id!=control.rollback_baseline_id
+                or retry_source.selection_epoch_id!=control.selection_epoch_id
+                or retry_source.selection_control_version!=control.control_version
+                or retry_vacuum.state not in {StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.OWNER_PAUSED}
+                or retry_vacuum.drained_at_ms is None or retry_vacuum.resolved_at_ms is not None
+                or await self.entry_vacuum_has_drain_blockers(strategy_group_id=strategy_group_id)
+                or await self.get_next_entry_vacuum_ticket(strategy_group_id=strategy_group_id) is not None):
+                raise SelectionJobConflict("Static retry requires authorized terminal drained source")
+        if await self._connection.scalar(sa.select(sa.exists().where(
                 strategy_universe_materialization_generations.c.strategy_group_id==strategy_group_id,
                 strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED"))))):
             raise SelectionJobConflict("Static Generation previous transition requires coordinated handoff")
@@ -1968,6 +1986,8 @@ class PostgresInstrumentSelectionRepository:
                 member_set_digest=selected_member_set_digest(current_members),
                 comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
                 comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
+        if retry_source is not None and generation.previous_events!=retry_source.previous_events:
+            raise SelectionJobConflict("Static retry previous Active source changed")
         await self._connection.execute(sa.insert(strategy_universe_materialization_generations).values(
             **generation.model_dump(mode="json",exclude={"authorization_id","effective_period_anchor_ms","previous_events"}),
             semantic_digest=generation.semantic_digest))
@@ -1979,8 +1999,66 @@ class PostgresInstrumentSelectionRepository:
         await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
             materialization_event_id=f"materialization-event:{generation_id}:1",materialization_generation_id=generation_id,
             event_sequence=1,event_type="PENDING",payload={"authorization_id":control.pending_authorization_id,
-                "effective_period_anchor_ms":control.pending_effective_period_anchor_ms},occurred_at_ms=created_at_ms))
+                "effective_period_anchor_ms":control.pending_effective_period_anchor_ms,
+                **({"previous_static_generation_id":retry_source.materialization_generation_id} if retry_source is not None else {})},occurred_at_ms=created_at_ms))
+        if retry_source is not None and retry_vacuum is not None:
+            generation = GenericStaticMaterializationGeneration.model_validate({**generation.model_dump(),
+                "lifecycle_state":"MATERIALIZING","desired_at_ms":now,"fenced_at_ms":now,"projection_version":4})
+            await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==generation_id).values(
+                    lifecycle_state="MATERIALIZING",desired_at_ms=now,fenced_at_ms=now,projection_version=4))
+            payload = {"entry_vacuum_id":retry_vacuum.entry_vacuum_id,
+                "previous_static_generation_id":retry_source.materialization_generation_id,
+                "original_fenced_at_ms":retry_vacuum.fenced_at_ms,"original_drained_at_ms":retry_vacuum.drained_at_ms}
+            for sequence,event_type in ((2,"DESIRED"),(3,"DRAINING_ENTRY"),(4,"MATERIALIZING")):
+                await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                    materialization_event_id=f"materialization-event:{generation_id}:{sequence}",materialization_generation_id=generation_id,
+                    event_sequence=sequence,event_type=event_type,payload=payload,occurred_at_ms=now))
+            await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+                entry_vacuum_event_id=f"vacuum-event:{retry_vacuum.entry_vacuum_id}:{retry_vacuum.projection_version+1}",
+                entry_vacuum_id=retry_vacuum.entry_vacuum_id,event_sequence=retry_vacuum.projection_version+1,event_type="SUPERSEDED",
+                payload={"previous_generation_id":retry_source.materialization_generation_id,
+                    "replacement_generation_id":generation_id,"recovery_origin":"STATIC_RETRY"},occurred_at_ms=now))
+            changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+                strategy_entry_vacuums_current.c.entry_vacuum_id==retry_vacuum.entry_vacuum_id,
+                strategy_entry_vacuums_current.c.projection_version==retry_vacuum.projection_version).values(
+                    source_generation_id=generation_id,period_anchor_ms=generation.effective_period_anchor_ms,
+                    state="RECONFIGURING",first_blocker="STATIC_RETRY_RECOVERY",projection_version=retry_vacuum.projection_version+1))
+            if changed.rowcount!=1:
+                raise SelectionJobConflict("Static retry original Vacuum CAS changed")
         return generation
+
+    async def require_static_materialization_vacuum(self, generation: GenericStaticMaterializationGeneration,
+        vacuum: StrategyEntryVacuum,
+    ) -> bool:
+        """Authenticate preserved drain separately from this operation's timeout."""
+        source = (await self._connection.execute(sa.select(strategy_universe_materialization_events.c.payload).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==generation.materialization_generation_id,
+            strategy_universe_materialization_events.c.event_type=="PENDING",
+            strategy_universe_materialization_events.c.event_sequence==1))).scalar_one()
+        previous_id = source.get("previous_static_generation_id")
+        if previous_id is None:
+            if vacuum.fenced_at_ms!=generation.fenced_at_ms:
+                raise SelectionJobConflict("Static original fence identity changed")
+            return False
+        old = await self.get_generic_static_materialization_generation(previous_id)
+        handoff = (await self._connection.execute(sa.select(strategy_entry_vacuum_events).where(
+            strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuum_events.c.event_type=="SUPERSEDED",
+            strategy_entry_vacuum_events.c.payload["replacement_generation_id"].astext==generation.materialization_generation_id).limit(1))).mappings().one_or_none()
+        if old is None or handoff is None or old.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED} or (
+            old.previous_events!=generation.previous_events or old.rollback_baseline_id!=generation.rollback_baseline_id
+            or old.selection_epoch_id!=generation.selection_epoch_id or old.selection_control_version!=generation.selection_control_version
+            or handoff["payload"]!={"previous_generation_id":previous_id,"replacement_generation_id":generation.materialization_generation_id,"recovery_origin":"STATIC_RETRY"}
+            or handoff["occurred_at_ms"]!=generation.fenced_at_ms or vacuum.drained_at_ms is None
+            or generation.fenced_at_ms is None or not vacuum.fenced_at_ms<=vacuum.drained_at_ms<generation.fenced_at_ms):
+            raise SelectionJobConflict("Static retry handoff provenance changed")
+        if not await self._connection.scalar(sa.select(sa.exists().where(
+            strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuum_events.c.event_type=="ENTRY_DRAINED",
+            strategy_entry_vacuum_events.c.occurred_at_ms==vacuum.drained_at_ms))):
+            raise SelectionJobConflict("Static retry original drain provenance changed")
+        return True
 
     async def _require_current_static_generation(self, materialization_generation_id: str) -> GenericStaticMaterializationGeneration:
         initial = await self.get_generic_static_materialization_generation(materialization_generation_id)
@@ -2083,10 +2161,11 @@ class PostgresInstrumentSelectionRepository:
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=current.strategy_group_id,
             selection_spec_id=current.selection_spec_id,for_update=True)
         if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or (
-            vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.fenced_at_ms!=current.fenced_at_ms
+            vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or current.fenced_at_ms is None or vacuum.fenced_at_ms>current.fenced_at_ms
             or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
             or await self.entry_vacuum_has_drain_blockers(strategy_group_id=current.strategy_group_id)):
             raise SelectionJobConflict("Static failure requires original drained Vacuum")
+        await self.require_static_materialization_vacuum(current,vacuum)
         universes = PostgresStrategyUniverseRepository(self._connection)
         targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)
         if len(targets)>1:
@@ -2154,9 +2233,10 @@ class PostgresInstrumentSelectionRepository:
             selection_spec_id=generation.selection_spec_id,for_update=True)
         if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or (
             vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None
-            or vacuum.resolved_at_ms is not None or vacuum.fenced_at_ms!=generation.fenced_at_ms
+            or vacuum.resolved_at_ms is not None or vacuum.fenced_at_ms>generation.fenced_at_ms
             or await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)):
             raise SelectionJobConflict("Static activation requires exact completed drain")
+        retry_handoff = await self.require_static_materialization_vacuum(generation,vacuum)
         source = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
         if source is None or source.authority.selection_epoch_id!=generation.selection_epoch_id or (
             source.authority.selection_control_version!=generation.selection_control_version):
@@ -2198,7 +2278,7 @@ class PostgresInstrumentSelectionRepository:
             owner_authorizations.c.authorization_id==generation.authorization_id))).mappings().one()
         signals = PostgresSignalRepository(self._connection)
         reason: Literal["AUTHORITY_GAP","OWNER_INTERRUPTION","RECOVERY_PROVENANCE"] | None = None
-        if source.authority.blocks_new_entry or source.authority.expires_at_ms<generation.effective_period_anchor_ms+3600000:
+        if retry_handoff or source.authority.blocks_new_entry or source.authority.expires_at_ms<generation.effective_period_anchor_ms+3600000:
             reason = "AUTHORITY_GAP"
         elif source.authority.owner_control_version!=owner["control_version"] or await signals.selection_authority_was_interrupted(strategy_group_id=generation.strategy_group_id,
             selection_spec_id=generation.selection_spec_id,owner_policy_id=scopes[0],after_ms=source.authority.created_at_ms,
@@ -2225,7 +2305,7 @@ class PostgresInstrumentSelectionRepository:
             owner_authorized_at_ms=authorization["authorized_at_ms"],rollback_baseline_id=generation.rollback_baseline_id,
             materialization_generation_id=materialization_generation_id,effective_period_anchor_ms=generation.effective_period_anchor_ms,
             entry_vacuum_id=vacuum.entry_vacuum_id,vacuum_version=vacuum.projection_version,
-            fenced_at_ms=vacuum.fenced_at_ms,drained_at_ms=vacuum.drained_at_ms,
+            fenced_at_ms=vacuum.fenced_at_ms,drained_at_ms=vacuum.drained_at_ms,materialization_started_at_ms=generation.fenced_at_ms,
             previous_event=generation.previous_events[0],source_selection_authority_id=source.authority.selection_authority_id,
             target_event=AuthorityEventBinding(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
                 grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=target_id,member_set_digest=baseline.source_event.member_set_digest),
