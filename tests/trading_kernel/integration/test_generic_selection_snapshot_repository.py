@@ -5274,9 +5274,9 @@ async def test_generic_continuity_preserves_event_side_and_comparison(database: 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("static_source", [False,True])
+@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true")])
 async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finishes_drain(
-    database: AsyncEngine, group: str,static_source: bool,
+    database: AsyncEngine, group: str,static_source: bool,corrupt_completion: bool | str,
 ) -> None:
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateGenericStaticRequest,
@@ -5347,7 +5347,15 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         assert abandoned.lease_owner is None and abandoned.terminal_at_ms==at+2
         marked = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert marked.state is StrategyEntryVacuumState.DRAINING_ENTRY and marked.first_blocker=="OWNER_PAUSED"
-    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+3)):
+    actual_execute = sa.ext.asyncio.AsyncConnection.execute
+    async def corrupt_pause_completion(connection,statement,*args,**kwargs):
+        if corrupt_completion and getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+            params = statement.compile().params
+            if params.get("event_type")=="OWNER_PAUSED" and params.get("payload",{}).get("entry_drain_complete"):
+                statement = statement.values(payload={"entry_drain_complete":"true" if corrupt_completion=="string_true" else False})
+        return await actual_execute(connection,statement,*args,**kwargs)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+3)), patch.object(
+        sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_pause_completion):
         drained = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+3)
     assert drained.disposition is MaterializationDisposition.OWNER_PAUSED,drained
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -5364,6 +5372,26 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
             await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
                 request=ControlMutationRequest(expected_version=paused_owner.control_version,reason="retry_static_after_paused_drain",
                     idempotency_key=f"resume-static-drain:{group}",owner_identity="owner",now_ms=at+4),authentication_strength="totp_step_up")
+        if corrupt_completion:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                control = await uow.instrument_selection.get_selection_control(group)
+                cadence = source.spec.cadence_hours*HOUR
+                next_anchor = ((at+5)//cadence+1)*cadence
+                scheduled = await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                    rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+                    effective_period_anchor_ms=next_anchor,authentication_strength="totp_step_up",
+                    request=ControlMutationRequest(expected_version=control.control_version,reason="corrupted_completion_must_not_grant",
+                        idempotency_key=f"retry-corrupt-drain:{group}",owner_identity="owner",now_ms=at+5))
+            due = next_anchor+HOUR+1
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due)), pytest.raises(
+                sa.exc.DBAPIError,match="Static retry requires exact original Vacuum handoff"):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_generic_static_materialization_generation(
+                    GenericStaticMaterializationGeneration.id_for_authorization(scheduled.pending_authorization_id)) is None
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==finished
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==original
+            return
         await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=at+5)
 
 

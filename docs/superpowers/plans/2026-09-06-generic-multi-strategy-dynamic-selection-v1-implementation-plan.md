@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮暂停drain证明末版回归：16分支PASS；Generic migration/SOR materialization/ENTRY Vacuum163 passed；源码+0008 Mypy161 files、文档25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4。
+
+2026-10-09暂停drain完成证明类型攻击补强（基于`58ef3be7`，GS-08关联）：四策略在正式Static paused-drain completion的INSERT边界分别注入entry_drain_complete=false和JSON字符串"true"，再经正式Owner Resume/新授权及到期Coordinator handoff。false已被既有独立SQL拒绝；string_true四分支RED证明旧->>/astext文本比较把字符串当布尔true，能够commit新retry。现Python repository与0008 SQL handoff predicate统一精确JSONB布尔true比较，普通暂停、false、string均不能证明完成drain；正常booltrue仍沿原恢复activation成功。攻击失败事务保持原OWNER_PAUSED Vacuum/Current Authority，零新Generation；没有修改真实drain判定或新交易范围。Dynamic/Static正常与两类损坏证明共16分支PASS，源码+0008 Mypy161 files、Ruff/diff通过；全部Docker PG、无生产修改。不代表有单drain证据或GS-04～09 Done，非exact R4。
+
 本轮paused-drain Static恢复验证：8个Dynamic/Static分支PASS，末版Generic migration/SOR materialization/ENTRY Vacuum163 passed、源码+0008 Mypy161 files、文档authority25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4或末版完整Generic模块。
 
 2026-10-09Static暂停drain后的重新授权恢复增量（基于`c0c7b1a1`，GS-08关联）：四策略正式Static Generation在DRAINING阶段Pause→终态ABANDONED→下一Coordinator tick确认无Ticket drain并记OWNER_PAUSED后，正式Owner Resume再用新TOTP授权排期，复用既有terminal reauthorization/handoff/activation全链。RED复现Python/独立SQL原drain provenance仅认ENTRY_DRAINED，拒绝实际上由正式drain产生的OWNER_PAUSED + entry_drain_complete=true。现两个边界都只额外接受同Vacuum、occurred_at恰等于原drained_at且明确完成flag的该事件；普通OwnerPause事件不能冒充完成drain，无直接SQL清fence、无终态revival。正式重授权仍保持旧source/Control/原Vacuum直到新操作到期；相同原fence/drain被保留，新目标重新warming/staged，typed RECOVERY proof/未来close/rebase及PG payload攻击仍有效。四策略Static成功恢复加Dynamic原pause drain合计8分支PASS；不代表有单cancel/unknown/partial恢复、unfenced pause或全部GS-08认证完成。全为Docker PG，无生产修改、无真实exchange写入，GS-04～09未Done、非exact R4。
