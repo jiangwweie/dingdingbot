@@ -1998,12 +1998,13 @@ class PostgresInstrumentSelectionRepository:
             "lifecycle_state":"MATERIALIZING","desired_at_ms":now,"fenced_at_ms":now,
             "projection_version":4})
 
-    async def retarget_failed_generic_vacuum_with_generation(self,
+    async def retarget_interrupted_generic_vacuum_with_generation(self,
         generation: GenericMaterializationGeneration, *, entry_vacuum_id: str,
     ) -> GenericMaterializationGeneration:
         """A newer effective Desired takes over the already-drained fence.
 
-        The failed Generation remains terminal. The original Vacuum timestamps
+        Failed Generations remain terminal; unfinished targets are abandoned
+        and their Generation superseded. The original Vacuum timestamps
         remain immutable evidence; the replacement gets its own timeout clock.
         No Authority is granted by this transaction.
         """
@@ -2036,8 +2037,13 @@ class PostgresInstrumentSelectionRepository:
             or vacuum.period_anchor_ms>=generation.period_anchor_ms):
             raise SelectionJobConflict("Generic replacement requires exact prior drained Vacuum")
         old = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
-        if old is None or old.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED or (
-            old.fenced_at_ms!=vacuum.fenced_at_ms or old.selection_spec_id!=generation.selection_spec_id
+        if old is None or old.lifecycle_state not in {
+            MaterializationGenerationState.FAILED_CLOSED, MaterializationGenerationState.MATERIALIZING,
+            MaterializationGenerationState.STAGED,
+        } or (
+            old.fenced_at_ms is None or not vacuum.fenced_at_ms<=old.fenced_at_ms<=now
+            or old.period_anchor_ms!=vacuum.period_anchor_ms
+            or old.selection_spec_id!=generation.selection_spec_id
             or old.selection_epoch_id!=generation.selection_epoch_id or old.selection_control_version!=generation.selection_control_version
             or old.previous_events!=generation.previous_events):
             raise SelectionJobConflict("Generic replacement previous Generation changed")
@@ -2047,10 +2053,30 @@ class PostgresInstrumentSelectionRepository:
         from src.trading_kernel.infrastructure.pg_universe_repository import (
             PostgresStrategyUniverseRepository,
         )
-        targets = await PostgresStrategyUniverseRepository(self._connection).get_generation_universe_targets(
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        targets = await universes.get_generation_universe_targets(
             old.materialization_generation_id,for_update=True)
-        if any(target.lifecycle_state.value!="abandoned" for target in targets):
-            raise SelectionJobConflict("Generic replacement has unfinished old targets")
+        if len(targets)>1 or any(target.lifecycle_state.value not in {"abandoned","warming","staged"} for target in targets):
+            raise SelectionJobConflict("Generic replacement old target identity changed")
+        if old.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED and any(
+            target.lifecycle_state.value!="abandoned" for target in targets):
+            raise SelectionJobConflict("Generic failed replacement targets were not abandoned")
+        from src.trading_kernel.application.abandon_strategy_universe import (
+            AbandonStrategyUniverseRequest,
+        )
+        for target in targets:
+            if target.lifecycle_state.value!="abandoned":
+                await universes.abandon(AbandonStrategyUniverseRequest(
+                    universe_version_id=target.universe_version_id,
+                    reason_code="superseded_by_newer_selection",attempted_at_ms=now))
+        if old.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED:
+            superseded = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==old.materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version==old.projection_version).values(
+                    lifecycle_state="SUPERSEDED",terminal_at_ms=now,projection_version=old.projection_version+1,
+                    lease_owner=None,lease_expires_at_ms=None))
+            if superseded.rowcount!=1:
+                raise SelectionJobConflict("Generic replacement previous Generation CAS changed")
         await self.add_generic_pending_materialization_generation(generation)
         moved = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
             strategy_universe_materialization_generations.c.materialization_generation_id==generation.materialization_generation_id,
@@ -2071,7 +2097,10 @@ class PostgresInstrumentSelectionRepository:
         await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
             materialization_event_id=f"materialization-event:{old.materialization_generation_id}:{old_sequence}",
             materialization_generation_id=old.materialization_generation_id,event_sequence=old_sequence,
-            event_type="SUPERSEDED_BY_NEWER_SELECTION",payload={"replacement_generation_id":generation.materialization_generation_id},
+            event_type="SUPERSEDED_BY_NEWER_SELECTION",payload={
+                "replacement_generation_id":generation.materialization_generation_id,
+                "entry_vacuum_id":vacuum.entry_vacuum_id,"previous_lifecycle_state":old.lifecycle_state.value,
+                "original_fenced_at_ms":vacuum.fenced_at_ms,"original_drained_at_ms":vacuum.drained_at_ms},
             occurred_at_ms=now))
         for offset,state,event_type,source_id in (
             (1,"SUPERSEDED","SUPERSEDED",old.materialization_generation_id),
@@ -2089,7 +2118,9 @@ class PostgresInstrumentSelectionRepository:
                 entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+offset}",
                 entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+offset,event_type=event_type,
                 payload={"previous_generation_id":old.materialization_generation_id,
-                    "replacement_generation_id":generation.materialization_generation_id},occurred_at_ms=now))
+                    "replacement_generation_id":generation.materialization_generation_id,
+                    "recovery_origin":("MATERIALIZATION_FAILURE" if old.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED
+                        else "UNFINISHED_MATERIALIZATION")},occurred_at_ms=now))
         return GenericMaterializationGeneration.model_validate({**generation.model_dump(),"lifecycle_state":"MATERIALIZING",
             "desired_at_ms":now,"fenced_at_ms":now,"projection_version":4})
 
@@ -4024,7 +4055,7 @@ class PostgresInstrumentSelectionRepository:
             strategy_entry_vacuum_events.c.event_type=="SUPERSEDED"
         ).order_by(strategy_entry_vacuum_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
         if predecessor is None or predecessor.get("replacement_generation_id")!=materialization_generation_id:
-            raise SelectionJobConflict("Recovered activation lacks failed predecessor lineage")
+            raise SelectionJobConflict("Recovered activation lacks interrupted predecessor lineage")
         if predecessor.get("recovery_origin")=="AUTHORITY_GAP":
             opened = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
                 strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
@@ -4036,21 +4067,38 @@ class PostgresInstrumentSelectionRepository:
                 raise SelectionJobConflict("Recovered activation original Authority gap changed")
             recovery_reason: Literal["AUTHORITY_GAP","MATERIALIZATION_FAILURE","MATERIALIZATION_TIMEOUT"] = "AUTHORITY_GAP"
         else:
-            failed = await self.get_generic_materialization_generation(predecessor["previous_generation_id"],for_update=True)
-            if failed is None or failed.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED or (
-                failed.terminal_at_ms is None or failed.terminal_at_ms>generation.created_at_ms
-                or failed.fenced_at_ms!=vacuum.fenced_at_ms or failed.previous_events!=generation.previous_events):
-                raise SelectionJobConflict("Recovered activation failed predecessor changed")
+            interrupted = await self.get_generic_materialization_generation(predecessor["previous_generation_id"],for_update=True)
+            unfinished = predecessor.get("recovery_origin")=="UNFINISHED_MATERIALIZATION"
+            expected_state = MaterializationGenerationState.SUPERSEDED if unfinished else MaterializationGenerationState.FAILED_CLOSED
+            if interrupted is None or interrupted.lifecycle_state is not expected_state or (
+                interrupted.terminal_at_ms is None or interrupted.terminal_at_ms>generation.created_at_ms
+                or interrupted.fenced_at_ms is None or not vacuum.fenced_at_ms<=interrupted.fenced_at_ms<generation.fenced_at_ms
+                or interrupted.selection_epoch_id!=generation.selection_epoch_id
+                or interrupted.selection_spec_id!=generation.selection_spec_id
+                or interrupted.selection_control_version!=generation.selection_control_version
+                or interrupted.period_anchor_ms>=generation.period_anchor_ms
+                or interrupted.previous_events!=generation.previous_events):
+                raise SelectionJobConflict("Recovered activation interrupted predecessor changed")
             failure = (await self._connection.execute(sa.select(strategy_universe_materialization_events.c.payload).where(
-                strategy_universe_materialization_events.c.materialization_generation_id==failed.materialization_generation_id,
-                strategy_universe_materialization_events.c.event_type=="FAILED_CLOSED"
+                strategy_universe_materialization_events.c.materialization_generation_id==interrupted.materialization_generation_id,
+                strategy_universe_materialization_events.c.event_type==(
+                    "SUPERSEDED_BY_NEWER_SELECTION" if unfinished else "FAILED_CLOSED")
             ).order_by(strategy_universe_materialization_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
-            if failure is None or failure.get("entry_vacuum_id")!=vacuum.entry_vacuum_id or failure.get("reason_code") not in {
+            if unfinished:
+                if failure is None or failure.get("entry_vacuum_id")!=vacuum.entry_vacuum_id or (
+                    failure.get("replacement_generation_id")!=generation.materialization_generation_id
+                    or failure.get("previous_lifecycle_state") not in {"MATERIALIZING","STAGED"}
+                    or failure.get("original_fenced_at_ms")!=vacuum.fenced_at_ms
+                    or failure.get("original_drained_at_ms")!=vacuum.drained_at_ms):
+                    raise SelectionJobConflict("Recovered activation supersession cause changed")
+                recovery_reason = "AUTHORITY_GAP"
+            elif failure is None or failure.get("entry_vacuum_id")!=vacuum.entry_vacuum_id or failure.get("reason_code") not in {
                 "MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED","CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
                 raise SelectionJobConflict("Recovered activation original failure cause changed")
-            recovery_reason = (
-                "MATERIALIZATION_TIMEOUT" if failure["reason_code"] in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED"}
-                else "MATERIALIZATION_FAILURE")
+            else:
+                recovery_reason = (
+                    "MATERIALIZATION_TIMEOUT" if failure["reason_code"] in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED"}
+                    else "MATERIALIZATION_FAILURE")
         source = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
         previous = generation.previous_events[0]
         if source is None or (
@@ -4065,7 +4113,7 @@ class PostgresInstrumentSelectionRepository:
             or source.authority.comparison_universe_id!=previous.comparison_universe_id
             or source.authority.comparison_transition_revision!=previous.comparison_transition_revision):
             raise SelectionJobConflict("Recovered activation source Authority changed")
-        if recovery_reason=="AUTHORITY_GAP" and predecessor.get("source_selection_authority_id")!=source.authority.selection_authority_id:
+        if predecessor.get("recovery_origin")=="AUTHORITY_GAP" and predecessor.get("source_selection_authority_id")!=source.authority.selection_authority_id:
             raise SelectionJobConflict("Recovered activation gap source Authority changed")
         universes = PostgresStrategyUniverseRepository(self._connection)
         active = await universes.get_current(spec.event_spec_id)

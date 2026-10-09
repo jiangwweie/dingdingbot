@@ -1590,7 +1590,7 @@ class InstrumentSelectionRepository(Protocol):
     async def add_generic_pending_materialization_generation(self,
         generation: GenericMaterializationGeneration) -> GenericMaterializationGeneration: ...
 
-    async def retarget_failed_generic_vacuum_with_generation(self,
+    async def retarget_interrupted_generic_vacuum_with_generation(self,
         generation: GenericMaterializationGeneration, *, entry_vacuum_id: str,
     ) -> GenericMaterializationGeneration: ...
 

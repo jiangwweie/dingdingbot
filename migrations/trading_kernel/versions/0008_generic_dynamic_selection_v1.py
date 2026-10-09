@@ -878,8 +878,24 @@ def _generic_recovered_activation_proof_function() -> None:
         ELSE
           SELECT * INTO oldg FROM brc_strategy_universe_materialization_generations
             WHERE materialization_generation_id=old_event->>'previous_generation_id';
-          IF NOT FOUND OR oldg.lifecycle_state<>'FAILED_CLOSED' OR oldg.fenced_at_ms<>v.fenced_at_ms
-            OR oldg.terminal_at_ms>g.created_at_ms OR oldg.selection_epoch_id<>g.selection_epoch_id THEN RETURN false; END IF;
+          IF NOT FOUND OR oldg.fenced_at_ms IS NULL OR oldg.fenced_at_ms<v.fenced_at_ms OR oldg.fenced_at_ms>=g.fenced_at_ms
+            OR oldg.terminal_at_ms IS NULL OR oldg.terminal_at_ms>g.created_at_ms
+            OR oldg.selection_epoch_id<>g.selection_epoch_id OR oldg.selection_spec_id<>g.selection_spec_id
+            OR oldg.selection_control_version<>g.selection_control_version OR oldg.period_anchor_ms>=g.period_anchor_ms
+            THEN RETURN false; END IF;
+          IF old_event->>'recovery_origin'='UNFINISHED_MATERIALIZATION' THEN
+            IF oldg.lifecycle_state<>'SUPERSEDED' THEN RETURN false; END IF;
+            SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
+              WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='SUPERSEDED_BY_NEWER_SELECTION'
+              ORDER BY event_sequence DESC LIMIT 1;
+            IF failure IS NULL OR failure->>'entry_vacuum_id' IS DISTINCT FROM v.entry_vacuum_id
+              OR failure->>'replacement_generation_id' IS DISTINCT FROM g.materialization_generation_id
+              OR failure->>'previous_lifecycle_state' IS NULL OR failure->>'previous_lifecycle_state' NOT IN ('MATERIALIZING','STAGED')
+              OR (failure->>'original_fenced_at_ms')::bigint IS DISTINCT FROM v.fenced_at_ms
+              OR (failure->>'original_drained_at_ms')::bigint IS DISTINCT FROM v.drained_at_ms THEN RETURN false; END IF;
+            reason:='AUTHORITY_GAP';
+          ELSE
+          IF oldg.lifecycle_state<>'FAILED_CLOSED' THEN RETURN false; END IF;
           SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
             WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='FAILED_CLOSED'
             ORDER BY event_sequence DESC LIMIT 1;
@@ -888,6 +904,7 @@ def _generic_recovered_activation_proof_function() -> None:
               'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
           reason:=CASE WHEN failure->>'reason_code' IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED')
             THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
+          END IF;
         END IF;
         SELECT * INTO b FROM brc_materialization_generation_event_baselines
           WHERE materialization_generation_id=g.materialization_generation_id;

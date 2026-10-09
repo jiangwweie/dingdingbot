@@ -3759,6 +3759,215 @@ async def test_generic_continuity_preserves_event_side_and_comparison(database: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+@pytest.mark.parametrize("restore_current_members", [False, True])
+@pytest.mark.parametrize("staged_old_target", [False, True])
+async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
+    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool,
+) -> None:
+    source, first_snapshot, _, active_uid = await _exercise_generic_generation(
+        database, group, False, durable=True, first_activation=True, natural_selection=True)
+    shifted = next_input(source)
+    second_source = shifted.model_copy(update={
+        "predecessor_snapshot": first_snapshot,
+        "member_windows": tuple(qualify_window(
+            window.model_copy(update={"candles": shifted.member_windows[0].candles}),
+            window.exchange_instrument_id == source.spec.candidate_ids[0])
+            for window in shifted.member_windows),
+    })
+    second = compute_generic_selection(second_source)
+    assert second.selected_members != first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(second,
+            decision_at_ms=second_source.decision_at_ms,
+            source_observed_at_ms=second_source.source_observed_at_ms)
+        original_authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=second.selection_snapshot_id,
+        worker_id="unfinished-target-owner")
+    for offset in range(8):
+        at = second.effective_from_ms + 1 + offset
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            step = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request,
+                clock_ms=lambda at=at: at)
+        if step.disposition is MaterializationDisposition.TARGET_WARMING:
+            break
+    assert step.disposition is MaterializationDisposition.TARGET_WARMING, step
+    old_id = step.materialization_generation_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        old = await uow.instrument_selection.get_generic_materialization_generation(old_id)
+        old_targets = await uow.strategy_universes.get_generation_universe_targets(old_id)
+        original_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+    assert old is not None and old.lifecycle_state.value == "MATERIALIZING"
+    assert len(old_targets) == 1 and old_targets[0].lifecycle_state.value == "warming"
+    assert original_vacuum is not None
+
+    async def ready_target(uid: str, at: int) -> None:
+        await make_warming_ready(database, universe_version_id=uid,
+            warm_closed_bar_time_ms=at//HOUR*HOUR, valid_until_ms=at+HOUR)
+        if group in {"MPG-001", "MI-001"}:
+            template = mpg_long_snapshot() if group == "MPG-001" else mi_long_snapshot()
+            delta = at//HOUR*HOUR-template.trigger_candle_close_time_ms
+            candles = tuple(c.model_copy(update={"open_time_ms": c.open_time_ms+delta,
+                "close_time_ms": c.close_time_ms+delta}) for c in template.candles_1h)
+            projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+                universe_version_id=uid, strategy_group_id=group,
+                exchange_instrument_ids=source.spec.candidate_ids, closed_bar_time_ms=at//HOUR*HOUR,
+                lookback_bars=8 if group == "MPG-001" else 12, freshness_window_ms=HOUR,
+                member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,
+                    candles_1h=candles) for member in source.spec.candidate_ids))
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(projection)
+
+    if staged_old_target:
+        stage_at = second.effective_from_ms+20
+        await ready_target(old_targets[0].universe_version_id, stage_at)
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=stage_at)):
+            staged = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request,
+                clock_ms=lambda: stage_at)
+        assert staged.disposition is MaterializationDisposition.GENERATION_STAGED, staged
+    newest_source = next_input(source if restore_current_members else second_source)
+    if restore_current_members:
+        # Restore the first selection's geometry at the third period, not a SQL member edit.
+        newest_source = next_input(newest_source).model_copy(update={"predecessor_snapshot": second})
+    newest = compute_generic_selection(newest_source)
+    assert newest.selected_members
+    if restore_current_members:
+        assert newest.selected_members == first_snapshot.selected_members
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(newest,
+            decision_at_ms=newest_source.decision_at_ms,
+            source_observed_at_ms=newest_source.source_observed_at_ms)
+    at = newest.effective_from_ms + 1
+    newest_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=newest.selection_snapshot_id,
+        worker_id="latest-target-owner")
+
+    @asynccontextmanager
+    async def interrupted_takeover():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected supersession rollback")
+
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)), pytest.raises(RuntimeError, match="supersession rollback"):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_takeover,
+            request=newest_request, clock_ms=lambda: at)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id) == original_vacuum
+        assert await uow.instrument_selection.get_generic_materialization_generation(
+            GenericMaterializationGeneration.id_for_snapshot(newest.selection_snapshot_id)) is None
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at)):
+        takeover = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request,
+            clock_ms=lambda: at)
+    assert takeover.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, takeover
+    async with PostgresKernelUnitOfWork(database) as uow:
+        retired = await uow.instrument_selection.get_generic_materialization_generation(old_id)
+        targets = await uow.strategy_universes.get_generation_universe_targets(old_id)
+        replacement = await uow.instrument_selection.get_generic_materialization_generation(takeover.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+        authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        active = await uow.strategy_universes.get_current(source.spec.event_spec_id)
+    assert retired is not None and retired.lifecycle_state.value == "SUPERSEDED"
+    assert all(target.lifecycle_state.value == "abandoned" for target in targets)
+    assert replacement is not None and replacement.selection_snapshot_id == newest.selection_snapshot_id
+    assert replacement.previous_events == old.previous_events
+    assert vacuum is not None and vacuum.entry_vacuum_id == original_vacuum.entry_vacuum_id
+    assert vacuum.fenced_at_ms == original_vacuum.fenced_at_ms
+    assert vacuum.drained_at_ms == original_vacuum.drained_at_ms
+    assert vacuum.source_generation_id == replacement.materialization_generation_id
+    assert authority == original_authority
+    assert active is not None and active.universe_version_id == active_uid
+    assert retired.lease_owner is None and retired.lease_expires_at_ms is None
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at+1)):
+        stale = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda: at+1)
+        warming = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+1)
+    assert stale.disposition is MaterializationDisposition.BLOCKED
+    assert warming.disposition is MaterializationDisposition.TARGET_WARMING, warming
+    if restore_current_members:
+        # Repeated retargets retain the original fence, not the last Generation's fence.
+        chained_source = next_input(newest_source)
+        chained = compute_generic_selection(chained_source)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.save_generic_snapshot(chained,
+                decision_at_ms=chained_source.decision_at_ms,
+                source_observed_at_ms=chained_source.source_observed_at_ms)
+        prior_replacement = replacement
+        previous_request = newest_request
+        newest_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=chained.selection_snapshot_id,
+            worker_id="chained-latest-target-owner")
+        at = chained.effective_from_ms+1
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            chained_takeover = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at)
+        assert chained_takeover.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, chained_takeover
+        async with PostgresKernelUnitOfWork(database) as uow:
+            replacement = await uow.instrument_selection.get_generic_materialization_generation(chained_takeover.materialization_generation_id)
+            superseded = await uow.instrument_selection.get_generic_materialization_generation(prior_replacement.materialization_generation_id)
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+        assert replacement is not None and replacement.selection_snapshot_id == chained.selection_snapshot_id
+        assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
+        assert vacuum is not None and vacuum.fenced_at_ms == original_vacuum.fenced_at_ms
+        assert vacuum.drained_at_ms == original_vacuum.drained_at_ms
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=at+1)):
+            stale = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=previous_request, clock_ms=lambda: at+1)
+            warming = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+1)
+        assert stale.disposition is MaterializationDisposition.BLOCKED
+        assert warming.disposition is MaterializationDisposition.TARGET_WARMING, warming
+    async with PostgresKernelUnitOfWork(database) as uow:
+        replacement_targets = await uow.strategy_universes.get_generation_universe_targets(replacement.materialization_generation_id)
+    assert len(replacement_targets) == 1
+    await ready_target(replacement_targets[0].universe_version_id, at+2)
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at+2)):
+        staged = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+2)
+    assert staged.disposition is MaterializationDisposition.GENERATION_STAGED, staged
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at+3)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            proof = await uow.instrument_selection.prepare_generic_recovered_activation_proof(replacement.materialization_generation_id)
+    assert proof.recovery_close_plan.reason == "AUTHORITY_GAP"
+    assert proof.first_eligible_close_time_ms > proof.committed_at_ms
+    assert proof.episode_rebase_required is True
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text(
+            "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof": proof.model_dump_json(), "checked_at": proof.committed_at_ms}) is True
+        wrong_source = proof.model_copy(update={"source_selection_authority_id": "authority:forged"})
+        assert await conn.scalar(sa.text(
+            "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+            {"proof": wrong_source.model_dump_json(), "checked_at": proof.committed_at_ms}) is False
+        assert await conn.scalar(sa.text(
+            "SELECT count(*) FROM brc_strategy_universe_materialization_events "
+            "WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"), {"gid": old_id}) == 0
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+        new=AsyncMock(return_value=at+3)):
+        activated = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+3)
+    assert activated.disposition is MaterializationDisposition.ACTIVE_NEW, activated
+    async with PostgresKernelUnitOfWork(database) as uow:
+        recovered = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    assert recovered is not None and isinstance(recovered.authority, GenericRecoveryAuthority)
+    assert recovered.authority.first_eligible_close_time_ms > at+3
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("group","resolution"),(
     ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","activate_refusal"),("MPG-001","empty"),
     ("MI-001","activate"),("MI-001","activate_refusal"),("MI-001","empty"),("BRF2-001","fallback"),

@@ -1359,10 +1359,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 comparison = await uow.instrument_selection.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
                 if comparison is None:
                     return _blocked("GENERIC_COMPARISON_BASELINE_MISSING")
-            if (not gap_handoff and generic_input_is_unchanged(
+            if (prior_vacuum is None and not gap_handoff and generic_input_is_unchanged(
                 snapshot,current_members=members.exchange_instrument_ids,comparison=comparison)):
-                if prior_vacuum is not None:
-                    return _blocked("GENERIC_GAP_NO_CHANGE_REBASE_REQUIRED")
                 first_activation = control.selection_mode is SelectionMode.STATIC_BASELINE
                 prior = await uow.instrument_selection.get_current_generic_authority(snapshot.selection_spec_id,for_update=True)
                 now = await uow.instrument_selection.read_authority_clock_ms()
@@ -1409,7 +1407,7 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     await uow.instrument_selection.retarget_generic_gap_vacuum_with_generation(generation,
                         entry_vacuum_id=prior_vacuum.entry_vacuum_id)
                 else:
-                    await uow.instrument_selection.retarget_failed_generic_vacuum_with_generation(generation,
+                    await uow.instrument_selection.retarget_interrupted_generic_vacuum_with_generation(generation,
                         entry_vacuum_id=prior_vacuum.entry_vacuum_id)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_MATERIALIZING,
                     selection_snapshot_id=snapshot.selection_snapshot_id,materialization_generation_id=generation_id,

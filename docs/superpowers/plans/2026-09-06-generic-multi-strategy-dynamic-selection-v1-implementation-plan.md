@@ -75,10 +75,12 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 | GS-05 | 四策略Runner→immutable24-member Snapshot、缺源/未来/qualification、三次temporary retry、EXPIRED/SUPERSEDED、lease reclaim、response-loss幂等均有正式PG入口 | 卡级完整验收矩阵及SOR子集重验；五策略resident due调度属于GS-10，不宣称已完成 |
 | GS-06 | fixed24 production Observation、独立comparison cache身份、A→B→A/revision、未观察成员重入、首TRIGGERED抑制→NOT_TRIGGERED→后TRIGGERED已存在 | 实际Static rollback下的新Comparison revision/rebase仍需随GS-08真实切换验证 |
 | GS-07 | single LONG/SHORT与SOR pair目标、trusted16/10/7 limits、global slot、staged无交易权限、retry不刷新deadline及事故路径真实Coordinator tests已有 | 卡级slot/lease/abandon/恢复及SOR子集全矩阵核对，不能仅用单次成功路径声明Done |
-| GS-08 | ACTIVE_NEW/NO_CHANGE/VALID_EMPTY、firstStatic失败恢复、跨period future-close recovery、continuity、Owner pause优先、空集/failed目标接管已有正式PG路径 | 冻结baseline→新Static Materialization→原子tradable/comparison/mode切换尚无正式入口；非空最新Snapshot对DESIRED/STAGED目标接管待证明；consume与grant真实并发顺序需逐项核对 |
+| GS-08 | ACTIVE_NEW/NO_CHANGE/VALID_EMPTY、firstStatic失败恢复、跨period future-close recovery、continuity、Owner pause优先、空集/failed目标接管已有正式PG路径；最新非空Snapshot接管MATERIALIZING/STAGED目标及连续接管已有四策略PG证据 | 冻结baseline→新Static Materialization→原子tradable/comparison/mode切换尚无正式入口；DESIRED及尚未drain完毕阶段的最新目标接管仍需闭合；consume与grant真实并发顺序需逐项核对 |
 | GS-09 | 四策略自然Selection→Signal→Claim/Ticket→durableENTRY→terminal、已有持仓遇EMPTY生命周期继续、Unknown/partial、exact late-fill归因/保护/受控退出已有实测 | MPG/MI有自然入场fault矩阵；CPM LONG/BRF2 SHORT应补同等Claim/issuance/dispatch/stale攻击并核对四边界；最小immutable证据链验收完成后才标卡Done |
 
 本审计不重开Feature/经济研究，不执行生产操作。已终态Ticket后出现不可归因外部Exposure的既有账户Incident/Owner containment属于明确fail-closed边界，不通过复活terminal Ticket或新增平行订单链伪造自动恢复。
+
+2026-10-09未完成非空目标接管增量（基于`a1d7fbd3`）：真实首次Owner授权、Selection Runner与Dynamic激活后，第二期目标停在MATERIALIZING/warming或STAGED；下一有效非空Snapshot通过同一Coordinator及repository事务abandon原目标、终态SUPERSEDED原Generation、取消原lease并接管同一已drained Vacuum。旧Active Universe与Authority不变，原Vacuum fence/drain时间不重置；新Generation有自己的有界materialization预算。新名单与旧Active相同也不能用NO_CHANGE绕过未解除围栏。连续第二次接管不再错误要求上一Generation的fence等于最初Vacuum fence。数据库恢复proof独立区分真实FAILED_CLOSED与UNFINISHED_MATERIALIZATION supersession，不制造失败事件；恢复激活沿原future-close-only与Episode rebase合同，不追认过去close。四策略×same/different-current-members×warming/staged的16分支覆盖提交前回滚、旧callback拒绝、连续接管、原timestamp保全、完整恢复proof/SQL验算/正式activation；这些包含在相关恢复与EMPTY组合40 passed中，不重复相加。Generic migration与SOR materialization99 passed、既有Full-chain51 passed、Unit/Architecture1315 passed、Mypy206 files、相关Ruff与diff通过。全部为本地Docker PG及recording venue；不构成exact R4或GS-08整卡Done，DESIRED/drain阶段接管、真实Static rollback及其余审计项仍未闭合。
 
 | 范围 | 当前已验证结果 | 仍需交付 |
 | --- | --- | --- |
