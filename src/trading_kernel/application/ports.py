@@ -93,6 +93,7 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
+    GenericStaticMaterializationGeneration,
     GenericStaticRollbackBaseline,
 )
 from src.trading_kernel.domain.generic_selection_core import GenericSelectionSnapshotV1
@@ -1754,6 +1755,12 @@ class InstrumentSelectionRepository(Protocol):
     async def get_generic_static_rollback_baseline(
         self, rollback_baseline_id: str,
     ) -> GenericStaticRollbackBaseline: ...
+
+    async def create_generic_static_materialization_generation(self, *, strategy_group_id: str,
+        created_at_ms: int) -> GenericStaticMaterializationGeneration: ...
+
+    async def get_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        for_update: bool = False) -> GenericStaticMaterializationGeneration | None: ...
 
     async def recover_expired_dynamic_activation(
         self,

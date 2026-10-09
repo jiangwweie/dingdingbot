@@ -250,6 +250,20 @@ class CoordinateGenericGenerationRequest(BaseModel):
         return value.strip()
 
 
+class CoordinateGenericStaticRequest(BaseModel):
+    """Consume a due DB Owner intent, never a caller-provided member list."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    strategy_group_id: str
+    worker_id: str
+
+    @field_validator("strategy_group_id","worker_id")
+    @classmethod
+    def _identity(cls,value: str) -> str:
+        if not value.strip() or value!=value.strip() or len(value)>160:
+            raise ValueError("Static Coordinator identity must be bounded")
+        return value
+
+
 class CoordinateGenericSnapshotRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     selection_snapshot_id: str
@@ -437,12 +451,27 @@ def plan_selection_materialization(
 async def coordinate_selection_materialization_once(
     *,
     uow_factory: UnitOfWorkFactory,
-    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest | CoordinateGenericSnapshotRequest | CoordinateGenericPeriodRequest,
+    request: CoordinateSelectionMaterializationRequest | CoordinateGenericGenerationRequest | CoordinateGenericSnapshotRequest | CoordinateGenericPeriodRequest | CoordinateGenericStaticRequest,
     clock_ms: Callable[[], int],
 ) -> CoordinateSelectionMaterializationResult:
     """Advance exactly one no-network materialization state from PostgreSQL facts."""
 
     now_ms = clock_ms()
+    if isinstance(request,CoordinateGenericStaticRequest):
+        async with uow_factory() as uow:
+            owner = await uow.owner_controls.get_strategy_control(request.strategy_group_id,for_update=True)
+            control = await uow.instrument_selection.get_selection_control(request.strategy_group_id,for_update=True)
+            if owner is None or owner.entry_state is StrategyEntryState.PAUSED:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED)
+            if control is None or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE or (
+                control.pending_effective_period_anchor_ms is None):
+                return _blocked("GENERIC_STATIC_OWNER_INTENT_MISSING")
+            if now_ms<control.pending_effective_period_anchor_ms+HOUR_MS:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NOT_DUE)
+            static_generation = await uow.instrument_selection.create_generic_static_materialization_generation(
+                strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
+                materialization_generation_id=static_generation.materialization_generation_id)
     if isinstance(request, CoordinateGenericPeriodRequest):
         return await _coordinate_generic_period(uow_factory=uow_factory,request=request,now_ms=now_ms)
     if isinstance(request, CoordinateGenericSnapshotRequest):

@@ -234,6 +234,96 @@ class GenericMaterializationGeneration(BaseModel):
         return "generation:"+canonical_digest({"snapshot":selection_snapshot_id})[7:]
 
 
+class GenericStaticMaterializationGeneration(BaseModel):
+    """Typed Static source of the existing Generation plane, not a Selector fact."""
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    materialization_generation_id: str
+    selection_spec_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    selection_mode: Literal["static_baseline"] = "static_baseline"
+    selection_snapshot_id: None = None
+    period_anchor_ms: None = None
+    rollback_baseline_id: str
+    authorization_id: str
+    effective_period_anchor_ms: int
+    selection_epoch_id: str
+    selection_control_version: int
+    desired_member_count: int
+    previous_events: tuple[MaterializationEventBaseline, ...]
+    created_at_ms: int
+    lifecycle_state: MaterializationGenerationState = MaterializationGenerationState.PENDING
+    projection_version: int = 1
+    desired_at_ms: int | None = None
+    fenced_at_ms: int | None = None
+    activated_at_ms: int | None = None
+    fallback_at_ms: int | None = None
+    terminal_at_ms: int | None = None
+    fallback_reason_code: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at_ms: int | None = None
+    lease_epoch: int = 0
+
+    @staticmethod
+    def id_for_authorization(authorization_id: str) -> str:
+        return "generation:"+canonical_digest({"static_authorization":authorization_id})[7:]
+
+    @property
+    def semantic_digest(self) -> str:
+        return canonical_digest(self.model_dump(mode="json",include={
+            "selection_spec_id","strategy_group_id","strategy_version_id","selection_mode",
+            "selection_snapshot_id","period_anchor_ms","rollback_baseline_id","authorization_id",
+            "effective_period_anchor_ms","selection_epoch_id","selection_control_version",
+            "desired_member_count","previous_events"}))
+
+    @model_validator(mode="after")
+    def _source(self) -> GenericStaticMaterializationGeneration:
+        spec = generic_selection_spec(self.strategy_group_id)
+        identities = (self.materialization_generation_id,self.selection_spec_id,self.rollback_baseline_id,
+            self.authorization_id,self.selection_epoch_id)
+        if any(not value.strip() or value!=value.strip() or len(value)>160 for value in identities) or (
+            self.selection_spec_id!=spec.selection_spec_id or self.strategy_version_id!=spec.strategy_version_id
+            or self.selection_epoch_id=="sor-v0" or self.selection_control_version<=0
+            or self.materialization_generation_id!=self.id_for_authorization(self.authorization_id)
+            or re.fullmatch(r"rollback-baseline:[0-9a-f]{64}",self.rollback_baseline_id) is None
+            or self.effective_period_anchor_ms<=0 or self.effective_period_anchor_ms%(spec.cadence_hours*3600000)
+            or self.created_at_ms<self.effective_period_anchor_ms+3600000 or not 1<=self.desired_member_count<=10):
+            raise ValueError("Static Generation source identity differs")
+        if len(self.previous_events)!=1 or self.previous_events[0].event_spec_id!=spec.event_spec_id or (
+            self.previous_events[0].position_side!=spec.position_side
+            or (self.strategy_group_id in {"MPG-001","MI-001"})!=(self.previous_events[0].comparison_universe_id is not None)):
+            raise ValueError("Static Generation previous Event differs")
+        if self.projection_version<=0 or self.lease_epoch<0 or (self.lease_owner is None)!=(self.lease_expires_at_ms is None):
+            raise ValueError("Static Generation lease shape differs")
+        if self.lease_owner is not None and (not self.lease_owner.strip() or self.lease_epoch<=0 or
+            self.lease_expires_at_ms is None or self.lease_expires_at_ms<=self.created_at_ms):
+            raise ValueError("Static Generation lease identity differs")
+        for timestamp in (self.desired_at_ms,self.fenced_at_ms,self.activated_at_ms,self.fallback_at_ms,self.terminal_at_ms):
+            if timestamp is not None and timestamp<self.created_at_ms:
+                raise ValueError("Static Generation lifecycle time moves backwards")
+        if self.lifecycle_state is MaterializationGenerationState.PENDING and self.desired_at_ms is not None:
+            raise ValueError("pending Static Generation cannot claim desired time")
+        if self.lifecycle_state in {MaterializationGenerationState.DESIRED,MaterializationGenerationState.DRAINING_ENTRY,
+            MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED,MaterializationGenerationState.ACTIVE} and self.desired_at_ms is None:
+            raise ValueError("Static Generation requires desired time")
+        if self.lifecycle_state in {MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,
+            MaterializationGenerationState.STAGED,MaterializationGenerationState.ACTIVE,MaterializationGenerationState.FAILED_CLOSED} and self.fenced_at_ms is None:
+            raise ValueError("Static Generation requires fenced time")
+        if self.lifecycle_state is MaterializationGenerationState.ACTIVE and (
+            self.activated_at_ms is None or self.terminal_at_ms!=self.activated_at_ms or self.fallback_at_ms is not None):
+            raise ValueError("Static Generation activation must be terminal without fallback")
+        if self.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED and (
+            self.terminal_at_ms is None or self.activated_at_ms is not None or self.fallback_at_ms is not None):
+            raise ValueError("Static Generation failure cannot claim activation")
+        if self.lifecycle_state is MaterializationGenerationState.FALLBACK_PREVIOUS:
+            if not self.fallback_reason_code or self.fallback_at_ms is None or self.terminal_at_ms!=self.fallback_at_ms:
+                raise ValueError("Static Generation fallback requires terminal evidence")
+        elif self.fallback_reason_code is not None:
+            raise ValueError("Static Generation nonfallback cannot claim reason")
+        return self
+
+
 class GenericMaterializationLeaseClaim(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     status: MaterializationGenerationClaimStatus

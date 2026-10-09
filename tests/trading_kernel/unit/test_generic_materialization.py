@@ -4,6 +4,7 @@ from src.trading_kernel.domain.comparison_universe import ComparisonUniverseBind
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
+    GenericStaticMaterializationGeneration,
     GenericStaticRollbackBaseline,
     GenericStaticRollbackEvent,
     MaterializationEventBaseline,
@@ -12,6 +13,32 @@ from src.trading_kernel.domain.generic_materialization import (
 from src.trading_kernel.domain.generic_selection_core import compute_generic_selection
 from src.trading_kernel.domain.selection_authority import selected_member_set_digest
 from tests.trading_kernel.support.generic_selection import CUTOFF, HOUR, inputs
+
+
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+def test_static_generation_is_owner_owned_without_synthetic_snapshot(group: str) -> None:
+    spec = inputs(group).spec
+    auth = "owner-authorization:static-test"
+    baseline_id = "rollback-baseline:"+"c"*64
+    prior = MaterializationEventBaseline(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+        grant_state="ACTIVE",universe_version_id="universe:dynamic-current",
+        member_set_digest=selected_member_set_digest(spec.candidate_ids[:1]),
+        comparison_universe_id="comparison:dynamic" if group in {"MPG-001","MI-001"} else None,
+        comparison_transition_revision=1 if group in {"MPG-001","MI-001"} else None)
+    generation = GenericStaticMaterializationGeneration(
+        materialization_generation_id=GenericStaticMaterializationGeneration.id_for_authorization(auth),
+        selection_spec_id=spec.selection_spec_id,strategy_group_id=group,strategy_version_id=spec.strategy_version_id,
+        rollback_baseline_id=baseline_id,authorization_id=auth,effective_period_anchor_ms=CUTOFF,
+        selection_epoch_id="epoch:dynamic-original",selection_control_version=3,
+        desired_member_count=1,previous_events=(prior,),created_at_ms=CUTOFF+HOUR+1)
+    assert generation.selection_snapshot_id is None and generation.period_anchor_ms is None
+    assert generation.selection_mode == "static_baseline"
+    assert GenericStaticMaterializationGeneration.model_validate(generation.model_dump()).semantic_digest == generation.semantic_digest
+    for key,value in (("materialization_generation_id","generation:forged"),("selection_snapshot_id","selection:fake"),
+        ("desired_member_count",11),("previous_events",()),("created_at_ms",CUTOFF),
+        ("lifecycle_state","STAGED"),("lease_owner","unfenced-worker")):
+        with pytest.raises(ValueError):
+            GenericStaticMaterializationGeneration.model_validate({**generation.model_dump(),key:value})
 
 
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])

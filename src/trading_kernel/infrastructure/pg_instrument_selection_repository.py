@@ -49,6 +49,7 @@ from src.trading_kernel.domain.exposure_episode import (
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
     GenericMaterializationLeaseClaim,
+    GenericStaticMaterializationGeneration,
     GenericStaticRollbackBaseline,
     GenericStaticRollbackEvent,
     MaterializationEventBaseline,
@@ -136,6 +137,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instruments,
     materialization_generation_event_baselines,
     materialization_generation_projection_columns,
+    owner_authorizations,
     runtime_release_compatibility_facts,
     selection_authority_current,
     selection_authority_event_bindings,
@@ -1807,6 +1809,114 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=generation.created_at_ms,
             )
         )
+
+    async def get_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        for_update: bool = False,
+    ) -> GenericStaticMaterializationGeneration | None:
+        query = sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id)
+        if for_update:
+            query = query.with_for_update()
+        row = (await self._connection.execute(query)).mappings().one_or_none()
+        if row is None:
+            return None
+        if row["selection_mode"]!="static_baseline" or row["selection_epoch_id"]=="sor-v0":
+            raise SelectionJobConflict("Static Generation source kind differs")
+        pending = (await self._connection.execute(sa.select(strategy_universe_materialization_events.c.payload).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_events.c.event_sequence==1,
+            strategy_universe_materialization_events.c.event_type=="PENDING"))).scalar_one_or_none()
+        if pending is None or not isinstance(pending.get("authorization_id"),str):
+            raise SelectionJobConflict("Static Generation lacks frozen Owner source")
+        previous = (await self._connection.execute(sa.select(materialization_generation_event_baselines).where(
+            materialization_generation_event_baselines.c.materialization_generation_id==materialization_generation_id,
+        ).limit(2))).mappings().all()
+        generation = GenericStaticMaterializationGeneration.model_validate({
+            **{key:row[key] for key in GenericStaticMaterializationGeneration.model_fields
+                if key not in {"previous_events","authorization_id","effective_period_anchor_ms"}},
+            "authorization_id":pending["authorization_id"],"effective_period_anchor_ms":pending.get("effective_period_anchor_ms"),
+            "previous_events":tuple(MaterializationEventBaseline.model_validate({key:event[key]
+                for key in MaterializationEventBaseline.model_fields}) for event in previous)})
+        if generation.semantic_digest!=row["semantic_digest"]:
+            raise SelectionJobConflict("Static Generation semantic identity differs")
+        return generation
+
+    async def create_generic_static_materialization_generation(self, *, strategy_group_id: str,
+        created_at_ms: int,
+    ) -> GenericStaticMaterializationGeneration:
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(strategy_group_id,for_update=True)
+        now = await self.read_authority_clock_ms()
+        if owner is None or owner["entry_state"]!="enabled" or control is None or (
+            control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
+            or control.pending_authorization_id is None or control.pending_effective_period_anchor_ms is None
+            or control.selection_epoch_id is None or control.rollback_baseline_id is None
+            or not control.pending_effective_period_anchor_ms+3_600_000<=created_at_ms<=now):
+            raise SelectionJobConflict("Static Generation requires due exact Owner intent")
+        spec = await self.get_generic_spec(control.selection_spec_id)
+        baseline = await self.get_generic_static_rollback_baseline(control.rollback_baseline_id)
+        if baseline.selection_spec_id!=spec.selection_spec_id or baseline.strategy_group_id!=strategy_group_id:
+            raise SelectionJobConflict("Static Generation baseline source changed")
+        authorization = (await self._connection.execute(sa.select(owner_authorizations).where(
+            owner_authorizations.c.authorization_id==control.pending_authorization_id))).mappings().one_or_none()
+        expected_scope = {"strategy_group_id":strategy_group_id,"selection_spec_id":spec.selection_spec_id,
+            "target_selection_mode":"static_baseline","rollback_baseline_id":baseline.rollback_baseline_id,
+            "selection_epoch_id":control.selection_epoch_id,"effective_period_anchor_ms":control.pending_effective_period_anchor_ms}
+        if authorization is None or authorization["purpose"]!="selection_mode_change" or (
+            authorization["authentication_strength"]!="totp_step_up" or authorization["target_scope"]!=expected_scope
+            or authorization["authorized_at_ms"]>created_at_ms):
+            raise SelectionJobConflict("Static Generation Owner proof changed")
+        generation_id = GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id)
+        existing = await self.get_generic_static_materialization_generation(generation_id,for_update=True)
+        if existing is not None:
+            if existing.authorization_id!=control.pending_authorization_id or existing.selection_control_version!=control.control_version:
+                raise SelectionJobConflict("Static Generation current source changed")
+            return existing
+        if await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,
+            for_update=True) is not None or await self._connection.scalar(sa.select(sa.exists().where(
+                strategy_universe_materialization_generations.c.strategy_group_id==strategy_group_id,
+                strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED"))))):
+            raise SelectionJobConflict("Static Generation previous transition requires coordinated handoff")
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        current = await universes.get_current(spec.event_spec_id)
+        if current is None:
+            raise SelectionJobConflict("Static Generation previous current Universe missing")
+        current_members = await universes.get_members(current.universe_version_id)
+        target_members = await universes.get_members(baseline.source_event.universe_version_id)
+        if not 1<=len(target_members)<=10 or selected_member_set_digest(target_members)!=baseline.source_event.member_set_digest:
+            raise SelectionJobConflict("Static Generation frozen target members changed")
+        comparison = await self.get_comparison_universe_binding(spec.event_spec_id,for_update=True) if (
+            strategy_group_id in {"MPG-001","MI-001"}) else None
+        generation = GenericStaticMaterializationGeneration(
+            materialization_generation_id=generation_id,selection_spec_id=spec.selection_spec_id,
+            strategy_group_id=strategy_group_id,strategy_version_id=spec.strategy_version_id,
+            rollback_baseline_id=baseline.rollback_baseline_id,authorization_id=control.pending_authorization_id,
+            effective_period_anchor_ms=control.pending_effective_period_anchor_ms,
+            selection_epoch_id=control.selection_epoch_id,selection_control_version=control.control_version,
+            desired_member_count=len(target_members),created_at_ms=created_at_ms,
+            previous_events=(MaterializationEventBaseline(event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+                grant_state=AuthorityEventGrantState.ACTIVE,universe_version_id=current.universe_version_id,
+                member_set_digest=selected_member_set_digest(current_members),
+                comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
+                comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
+        await self._connection.execute(sa.insert(strategy_universe_materialization_generations).values(
+            **generation.model_dump(mode="json",exclude={"authorization_id","effective_period_anchor_ms","previous_events"}),
+            semantic_digest=generation.semantic_digest))
+        await self._connection.execute(sa.insert(materialization_generation_event_baselines).values(
+            materialization_generation_id=generation_id,**generation.previous_events[0].model_dump(mode="json")))
+        await self._connection.execute(sa.insert(strategy_universe_materialization_targets).values(
+            materialization_generation_id=generation_id,event_spec_id=spec.event_spec_id,position_side=spec.position_side,
+            materialization_order=1 if spec.position_side=="long" else 2,expected_member_set_digest=baseline.source_event.member_set_digest))
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id=f"materialization-event:{generation_id}:1",materialization_generation_id=generation_id,
+            event_sequence=1,event_type="PENDING",payload={"authorization_id":control.pending_authorization_id,
+                "effective_period_anchor_ms":control.pending_effective_period_anchor_ms},occurred_at_ms=created_at_ms))
+        return generation
 
     async def get_generic_materialization_generation(
         self, materialization_generation_id: str, *, for_update: bool = False,

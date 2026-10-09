@@ -1833,6 +1833,10 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         DECLARE gid text; g brc_strategy_universe_materialization_generations%ROWTYPE;
                 spec brc_instrument_selection_specs%ROWTYPE; s brc_instrument_selection_snapshots%ROWTYPE;
                 expected integer; actual integer; matching integer; states integer; target_digest text;
+                owner_source jsonb; owner_source_at bigint; owner_proof brc_owner_authorizations%ROWTYPE;
+                frozen_source brc_selection_rollback_baseline_events%ROWTYPE;
+                previous_source brc_materialization_generation_event_baselines%ROWTYPE;
+                frozen_count integer; frozen_digest text; source_json text; expected_digest text;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
@@ -1872,6 +1876,71 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 OR e.strategy_version_id<>g.strategy_version_id OR b.member_set_digest<>brc_selected_universe_member_digest_v1(b.universe_version_id)))
               OR ((g.strategy_group_id IN ('MPG-001','MI-001')) <> (b.comparison_universe_id IS NOT NULL)))) THEN
             RAISE EXCEPTION 'Generation previous Universe/digest/comparison mismatch';
+          END IF;
+          IF spec.selection_kind='generic_dynamic_v1' AND g.selection_mode='static_baseline' THEN
+            SELECT payload,occurred_at_ms INTO owner_source,owner_source_at FROM brc_strategy_universe_materialization_events
+              WHERE materialization_generation_id=gid AND event_sequence=1 AND event_type='PENDING';
+            IF owner_source IS NULL OR owner_source->>'authorization_id' IS NULL
+              OR owner_source->>'effective_period_anchor_ms' IS NULL OR owner_source_at IS DISTINCT FROM g.created_at_ms THEN
+              RAISE EXCEPTION 'Static Generation Owner source missing'; END IF;
+            SELECT * INTO owner_proof FROM brc_owner_authorizations WHERE authorization_id=owner_source->>'authorization_id';
+            IF NOT FOUND OR owner_proof.purpose<>'selection_mode_change' OR owner_proof.authentication_strength<>'totp_step_up'
+              OR owner_proof.authorized_at_ms>g.created_at_ms
+              OR owner_proof.target_scope IS DISTINCT FROM jsonb_build_object(
+                'strategy_group_id',g.strategy_group_id,'selection_spec_id',g.selection_spec_id,
+                'target_selection_mode','static_baseline','rollback_baseline_id',g.rollback_baseline_id,
+                'selection_epoch_id',g.selection_epoch_id,'effective_period_anchor_ms',(owner_source->>'effective_period_anchor_ms')::bigint)
+              OR g.created_at_ms<(owner_source->>'effective_period_anchor_ms')::bigint+3600000
+              OR g.materialization_generation_id<>'generation:' || encode(sha256(convert_to(
+                '{"static_authorization":' || to_json(owner_proof.authorization_id)::text || '}','UTF8')),'hex') THEN
+              RAISE EXCEPTION 'Static Generation Owner source mismatch'; END IF;
+            SELECT * INTO frozen_source FROM brc_selection_rollback_baseline_events WHERE rollback_baseline_id=g.rollback_baseline_id;
+            IF NOT FOUND OR frozen_source.event_spec_id<>(SELECT event_spec_id FROM brc_instrument_selection_spec_events WHERE selection_spec_id=g.selection_spec_id)
+              OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_rollback_baselines base
+                WHERE base.rollback_baseline_id=g.rollback_baseline_id AND base.strategy_group_id=g.strategy_group_id
+                  AND base.strategy_version_id=g.strategy_version_id AND base.captured_at_ms<=g.created_at_ms) THEN
+              RAISE EXCEPTION 'Static Generation frozen baseline mismatch'; END IF;
+            SELECT count(*) INTO frozen_count FROM brc_strategy_universe_members WHERE universe_version_id=frozen_source.universe_version_id;
+            frozen_digest:=brc_selected_universe_member_digest_v1(frozen_source.universe_version_id);
+            IF frozen_count NOT BETWEEN 1 AND 10 OR frozen_count<>g.desired_member_count
+              OR EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_targets WHERE materialization_generation_id=gid
+                AND expected_member_set_digest<>frozen_digest) THEN RAISE EXCEPTION 'Static Generation frozen members mismatch'; END IF;
+            SELECT * INTO previous_source FROM brc_materialization_generation_event_baselines WHERE materialization_generation_id=gid;
+            source_json:='[{"comparison_transition_revision":' || coalesce(previous_source.comparison_transition_revision::text,'null') ||
+              ',"comparison_universe_id":' || coalesce(to_json(previous_source.comparison_universe_id)::text,'null') ||
+              ',"event_spec_id":' || to_json(previous_source.event_spec_id)::text ||
+              ',"grant_state":' || to_json(previous_source.grant_state)::text ||
+              ',"member_set_digest":' || to_json(previous_source.member_set_digest)::text ||
+              ',"position_side":' || to_json(previous_source.position_side)::text ||
+              ',"universe_version_id":' || coalesce(to_json(previous_source.universe_version_id)::text,'null') || '}]';
+            expected_digest:='sha256:' || encode(sha256(convert_to(
+              '{"authorization_id":' || to_json(owner_proof.authorization_id)::text ||
+              ',"desired_member_count":' || g.desired_member_count::text ||
+              ',"effective_period_anchor_ms":' || (owner_source->>'effective_period_anchor_ms')::bigint::text ||
+              ',"period_anchor_ms":' || 'null,"previous_events":' || source_json ||
+              ',"rollback_baseline_id":' || to_json(g.rollback_baseline_id)::text ||
+              ',"selection_control_version":' || g.selection_control_version::text ||
+              ',"selection_epoch_id":' || to_json(g.selection_epoch_id)::text ||
+              ',"selection_mode":"static_baseline","selection_snapshot_id":' || 'null,"selection_spec_id":' || to_json(g.selection_spec_id)::text ||
+              ',"strategy_group_id":' || to_json(g.strategy_group_id)::text ||
+              ',"strategy_version_id":' || to_json(g.strategy_version_id)::text || '}','UTF8')),'hex');
+            IF g.semantic_digest IS DISTINCT FROM expected_digest THEN RAISE EXCEPTION 'Static Generation source digest mismatch'; END IF;
+            IF g.lifecycle_state='PENDING' AND NOT EXISTS (
+              SELECT 1 FROM brc_strategy_selection_control_current c
+                JOIN brc_strategy_entry_controls_current o USING(strategy_group_id)
+                JOIN brc_strategy_universe_current current_u ON current_u.event_spec_id=previous_source.event_spec_id
+              WHERE c.strategy_group_id=g.strategy_group_id AND c.selection_spec_id=g.selection_spec_id
+                AND c.selection_mode='dynamic_selection' AND c.pending_selection_mode='static_baseline'
+                AND c.pending_authorization_id=owner_proof.authorization_id
+                AND c.pending_effective_period_anchor_ms=(owner_source->>'effective_period_anchor_ms')::bigint
+                AND c.selection_epoch_id=g.selection_epoch_id AND c.control_version=g.selection_control_version
+                AND c.rollback_baseline_id=g.rollback_baseline_id AND o.entry_state='enabled'
+                AND current_u.lifecycle_state='active' AND current_u.universe_version_id=previous_source.universe_version_id
+                AND (previous_source.comparison_universe_id IS NULL OR EXISTS (
+                  SELECT 1 FROM brc_comparison_binding_current cb WHERE cb.event_spec_id=previous_source.event_spec_id
+                    AND cb.comparison_universe_id=previous_source.comparison_universe_id
+                    AND cb.comparison_transition_revision=previous_source.comparison_transition_revision))
+            ) THEN RAISE EXCEPTION 'Static Generation Owner source is not current'; END IF;
           END IF;
           RETURN NULL;
         END; $$
