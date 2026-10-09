@@ -1203,6 +1203,7 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
             old_callback = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:paused_at+3)
         assert old_callback.disposition is MaterializationDisposition.BLOCKED
         assert old_callback.reason_code=="GENERIC_STATIC_RECOVERY_REQUIRED"
+        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=paused_at+4)
     if failure_case == "pause":
         await pause_static_target(due+6)
         return
@@ -1265,6 +1266,7 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
                 "WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":created.materialization_generation_id}) == 1
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state='warming'")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=failed_at+2)
         return
     await make_warming_ready(database,universe_version_id=target_uid,warm_closed_bar_time_ms=anchor+HOUR,
         valid_until_ms=due+HOUR)
@@ -6832,6 +6834,98 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         member=first.selected_members[0],universe_version_id=current_uid,
         closed_at_ms=third.effective_from_ms,now_ms=third_grant_at+2,
         fault_stage=fault_stage)
+
+
+async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms):
+    from src.trading_kernel.application.owner_control import (
+        set_strategy_entry_state,
+        stage_generic_static_selection_mode,
+    )
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control = await uow.instrument_selection.get_selection_control(group)
+        old = await uow.instrument_selection.get_generic_static_materialization_generation(
+            GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id))
+        authority = await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=control.selection_spec_id)
+    assert old.lifecycle_state.value in {"FAILED_CLOSED","ABANDONED"}
+    cadence = inputs(group).spec.cadence_hours*HOUR
+    anchor = (at_ms//cadence+1)*cadence
+    request = ControlMutationRequest(expected_version=control.control_version,
+        reason="retry_terminal_static_intent",idempotency_key=f"retry-static:{group}:{old.authorization_id}",
+        owner_identity="owner",now_ms=at_ms)
+    for defect in ("version","epoch","baseline","period","step_up","time"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            with pytest.raises((OwnerControlBlocked,OwnerControlConflict)):
+                await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                    rollback_baseline_id="rollback-baseline:wrong" if defect=="baseline" else control.rollback_baseline_id,
+                    selection_epoch_id="epoch:wrong" if defect=="epoch" else control.selection_epoch_id,
+                    effective_period_anchor_ms=anchor+HOUR if defect=="period" else anchor,
+                    request=request.model_copy(update={"expected_version":control.control_version+1 if defect=="version" else control.control_version,
+                        "idempotency_key":request.idempotency_key+":"+defect,"now_ms":old.terminal_at_ms-1 if defect=="time" else at_ms}),
+                    authentication_strength="password" if defect=="step_up" else "totp_step_up")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        savepoint = await uow._connection.begin_nested()
+        owner = await uow.owner_controls.get_strategy_control(group)
+        await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=owner.control_version,reason="reauthorization_must_not_clear_pause",
+                idempotency_key=request.idempotency_key+":pause-probe",owner_identity="owner",now_ms=at_ms),authentication_strength="totp_step_up")
+        with pytest.raises(OwnerControlBlocked,match="reauthorization_source_invalid"):
+            await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+                effective_period_anchor_ms=anchor,request=request.model_copy(update={"idempotency_key":request.idempotency_key+":paused"}),
+                authentication_strength="totp_step_up")
+        await savepoint.rollback()
+    @asynccontextmanager
+    async def interrupted_authorization():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected Static reauthorization rollback")
+    with pytest.raises(RuntimeError,match="reauthorization rollback"):
+        async with interrupted_authorization() as uow:
+            await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+                effective_period_anchor_ms=anchor,request=request,authentication_strength="totp_step_up")
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_selection_control(group)==control
+        assert await uow.owner_controls.get_authorization_by_idempotency_key(request.idempotency_key) is None
+    async def authorize(retry_request):
+        try:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                return await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                    rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+                    effective_period_anchor_ms=anchor,request=retry_request,authentication_strength="totp_step_up")
+        except OwnerControlBlocked as exc:
+            return exc
+    results = await asyncio.wait_for(asyncio.gather(authorize(request),authorize(request.model_copy(update={
+        "idempotency_key":request.idempotency_key+":concurrent"}))),timeout=10)
+    winners = [result for result in results if not isinstance(result,OwnerControlBlocked)]
+    assert len(winners)==1 and sum(isinstance(result,OwnerControlBlocked) for result in results)==1
+    new = winners[0]
+    winning_request = request if results[0] is new else request.model_copy(update={"idempotency_key":request.idempotency_key+":concurrent"})
+    assert new.pending_authorization_id!=control.pending_authorization_id
+    assert new.pending_effective_period_anchor_ms==anchor and new.control_version==control.control_version
+    assert new.selection_mode.value=="dynamic_selection" and new.selection_epoch_id==control.selection_epoch_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+            rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+            effective_period_anchor_ms=anchor,request=winning_request,authentication_strength="totp_step_up")==new
+        assert await uow.instrument_selection.get_generic_static_materialization_generation(old.materialization_generation_id)==old
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=control.selection_spec_id)==vacuum
+        assert await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id)==authority
+        losing_key = request.idempotency_key+":concurrent" if winning_request.idempotency_key==request.idempotency_key else request.idempotency_key
+        assert await uow.owner_controls.get_authorization_by_idempotency_key(losing_key) is None
+    async with database.connect() as conn:
+        events = (await conn.execute(sa.text("SELECT payload FROM brc_strategy_universe_materialization_events "
+            "WHERE materialization_generation_id=:gid AND event_type='OWNER_REAUTHORIZED'"),{"gid":old.materialization_generation_id})).scalars().all()
+    assert events==[{"authorization_id":new.pending_authorization_id,
+        "effective_period_anchor_ms":anchor,"entry_vacuum_id":vacuum.entry_vacuum_id}]
+    async with PostgresKernelUnitOfWork(database) as uow:
+        with pytest.raises(OwnerControlBlocked,match="already_pending"):
+            await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+                rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+                effective_period_anchor_ms=anchor,request=request.model_copy(update={"idempotency_key":request.idempotency_key+":duplicate"}),
+                authentication_strength="totp_step_up")
 
 
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,

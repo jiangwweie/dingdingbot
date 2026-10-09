@@ -1337,7 +1337,57 @@ class PostgresInstrumentSelectionRepository:
         selection_spec_id: str, selection_epoch_id: str, rollback_baseline_id: str,
         expected_control_version: int, effective_period_anchor_ms: int,
         authorization_id: str, updated_at_ms: int,
+        expected_pending_authorization_id: str | None = None,
     ) -> SelectionControl | None:
+        previous: GenericStaticMaterializationGeneration | None = None
+        vacuum: StrategyEntryVacuum | None = None
+        if expected_pending_authorization_id is not None:
+            owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+                strategy_entry_controls_current.c.strategy_group_id==strategy_group_id).with_for_update())).mappings().one_or_none()
+            control = await self.get_selection_control(strategy_group_id,for_update=True)
+            previous = await self.get_generic_static_materialization_generation(
+                GenericStaticMaterializationGeneration.id_for_authorization(expected_pending_authorization_id),for_update=True)
+            vacuum = await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=selection_spec_id,for_update=True)
+            if control is None or owner is None or owner["entry_state"]!="enabled" or previous is None or (
+                control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
+                or control.pending_authorization_id!=expected_pending_authorization_id
+                or previous.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED}
+                or previous.selection_epoch_id!=selection_epoch_id or previous.rollback_baseline_id!=rollback_baseline_id
+                or previous.selection_control_version!=expected_control_version or previous.terminal_at_ms is None
+                or updated_at_ms<max(previous.terminal_at_ms,control.updated_at_ms)
+                or vacuum is None or vacuum.source_generation_id!=previous.materialization_generation_id
+                or vacuum.state not in {StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.OWNER_PAUSED}
+                or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None):
+                raise SelectionJobConflict("Static reauthorization requires exact terminal fenced intent")
+            if await self._connection.scalar(sa.select(sa.exists().where(
+                strategy_universe_versions.c.materialization_generation_id==previous.materialization_generation_id,
+                strategy_universe_versions.c.lifecycle_state!="abandoned"))):
+                raise SelectionJobConflict("Static reauthorization requires abandoned targets")
+            prior = previous.previous_events[0]
+            active = (await self._connection.execute(sa.select(strategy_universe_current).where(
+                strategy_universe_current.c.event_spec_id==prior.event_spec_id).with_for_update())).mappings().one_or_none()
+            if active is None or active["lifecycle_state"]!="active" or active["universe_version_id"]!=prior.universe_version_id:
+                raise SelectionJobConflict("Static reauthorization previous Universe changed")
+            if prior.comparison_universe_id is not None:
+                comparison = await self.get_comparison_universe_binding(prior.event_spec_id,for_update=True)
+                if comparison is None or (comparison.comparison_universe_id,comparison.comparison_transition_revision)!=(
+                    prior.comparison_universe_id,prior.comparison_transition_revision):
+                    raise SelectionJobConflict("Static reauthorization previous comparison changed")
+            authorization = (await self._connection.execute(sa.select(owner_authorizations).where(
+                owner_authorizations.c.authorization_id==authorization_id))).mappings().one_or_none()
+            spec = await self.get_generic_spec(selection_spec_id)
+            cadence = spec.cadence_hours*3_600_000
+            expected_scope = {"strategy_group_id":strategy_group_id,"selection_spec_id":selection_spec_id,
+                "target_selection_mode":"static_baseline","rollback_baseline_id":rollback_baseline_id,
+                "selection_epoch_id":selection_epoch_id,"effective_period_anchor_ms":effective_period_anchor_ms}
+            if authorization_id==expected_pending_authorization_id or authorization is None or (
+                authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up"
+                or authorization["authorized_at_ms"]!=updated_at_ms or authorization["target_scope"]!=expected_scope
+                or effective_period_anchor_ms!=(updated_at_ms//cadence+1)*cadence):
+                raise SelectionJobConflict("Static reauthorization requires new exact Owner proof")
+        pending_predicate = (sa.and_(strategy_selection_control_current.c.pending_selection_mode=="static_baseline",
+            strategy_selection_control_current.c.pending_authorization_id==expected_pending_authorization_id)
+            if expected_pending_authorization_id is not None else strategy_selection_control_current.c.pending_selection_mode.is_(None))
         result = await self._connection.execute(sa.update(strategy_selection_control_current).where(
             strategy_selection_control_current.c.strategy_group_id==strategy_group_id,
             strategy_selection_control_current.c.selection_spec_id==selection_spec_id,
@@ -1345,10 +1395,21 @@ class PostgresInstrumentSelectionRepository:
             strategy_selection_control_current.c.rollback_baseline_id==rollback_baseline_id,
             strategy_selection_control_current.c.control_version==expected_control_version,
             strategy_selection_control_current.c.selection_mode=="dynamic_selection",
-            strategy_selection_control_current.c.pending_selection_mode.is_(None),
+            pending_predicate,
         ).values(pending_selection_mode="static_baseline",pending_effective_period_anchor_ms=effective_period_anchor_ms,
             pending_authorization_id=authorization_id,updated_at_ms=updated_at_ms).returning(strategy_selection_control_current))
         row = result.mappings().one_or_none()
+        if row is not None and expected_pending_authorization_id is not None:
+            if previous is None or vacuum is None:
+                raise SelectionJobConflict("Static reauthorization source disappeared")
+            sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+                strategy_universe_materialization_events.c.materialization_generation_id==previous.materialization_generation_id)) or 0)+1
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=f"materialization-event:{previous.materialization_generation_id}:{sequence}",
+                materialization_generation_id=previous.materialization_generation_id,event_sequence=sequence,
+                event_type="OWNER_REAUTHORIZED",payload={"authorization_id":authorization_id,
+                    "effective_period_anchor_ms":effective_period_anchor_ms,"entry_vacuum_id":vacuum.entry_vacuum_id},
+                occurred_at_ms=updated_at_ms))
         return None if row is None else _selection_control_from_row(row)
 
     async def _read_static_baseline_universe(

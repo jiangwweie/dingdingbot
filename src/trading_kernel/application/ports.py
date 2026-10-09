@@ -1751,6 +1751,7 @@ class InstrumentSelectionRepository(Protocol):
         self, *, strategy_group_id: str, selection_spec_id: str, selection_epoch_id: str,
         rollback_baseline_id: str, expected_control_version: int, effective_period_anchor_ms: int,
         authorization_id: str, updated_at_ms: int,
+        expected_pending_authorization_id: str | None = None,
     ) -> SelectionControl | None: ...
 
     async def capture_generic_static_rollback_baseline(

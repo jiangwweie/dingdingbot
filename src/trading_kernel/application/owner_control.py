@@ -31,6 +31,9 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
     build_event_exit_binding,
 )
+from src.trading_kernel.domain.generic_materialization import (
+    GenericStaticMaterializationGeneration,
+)
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS, INTERVAL_MS
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
@@ -42,6 +45,7 @@ from src.trading_kernel.domain.owner_control import (
     transition_strategy_entry_control,
 )
 from src.trading_kernel.domain.selection_authority import (
+    MaterializationGenerationState,
     SelectionControl,
     SelectionMode,
 )
@@ -471,6 +475,9 @@ async def stage_generic_static_selection_mode(
     """
     if authentication_strength != "totp_step_up":
         raise OwnerControlBlocked("selection_mode_change_requires_step_up")
+    # Match Coordinator's Owner -> Control -> Generation lock order. A new
+    # intent is not an Entry grant, but must not deadlock with pause cleanup.
+    await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
     current = await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
     if current is None or strategy_group_id=="SOR-001":
         raise OwnerControlBlocked("generic_selection_control_missing")
@@ -490,8 +497,15 @@ async def stage_generic_static_selection_mode(
         raise OwnerControlBlocked("selection_control_clock_moved_backwards")
     if current.selection_mode is not SelectionMode.DYNAMIC_SELECTION or current.selection_epoch_id!=selection_epoch_id:
         raise OwnerControlBlocked("selection_static_rollback_requires_current_dynamic_epoch")
+    replacement_authorization_id = None
     if current.pending_selection_mode is not None:
-        raise OwnerControlBlocked("selection_mode_transition_already_pending")
+        if current.pending_selection_mode is not SelectionMode.STATIC_BASELINE or current.pending_authorization_id is None:
+            raise OwnerControlBlocked("selection_mode_transition_already_pending")
+        previous = await uow.instrument_selection.get_generic_static_materialization_generation(
+            GenericStaticMaterializationGeneration.id_for_authorization(current.pending_authorization_id),for_update=True)
+        if previous is None or previous.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED}:
+            raise OwnerControlBlocked("selection_mode_transition_already_pending")
+        replacement_authorization_id = current.pending_authorization_id
     if current.rollback_baseline_id!=rollback_baseline_id:
         raise OwnerControlBlocked("selection_static_rollback_baseline_changed")
     try:
@@ -507,11 +521,15 @@ async def stage_generic_static_selection_mode(
     authorization = _authorization(purpose="selection_mode_change",request=request,
         authentication_strength="totp_step_up",target_scope=scope)
     await uow.owner_controls.add_authorization(authorization)
-    staged = await uow.instrument_selection.stage_pending_generic_static_mode(
-        strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,
-        selection_epoch_id=selection_epoch_id,rollback_baseline_id=rollback_baseline_id,
-        expected_control_version=current.control_version,effective_period_anchor_ms=effective_period_anchor_ms,
-        authorization_id=authorization.authorization_id,updated_at_ms=request.now_ms)
+    try:
+        staged = await uow.instrument_selection.stage_pending_generic_static_mode(
+            strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,
+            selection_epoch_id=selection_epoch_id,rollback_baseline_id=rollback_baseline_id,
+            expected_control_version=current.control_version,effective_period_anchor_ms=effective_period_anchor_ms,
+            authorization_id=authorization.authorization_id,updated_at_ms=request.now_ms,
+            expected_pending_authorization_id=replacement_authorization_id)
+    except (SelectionPersistenceConflict,ValueError) as exc:
+        raise OwnerControlBlocked("selection_static_reauthorization_source_invalid") from exc
     if staged is None:
         raise OwnerControlConflict("selection_control_version_conflict")
     return staged
