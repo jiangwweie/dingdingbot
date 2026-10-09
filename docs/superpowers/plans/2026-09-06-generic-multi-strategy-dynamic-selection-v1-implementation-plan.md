@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮comparative Static新交易末版回归：四策略专项4 passed；自然入口/hourly faults60 passed；既有Full-chain/文档76 passed、更新文档后25 passed、Ruff/diff通过。仅tests/docs，未跑全Unit/Mypy或R4，集合重叠不合计。
+
+2026-10-09MPG/MI Static recovery后新自然交易增量（基于`d3fae989`，GS-06/08/09关联）：将已有Static后第二Ticket链扩展到两个comparative策略，在旧Dynamic Ticket终态后exact-load新Static Universe、冻结Static activation proof及其comparison revision，比较输入使用实际baseline成员而非强行fixed24。首个future close给真实TRIGGERED，由RECOVERY_REBASE_REQUIRED抑制；更晚NOT_TRIGGERED沿正式Observation同时完成合法recovery/comparison arming，再更晚TRIGGERED只产生一个新Signal。该Static Signal经正式issue_ready_signal/Claim/AdmissionDecision/Ticket、durable唯一ENTRY和recording venue/protection/Runner/flat/Settlement/Review至terminal，birth Selection Authority=NULL而不伪造Dynamic权限。四策略Static后续交易专项4 passed，最终每策略两笔terminal Ticket/不同Episode/不同Entry order ID，旧Dynamic历史来源保持。生产代码未改，无SQL写入Signal/checkpoint，无alpha参数变动；本地模拟fill/费用/Review不作为实盘收益证明。第二Dynamic epoch交易与完整拒绝/并发矩阵仍待闭合，GS-04～09未Done、非exact R4，production_modified=NO。
+
 本轮新Static natural ENTRY末版回归：自然入口/hourly faults60 passed（含两条新增Static第二Ticket终态链与不同order/episode身份断言）；既有Full-chain/文档76 passed、文档更新后25 passed、Ruff/diff通过。本轮仅tests/docs，未跑全Unit/Mypy或最终R4，集合重叠不合计。
 
 2026-10-09CPM/BRF2 Static切换后新自然交易增量（基于`730d5bbe`，GS-06/08/09关联）：在原正式Owner→Runner→Dynamic自然Signal/Ticket链、原Ticket protected时完成正式Static cutover并让原Ticket终态关闭后，新的Active Static scope分别消费合法NOT_TRIGGERED与更晚TRIGGERED closed bars，再由原issue_ready_signal/Claim/Ticket/durable ENTRY/recording venue/reconcile/protect/TP1/Runner/exit/Settlement/Review闭环。不直接写Signal或checkpoint；两策略各最终2条terminal Ticket、2个不同Exposure Episode与2条ENTRY、2个不同accepted Entry order ID。Static Signal/Claim/AdmissionDecision/Ticket不伪造Dynamic Selection Authority（birth字段NULL），而是原Control/current Universe与已冻结Static activation proof；新Ticket仍冻结同Event/Universe/Initial Stop/Exit Binding，旧Ticket lineage不改。复用原入场helper时给每条Ticket独立Review/venue ID，避免第二笔复用首笔fixture身份。CPM LONG/BRF2 SHORT专项2 passed；这不是MPG/MI comparative新Static Entry或第二Dynamic epoch交易认证。所有fill/flat/费用与Review经济值为本地fixture，非实盘/收益证明；GS-04～09未Done、非exact R4，production_modified=NO。

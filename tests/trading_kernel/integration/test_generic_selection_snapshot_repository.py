@@ -8176,7 +8176,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert member["qualification_semantic_digest"].startswith("sha256:")
     assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
         "BudgetSettled","ReviewRecorded"} <= event_types
-    if fault_stage=="static_after_protection" and group in {"CPM-RO-001","BRF2-001"}:
+    if fault_stage=="static_after_protection":
         await _issue_new_static_natural_trade(database,group=group)
 
 
@@ -8195,16 +8195,37 @@ async def _issue_new_static_natural_trade(database, *, group):
         async def fetch_closed_candles(self,request):
             candles = self.template.candles_1h if request.timeframe=="1h" else self.template.candles_4h
             return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+self.delta,"close_time_ms":c.close_time_ms+self.delta}) for c in candles)
-    for close,template in ((first_close,cpm_flat_snapshot()),(first_close+HOUR,cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot())):
+    comparative = group in {"MPG-001","MI-001"}
+    if comparative:
+        trigger = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+        flat = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+        sequence = ((first_close,trigger),(first_close+HOUR,flat),(first_close+2*HOUR,trigger))
+    else:
+        sequence = ((first_close,cpm_flat_snapshot()),(first_close+HOUR,cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot()))
+    for close,template in sequence:
         await make_warming_ready(database,universe_version_id=current.universe_version_id,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+        if comparative:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                members = await uow.strategy_universes.get_members(current.universe_version_id)
+            shift = close-template.trigger_candle_close_time_ms
+            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+            projection = build_comparative_universe_projection(event_spec_id=spec.event_spec_id,universe_version_id=current.universe_version_id,
+                strategy_group_id=group,exchange_instrument_ids=members,closed_bar_time_ms=close,
+                lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles) for member in members)).model_copy(update={
+                    "comparison_transition_revision":proof.comparison_transition_revision})
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(projection)
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
             observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),Market(template,close),
                 ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
                     trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
-        assert observed.status is (ObservationStatus.NO_SIGNAL if close==first_close else ObservationStatus.SIGNAL_CREATED),observed
+        assert observed.status is (ObservationStatus.SIGNAL_CREATED if close==sequence[-1][0] else ObservationStatus.NO_SIGNAL),observed
+        if comparative and close==first_close:
+            assert observed.detector_reason=="RECOVERY_REBASE_REQUIRED",observed
     await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
         selection_authority_id=None,member=member,universe_version_id=current.universe_version_id,
-        closed_at_ms=first_close+HOUR,now_ms=first_close+HOUR+2,fault_stage=None)
+        closed_at_ms=sequence[-1][0],now_ms=sequence[-1][0]+2,fault_stage=None)
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==2
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status<>'terminal'"))==0
