@@ -3128,6 +3128,8 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
         for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
+    *((group,"entry_fault:static_new_entry:"+fault) for group in ("CPM-RO-001","BRF2-001")
+        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -7211,7 +7213,8 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
 @pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
-    *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000))])
+    *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
+    *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch"))])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -7634,6 +7637,10 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,
     selection_authority_id, member, universe_version_id, closed_at_ms, now_ms,
     fault_stage: str | None, authority_transition=None):
+    static_entry_fault = None
+    if fault_stage is not None and fault_stage.startswith("static_new_entry:"):
+        static_entry_fault = fault_stage.split(":",1)[1]
+        fault_stage = "static_after_protection"
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
         dispatch_one_command,
@@ -7667,6 +7674,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                     reason="hourly_entry_fault_test",idempotency_key=f"pause:{group}:{fault_stage}",
                     owner_identity="owner",now_ms=at_ms),
                 authentication_strength="totp_step_up")
+
+    async def assert_no_ticket_for_signal():
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE signal_event_id=:signal"),{"signal":signal_event_id})==0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands c JOIN brc_trade_tickets t USING(ticket_id) WHERE t.signal_event_id=:signal"),{"signal":signal_event_id})==0
 
     await make_warming_ready(database,universe_version_id=universe_version_id,
         warm_closed_bar_time_ms=closed_at_ms,valid_until_ms=now_ms+60_000)
@@ -7765,9 +7777,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
                 schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms+2))
         assert refused.status.value == "scope_or_policy_mismatch", refused
-        async with database.connect() as conn:
-            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
-            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        await assert_no_ticket_for_signal()
         return
     delayed_static = fault_stage is not None and fault_stage.startswith("static_slow_normal_after_protection:")
     assert delayed_static or fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}
@@ -7800,9 +7810,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert decision.first_blocker=="selection_entry_vacuum"
             assert decision.selection_authority_id==selection_authority_id
             assert decision.capacity_claim_id is None and decision.ticket_id is None
-        async with database.connect() as conn:
-            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
-            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        await assert_no_ticket_for_signal()
         return
     async def issue_natural_signal():
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -8177,10 +8185,10 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
         "BudgetSettled","ReviewRecorded"} <= event_types
     if fault_stage=="static_after_protection":
-        await _issue_new_static_natural_trade(database,group=group)
+        await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
 
 
-async def _issue_new_static_natural_trade(database, *, group):
+async def _issue_new_static_natural_trade(database, *, group,fault_stage=None):
     spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.strategy_universes.get_current(spec.event_spec_id)
@@ -8225,13 +8233,14 @@ async def _issue_new_static_natural_trade(database, *, group):
             assert observed.detector_reason=="RECOVERY_REBASE_REQUIRED",observed
     await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
         selection_authority_id=None,member=member,universe_version_id=current.universe_version_id,
-        closed_at_ms=sequence[-1][0],now_ms=sequence[-1][0]+2,fault_stage=None)
+        closed_at_ms=sequence[-1][0],now_ms=sequence[-1][0]+2,fault_stage=fault_stage)
     async with database.connect() as conn:
-        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==2
-        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status<>'terminal'"))==0
-        assert await conn.scalar(sa.text("SELECT count(DISTINCT exposure_episode_id) FROM brc_trade_tickets"))==2
-        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry'"))==2
-        assert await conn.scalar(sa.text("SELECT count(DISTINCT entry_exchange_order_id) FROM brc_trade_aggregates"))==2
+        ticket_count = 1 if fault_stage in {"before_issue","between_claim_ticket"} else 2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==ticket_count
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status NOT IN ('terminal','entry_rejected')"))==0
+        assert await conn.scalar(sa.text("SELECT count(DISTINCT exposure_episode_id) FROM brc_trade_tickets"))==ticket_count
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry'"))==ticket_count
+        assert await conn.scalar(sa.text("SELECT count(DISTINCT entry_exchange_order_id) FROM brc_trade_aggregates"))==(2 if fault_stage is None else 1)
 
 
 @pytest.mark.asyncio

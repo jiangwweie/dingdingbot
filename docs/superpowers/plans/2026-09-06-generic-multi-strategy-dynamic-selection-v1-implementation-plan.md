@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮Static新ENTRY fault末版回归：正向/四fault20 passed；既有Full-chain/文档76 passed、台账更新后文档25 passed、Ruff/diff通过。本轮tests/docs-only，未跑完整Generic、Unit/Mypy或最终R4，集合重叠不合计。
+
+2026-10-09新Static自然ENTRY拒绝矩阵（基于`74302aff`，GS-09关联）：四策略复用正式Dynamic旧Ticket终态→Owner Static cutover→comparison/recovery合法arming→新自然Signal链，分别在Claim前、已计算Claim到Ticket之间、prepared ENTRY dispatch之前正式Owner Pause，以及dispatch前action-time account/admission facts过期。前两类按新signal精确查询零Ticket/Command，避免将已存在的旧terminal历史当作本次副作用；后两类prepared唯一ENTRY拒绝/超越且recording venue无新execute，Reservation/Netting Domain释放，原历史不改。Claim→Ticket间Pause来自独立Owner UoW，非修改mock布尔；Static birth仍NULL，不伪造Dynamic Authority。四策略×四fault16分支PASS，与四策略正向第二Static Ticket继续共享同一helper，新的Review/order/episode identity不重用首笔；测试中新账户事实/fill/Review为local fixture，非收益声明。仅tests/docs补强、无生产行为改动，不代表第二Dynamic epoch或所有positive Universe switch/freshness矩阵已完成，GS-04～09未Done、非exact R4，production_modified=NO。
+
 本轮comparative Static新交易末版回归：四策略专项4 passed；自然入口/hourly faults60 passed；既有Full-chain/文档76 passed、更新文档后25 passed、Ruff/diff通过。仅tests/docs，未跑全Unit/Mypy或R4，集合重叠不合计。
 
 2026-10-09MPG/MI Static recovery后新自然交易增量（基于`d3fae989`，GS-06/08/09关联）：将已有Static后第二Ticket链扩展到两个comparative策略，在旧Dynamic Ticket终态后exact-load新Static Universe、冻结Static activation proof及其comparison revision，比较输入使用实际baseline成员而非强行fixed24。首个future close给真实TRIGGERED，由RECOVERY_REBASE_REQUIRED抑制；更晚NOT_TRIGGERED沿正式Observation同时完成合法recovery/comparison arming，再更晚TRIGGERED只产生一个新Signal。该Static Signal经正式issue_ready_signal/Claim/AdmissionDecision/Ticket、durable唯一ENTRY和recording venue/protection/Runner/flat/Settlement/Review至terminal，birth Selection Authority=NULL而不伪造Dynamic权限。四策略Static后续交易专项4 passed，最终每策略两笔terminal Ticket/不同Episode/不同Entry order ID，旧Dynamic历史来源保持。生产代码未改，无SQL写入Signal/checkpoint，无alpha参数变动；本地模拟fill/费用/Review不作为实盘收益证明。第二Dynamic epoch交易与完整拒绝/并发矩阵仍待闭合，GS-04～09未Done、非exact R4，production_modified=NO。
