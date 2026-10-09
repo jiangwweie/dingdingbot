@@ -3136,6 +3136,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string","_recover","_unknown_recover","_partial_recover","_early_resume","_early_resume_unknown","_early_resume_partial","_early_resume_recover","_early_resume_unknown_recover","_early_resume_partial_recover")),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
         for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
+    *((group,"entry_fault:prepared_pause:"+fault) for group in ("CPM-RO-001","BRF2-001") for fault in ("empty","nonempty","early_empty","early_nonempty")),
     *((group,"entry_fault:static_new_entry:"+fault) for group in ("CPM-RO-001","BRF2-001")
         for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
 ])
@@ -8100,7 +8101,8 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
     *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
     *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
     *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover",
-        "sent_early_resume","unknown_early_resume","partial_early_resume","sent_early_resume_recover","unknown_early_resume_recover","partial_early_resume_recover"))])
+        "sent_early_resume","unknown_early_resume","partial_early_resume","sent_early_resume_recover","unknown_early_resume_recover","partial_early_resume_recover")),
+    *("prepared_pause:"+fault for fault in ("empty","nonempty","early_empty","early_nonempty"))])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -8520,9 +8522,130 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
     assert not past.allowed
 
 
+async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,issued,now_ms,empty,early_resume):
+    from src.trading_kernel.application.dispatch_exchange_command import (
+        DispatchCommandRequest,
+        dispatch_one_command,
+    )
+    from src.trading_kernel.application.owner_control import (
+        set_strategy_entry_state,
+    )
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    spec=inputs(group).spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        original=await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
+        before_commands=await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+        assert len(before_commands)==1 and before_commands[0].status.value=="prepared" and before_commands[0].generation==1
+        owner=await uow.owner_controls.get_strategy_control(group)
+        await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=owner.control_version,reason="pause_prepared_natural_entry",
+                idempotency_key=f"prepared-pause:{group}:{empty}:{early_resume}",owner_identity="owner",now_ms=now_ms+1),authentication_strength="totp_step_up")
+        vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=spec.selection_spec_id)
+    async def resume(at):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_prepared_natural_entry",
+                    idempotency_key=f"prepared-resume:{group}:{empty}:{early_resume}",owner_identity="owner",now_ms=at),authentication_strength="totp_step_up")
+    if early_resume:
+        await resume(now_ms+2)
+    outcomes=[]
+    for offset in (3,4,5):
+        if offset==4:
+            with pytest.raises(RuntimeError,match="prepared pause drain rollback"):
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    result=await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,now_ms=now_ms+offset))
+                    assert result.status is VacuumDrainStatus.PREPARED_ENTRY_SUPERSEDED,result
+                    raise RuntimeError("prepared pause drain rollback")
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.aggregates.get(issued.ticket_id)).status.value=="entry_pending"
+                assert (await uow.budgets.get_for_ticket(issued.ticket_id)).status=="active"
+                assert await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+                assert (await uow.exchange_commands.list_for_ticket(issued.ticket_id))[0].status.value=="prepared"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            step=await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,now_ms=now_ms+offset))
+        outcomes.append(step.status)
+    assert outcomes==[VacuumDrainStatus.DRAIN_STARTED,VacuumDrainStatus.PREPARED_ENTRY_SUPERSEDED,VacuumDrainStatus.OWNER_PAUSED],outcomes
+    async with PostgresKernelUnitOfWork(database) as uow:
+        drained=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=spec.selection_spec_id)
+        assert drained.entry_vacuum_id==vacuum.entry_vacuum_id and drained.fenced_at_ms==vacuum.fenced_at_ms
+        assert drained.state is StrategyEntryVacuumState.OWNER_PAUSED and drained.drained_at_ms==now_ms+5
+        assert await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)==original
+        retained=await uow.tickets.get(issued.ticket_id)
+        aggregate=await uow.aggregates.get(issued.ticket_id)
+        commands=await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+        reservation=await uow.budgets.get_for_ticket(issued.ticket_id)
+        assert retained.model_dump(exclude={"status"})==ticket.model_dump(exclude={"status"})
+        assert aggregate.status.value=="entry_rejected" and aggregate.position_qty==0
+        assert reservation.status=="released" and not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+        assert len(commands)==1 and commands[0].status.value=="superseded"
+    if not early_resume:
+        await resume(now_ms+6)
+    class NoVenue:
+        async def execute(self,request):
+            raise AssertionError("prepared paused ENTRY must never reach venue")
+    refused=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),NoVenue(),DispatchCommandRequest(worker_id="prepared-after-pause",
+        ticket_id=issued.ticket_id,now_ms=now_ms+7,lease_until_ms=now_ms+30000,timeout_seconds=1))
+    assert refused.status.value=="no_command",refused
+    source=inputs(group).model_copy(update={"selection_epoch_id":original.authority.selection_epoch_id})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        parent=await uow.instrument_selection.get_generic_snapshot(original.authority.selection_snapshot_id)
+    while source.feature_cutoff_at_ms<parent.feature_cutoff_at_ms:
+        source=next_input(source)
+    source=next_input(source).model_copy(update={"predecessor_snapshot":parent})
+    member=spec.candidate_ids[int(parent.selected_members==(spec.candidate_ids[0],))]
+    source=source.model_copy(update={"member_windows":tuple(qualify_window(w.model_copy(update={"candles":source.member_windows[0].candles}),not empty and w.exchange_instrument_id==member) for w in source.member_windows)})
+    class SelectionMarket:
+        async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+            return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in source.member_windows)
+        async def fetch_generic_selection_klines(self,request):
+            return next(w.candles for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+    tick=source.feature_cutoff_at_ms
+    def clock():
+        nonlocal tick
+        tick+=1
+        return tick
+    selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectionMarket(),
+        request=RunInstrumentSelectionRequest(selection_spec_id=spec.selection_spec_id,selection_epoch_id=source.selection_epoch_id,period_anchor_ms=source.feature_cutoff_at_ms,worker_id="prepared-latest-selector"),clock_ms=clock)
+    assert selected.outcome=="SNAPSHOT_READY",selected
+    async with PostgresKernelUnitOfWork(database) as uow:
+        snapshot=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+    assert bool(snapshot.selected_members)==(not empty)
+    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="prepared-latest-owner")
+    for offset in range(1,8):
+        at=snapshot.effective_from_ms+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+            outcome=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda at=at:at)
+        if outcome.disposition in {MaterializationDisposition.VALID_EMPTY,MaterializationDisposition.ACTIVE_NEW}:
+            break
+        if outcome.materialization_generation_id:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                targets=await uow.strategy_universes.get_generation_universe_targets(outcome.materialization_generation_id)
+            if targets:
+                await make_warming_ready(database,universe_version_id=targets[0].universe_version_id,warm_closed_bar_time_ms=snapshot.effective_from_ms,valid_until_ms=at+HOUR)
+                if group in {"MPG-001","MI-001"}:
+                    flat=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                    delta=snapshot.effective_from_ms-flat.trigger_candle_close_time_ms
+                    candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in flat.candles_1h)
+                    projection=build_comparative_universe_projection(event_spec_id=spec.event_spec_id,universe_version_id=targets[0].universe_version_id,strategy_group_id=group,
+                        exchange_instrument_ids=spec.candidate_ids,closed_bar_time_ms=snapshot.effective_from_ms,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in spec.candidate_ids))
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.strategy_universes.save_comparative_projection(projection)
+    assert outcome.disposition is (MaterializationDisposition.VALID_EMPTY if empty else MaterializationDisposition.ACTIVE_NEW),outcome
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"))==0
+
+
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,
     selection_authority_id, member, universe_version_id, closed_at_ms, now_ms,
     fault_stage: str | None, authority_transition=None):
+    prepared_pause_fault=None
+    if fault_stage is not None and fault_stage.startswith("prepared_pause:"):
+        prepared_pause_fault=fault_stage.split(":",1)[1]
+        fault_stage=None
     real_pause_fault=None
     if fault_stage is not None and fault_stage.startswith("real_pause_drain:"):
         real_pause_fault=fault_stage.split(":",1)[1]
@@ -8765,6 +8888,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert current.authority.selection_control_version == control.control_version
             assert current.authority.event_binding.universe_version_id == universe_version_id
 
+    if prepared_pause_fault is not None:
+        await _assert_natural_prepared_entry_owner_pause(database,group=group,ticket=ticket,issued=issued,
+            now_ms=now_ms,empty=prepared_pause_fault.endswith("empty") and not prepared_pause_fault.endswith("nonempty"),
+            early_resume=prepared_pause_fault.startswith("early_"))
+        return
     class ActionFacts:
         async def read_entry_admission_snapshot(self, request):
             if fault_stage=="switch_during_dispatch_facts":
