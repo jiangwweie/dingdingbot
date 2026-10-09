@@ -5834,7 +5834,7 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true"),(False,"early_resume"),(True,"early_resume")])
+@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true"),(False,"early_resume"),(True,"early_resume"),(False,"deferred_cleanup"),(True,"deferred_cleanup")])
 async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finishes_drain(
     database: AsyncEngine, group: str,static_source: bool,corrupt_completion: bool | str,
 ) -> None:
@@ -5846,7 +5846,8 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         stage_generic_static_selection_mode,
     )
     from src.trading_kernel.domain.owner_control import StrategyEntryState
-    early_resume=corrupt_completion=="early_resume"
+    deferred_cleanup=corrupt_completion=="deferred_cleanup"
+    early_resume=corrupt_completion in {"early_resume","deferred_cleanup"}
     if early_resume:
         corrupt_completion=False
     source,first,_,uid = await _exercise_generic_generation(database,group,False,
@@ -5888,6 +5889,13 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
             request=ControlMutationRequest(expected_version=owner.control_version,reason="pause_existing_entry_drain",
                 idempotency_key=f"pause-drain:{group}",owner_identity="owner",now_ms=at+1),authentication_strength="totp_step_up")
+    if deferred_cleanup:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_before_cleanup",
+                    idempotency_key=f"deferred-resume:{group}:{static_source}",owner_identity="owner",now_ms=at+2),authentication_strength="totp_step_up")
+        at+=1
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+2)):
         @asynccontextmanager
         async def interrupted_pause():
@@ -5902,7 +5910,7 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
             assert unchanged.lifecycle_state.value=="DRAINING_ENTRY"
             assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==vacuum
         paused = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+2)
-    assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+    assert paused.disposition is (MaterializationDisposition.WAITING_VACUUM if deferred_cleanup else MaterializationDisposition.OWNER_PAUSED)
     async with PostgresKernelUnitOfWork(database) as uow:
         abandoned = await (uow.instrument_selection.get_generic_static_materialization_generation(result.materialization_generation_id)
             if static_source else uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id))
@@ -5910,7 +5918,7 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         assert abandoned.lease_owner is None and abandoned.terminal_at_ms==at+2
         marked = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert marked.state is StrategyEntryVacuumState.DRAINING_ENTRY and marked.first_blocker=="OWNER_PAUSED"
-    if early_resume:
+    if early_resume and not deferred_cleanup:
         async with PostgresKernelUnitOfWork(database) as uow:
             owner=await uow.owner_controls.get_strategy_control(group)
             await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
@@ -6341,10 +6349,14 @@ async def test_latest_nonempty_snapshot_takes_over_early_generation_after_drain(
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 @pytest.mark.parametrize("restore_current_members", [False, True])
 @pytest.mark.parametrize("staged_old_target,pause_before_takeover,corrupt_completion", [(False,False,None),(True,False,None),(False,True,None),(True,True,None),
-    ("draining",True,None),("draining",True,"false"),("draining",True,"string")])
+    ("draining",True,None),("draining",True,"false"),("draining",True,"string"),
+    ("deferred_warming",True,None),("deferred_staged",True,None),("deferred_draining",True,None)])
 async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
     database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool | str, pause_before_takeover: bool,corrupt_completion: str | None,
 ) -> None:
+    deferred_cleanup=isinstance(staged_old_target,str) and staged_old_target.startswith("deferred_")
+    if deferred_cleanup:
+        staged_old_target={"deferred_warming":False,"deferred_staged":True,"deferred_draining":"draining"}[staged_old_target]
     source, first_snapshot, _, active_uid = await _exercise_generic_generation(
         database, group, False, durable=True, first_activation=True, natural_selection=True)
     shifted = next_input(source)
@@ -6422,7 +6434,7 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
                     request=ControlMutationRequest(expected_version=owner.control_version,reason="paused_nonempty_takeover",
                         idempotency_key=f"paused-nonempty:{group}:{restore_current_members}:{staged_old_target}:{offset}",
                         owner_identity="owner",now_ms=second.effective_from_ms+offset),authentication_strength="totp_step_up")
-            if state is StrategyEntryState.PAUSED:
+            if state is StrategyEntryState.PAUSED and not deferred_cleanup:
                 paused_at=second.effective_from_ms+22
                 with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=paused_at)):
                     paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda paused_at=paused_at:paused_at)
@@ -6445,6 +6457,33 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
                     old=await uow.instrument_selection.get_generic_materialization_generation(old_id)
                     original_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
                 assert old.lifecycle_state.value=="ABANDONED" and original_vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
+        if deferred_cleanup:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                before_cleanup=await uow.instrument_selection.get_generic_materialization_generation(old_id)
+                before_targets=await uow.strategy_universes.get_generation_universe_targets(old_id)
+            actual_execute=sa.ext.asyncio.AsyncConnection.execute
+            async def corrupt_deferred_cleanup(connection,statement,*args,**kwargs):
+                if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
+                    params=statement.compile().params
+                    if params.get("event_type")=="ABANDONED" and params.get("payload",{}).get("cleanup_deferred"):
+                        statement=statement.values(payload={**params["payload"],"owner_pause_authorization_id":"authorization:forged"})
+                return await actual_execute(connection,statement,*args,**kwargs)
+            cleanup_at=second.effective_from_ms+26
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=cleanup_at)), patch.object(
+                sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_deferred_cleanup), pytest.raises(sa.exc.DBAPIError,match="Deferred cleanup requires exact"):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:cleanup_at)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_generic_materialization_generation(old_id)==before_cleanup
+                assert await uow.strategy_universes.get_generation_universe_targets(old_id)==before_targets
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==original_authority
+            for cleanup_at in ((second.effective_from_ms+26,second.effective_from_ms+27) if staged_old_target=="draining" else (second.effective_from_ms+26,)):
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=cleanup_at)):
+                    cleanup=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda cleanup_at=cleanup_at:cleanup_at)
+                assert cleanup.disposition is MaterializationDisposition.WAITING_VACUUM,cleanup
+            async with PostgresKernelUnitOfWork(database) as uow:
+                old=await uow.instrument_selection.get_generic_materialization_generation(old_id)
+                original_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            assert old.lifecycle_state.value=="ABANDONED" and original_vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
     newest_source = next_input(source if restore_current_members else second_source)
     if restore_current_members:
         # Restore the first selection's geometry at the third period, not a SQL member edit.

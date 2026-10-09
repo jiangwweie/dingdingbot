@@ -108,6 +108,54 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
 
 def _generic_vacuum_owner_resume_proof() -> None:
     op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_deferred_owner_pause_matches(gid text,checked_at bigint) RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT EXISTS (
+          SELECT 1 FROM brc_strategy_universe_materialization_generations g
+          JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=g.strategy_group_id
+          JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+          JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=o.strategy_group_id AND p.control_version=r.control_version-1
+          JOIN brc_owner_authorizations a ON a.authorization_id=r.authorization_id
+          JOIN brc_owner_authorizations pa ON pa.authorization_id=p.authorization_id
+          WHERE g.materialization_generation_id=gid AND g.selection_epoch_id<>'sor-v0'
+            AND g.lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')
+            AND o.entry_state='enabled' AND o.control_version=r.control_version AND r.strategy_group_id=o.strategy_group_id
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms<=checked_at
+            AND p.operation='pause' AND p.target_state='paused' AND p.created_at_ms>=g.created_at_ms AND p.created_at_ms<=r.created_at_ms
+            AND a.purpose='strategy_resume' AND a.authentication_strength='totp_step_up' AND a.authorized_at_ms=r.created_at_ms
+            AND a.target_scope=jsonb_build_object('strategy_group_id',g.strategy_group_id)
+            AND pa.purpose='strategy_pause' AND pa.authorized_at_ms=p.created_at_ms
+            AND pa.target_scope=jsonb_build_object('strategy_group_id',g.strategy_group_id)
+        );
+      $$
+    """))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_deferred_cleanup_event_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.event_type='ABANDONED' AND NEW.payload ? 'cleanup_deferred' THEN
+          IF NEW.payload->'cleanup_deferred' IS DISTINCT FROM 'true'::jsonb OR NEW.payload->>'reason_code'<>'owner_paused'
+            OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations g
+              JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=g.strategy_group_id
+              JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+              JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=o.strategy_group_id AND p.control_version=r.control_version-1
+              JOIN brc_owner_authorizations a ON a.authorization_id=r.authorization_id
+              JOIN brc_owner_authorizations pa ON pa.authorization_id=p.authorization_id
+              WHERE g.materialization_generation_id=NEW.materialization_generation_id AND g.lifecycle_state='ABANDONED'
+                AND g.terminal_at_ms=NEW.occurred_at_ms AND g.created_at_ms<=p.created_at_ms AND r.created_at_ms<=NEW.occurred_at_ms
+                AND o.entry_state='enabled' AND o.control_version=r.control_version AND r.strategy_group_id=o.strategy_group_id
+                AND r.operation='resume' AND r.target_state='enabled' AND p.operation='pause' AND p.target_state='paused'
+                AND NEW.payload->>'owner_resume_authorization_id'=r.authorization_id AND NEW.payload->>'owner_pause_authorization_id'=p.authorization_id
+                AND a.purpose='strategy_resume' AND a.authentication_strength='totp_step_up' AND a.authorized_at_ms=r.created_at_ms
+                AND a.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+                AND pa.purpose='strategy_pause' AND pa.authorized_at_ms=p.created_at_ms
+                AND pa.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id))
+          THEN RAISE EXCEPTION 'Deferred cleanup requires exact Owner Pause and Resume evidence'; END IF;
+        END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_brc_generic_deferred_cleanup_event BEFORE INSERT ON brc_strategy_universe_materialization_events "
+        "FOR EACH ROW EXECUTE FUNCTION brc_generic_deferred_cleanup_event_guard()"))
+    op.execute(sa.text("""
       CREATE FUNCTION brc_generic_early_resume_drain_matches(vid text,checked_at bigint) RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT EXISTS (
           SELECT 1 FROM brc_strategy_entry_vacuums_current v
@@ -132,7 +180,11 @@ def _generic_vacuum_owner_resume_proof() -> None:
                 JOIN brc_strategy_entry_vacuum_events e ON e.entry_vacuum_id=vid
                 WHERE g.materialization_generation_id=v.source_generation_id AND g.lifecycle_state='ABANDONED'
                   AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
-                  AND g.terminal_at_ms>=p.created_at_ms AND g.terminal_at_ms<=r.created_at_ms
+                  AND g.terminal_at_ms>=p.created_at_ms AND g.terminal_at_ms<=checked_at AND (g.terminal_at_ms<=r.created_at_ms OR EXISTS (
+                    SELECT 1 FROM brc_strategy_universe_materialization_events abandoned WHERE abandoned.materialization_generation_id=g.materialization_generation_id
+                      AND abandoned.event_type='ABANDONED' AND abandoned.occurred_at_ms=g.terminal_at_ms
+                      AND abandoned.payload->'cleanup_deferred'='true'::jsonb
+                      AND abandoned.payload->>'owner_resume_authorization_id'=r.authorization_id AND abandoned.payload->>'owner_pause_authorization_id'=p.authorization_id))
                   AND e.event_type='OWNER_PAUSE_REQUESTED' AND e.occurred_at_ms=g.terminal_at_ms
                   AND e.payload->>'materialization_generation_id'=g.materialization_generation_id))
         );
@@ -187,7 +239,9 @@ def _generic_vacuum_owner_resume_proof() -> None:
             AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
             AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
             AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
-            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=g.terminal_at_ms AND r.created_at_ms<=checked_at
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms<=checked_at
+            AND (r.created_at_ms>=g.terminal_at_ms OR (a.payload->'cleanup_deferred'='true'::jsonb
+              AND a.payload->>'owner_resume_authorization_id'=r.authorization_id AND a.payload->>'owner_pause_authorization_id'=pause.authorization_id))
             AND (r.created_at_ms>=v.drained_at_ms OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events completed
               WHERE completed.entry_vacuum_id=vid AND completed.event_type='OWNER_PAUSED' AND completed.occurred_at_ms=v.drained_at_ms
                 AND completed.payload->'resumed_before_drain'='true'::jsonb AND completed.payload->'entry_drain_complete'='true'::jsonb

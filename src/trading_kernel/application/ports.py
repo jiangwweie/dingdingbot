@@ -1894,6 +1894,8 @@ class InstrumentSelectionRepository(Protocol):
         paused_at_ms: int,
     ) -> MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration: ...
 
+    async def generic_generation_owner_pause_pending(self, materialization_generation_id: str, *, checked_at_ms: int) -> bool: ...
+
     async def get_materialization_generation(
         self,
         materialization_generation_id: str,

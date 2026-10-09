@@ -4014,6 +4014,10 @@ class PostgresInstrumentSelectionRepository:
             ).model_dump()
         )
 
+    async def generic_generation_owner_pause_pending(self, materialization_generation_id: str, *, checked_at_ms: int) -> bool:
+        return bool(await self._connection.scalar(sa.text("SELECT brc_generic_deferred_owner_pause_matches(:gid,:at)"),
+            {"gid":materialization_generation_id,"at":checked_at_ms}))
+
     async def abandon_generation_for_owner_pause(
         self,
         *,
@@ -4062,13 +4066,21 @@ class PostgresInstrumentSelectionRepository:
             )
         if not valid_vacuum:
             raise ValueError("Owner Pause requires the exact open Generation fence")
+        abandonment_payload: dict[str, str | bool] = {"reason_code":"owner_paused"}
         locked_generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
         if isinstance(generation,(GenericMaterializationGeneration,GenericStaticMaterializationGeneration)):
             owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
                 strategy_entry_controls_current.c.strategy_group_id==generation.strategy_group_id).with_for_update())).mappings().one_or_none()
             now = await self.read_authority_clock_ms()
-            if owner is None or owner["entry_state"]!="paused" or not generation.created_at_ms<=paused_at_ms<=now:
+            deferred = owner is not None and owner["entry_state"]=="enabled" and await self.generic_generation_owner_pause_pending(
+                generation.materialization_generation_id,checked_at_ms=now)
+            if owner is None or (owner["entry_state"]!="paused" and not deferred) or not generation.created_at_ms<=paused_at_ms<=now:
                 raise SelectionJobConflict("Generic abandonment requires current Owner Pause")
+            if deferred:
+                evidence=(await self._connection.execute(sa.text("SELECT r.authorization_id AS resume_id,p.authorization_id AS pause_id "
+                    "FROM brc_strategy_entry_control_events r JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=r.strategy_group_id AND p.control_version=r.control_version-1 "
+                    "WHERE r.strategy_entry_control_event_id=:id"),{"id":owner["last_event_id"]})).mappings().one()
+                abandonment_payload.update({"cleanup_deferred":True,"owner_resume_authorization_id":evidence["resume_id"],"owner_pause_authorization_id":evidence["pause_id"]})
             if isinstance(generation,GenericStaticMaterializationGeneration):
                 locked_generation = await self.get_generic_static_materialization_generation(generation.materialization_generation_id,for_update=True)
             else:
@@ -4133,7 +4145,7 @@ class PostgresInstrumentSelectionRepository:
                 materialization_generation_id=generation.materialization_generation_id,
                 event_sequence=abandoned.projection_version,
                 event_type="ABANDONED",
-                payload={"reason_code": "owner_paused"},
+                payload=abandonment_payload,
                 occurred_at_ms=paused_at_ms,
             )
         )
