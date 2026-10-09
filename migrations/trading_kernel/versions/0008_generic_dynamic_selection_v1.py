@@ -133,6 +133,32 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
+        IF OLD.state='OWNER_PAUSED' AND OLD.source_generation_id IS NULL AND NEW.state='DRAINING_ENTRY' THEN
+          IF OLD.first_blocker<>'OWNER_PAUSED' OR OLD.drained_at_ms IS NULL OR NEW.source_generation_id IS NOT NULL
+            OR NEW.first_blocker<>'NO_SELECTION_READY_MEMBERS' OR NEW.period_anchor_ms<=OLD.period_anchor_ms
+            OR NEW.fenced_at_ms<>OLD.fenced_at_ms OR NEW.drained_at_ms IS DISTINCT FROM OLD.drained_at_ms
+            OR NEW.resolved_at_ms IS NOT NULL OR NEW.projection_version<>OLD.projection_version+1
+            OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=OLD.entry_vacuum_id
+              AND e.event_type='OWNER_PAUSED' AND e.occurred_at_ms=OLD.drained_at_ms
+              AND e.payload->'entry_drain_complete'='true'::jsonb)
+            OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
+              JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=e.payload->>'selection_snapshot_id'
+              JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=OLD.strategy_group_id
+              JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=OLD.strategy_group_id
+              WHERE e.entry_vacuum_id=OLD.entry_vacuum_id AND e.event_sequence=NEW.projection_version
+                AND e.event_type='VALID_EMPTY_INTENT' AND e.payload->'supersedes_owner_pause'='true'::jsonb
+                AND e.payload->>'intended_authority_outcome'='VALID_EMPTY'
+                AND s.selection_spec_id=OLD.selection_spec_id AND s.selection_epoch_id=c.selection_epoch_id
+                AND s.period_anchor_ms=NEW.period_anchor_ms AND s.selected_count=0
+                AND s.created_at_ms<=e.occurred_at_ms AND s.eligibility_not_before_ms<=e.occurred_at_ms AND e.occurred_at_ms<s.expires_at_ms
+                AND c.selection_mode='dynamic_selection' AND o.entry_state='enabled'
+                AND (c.pending_selection_mode IS NULL OR (c.pending_selection_mode='static_baseline' AND s.period_anchor_ms<c.pending_effective_period_anchor_ms))
+                AND NOT EXISTS (SELECT 1 FROM brc_instrument_selection_snapshots newer
+                  WHERE newer.selection_spec_id=s.selection_spec_id AND newer.selection_epoch_id=s.selection_epoch_id
+                    AND newer.eligibility_not_before_ms<=e.occurred_at_ms AND newer.period_anchor_ms>s.period_anchor_ms))
+          THEN RAISE EXCEPTION 'Owner Pause EMPTY requires exact resumed completion and latest intent'; END IF;
+          RETURN NEW;
+        END IF;
         IF OLD.first_blocker='AUTHORITY_GAP' AND OLD.source_generation_id IS NULL
           AND OLD.state='RECOVERY_PENDING' AND NEW.state='RECONFIGURING'
           AND NEW.first_blocker='AUTHORITY_GAP' AND NEW.source_generation_id IS NOT NULL

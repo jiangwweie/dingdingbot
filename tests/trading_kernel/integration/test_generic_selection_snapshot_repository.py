@@ -5345,6 +5345,49 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
         assert drained.state is StrategyEntryVacuumState.OWNER_PAUSED and drained.resolved_at_ms is None
         assert await (uow.instrument_selection.get_generic_static_materialization_generation(before.materialization_generation_id)
             if static_source else uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id))==abandoned
+    if not static_source:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner = await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="latest_empty_after_unfenced_pause",
+                    idempotency_key=f"resume-empty:{group}:{stage}",owner_identity="owner",now_ms=tick+4),authentication_strength="totp_step_up")
+        empty_source = next_input(next_source).model_copy(update={"predecessor_snapshot":snapshot})
+        empty_source = empty_source.model_copy(update={"member_windows":tuple(qualify_window(window,False) for window in empty_source.member_windows)})
+        empty = compute_generic_selection(empty_source)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.save_generic_snapshot(empty,decision_at_ms=empty_source.decision_at_ms,source_observed_at_ms=empty_source.source_observed_at_ms)
+        empty_at = empty.effective_from_ms+1
+        empty_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,worker_id="latest-empty-after-pause")
+        actual_execute = sa.ext.asyncio.AsyncConnection.execute
+        async def corrupt_empty_intent(connection,statement,*args,**kwargs):
+            if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+                params = statement.compile().params
+                if params.get("event_type")=="VALID_EMPTY_INTENT" and params.get("payload",{}).get("supersedes_owner_pause"):
+                    statement = statement.values(payload={**params["payload"],"supersedes_owner_pause":False})
+            return await actual_execute(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=empty_at)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_empty_intent), pytest.raises(sa.exc.DBAPIError,match="Owner Pause EMPTY requires exact"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:empty_at)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==drained
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==authority
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=empty_at)):
+            for _ in range(4):
+                outcome = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:empty_at)
+                if outcome.disposition is MaterializationDisposition.VALID_EMPTY:
+                    break
+        assert outcome.disposition is MaterializationDisposition.VALID_EMPTY,outcome
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id)==abandoned
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+            current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            assert current.authority.authority_outcome=="VALID_EMPTY" and current.authority.blocks_new_entry
+            assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+        async with database.connect() as conn:
+            retained = (await conn.execute(sa.text("SELECT state,fenced_at_ms,drained_at_ms FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=:id"),{"id":drained.entry_vacuum_id})).one()
+            assert retained==("VALID_EMPTY",drained.fenced_at_ms,drained.drained_at_ms)
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
 
 
 @pytest.mark.asyncio

@@ -5381,8 +5381,21 @@ class PostgresInstrumentSelectionRepository:
         current = await self.get_current_entry_vacuum(strategy_group_id=snapshot.strategy_group_id,
             selection_spec_id=snapshot.selection_spec_id,for_update=True)
         if current!=vacuum or vacuum.state not in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,
-            StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.RECOVERY_PENDING}:
+            StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.RECOVERY_PENDING,StrategyEntryVacuumState.OWNER_PAUSED}:
             raise SelectionJobConflict("Generic empty handoff Vacuum changed")
+        if vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED:
+            if vacuum.first_blocker!="OWNER_PAUSED" or vacuum.source_generation_id is not None or (
+                vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
+                or await self.entry_vacuum_has_drain_blockers(strategy_group_id=snapshot.strategy_group_id)
+                or await self.get_next_entry_vacuum_ticket(strategy_group_id=snapshot.strategy_group_id) is not None):
+                raise SelectionJobConflict("Generic empty handoff requires completed generation-free Owner Pause drain")
+            complete = await self._connection.scalar(sa.select(sa.exists().where(
+                strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+                strategy_entry_vacuum_events.c.event_type=="OWNER_PAUSED",
+                strategy_entry_vacuum_events.c.occurred_at_ms==vacuum.drained_at_ms,
+                strategy_entry_vacuum_events.c.payload["entry_drain_complete"]==sa.cast(sa.literal("true"),sa.dialects.postgresql.JSONB))))
+            if not complete:
+                raise SelectionJobConflict("Generic empty handoff Owner Pause completion proof missing")
         if vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING:
             origin = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
                 strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
@@ -5435,19 +5448,20 @@ class PostgresInstrumentSelectionRepository:
         retargeted = StrategyEntryVacuum.model_validate({**vacuum.model_dump(),"source_generation_id":None,
             "period_anchor_ms":snapshot.feature_cutoff_at_ms,"state":"DRAINING_ENTRY","first_blocker":"NO_SELECTION_READY_MEMBERS",
             "projection_version":vacuum.projection_version+1})
-        if vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING:
+        if vacuum.state in {StrategyEntryVacuumState.RECOVERY_PENDING,StrategyEntryVacuumState.OWNER_PAUSED}:
             await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
                 entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{retargeted.projection_version}",
                 entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=retargeted.projection_version,
                 event_type="VALID_EMPTY_INTENT",
                 payload={"selection_snapshot_id":selection_snapshot_id,
-                    "intended_authority_outcome":"VALID_EMPTY","supersedes_gap":True},occurred_at_ms=now))
+                    "intended_authority_outcome":"VALID_EMPTY","supersedes_gap":vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING,
+                    "supersedes_owner_pause":vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED},occurred_at_ms=now))
         changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
             strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
             strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(**retargeted.model_dump(mode="json")))
         if changed.rowcount!=1:
             raise SelectionJobConflict("Generic empty handoff Vacuum CAS changed")
-        if vacuum.state is not StrategyEntryVacuumState.RECOVERY_PENDING:
+        if vacuum.state not in {StrategyEntryVacuumState.RECOVERY_PENDING,StrategyEntryVacuumState.OWNER_PAUSED}:
             await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
                 entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{retargeted.projection_version}",entry_vacuum_id=vacuum.entry_vacuum_id,
                 event_sequence=retargeted.projection_version,event_type="VALID_EMPTY_INTENT",

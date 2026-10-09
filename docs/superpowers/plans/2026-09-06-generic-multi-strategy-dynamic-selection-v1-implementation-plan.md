@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮generation-free Pause/EMPTY末版回归：20分支PASS；Generic migration/SOR materialization/ENTRY Vacuum163 passed；Unit/Architecture1327 passed、Mypy161 files、Ruff/diff、文档25 passed。集合重叠不合计，未跑最终R4或末版完整Generic模块。
+
+2026-10-09generation-free Pause→最新EMPTY接管增量（基于`f52b9a01`，GS-08关联）：四策略PENDING/DESIRED正式Pause终态后完成无单drain，再正式Owner Resume并提交下一有效zero-member Snapshot；RED复现OWNER_PAUSED Vacuum永久返回GENERIC_EMPTY_REQUIRES_SUPERSESSION。现在沿原retarget_generic_empty_vacuum接管同一原fence/drain，要求Owner enabled且exact version/control/epoch、latest effective EMPTY、generation-free已完成且无unresolved drain/Ticket；仅接受精确booltrue/相同drain time的完成事件。VALID_EMPTY_INTENT在Vacuum更新前提交，0008 BEFORE trigger独立核验原状态/time/version/完成proof、新Source latest/expiry/Spec/control及Owner，不能只信Python。篡改supersedes_owner_pause flag在真实PG拒绝，原Vacuum与Authority整体回滚；合法步骤随后提交唯一VALID_EMPTY负向Authority，旧ABANDONED Generation/原Universe不改，原Vacuum ID/fence/drain保留为VALID_EMPTY终态，零新Ticket/Command、无fallback previous。四策略×两early状态8条恢复链及Static/Gap/原EMPTY相邻组合20 passed。本轮不声称暂停后的非空warming/staged/DRAINING接管或有单恢复已完成，GS-04～09未Done、非exact R4，全部Docker PG，无生产修改。
+
 本轮Static unfenced Pause末版回归：early/draining/正式Static链52 passed；SOR materialization/ENTRY Vacuum/既有Full-chain193 passed；Unit/Architecture1327 passed、Mypy160 files、文档25 passed、Ruff/diff通过。集合重叠不合计，非exact R4。
 
 2026-10-09Static未围栏Owner Pause增量（基于`5de58b6f`，GS-08关联）：已有Dynamic early-pause矩阵扩展到正式Owner Static intent创建的PENDING/DESIRED Generation，四策略Static八分支RED复现仍可行动。Static Coordinator现与Dynamic共用原Owner-created OPEN Vacuum、mark_entry_vacuum_draining及abandon_generation_for_owner_pause，不新增取消表/队列或来源；旧Static intent终态ABANDONED、terminal time/lease清理，Generation.fenced_at仍NULL，不伪造已materialize。下一同Coordinator tick允许generation-free Owner-paused drain完成且保持fence/Current/Authority；仅OwnerPause持有负向权限，没有fallback/grant。Dynamic/Static×PENDING/DESIRED×四策略16分支PASS，语义digest/原Universe与Authority/零目标均保全。此处仍为无Ticket场景；generation-free Pause后的新Owner Static授权、Dynamic最新Selection恢复/空集、prepared/sent/unknown/partial交叉仍需闭合。全为Docker PG，无生产修改，GS-04～09未Done、非exact R4。
