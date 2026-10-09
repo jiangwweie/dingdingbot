@@ -5371,6 +5371,13 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
         async with PostgresKernelUnitOfWork(database) as uow:
             assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==drained
             assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==authority
+        async def omit_negative_authority(repository,negative,*,entry_vacuum_id,**kwargs):
+            await repository._connection.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='VALID_EMPTY',resolved_at_ms=:at,"
+                "projection_version=projection_version+1 WHERE entry_vacuum_id=:id"),{"at":negative.created_at_ms,"id":entry_vacuum_id})
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=empty_at)), patch.object(
+            PostgresInstrumentSelectionRepository,"commit_generic_valid_empty",new=omit_negative_authority), pytest.raises(
+                sa.exc.DBAPIError,match="VALID_EMPTY requires atomic negative Authority"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:empty_at)
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=empty_at)):
             for _ in range(4):
                 outcome = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=empty_request,clock_ms=lambda:empty_at)

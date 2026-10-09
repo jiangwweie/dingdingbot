@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮Pause EMPTY atomicity末版验证：EMPTY/Gap/early Pause28 passed；Generic migration/SOR materialization/ENTRY Vacuum163 passed；源码+0008 Mypy161 files、文档25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4或全Unit/Generic。
+
+2026-10-09Pause→EMPTY最终原子性补强（基于`3f15b519`，GS-04/08关联）：在四策略×PENDING/DESIRED暂停后合法resume/latest EMPTY上下文，故障替换commit_generic_valid_empty，使应用只把已retarget的Vacuum写VALID_EMPTY/resolve而不insert负向Authority/current；真实PG此前DID_NOT_RAISE八分支RED。现扩展既有brc_validate_generic_gap_empty_resolution deferred guard到supersedes_owner_pause=true的EMPTY intent，要求最终同Spec/current/目标Snapshot/period/resolved timestamp的VALID_EMPTY negative Authority原子存在；无新表/平行linkage。非法事务整体回滚，正确正式commit随后继续PASS。初版测试误以为empty handoff分两次tick，实际无单路径同一事务已能完成，已在正确commit边界注入而非人为拆生产事务；没有修改EMPTY业务规则。四策略负向/正向复验包含在相邻EMPTY/Gap组合中，仍不能替代非空pause恢复/新Universe activation并发或完整GS-04～09认证。全部Docker PG，无生产修改，非exact R4。
+
 本轮generation-free Pause/EMPTY末版回归：20分支PASS；Generic migration/SOR materialization/ENTRY Vacuum163 passed；Unit/Architecture1327 passed、Mypy161 files、Ruff/diff、文档25 passed。集合重叠不合计，未跑最终R4或末版完整Generic模块。
 
 2026-10-09generation-free Pause→最新EMPTY接管增量（基于`f52b9a01`，GS-08关联）：四策略PENDING/DESIRED正式Pause终态后完成无单drain，再正式Owner Resume并提交下一有效zero-member Snapshot；RED复现OWNER_PAUSED Vacuum永久返回GENERIC_EMPTY_REQUIRES_SUPERSESSION。现在沿原retarget_generic_empty_vacuum接管同一原fence/drain，要求Owner enabled且exact version/control/epoch、latest effective EMPTY、generation-free已完成且无unresolved drain/Ticket；仅接受精确booltrue/相同drain time的完成事件。VALID_EMPTY_INTENT在Vacuum更新前提交，0008 BEFORE trigger独立核验原状态/time/version/完成proof、新Source latest/expiry/Spec/control及Owner，不能只信Python。篡改supersedes_owner_pause flag在真实PG拒绝，原Vacuum与Authority整体回滚；合法步骤随后提交唯一VALID_EMPTY负向Authority，旧ABANDONED Generation/原Universe不改，原Vacuum ID/fence/drain保留为VALID_EMPTY终态，零新Ticket/Command、无fallback previous。四策略×两early状态8条恢复链及Static/Gap/原EMPTY相邻组合20 passed。本轮不声称暂停后的非空warming/staged/DRAINING接管或有单恢复已完成，GS-04～09未Done、非exact R4，全部Docker PG，无生产修改。

@@ -512,8 +512,9 @@ def _generic_gap_empty_resolution_guard() -> None:
       BEGIN
         IF NEW.state<>'VALID_EMPTY' OR NOT EXISTS (
           SELECT 1 FROM brc_strategy_entry_vacuum_events e
-          WHERE e.entry_vacuum_id=NEW.entry_vacuum_id AND e.event_type='OPEN'
-            AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY')
+          WHERE e.entry_vacuum_id=NEW.entry_vacuum_id
+            AND ((e.event_type='OPEN' AND e.payload->>'intended_outcome'='PRE_FENCE_CONTINUITY')
+              OR (e.event_type='VALID_EMPTY_INTENT' AND e.payload->'supersedes_owner_pause'='true'::jsonb)))
         THEN RETURN NULL; END IF;
         SELECT e.payload INTO intent FROM brc_strategy_entry_vacuum_events e
           WHERE e.entry_vacuum_id=NEW.entry_vacuum_id AND e.event_type='VALID_EMPTY_INTENT'
@@ -527,7 +528,7 @@ def _generic_gap_empty_resolution_guard() -> None:
               AND a.selection_snapshot_id=intent->>'selection_snapshot_id'
               AND a.period_anchor_ms=NEW.period_anchor_ms
               AND a.created_at_ms=NEW.resolved_at_ms)
-        THEN RAISE EXCEPTION 'Gap VALID_EMPTY requires atomic negative Authority'; END IF;
+        THEN RAISE EXCEPTION 'Gap/Pause VALID_EMPTY requires atomic negative Authority'; END IF;
         RETURN NULL;
       END; $$
     """))
