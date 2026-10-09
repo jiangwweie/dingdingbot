@@ -1991,6 +1991,76 @@ class PostgresInstrumentSelectionRepository:
             payload={"authorization_id":current.authorization_id},occurred_at_ms=desired_at_ms))
         return desired
 
+    async def fail_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int, expected_projection_version: int, reason_code: str,
+    ) -> GenericStaticMaterializationGeneration:
+        from src.trading_kernel.application.abandon_strategy_universe import (
+            AbandonStrategyUniverseRequest,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+
+        if reason_code not in {"MATERIALIZATION_TIMEOUT","CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
+            raise ValueError("Static Generation requires classified failure")
+        current = await self._require_current_static_generation(materialization_generation_id)
+        now = await self.read_authority_clock_ms()
+        if current.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED} or (
+            current.projection_version!=expected_projection_version or current.lease_owner!=worker_id
+            or current.lease_epoch!=lease_epoch or current.lease_expires_at_ms is None or now>=current.lease_expires_at_ms
+            or current.fenced_at_ms is None or now<current.fenced_at_ms):
+            raise SelectionJobConflict("Static failure Generation lease/state changed")
+        spec = await self.get_generic_spec(current.selection_spec_id)
+        deadline = current.fenced_at_ms+spec.materialization_timeout_ms
+        if reason_code=="MATERIALIZATION_TIMEOUT" and now<deadline:
+            raise SelectionJobConflict("Static failure deadline has not elapsed")
+        vacuum = await self.get_current_entry_vacuum(strategy_group_id=current.strategy_group_id,
+            selection_spec_id=current.selection_spec_id,for_update=True)
+        if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or (
+            vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.fenced_at_ms!=current.fenced_at_ms
+            or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
+            or await self.entry_vacuum_has_drain_blockers(strategy_group_id=current.strategy_group_id)):
+            raise SelectionJobConflict("Static failure requires original drained Vacuum")
+        universes = PostgresStrategyUniverseRepository(self._connection)
+        targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)
+        if len(targets)>1:
+            raise SelectionJobConflict("Static failure target set changed")
+        for target in targets:
+            if target.lifecycle_state.value not in {"warming","staged","abandoned"}:
+                raise SelectionJobConflict("Static failure cannot abandon active target")
+            if target.lifecycle_state.value!="abandoned":
+                await universes.abandon(AbandonStrategyUniverseRequest(universe_version_id=target.universe_version_id,
+                    reason_code=reason_code.lower(),attempted_at_ms=now))
+        failed = GenericStaticMaterializationGeneration.model_validate({**current.model_dump(),
+            "lifecycle_state":"FAILED_CLOSED","terminal_at_ms":now,"lease_owner":None,
+            "lease_expires_at_ms":None,"projection_version":current.projection_version+1})
+        changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version==expected_projection_version,
+            strategy_universe_materialization_generations.c.lease_epoch==lease_epoch).values(
+                lifecycle_state="FAILED_CLOSED",terminal_at_ms=now,lease_owner=None,lease_expires_at_ms=None,
+                projection_version=failed.projection_version))
+        if changed.rowcount!=1:
+            raise SelectionJobConflict("Static failure Generation CAS changed")
+        sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==materialization_generation_id)) or 0)+1
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id=f"materialization-event:{materialization_generation_id}:{sequence}",
+            materialization_generation_id=materialization_generation_id,event_sequence=sequence,event_type="FAILED_CLOSED",
+            payload={"entry_vacuum_id":vacuum.entry_vacuum_id,"reason_code":reason_code,"materialization_deadline_ms":deadline},
+            occurred_at_ms=now))
+        changed_vacuum = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(
+                first_blocker=reason_code,projection_version=vacuum.projection_version+1))
+        if changed_vacuum.rowcount!=1:
+            raise SelectionJobConflict("Static failure Vacuum CAS changed")
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}",
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type="RECOVERY_REQUIRED",
+            payload={"reason_code":reason_code,"source_generation_id":materialization_generation_id},occurred_at_ms=now))
+        return failed
+
     async def get_generic_materialization_generation(
         self, materialization_generation_id: str, *, for_update: bool = False,
     ) -> GenericMaterializationGeneration | None:

@@ -1837,6 +1837,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 frozen_source brc_selection_rollback_baseline_events%ROWTYPE;
                 previous_source brc_materialization_generation_event_baselines%ROWTYPE;
                 frozen_count integer; frozen_digest text; source_json text; expected_digest text;
+                failure_source jsonb; failure_at bigint; deadline bigint; failure_vacuum brc_strategy_entry_vacuums_current%ROWTYPE;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
@@ -1941,6 +1942,29 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                     AND cb.comparison_universe_id=previous_source.comparison_universe_id
                     AND cb.comparison_transition_revision=previous_source.comparison_transition_revision))
             ) THEN RAISE EXCEPTION 'Static Generation Owner source is not current'; END IF;
+            IF g.lifecycle_state='FAILED_CLOSED' THEN
+              IF EXISTS (SELECT 1 FROM brc_strategy_universe_versions u WHERE u.materialization_generation_id=gid
+                AND u.lifecycle_state<>'abandoned') THEN RAISE EXCEPTION 'Static failure requires abandoned targets'; END IF;
+              SELECT payload,occurred_at_ms INTO failure_source,failure_at FROM brc_strategy_universe_materialization_events
+                WHERE materialization_generation_id=gid AND event_type='FAILED_CLOSED' ORDER BY event_sequence DESC LIMIT 1;
+              SELECT g.fenced_at_ms+v.materialization_timeout_ms INTO deadline
+                FROM brc_generic_dynamic_selection_specs_v1 v WHERE v.selection_spec_id=g.selection_spec_id;
+              IF failure_source IS NULL OR g.fenced_at_ms IS NULL OR g.terminal_at_ms IS NULL
+                OR failure_at IS DISTINCT FROM g.terminal_at_ms OR g.terminal_at_ms<g.fenced_at_ms
+                OR g.lease_owner IS NOT NULL OR g.lease_expires_at_ms IS NOT NULL
+                OR g.activated_at_ms IS NOT NULL OR g.fallback_at_ms IS NOT NULL
+                OR failure_source->>'reason_code' IS NULL
+                OR failure_source->>'reason_code' NOT IN ('MATERIALIZATION_TIMEOUT','CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE')
+                OR deadline IS NULL OR (failure_source->>'materialization_deadline_ms')::bigint IS DISTINCT FROM deadline
+                OR (failure_source->>'reason_code'='MATERIALIZATION_TIMEOUT' AND g.terminal_at_ms<deadline) THEN
+                RAISE EXCEPTION 'Static failure requires exact terminal cause'; END IF;
+              SELECT * INTO failure_vacuum FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=failure_source->>'entry_vacuum_id';
+              IF NOT FOUND OR failure_vacuum.source_generation_id<>gid OR failure_vacuum.state<>'RECONFIGURING'
+                OR failure_vacuum.strategy_group_id<>g.strategy_group_id OR failure_vacuum.selection_spec_id<>g.selection_spec_id
+                OR failure_vacuum.fenced_at_ms<>g.fenced_at_ms OR failure_vacuum.drained_at_ms IS NULL
+                OR failure_vacuum.resolved_at_ms IS NOT NULL OR failure_vacuum.first_blocker IS DISTINCT FROM failure_source->>'reason_code' THEN
+                RAISE EXCEPTION 'Static failure requires unresolved original Vacuum'; END IF;
+            END IF;
           END IF;
           RETURN NULL;
         END; $$

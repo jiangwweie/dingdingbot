@@ -1769,6 +1769,10 @@ class InstrumentSelectionRepository(Protocol):
         worker_id: str, lease_epoch: int, expected_projection_version: int,
         desired_at_ms: int) -> GenericStaticMaterializationGeneration: ...
 
+    async def fail_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int, expected_projection_version: int,
+        reason_code: str) -> GenericStaticMaterializationGeneration: ...
+
     async def recover_expired_dynamic_activation(
         self,
         request: RecoverExpiredDynamicActivationRequest,

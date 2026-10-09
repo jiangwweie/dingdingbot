@@ -478,6 +478,13 @@ async def coordinate_selection_materialization_once(
                     strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
                     materialization_generation_id=created_static.materialization_generation_id)
+            if existing_static.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
+                failed_static_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=request.strategy_group_id,selection_spec_id=existing_static.selection_spec_id,for_update=True)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                    materialization_generation_id=gid,entry_vacuum_id=None if failed_static_vacuum is None else failed_static_vacuum.entry_vacuum_id,
+                    reason_code=(failed_static_vacuum.first_blocker if failed_static_vacuum is not None
+                        and failed_static_vacuum.source_generation_id==gid else "GENERIC_STATIC_RECOVERY_REQUIRED"))
             claimed_static = await uow.instrument_selection.claim_generic_static_materialization_generation(gid,
                 worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
             if claimed_static is None:
@@ -485,6 +492,14 @@ async def coordinate_selection_materialization_once(
                     materialization_generation_id=gid,reason_code="GENERIC_GENERATION_LEASE_UNAVAILABLE")
             static_failed = False
             try:
+                if claimed_static.lifecycle_state in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                    static_spec = await uow.instrument_selection.get_generic_spec(claimed_static.selection_spec_id)
+                    if claimed_static.fenced_at_ms is not None and now_ms>=claimed_static.fenced_at_ms+static_spec.materialization_timeout_ms:
+                        await uow.instrument_selection.fail_generic_static_materialization_generation(gid,
+                            worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch,
+                            expected_projection_version=claimed_static.projection_version,reason_code="MATERIALIZATION_TIMEOUT")
+                        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                            materialization_generation_id=gid,reason_code="MATERIALIZATION_TIMEOUT")
                 if claimed_static.lifecycle_state is MaterializationGenerationState.PENDING:
                     await uow.instrument_selection.mark_generic_static_materialization_generation_desired(gid,
                         worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch,
@@ -534,6 +549,12 @@ async def coordinate_selection_materialization_once(
                         universe_version_id=installed_static.universe.universe_version_id,attempted_at_ms=now_ms,
                         operation=UniverseActivationOperation.STAGE_DYNAMIC,materialization_generation_id=gid,
                         materialization_lease_owner=request.worker_id,materialization_lease_epoch=claimed_static.lease_epoch))
+                    if static_staged.reason_code in {"CERTIFICATION_OWNER_ACTION_REQUIRED","CERTIFICATION_NOT_ELIGIBLE"}:
+                        await uow.instrument_selection.fail_generic_static_materialization_generation(gid,
+                            worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch,
+                            expected_projection_version=claimed_static.projection_version,reason_code=static_staged.reason_code)
+                        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                            materialization_generation_id=gid,reason_code=static_staged.reason_code)
                     static_disposition = (MaterializationDisposition.GENERATION_STAGED
                         if static_staged.status is UniverseActivationStatus.STAGED else MaterializationDisposition.TARGET_WARMING
                         if static_staged.reason_code in _GENERIC_TRANSIENT_WARMING_BLOCKERS else MaterializationDisposition.BLOCKED)

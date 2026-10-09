@@ -969,7 +969,10 @@ async def test_future_static_schedule_preserves_prior_period_continuity(database
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_due_static_owner_intent_creates_exact_generation_not_selection_snapshot(database: AsyncEngine, group: str) -> None:
+@pytest.mark.parametrize("failure_case", [None,"timeout","owner_action"])
+async def test_due_static_owner_intent_creates_exact_generation_not_selection_snapshot(
+    database: AsyncEngine, group: str, failure_case: str | None,
+) -> None:
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateGenericStaticRequest,
     )
@@ -1146,6 +1149,66 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
         assert await uow.instrument_selection.get_selection_control(group) == scheduled
+    if failure_case is not None:
+        failed_at = due+2+source.spec.materialization_timeout_ms if failure_case=="timeout" else due+5
+        if failure_case=="owner_action":
+            await make_warming_ready(database,universe_version_id=target_uid,
+                warm_closed_bar_time_ms=anchor+HOUR,valid_until_ms=due+HOUR)
+            async with database.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='owner_action_required',"
+                    "blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN "
+                    "(SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":target_uid})
+        expected_reason = "MATERIALIZATION_TIMEOUT" if failure_case=="timeout" else "CERTIFICATION_OWNER_ACTION_REQUIRED"
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                failure_lease = await uow.instrument_selection.claim_generic_static_materialization_generation(
+                    created.materialization_generation_id,worker_id="static-failure-probe",now_ms=failed_at,lease_duration_ms=30000)
+        assert failure_lease is not None
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)), pytest.raises(
+            SelectionJobConflict,match="lease/state"):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.instrument_selection.fail_generic_static_materialization_generation(created.materialization_generation_id,
+                    worker_id="static-failure-probe",lease_epoch=failure_lease.lease_epoch+1,
+                    expected_projection_version=failure_lease.projection_version,reason_code=expected_reason)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.release_generic_materialization_generation_lease(created.materialization_generation_id,
+                worker_id="static-failure-probe",lease_epoch=failure_lease.lease_epoch)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)), patch.object(
+            PostgresStrategyUniverseRepository,"abandon",new=AsyncMock(return_value=None)), pytest.raises(
+                sa.exc.DBAPIError,match="Static failure requires abandoned targets"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda:failed_at)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            before_failure = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+            assert before_failure is not None and before_failure.lifecycle_state.value == "MATERIALIZING"
+            assert before_failure.lease_owner is None
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)):
+            failed = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda:failed_at)
+        assert failed.disposition is MaterializationDisposition.BLOCKED and failed.reason_code == expected_reason, failed
+        async with PostgresKernelUnitOfWork(database) as uow:
+            failed_generation = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+            failed_vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            failed_targets = await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id)
+            assert failed_generation is not None and failed_generation.lifecycle_state.value == "FAILED_CLOSED"
+            assert failed_generation.terminal_at_ms == failed_at and failed_generation.lease_owner is None
+            assert failed_vacuum is not None and failed_vacuum.state.value == "RECONFIGURING"
+            assert failed_vacuum.first_blocker == expected_reason and failed_vacuum.resolved_at_ms is None
+            assert failed_vacuum.fenced_at_ms == due+2 and failed_vacuum.drained_at_ms == due+3
+            assert len(failed_targets)==1 and failed_targets[0].lifecycle_state.value == "abandoned"
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+            assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+            assert await uow.instrument_selection.get_selection_control(group) == scheduled
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)):
+            repeated_failure = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda:failed_at+1)
+        assert repeated_failure.reason_code == expected_reason
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events "
+                "WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":created.materialization_generation_id}) == 1
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state='warming'")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        return
     await make_warming_ready(database,universe_version_id=target_uid,warm_closed_bar_time_ms=anchor+HOUR,
         valid_until_ms=due+HOUR)
     @asynccontextmanager
