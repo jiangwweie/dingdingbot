@@ -72,12 +72,16 @@ def test_recovery_proof_binds_exact_previous_scope_and_future_clock(group, stati
         {"selection_epoch_id":"sor-v0"},
         {"observation_cursors":(proof.observation_cursors[0].model_copy(update={"episode_domain_key":"other"}),)},
     ]
-    mutations += [{"source_selection_authority_id":"authority:fake"},{"failed_activation_authorization_id":None}] if static else [
+    mutations += [{"failed_activation_authorization_id":None}] if static else [
         {"source_selection_authority_id":None},{"membership_freshness":None},{"failed_activation_authorization_id":"owner:fake"}]
     for mutation in mutations:
         with pytest.raises(ValueError):
             GenericRecoveryGrantProof.model_validate({**proof.model_dump(),**mutation})
     assert proof.semantic_digest != GenericRecoveryGrantProof.model_validate({**proof.model_dump(),"owner_control_version":2}).semantic_digest
+    if static:
+        retry = GenericRecoveryGrantProof.model_validate({**proof.model_dump(),"source_selection_authority_id":"authority:previous-static-recovery"})
+        assert retry.semantic_digest != proof.semantic_digest
+        assert retry.membership_freshness is None and retry.selection_mode=="static_baseline"
     if group in {"MPG-001", "MI-001"}:
         with pytest.raises(ValueError,match="comparison"):
             GenericRecoveryGrantProof.model_validate({**proof.model_dump(),"comparison_universe_id":"comparison:wrong"})

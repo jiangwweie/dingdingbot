@@ -4929,8 +4929,10 @@ class PostgresInstrumentSelectionRepository:
         reason: Literal["AUTHORITY_GAP","MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT"] = ("AUTHORITY_GAP" if paused_first else
             "MATERIALIZATION_TIMEOUT" if vacuum.first_blocker in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED"} else "MATERIALIZATION_FAILURE")
         source_authority = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
-        if static_first and source_authority is not None:
-            raise SelectionJobConflict("Static recovery cannot replace a Dynamic Authority")
+        if static_first and source_authority is not None and (not isinstance(source_authority.authority,GenericRecoveryAuthority) or
+            not static_recovery_is_first_activation_source(source_authority.authority,control,
+                owner_control_version=owner["control_version"]-2*int(paused_first),activation_authorization_id=control.pending_authorization_id)):
+            raise SelectionJobConflict("Static recovery cannot replace an unrelated Authority")
         if dynamic and (source_authority is None or source_authority.authority.selection_epoch_id!=generation.selection_epoch_id
             or source_authority.authority.selection_control_version!=control.control_version
             or source_authority.authority.owner_control_version!=owner["control_version"]):
@@ -4940,6 +4942,11 @@ class PostgresInstrumentSelectionRepository:
         if any(target.lifecycle_state.value!="abandoned" for target in targets):
             raise SelectionJobConflict("Static recovery has unfinished targets")
         previous = generation.previous_events[0]
+        if static_first and source_authority is not None and (
+            source_authority.authority.event_binding != AuthorityEventBinding.model_validate(previous.model_dump(exclude={"comparison_universe_id","comparison_transition_revision"}))
+            or source_authority.authority.comparison_universe_id!=previous.comparison_universe_id
+            or source_authority.authority.comparison_transition_revision!=previous.comparison_transition_revision):
+            raise SelectionJobConflict("Static retry recovery previous Authority differs")
         if dynamic and (source_authority is None or source_authority.authority.event_binding.universe_version_id!=previous.universe_version_id
             or source_authority.authority.event_binding.member_set_digest!=previous.member_set_digest
             or source_authority.authority.event_binding.event_spec_id!=previous.event_spec_id):

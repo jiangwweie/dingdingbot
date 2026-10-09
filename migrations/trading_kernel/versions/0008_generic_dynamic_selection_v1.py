@@ -1046,8 +1046,7 @@ def _generic_static_recovery_proof_function() -> None:
         IF v.first_blocker NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
           'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
         END IF;
-        IF (NOT dynamic_recovery AND EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id))
-          OR EXISTS (SELECT 1 FROM brc_strategy_universe_versions WHERE materialization_generation_id=g.materialization_generation_id AND lifecycle_state<>'abandoned') THEN RETURN false; END IF;
+        IF EXISTS (SELECT 1 FROM brc_strategy_universe_versions WHERE materialization_generation_id=g.materialization_generation_id AND lifecycle_state<>'abandoned') THEN RETURN false; END IF;
         SELECT count(*) INTO n FROM brc_materialization_generation_event_baselines WHERE materialization_generation_id=g.materialization_generation_id;
         IF n<>1 THEN RETURN false; END IF;
         SELECT * INTO b FROM brc_materialization_generation_event_baselines WHERE materialization_generation_id=g.materialization_generation_id;
@@ -1056,6 +1055,28 @@ def _generic_static_recovery_proof_function() -> None:
           WHERE u.event_spec_id=b.event_spec_id AND u.universe_version_id=b.universe_version_id
             AND u.lifecycle_state='active' AND x.lifecycle_state='active' AND u.semantic_digest=x.semantic_digest
             AND x.event_spec_id=b.event_spec_id AND x.strategy_group_id=g.strategy_group_id) THEN RETURN false; END IF;
+        IF NOT dynamic_recovery THEN
+          SELECT x.* INTO source_authority FROM brc_selection_authority_current current_auth
+            JOIN brc_selection_session_authorities x ON x.selection_authority_id=current_auth.selection_authority_id
+            WHERE current_auth.selection_spec_id=g.selection_spec_id;
+          IF FOUND THEN
+            IF source_authority.selection_mode<>'static_baseline' OR source_authority.authority_outcome<>'FALLBACK_PREVIOUS'
+              OR source_authority.recovery_grant_proof IS NULL OR source_authority.selection_epoch_id=g.selection_epoch_id
+              OR source_authority.selection_control_version+1<>c.control_version
+              OR source_authority.owner_control_version<>(o.control_version-CASE WHEN paused_first THEN 2 ELSE 0 END)
+              OR source_authority.created_at_ms>c.updated_at_ms
+              OR source_authority.recovery_grant_proof->>'failed_activation_authorization_id' IS NULL
+              OR source_authority.recovery_grant_proof->>'failed_activation_authorization_id'=a.authorization_id
+              OR source_authority.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
+              OR source_authority.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision
+              OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings sb
+                WHERE sb.selection_authority_id=source_authority.selection_authority_id
+                  AND sb.event_spec_id=b.event_spec_id AND sb.position_side=b.position_side AND sb.grant_state='ACTIVE'
+                  AND sb.universe_version_id=b.universe_version_id AND sb.member_set_digest=b.member_set_digest)
+              THEN RETURN false; END IF;
+            source_id:=source_authority.selection_authority_id;
+          END IF;
+        END IF;
         IF dynamic_recovery AND NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings sb
           WHERE sb.selection_authority_id=source_authority.selection_authority_id
             AND sb.event_spec_id=b.event_spec_id AND sb.position_side=b.position_side

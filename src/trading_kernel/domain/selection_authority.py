@@ -1108,7 +1108,7 @@ class GenericRecoveryGrantProof(BaseModel):
         elif static:
             if self.target_snapshot_id is not None:
                 raise ValueError("Static fallback cannot claim a new target Snapshot")
-            if self.membership_freshness is not None or self.source_selection_authority_id is not None or (
+            if self.membership_freshness is not None or (
                 self.failed_activation_authorization_id is None or self.materialization_generation_id is None):
                 raise ValueError("first Static fallback requires failed activation provenance, not Dynamic freshness")
         else:

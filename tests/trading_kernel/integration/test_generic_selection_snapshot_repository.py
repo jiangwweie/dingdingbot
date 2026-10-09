@@ -6036,7 +6036,7 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
 @pytest.mark.parametrize("old_stage", ["DESIRED","DRAINING_ENTRY","warming","staged"])
-@pytest.mark.parametrize("retry_dynamic", [False,True,"unchanged","empty"])
+@pytest.mark.parametrize("retry_dynamic", [False,True,"unchanged","empty","timeout","permanent","pause"])
 async def test_first_dynamic_pause_restores_static_through_transition_scoped_recovery(database: AsyncEngine,group: str,old_stage: str,retry_dynamic: bool | str) -> None:
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
@@ -6264,6 +6264,8 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
                 async with PostgresKernelUnitOfWork(database) as uow:
                     fresh_targets=await uow.strategy_universes.get_generation_universe_targets(activation.materialization_generation_id)
                 if fresh_targets:
+                    if retry_dynamic in {"timeout","permanent","pause"}:
+                        break
                     uid=fresh_targets[0].universe_version_id
                     await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=fresh.effective_from_ms,valid_until_ms=activation_at+HOUR)
                     if group in {"MPG-001","MI-001"}:
@@ -6275,6 +6277,114 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
                             freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
                         async with PostgresKernelUnitOfWork(database) as uow:
                             await uow.strategy_universes.save_comparative_projection(cache)
+        if retry_dynamic in {"timeout","permanent","pause"}:
+            retry_gid=activation.materialization_generation_id
+            async with PostgresKernelUnitOfWork(database) as uow:
+                retry_generation=await uow.instrument_selection.get_generic_materialization_generation(retry_gid)
+            assert retry_generation.fenced_at_ms is not None
+            failed_at=retry_generation.fenced_at_ms+source.spec.materialization_timeout_ms if retry_dynamic=="timeout" else activation_at+1
+            retry_request=CoordinateGenericGenerationRequest(materialization_generation_id=retry_gid,worker_id="fresh-retry-failure")
+            if retry_dynamic=="permanent":
+                await make_warming_ready(database,universe_version_id=fresh_targets[0].universe_version_id,warm_closed_bar_time_ms=failed_at//HOUR*HOUR,valid_until_ms=failed_at+HOUR)
+                async with database.begin() as conn:
+                    await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='owner_action_required',blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":fresh_targets[0].universe_version_id})
+            if retry_dynamic=="pause":
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    owner=await uow.owner_controls.get_strategy_control(group)
+                    await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+                        request=ControlMutationRequest(expected_version=owner.control_version,reason="pause_fresh_dynamic_retry",idempotency_key=f"retry-pause:{group}:{old_stage}",owner_identity="owner",now_ms=failed_at),authentication_strength="totp_step_up")
+                failed_at+=1
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)):
+                failed=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:failed_at)
+            if retry_dynamic=="pause":
+                assert failed.disposition is MaterializationDisposition.OWNER_PAUSED,failed
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)):
+                    still_paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:failed_at+1)
+                assert still_paused.disposition is MaterializationDisposition.OWNER_PAUSED
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    owner=await uow.owner_controls.get_strategy_control(group)
+                    await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                        request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_fresh_dynamic_retry_static",idempotency_key=f"retry-resume:{group}:{old_stage}",owner_identity="owner",now_ms=failed_at+2),authentication_strength="totp_step_up")
+                failed_at+=2
+            else:
+                assert failed.reason_code==("MATERIALIZATION_TIMEOUT" if retry_dynamic=="timeout" else "CERTIFICATION_OWNER_ACTION_REQUIRED"),failed
+            await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=failed_at//HOUR*HOUR,valid_until_ms=failed_at+HOUR)
+            if group in {"MPG-001","MI-001"}:
+                flat=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                shift=failed_at//HOUR*HOUR-flat.trigger_candle_close_time_ms
+                candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in flat.candles_1h)
+                cache=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=static_uid,strategy_group_id=group,
+                    exchange_instrument_ids=source.spec.candidate_ids[:1],closed_bar_time_ms=failed_at//HOUR*HOUR,lookback_bars=8 if group=="MPG-001" else 12,
+                    freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids[:1]))
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow.strategy_universes.save_comparative_projection(cache)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)):
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    proposal=await uow.instrument_selection.prepare_generic_recovery_grant_proof(retry_gid)
+                    pending_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            assert proposal.source_selection_authority_id==current.authority.selection_authority_id
+            assert proposal.recovery_close_plan.recovery_revision>current.authority.recovery_proof.recovery_close_plan.recovery_revision
+            for changes in ({"source_selection_authority_id":None},{"source_selection_authority_id":"authority:forged-source"},
+                            {"failed_activation_authorization_id":owner_selection.pending_authorization_id}):
+                forged=proposal.model_copy(update=changes)
+                async with database.connect() as conn:
+                    assert await conn.scalar(sa.text("SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:at)"),{"proof":forged.model_dump_json(),"at":failed_at+1}) is False
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)), patch.object(
+                    PostgresInstrumentSelectionRepository,"require_generic_recovery_grant_proof",new=AsyncMock(return_value=failed_at+1)), pytest.raises(sa.exc.DBAPIError,match="Static recovery proof differs"):
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        await uow.instrument_selection.commit_generic_recovery(forged)
+            @asynccontextmanager
+            async def interrupted_retry_restore():
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    yield uow
+                    raise RuntimeError("retry Static recovery commit interruption")
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)), pytest.raises(RuntimeError,match="retry Static recovery commit interruption"):
+                await coordinate_selection_materialization_once(uow_factory=interrupted_retry_restore,request=retry_request,clock_ms=lambda:failed_at+1)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)).authority==current.authority
+                assert (await uow.instrument_selection.get_selection_control(group)).pending_authorization_id==next_control.pending_authorization_id
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==pending_vacuum
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+1)):
+                restored=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:failed_at+1)
+            assert restored.disposition is MaterializationDisposition.FALLBACK_PREVIOUS,restored
+            async with PostgresKernelUnitOfWork(database) as uow:
+                restored_current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                restored_control=await uow.instrument_selection.get_selection_control(group)
+                assert restored_control.selection_mode.value=="static_baseline" and restored_control.selection_epoch_id is None and restored_control.pending_authorization_id is None
+                assert isinstance(restored_current.authority,GenericRecoveryAuthority) and restored_current.authority.selection_mode=="static_baseline"
+                assert restored_current.authority.materialization_generation_id==retry_gid
+                assert restored_current.authority.recovery_proof.failed_activation_authorization_id==next_control.pending_authorization_id
+                assert restored_current.authority.first_eligible_close_time_ms>failed_at+1
+                assert restored_current.authority.event_binding.universe_version_id==static_uid
+                assert restored_current.authority.selection_authority_id!=current.authority.selection_authority_id
+                assert await uow.instrument_selection.get_generic_materialization_generation(gid)==abandoned
+                assert (await uow.instrument_selection.get_generic_materialization_generation(retry_gid)).lifecycle_state.value==("ABANDONED" if retry_dynamic=="pause" else "FAILED_CLOSED")
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities WHERE selection_mode='dynamic_selection'"))==0
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+2)):
+                repeated=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:failed_at+2)
+            assert repeated.selection_authority_id==restored.selection_authority_id
+            recovery_close=restored_current.authority.first_eligible_close_time_ms
+            template={"CPM-RO-001":cpm_long_snapshot,"BRF2-001":brf2_short_snapshot,"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot}[group]()
+            delta=recovery_close-template.trigger_candle_close_time_ms
+            await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=recovery_close,valid_until_ms=recovery_close+HOUR)
+            if group in {"MPG-001","MI-001"}:
+                candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+                cache=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=static_uid,strategy_group_id=group,
+                    exchange_instrument_ids=source.spec.candidate_ids[:1],closed_bar_time_ms=recovery_close,lookback_bars=8 if group=="MPG-001" else 12,
+                    freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids[:1]))
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow.strategy_universes.save_comparative_projection(cache)
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=recovery_close+1)):
+                observed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),StaticRecoveryMarket(),ObservationRequest(
+                    runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=recovery_close,attempted_at_ms=recovery_close+1))
+            assert observed.status is ObservationStatus.NO_SIGNAL and observed.detector_reason=="RECOVERY_REBASE_REQUIRED",observed
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+            return
         assert activation.disposition is (MaterializationDisposition.VALID_EMPTY if retry_dynamic=="empty" else
             MaterializationDisposition.NO_CHANGE if retry_dynamic=="unchanged" and group in {"CPM-RO-001","BRF2-001"} else MaterializationDisposition.ACTIVE_NEW),activation
         async with PostgresKernelUnitOfWork(database) as uow:

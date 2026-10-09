@@ -1783,7 +1783,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 recovered=await uow.instrument_selection.commit_generic_recovery(current.authority.recovery_proof)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
                     materialization_generation_id=initial.materialization_generation_id,selection_authority_id=recovered.selection_authority_id)
-            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and current is None:
+            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+                current is None or isinstance(current.authority,GenericRecoveryAuthority) and current.authority.selection_mode=="static_baseline"):
                 try:
                     first_pause_proof=await uow.instrument_selection.prepare_generic_recovery_grant_proof(initial.materialization_generation_id)
                 except SelectionPersistenceConflict as exc:
@@ -1806,7 +1807,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=initial.strategy_group_id,
                 selection_spec_id=initial.selection_spec_id,for_update=True)
             first_static = (control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE
-                and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and committed is None)
+                and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+                    committed is None or isinstance(committed.authority,GenericRecoveryAuthority) and committed.authority.selection_mode=="static_baseline"))
             previous_dynamic = (control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION
                 and control.pending_selection_mode is None and committed is not None)
             if (first_static or previous_dynamic) and vacuum is not None and (
