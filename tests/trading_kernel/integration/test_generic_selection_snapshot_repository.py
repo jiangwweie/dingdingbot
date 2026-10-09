@@ -532,9 +532,14 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 current_close_proof=proof,membership_freshness=freshness,comparison_universe_id=cid,
                 comparison_transition_revision=1 if cid else None,effective_from_ms=proof.authority_granted_at_ms,created_at_ms=proof.authority_granted_at_ms)
             # Storage contract only; no current pointer or trading activation.
+            if commit_parent:
+                await enable_epoch(database,group,pending=normal_parent=="first",pending_anchor_ms=cutoff)
             async with database.begin() as conn:
                 if cid:
-                    await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,1,NULL)"),{"event":source.spec.event_spec_id,"cid":cid})
+                    if commit_parent:
+                        await conn.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_universe_id=:cid,comparison_transition_revision=1,source_static_universe_version_id=NULL WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id,"cid":cid})
+                    else:
+                        await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:cid,1,NULL)"),{"event":source.spec.event_spec_id,"cid":cid})
                 for changes in ({"current_close_proof":{}}, {"membership_freshness":{}},
                                 {"first_eligible_close_time_ms":proof.current_final_close_time_ms-HOUR},
                                 {"grant_proof_kind":"AUDITED_AUTHORITY_GAP"}):
@@ -558,7 +563,6 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                     await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
                         **authority.event_binding.model_dump(mode="json")))
             if commit_parent:
-                await enable_epoch(database,group,pending=normal_parent=="first",pending_anchor_ms=cutoff)
                 authority = authority.model_copy(update={"selection_control_version":2+int(normal_parent=="first"),
                     "activation_authorization_id":"owner:first:"+group if normal_parent=="first" else None})
                 async with database.begin() as conn:
@@ -2179,15 +2183,38 @@ async def test_pg_decimal_representation_does_not_change_semantic_identity(datab
 
 async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1", *, pending=False, pending_anchor_ms=CUTOFF) -> None:
     # Isolated repository prerequisite, not an Owner API/activation acceptance.
-    async with database.begin() as conn:
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current_universe=await uow.strategy_universes.get_current(inputs(group).spec.event_spec_id)
+    if current_universe is None:
+        await _install_static_selection_source(database,group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        conn=uow._connection
+        assert conn is not None
+        source_current=(await conn.execute(sa.text("SELECT universe_version_id,activated_at_ms FROM brc_strategy_universe_current WHERE event_spec_id=:event"),
+            {"event":inputs(group).spec.event_spec_id})).mappings().one()
+        captured_at=max(pending_anchor_ms-1,source_current["activated_at_ms"])
+        if group in {"MPG-001","MI-001"} and await uow.instrument_selection.get_comparison_universe_binding(inputs(group).spec.event_spec_id) is None:
+            members=tuple((await conn.execute(sa.text("SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid ORDER BY exchange_instrument_id"),
+                {"uid":source_current["universe_version_id"]})).scalars())
+            assert 1<=len(members)<=10
+            digest=canonical_digest({"exchange_instrument_ids":members})
+            comparison_id="comparison:"+digest[7:]
+            await conn.execute(sa.text("INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,:count) ON CONFLICT DO NOTHING"),
+                {"id":comparison_id,"digest":digest,"count":len(members)})
+            for member in members:
+                await conn.execute(sa.text("INSERT INTO brc_comparison_universe_members VALUES(:id,:member) ON CONFLICT DO NOTHING"),{"id":comparison_id,"member":member})
+            await conn.execute(sa.text("INSERT INTO brc_comparison_binding_current VALUES(:event,:id,0,:uid)"),
+                {"event":inputs(group).spec.event_spec_id,"id":comparison_id,"uid":source_current["universe_version_id"]})
         row = (await conn.execute(sa.select(strategy_selection_control_current).where(
             strategy_selection_control_current.c.strategy_group_id == group,
         ))).mappings().one()
         if row["selection_mode"] == "dynamic_selection":
             raise AssertionError("Epoch rotation fixtures must use formal Owner Static/Dynamic transitions")
+        baseline=await uow.instrument_selection.capture_generic_static_rollback_baseline(
+            selection_spec_id=inputs(group).spec.selection_spec_id,captured_at_ms=captured_at)
         auth_id = "owner:first:"+group if epoch == "epoch:1" else f"owner:first:{group}:{epoch}"
         await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','test-owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
-            {"id":auth_id,"digest":"sha256:"+"8"*64,"at":pending_anchor_ms-1,
+            {"id":auth_id,"digest":"sha256:"+"8"*64,"at":captured_at,
              "scope":json.dumps({"strategy_group_id":group,"selection_spec_id":inputs(group).spec.selection_spec_id,
                  "target_selection_mode":"dynamic_selection","effective_period_anchor_ms":pending_anchor_ms,
                  "selection_epoch_id":epoch})})
@@ -2195,13 +2222,37 @@ async def enable_epoch(database: AsyncEngine, group: str, epoch: str = "epoch:1"
             strategy_selection_control_current.c.strategy_group_id == group,
         ).values(selection_mode="static_baseline",pending_selection_mode="dynamic_selection",
             pending_effective_period_anchor_ms=pending_anchor_ms,pending_authorization_id=auth_id,
-            selection_epoch_id=epoch,control_version=int(row["control_version"])+int(pending)))
-        if not pending:
+            selection_epoch_id=epoch,control_version=int(row["control_version"])+int(pending),
+            rollback_baseline_id=baseline.rollback_baseline_id,updated_at_ms=captured_at))
+    if not pending:
+        async with database.begin() as conn:
             await conn.execute(sa.update(strategy_selection_control_current).where(
                 strategy_selection_control_current.c.strategy_group_id == group,
             ).values(selection_mode="dynamic_selection",pending_selection_mode=None,
                 pending_effective_period_anchor_ms=None,pending_authorization_id=None,
                 control_version=int(row["control_version"])+1))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_generic_pending_dynamic_cannot_bypass_static_baseline_at_database_boundary(database: AsyncEngine,group: str) -> None:
+    source=inputs(group)
+    with pytest.raises(sa.exc.DBAPIError,match="requires frozen Static rollback baseline"):
+        async with database.begin() as conn:
+            epoch="epoch:missing-baseline"
+            auth=f"owner:missing-baseline:{group}"
+            await conn.execute(sa.text("INSERT INTO brc_owner_authorizations VALUES (:id,'selection_mode_change','owner','totp_step_up',:digest,CAST(:scope AS jsonb),:id,:at)"),
+                {"id":auth,"digest":"sha256:"+"8"*64,"at":CUTOFF-1,"scope":json.dumps({"strategy_group_id":group,
+                    "selection_spec_id":source.spec.selection_spec_id,"target_selection_mode":"dynamic_selection",
+                    "effective_period_anchor_ms":CUTOFF,"selection_epoch_id":epoch})})
+            await conn.execute(sa.text("UPDATE brc_strategy_selection_control_current SET pending_selection_mode='dynamic_selection',"
+                "pending_effective_period_anchor_ms=:anchor,pending_authorization_id=:auth,selection_epoch_id=:epoch,control_version=control_version+1,updated_at_ms=:at "
+                "WHERE strategy_group_id=:group"),{"anchor":CUTOFF,"auth":auth,"epoch":epoch,"at":CUTOFF-1,"group":group})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control=await uow.instrument_selection.get_selection_control(group)
+        assert control.selection_mode.value=="static_baseline" and control.pending_authorization_id is None
+        assert control.rollback_baseline_id is None and control.selection_epoch_id is None
+        assert await uow.owner_controls.get_authorization_by_idempotency_key(f"owner:missing-baseline:{group}") is None
 
 
 @pytest.mark.asyncio
@@ -2249,13 +2300,21 @@ async def test_static_generic_selection_claim_short_circuits_without_job(databas
 
 
 @pytest.mark.asyncio
-async def test_generic_static_control_cannot_jump_directly_to_dynamic(database: AsyncEngine) -> None:
-    with pytest.raises(sa.exc.DBAPIError, match="Generic activation requires pending Owner epoch"):
+@pytest.mark.parametrize("baseline_present", [False,True])
+async def test_generic_static_control_cannot_jump_directly_to_dynamic(database: AsyncEngine,baseline_present: bool) -> None:
+    if baseline_present:
+        await _install_static_selection_source(database,"MPG-001")
+        async with PostgresKernelUnitOfWork(database) as uow:
+            staged=await stage_generic_dynamic_selection_mode(uow,strategy_group_id="MPG-001",effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="direct_epoch_attack",
+                    idempotency_key="owner:direct-epoch-attack",owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")
+    with pytest.raises(sa.exc.DBAPIError, match="Generic activation requires pending Owner epoch" if baseline_present else "requires frozen Static rollback baseline"):
         async with database.begin() as conn:
             await conn.execute(sa.text("""
                 UPDATE brc_strategy_selection_control_current
                 SET selection_mode='dynamic_selection',selection_epoch_id='epoch:rogue',
-                    control_version=control_version+1
+                    control_version=control_version+1,pending_selection_mode=NULL,
+                    pending_authorization_id=NULL,pending_effective_period_anchor_ms=NULL
                 WHERE strategy_group_id='MPG-001'
             """))
     async with database.connect() as conn:
@@ -2264,8 +2323,8 @@ async def test_generic_static_control_cannot_jump_directly_to_dynamic(database: 
             "FROM brc_strategy_selection_control_current WHERE strategy_group_id='MPG-001'"
         ))).mappings().one()
         assert row["selection_mode"] == "static_baseline"
-        assert row["selection_epoch_id"] is None
-        assert row["pending_selection_mode"] is None
+        assert row["selection_epoch_id"] == (staged.selection_epoch_id if baseline_present else None)
+        assert row["pending_selection_mode"] == ("dynamic_selection" if baseline_present else None)
 
 
 @pytest.mark.asyncio

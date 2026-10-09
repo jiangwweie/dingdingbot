@@ -2744,6 +2744,9 @@ def _selection_job_epochs() -> None:
           ) THEN RAISE EXCEPTION 'Generic Static rollback baseline parent mismatch'; END IF;
           needs_epoch := NEW.selection_mode='dynamic_selection' OR coalesce(NEW.pending_selection_mode='dynamic_selection',false);
           IF needs_epoch THEN
+            IF NEW.rollback_baseline_id IS NULL THEN
+              RAISE EXCEPTION 'Generic Dynamic Control requires frozen Static rollback baseline';
+            END IF;
             IF NEW.selection_epoch_id IS NULL OR NEW.selection_epoch_id='sor-v0' OR length(trim(NEW.selection_epoch_id))=0 THEN
               RAISE EXCEPTION 'Generic Dynamic Control requires epoch';
             END IF;
