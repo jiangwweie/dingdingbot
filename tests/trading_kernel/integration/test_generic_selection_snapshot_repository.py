@@ -1698,6 +1698,10 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
     pause_base_at = second_at
     if group in {"CPM-RO-001","BRF2-001"}:
         pause_base_at = await _issue_second_dynamic_noncomparative_trade(database,group=group)
+    else:
+        pause_base_at = await _issue_second_dynamic_comparative_trade(database,group=group)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            rotated_authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
     async with PostgresKernelUnitOfWork(database) as uow:
         before_pause = await uow.owner_controls.get_strategy_control(group)
         assert before_pause is not None
@@ -8189,6 +8193,87 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         "BudgetSettled","ReviewRecorded"} <= event_types
     if fault_stage=="static_after_protection":
         await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
+
+
+async def _issue_second_dynamic_comparative_trade(database, *, group):
+    spec = inputs(group).spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
+        previous = await uow.instrument_selection.get_generic_snapshot(current.authority.selection_snapshot_id)
+        epoch=current.authority.selection_epoch_id
+        assert previous.predecessor_snapshot_id is None and len(previous.members)==24
+        uid = current.authority.event_binding.universe_version_id
+        assert uow._connection is not None
+        scope_id,member = (await uow._connection.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
+            "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})).one()
+    source = inputs(group).model_copy(update={"selection_epoch_id":current.authority.selection_epoch_id})
+    while source.feature_cutoff_at_ms<previous.feature_cutoff_at_ms:
+        source=next_input(source)
+    trigger = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+    flat = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+    class Market:
+        def __init__(self,template,close):
+            self.template,self.delta=template,close-template.trigger_candle_close_time_ms
+        async def fetch_closed_candles(self,request):
+            candles=self.template.candles_1h if request.timeframe=="1h" else self.template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+self.delta,"close_time_ms":c.close_time_ms+self.delta}) for c in candles)
+    for index,template in enumerate((trigger,flat,trigger)):
+        if index:
+            source=next_input(source).model_copy(update={"predecessor_snapshot":previous})
+            class SelectorMarket:
+                def __init__(self,selection_input):
+                    self.selection_input=selection_input
+                async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                    return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for window in self.selection_input.member_windows)
+                async def fetch_generic_selection_klines(self,request):
+                    return next(window.candles for window in self.selection_input.member_windows if window.exchange_instrument_id==request.exchange_instrument_id)
+            tick=source.feature_cutoff_at_ms
+            def selector_clock():
+                nonlocal tick
+                tick+=1
+                return tick
+            selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectorMarket(source),
+                request=RunInstrumentSelectionRequest(selection_spec_id=spec.selection_spec_id,selection_epoch_id=current.authority.selection_epoch_id,
+                    period_anchor_ms=source.feature_cutoff_at_ms,worker_id="second-epoch-hourly-selector"),clock_ms=selector_clock)
+            assert selected.outcome=="SNAPSHOT_READY",selected
+            async with PostgresKernelUnitOfWork(database) as uow:
+                successor=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+                assert successor.selection_epoch_id==epoch and len(successor.members)==24
+                assert successor.predecessor_snapshot_id==previous.selection_snapshot_id
+                previous=successor
+        close=previous.effective_from_ms
+        await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+        windows=[]
+        for candidate in spec.candidate_ids:
+            path=template if candidate==member else flat
+            delta=close-path.trigger_candle_close_time_ms
+            candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in path.candles_1h)
+            windows.append(ComparativeMemberWindow(exchange_instrument_id=candidate,candles_1h=candles))
+        projection=build_comparative_universe_projection(event_spec_id=spec.event_spec_id,universe_version_id=uid,
+            strategy_group_id=group,exchange_instrument_ids=spec.candidate_ids,closed_bar_time_ms=close,
+            lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,member_windows=tuple(windows)).model_copy(update={
+                "comparison_transition_revision":current.authority.comparison_transition_revision})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
+        attempted=max(close+5,current.authority.created_at_ms+1)
+        if index:
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+4)):
+                unchanged=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=previous.selection_snapshot_id,worker_id="second-epoch-hourly-authority"),clock_ms=lambda close=close:close+4)
+            assert unchanged.disposition is MaterializationDisposition.NO_CHANGE,unchanged
+            async with PostgresKernelUnitOfWork(database) as uow:
+                current=await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=attempted)):
+            observed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),Market(template,close),
+                ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                    trigger_candle_close_time_ms=close,attempted_at_ms=attempted))
+        assert observed.status is (ObservationStatus.SIGNAL_CREATED if index==2 else ObservationStatus.NO_SIGNAL),observed
+        if index==0:
+            assert observed.detector_reason=="COMPARISON_REBASE_REQUIRED",observed
+    await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
+        selection_authority_id=current.authority.selection_authority_id,member=member,universe_version_id=uid,
+        closed_at_ms=close,now_ms=attempted+1,fault_stage=None)
+    return attempted+800
 
 
 async def _issue_second_dynamic_noncomparative_trade(database, *, group):
