@@ -5384,16 +5384,42 @@ class PostgresInstrumentSelectionRepository:
             StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.RECOVERY_PENDING,StrategyEntryVacuumState.OWNER_PAUSED}:
             raise SelectionJobConflict("Generic empty handoff Vacuum changed")
         if vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED:
-            if vacuum.first_blocker!="OWNER_PAUSED" or vacuum.source_generation_id is not None or (
+            if vacuum.first_blocker!="OWNER_PAUSED" or (
                 vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
                 or await self.entry_vacuum_has_drain_blockers(strategy_group_id=snapshot.strategy_group_id)
                 or await self.get_next_entry_vacuum_ticket(strategy_group_id=snapshot.strategy_group_id) is not None):
-                raise SelectionJobConflict("Generic empty handoff requires completed generation-free Owner Pause drain")
+                raise SelectionJobConflict("Generic empty handoff requires completed Owner Pause drain")
             complete = await self._connection.scalar(sa.select(sa.exists().where(
                 strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
                 strategy_entry_vacuum_events.c.event_type=="OWNER_PAUSED",
                 strategy_entry_vacuum_events.c.occurred_at_ms==vacuum.drained_at_ms,
                 strategy_entry_vacuum_events.c.payload["entry_drain_complete"]==sa.cast(sa.literal("true"),sa.dialects.postgresql.JSONB))))
+            if vacuum.source_generation_id is not None:
+                complete = await self._connection.scalar(sa.text("""
+                    SELECT EXISTS (
+                      SELECT 1 FROM brc_strategy_universe_materialization_generations g
+                      JOIN brc_strategy_entry_vacuum_events p ON p.entry_vacuum_id=:vacuum_id
+                      JOIN brc_strategy_universe_materialization_events a
+                        ON a.materialization_generation_id=g.materialization_generation_id
+                      WHERE g.materialization_generation_id=:generation_id
+                        AND g.selection_mode='dynamic_selection' AND g.lifecycle_state='ABANDONED'
+                        AND g.selection_spec_id=:spec AND g.selection_epoch_id=:epoch
+                        AND g.strategy_group_id=:group AND g.period_anchor_ms=:period
+                        AND g.fenced_at_ms>=:fenced AND g.fenced_at_ms<=g.terminal_at_ms
+                        AND g.terminal_at_ms>=:drained AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+                        AND p.event_type='OWNER_PAUSED' AND p.occurred_at_ms=g.terminal_at_ms
+                        AND p.payload->>'materialization_generation_id'=g.materialization_generation_id
+                        AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms
+                        AND a.payload->>'reason_code'='owner_paused'
+                        AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t
+                          WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
+                        AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
+                          WHERE d.entry_vacuum_id=:vacuum_id AND d.event_type='ENTRY_DRAINED'
+                            AND d.occurred_at_ms=:drained AND d.payload->>'target_state'='RECONFIGURING')
+                    )
+                """), {"vacuum_id":vacuum.entry_vacuum_id,"generation_id":vacuum.source_generation_id,
+                    "spec":snapshot.selection_spec_id,"epoch":snapshot.selection_epoch_id,"group":snapshot.strategy_group_id,
+                    "period":vacuum.period_anchor_ms,"fenced":vacuum.fenced_at_ms,"drained":vacuum.drained_at_ms})
             if not complete:
                 raise SelectionJobConflict("Generic empty handoff Owner Pause completion proof missing")
         if vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING:
@@ -5422,8 +5448,9 @@ class PostgresInstrumentSelectionRepository:
             old = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
             if old is None or old.selection_spec_id!=snapshot.selection_spec_id or old.selection_epoch_id!=snapshot.selection_epoch_id or (
                 old.period_anchor_ms>=snapshot.feature_cutoff_at_ms or old.fenced_at_ms is None or old.fenced_at_ms<vacuum.fenced_at_ms
-                or old.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED,MaterializationGenerationState.FAILED_CLOSED}
-                or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None):
+                or (not (vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED and old.lifecycle_state is MaterializationGenerationState.ABANDONED)
+                    and (old.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED,MaterializationGenerationState.FAILED_CLOSED}
+                        or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING)) or vacuum.drained_at_ms is None):
                 raise SelectionJobConflict("Generic empty handoff requires exact drained previous Generation")
             universes = PostgresStrategyUniverseRepository(self._connection)
             targets = await universes.get_generation_universe_targets(old.materialization_generation_id,for_update=True)
@@ -5433,7 +5460,7 @@ class PostgresInstrumentSelectionRepository:
                 if target.lifecycle_state.value!="abandoned":
                     await universes.abandon(AbandonStrategyUniverseRequest(universe_version_id=target.universe_version_id,
                         reason_code="superseded_by_valid_empty",attempted_at_ms=now))
-            if old.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED:
+            if old.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED}:
                 changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
                     strategy_universe_materialization_generations.c.materialization_generation_id==old.materialization_generation_id,
                     strategy_universe_materialization_generations.c.projection_version==old.projection_version).values(

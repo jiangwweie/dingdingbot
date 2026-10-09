@@ -133,14 +133,35 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
-        IF OLD.state='OWNER_PAUSED' AND OLD.source_generation_id IS NULL AND NEW.state='DRAINING_ENTRY' THEN
+        IF OLD.selection_spec_id<>'sor-dynamic-selection-v0' AND OLD.state='OWNER_PAUSED'
+          AND NEW.state='DRAINING_ENTRY' AND NEW.source_generation_id IS NULL THEN
           IF OLD.first_blocker<>'OWNER_PAUSED' OR OLD.drained_at_ms IS NULL OR NEW.source_generation_id IS NOT NULL
             OR NEW.first_blocker<>'NO_SELECTION_READY_MEMBERS' OR NEW.period_anchor_ms<=OLD.period_anchor_ms
             OR NEW.fenced_at_ms<>OLD.fenced_at_ms OR NEW.drained_at_ms IS DISTINCT FROM OLD.drained_at_ms
             OR NEW.resolved_at_ms IS NOT NULL OR NEW.projection_version<>OLD.projection_version+1
-            OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=OLD.entry_vacuum_id
+            OR NOT ((OLD.source_generation_id IS NULL AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=OLD.entry_vacuum_id
               AND e.event_type='OWNER_PAUSED' AND e.occurred_at_ms=OLD.drained_at_ms
-              AND e.payload->'entry_drain_complete'='true'::jsonb)
+              AND e.payload->'entry_drain_complete'='true'::jsonb))
+              OR (OLD.source_generation_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM brc_strategy_universe_materialization_generations g
+                JOIN brc_strategy_entry_vacuum_events p ON p.entry_vacuum_id=OLD.entry_vacuum_id
+                JOIN brc_strategy_universe_materialization_events a ON a.materialization_generation_id=g.materialization_generation_id
+                JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=OLD.strategy_group_id
+                WHERE g.materialization_generation_id=OLD.source_generation_id
+                  AND g.selection_mode='dynamic_selection' AND g.lifecycle_state='ABANDONED'
+                  AND g.selection_spec_id=OLD.selection_spec_id AND g.selection_epoch_id=c.selection_epoch_id
+                  AND g.strategy_group_id=OLD.strategy_group_id AND g.period_anchor_ms=OLD.period_anchor_ms
+                  AND g.fenced_at_ms>=OLD.fenced_at_ms AND g.fenced_at_ms<=g.terminal_at_ms
+                  AND g.terminal_at_ms>=OLD.drained_at_ms AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+                  AND p.event_type='OWNER_PAUSED' AND p.occurred_at_ms=g.terminal_at_ms
+                  AND p.payload->>'materialization_generation_id'=g.materialization_generation_id
+                  AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
+                  AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t
+                    WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
+                  AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=OLD.entry_vacuum_id
+                    AND d.event_type='ENTRY_DRAINED' AND d.occurred_at_ms=OLD.drained_at_ms
+                    AND d.payload->>'target_state'='RECONFIGURING')))
+              )
             OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
               JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=e.payload->>'selection_snapshot_id'
               JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=OLD.strategy_group_id

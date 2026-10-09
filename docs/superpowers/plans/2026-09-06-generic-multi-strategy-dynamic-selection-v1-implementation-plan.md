@@ -67,6 +67,8 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 
 #### 2026-10-09逐卡验收审计（替代下方早期表格的当前缺口解释）
 
+2026-10-10 EMPTY接管末版验证：Generic/历史SOR migration、SOR materialization、ENTRY Vacuum四模块完整组合168 passed（修正前167 passed+1 frozen-schema fixture FAIL）；warming/staged pause→resume→EMPTY包含两类独立SQL攻击、rollback和终态重复请求same Authority ID，末版8 passed。generation-free pause/authority-gap EMPTY相关组合26 passed与本组重叠，不相加。Full-chain51 passed、Unit/Architecture1327 passed、源码与0008 Mypy161 files、document authority25 passed、Ruff/diff通过。此为局部修复证据，不是GS-04～09整卡认证或exact R4。
+
 以下审计基于tracked source与正式入口tests，不把测试名或历史PASS摘要直接提升为Done。GS-04～09的本地卡级验收与GS-10～13的hosting/API/soak/最终R4交付分开，后者仍在完整计划内。
 
 | 卡 | 当前可定位的实现／证据 | 尚需闭合的明确要求 |
@@ -79,6 +81,8 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 | GS-09 | 四策略自然Selection→Signal→Claim/Ticket→durableENTRY→terminal、EMPTY/Static切换及timeout后的protected Ticket安全链、Unknown/partial/late-fill闭环已有证据；CPM/BRF2三段pause/freshness拒绝、正式nonempty Vacuum的claim/dispatch竞态及四策略Claim前stale拒绝已验证 | 新Universe current替换后的旧Signal/Claim全部矩阵、剩余source freshness和新Static/第二Dynamic自然ENTRY、最小immutable证据合同及整卡验收仍需核对，不把Vacuum fence等同positive current替换 |
 
 本审计不重开Feature/经济研究，不执行生产操作。已终态Ticket后出现不可归因外部Exposure的既有账户Incident/Owner containment属于明确fail-closed边界，不通过复活terminal Ticket或新增平行订单链伪造自动恢复。
+
+2026-10-10 paused warming/staged至最新EMPTY接管增量（基于`755efdc3`）：新增四策略×warming/staged正式Owner Pause→resume→latest VALID_EMPTY入口先复现8 FAIL。共享empty retarget现允许具备精确原ENTRY_DRAINED、Owner Pause/Generation ABANDONED事件、同Spec/epoch/period、无lease/非abandoned目标/待drain Ticket的终态Dynamic源；不将ABANDONED改成SUPERSEDED，不复活旧目标，不重置原Vacuum fence/drain时间。0008 BEFORE guard独立验算同一来源和最新empty intent，并保留deferred原子negative Authority约束；篡改supersedes_owner_pause或只写终态Vacuum均使整事务回滚。相关pause/generation-free/authority-gap EMPTY组合26 passed；末版8分支再次通过，既有Full-chain51 passed、Unit/Architecture1327 passed。迁移组合同时暴露历史0006测试调用当前0008 repository而缺selection_epoch_id；改为exact0006 SQL验证Static mode、无pending授权及version=1，保持0005→0006 preservation/zero work全部断言，当前Schema正式Owner activation测试不删除。历史迁移模块单独5 passed。非空恢复接管、有真实ENTRY的pause交叉及卡级全矩阵仍未闭合；不宣称GS-04～09 Done或exact R4，无生产修改。
 
 2026-10-09整模块重验（基于`b532e8f8`）：`pytest tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py -q --tb=short --maxfail=3`完整358 passed、零skip，耗时1015.57s；本次没有用-k子集替代整模块，也不是最终Release tier。相邻Generic migration/Comparison/Observation/Universe install/eligibility/warming/activation-fault组合初轮68 passed+1 FAIL，原eligibility夹具在head库里仍冻结0007 capability schema，按CURRENT_SCHEMA_REVISION修正后末版69 passed；历史portfolio migration模块原head断言仍0007，明确更新为0008，冻结0003 target未变，末版22 passed。Unit/Architecture1327 passed；SOR Golden artifact integrity verified（961 Snapshot、23064 member rows、artifact_set_digest=sha256:5d8c701d2738daebc506921038b2afb5a8feeda4a25d9652866c9b41743d4e45），此命令未带raw cache/input flags，不能声称本轮重建Production Core raw-input parity。当前表已将此前closed切片移动至证据栏并保留实际未完成要求。仅tests/docs改动，Ruff、document authority25 passed、diff通过；集合重叠不合计，不标GS-04～09 Done/R4 PASS，无生产修改。
 
