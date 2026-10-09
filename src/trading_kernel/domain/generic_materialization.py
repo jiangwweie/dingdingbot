@@ -370,6 +370,11 @@ class GenericStaticActivationProof(BaseModel):
         return self.selection_control_version+1
 
     @property
+    def recovery_id(self) -> str:
+        return "recovery:static:"+canonical_digest({"generation":self.materialization_generation_id,
+            "version":self.result_selection_control_version})[7:]
+
+    @property
     def semantic_digest(self) -> str:
         return canonical_digest(self.model_dump(mode="json"))
 

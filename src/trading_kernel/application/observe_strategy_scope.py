@@ -315,6 +315,7 @@ async def observe_strategy_scope(
             )
         selection_authority_id = None
         recovery_observation = False
+        static_recovery_observation = False
         if scope.lifecycle_state == "active":
             selection = await resolve_selection_observation_authority(
                 uow,
@@ -338,7 +339,8 @@ async def observe_strategy_scope(
                     reason=selection.reason_code,
                 )
             selection_authority_id = selection.selection_authority_id
-            recovery_observation = selection.reason_code == "generic_recovery_observation"
+            static_recovery_observation = selection.reason_code == "generic_static_recovery_observation"
+            recovery_observation = selection.reason_code == "generic_recovery_observation" or static_recovery_observation
         product_session: ProductSessionSnapshot | None = None
         comparison_lookback = comparative_lookback_bars(contract.event_spec_id)
         comparative_projection: ComparativeUniverseProjection | None = None
@@ -595,12 +597,18 @@ async def observe_strategy_scope(
         exposure_episode_id = None
         if contract.episode_policy == "rising_edge":
             if recovery_observation:
-                if selection_authority_id is None:
+                if not static_recovery_observation and selection_authority_id is None:
                     raise RuntimeError("Recovery Observation lost Authority identity")
-                recovered = await uow.signals.advance_recovery_observation(runtime_scope_id=scope.runtime_scope_id,
-                    selection_authority_id=selection_authority_id,observed_at_ms=request.trigger_candle_close_time_ms,
-                    detector_status=detector_result.status,
-                    occurred_at_ms=detector_result.occurred_at_ms if detector_result.status is DetectorStatus.TRIGGERED else None)
+                if static_recovery_observation:
+                    recovered = await uow.signals.advance_static_recovery_observation(runtime_scope_id=scope.runtime_scope_id,
+                        observed_at_ms=request.trigger_candle_close_time_ms,detector_status=detector_result.status,
+                        occurred_at_ms=detector_result.occurred_at_ms if detector_result.status is DetectorStatus.TRIGGERED else None)
+                else:
+                    assert selection_authority_id is not None
+                    recovered = await uow.signals.advance_recovery_observation(runtime_scope_id=scope.runtime_scope_id,
+                        selection_authority_id=selection_authority_id,observed_at_ms=request.trigger_candle_close_time_ms,
+                        detector_status=detector_result.status,
+                        occurred_at_ms=detector_result.occurred_at_ms if detector_result.status is DetectorStatus.TRIGGERED else None)
                 if recovered.episode_transition is None:
                     reason = recovered.suppression_reason or "RECOVERY_REBASE_REQUIRED"
                     await _save_observation_blocker(uow,scope=scope,blocker=reason,detector_reason=reason,

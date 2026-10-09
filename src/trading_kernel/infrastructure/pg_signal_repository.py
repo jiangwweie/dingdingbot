@@ -466,6 +466,80 @@ class PostgresSignalRepository:
                 raise RuntimeError("Recovery Observation latest close changed during commit")
         return transition
 
+    async def advance_static_recovery_observation(self, *, runtime_scope_id: str, observed_at_ms: int,
+        detector_status: DetectorStatus, occurred_at_ms: int | None,
+    ) -> RecoveryBoundExposureEpisodeTransition:
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            PostgresInstrumentSelectionRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_repositories import (
+            PostgresOwnerControlRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+        scope = await self.get_runtime_scope(runtime_scope_id)
+        if scope is None or scope.lifecycle_state!="active":
+            raise RuntimeError("Static recovery Observation scope changed")
+        selection = PostgresInstrumentSelectionRepository(self._connection)
+        proof = await selection.get_generic_static_activation_proof_for_universe(scope.universe_version_id)
+        if proof is None or not proof.episode_rebase_required:
+            raise RuntimeError("Static recovery Observation proof missing")
+        now = await selection.read_authority_clock_ms()
+        owner = await PostgresOwnerControlRepository(self._connection).get_strategy_control(scope.strategy_group_id,for_update=True)
+        control = await selection.get_selection_control(scope.strategy_group_id,for_update=True)
+        actual = await PostgresStrategyUniverseRepository(self._connection).get_current(scope.event_spec_id)
+        policy = (await self._connection.execute(sa.select(owner_policy_current).where(
+            owner_policy_current.c.owner_policy_id==scope.owner_policy_id))).mappings().one_or_none()
+        if owner is None or owner.entry_state.value!="enabled" or control is None or (
+            control.selection_mode.value!="static_baseline" or control.selection_epoch_id is not None
+            or control.control_version!=proof.result_selection_control_version
+            or actual is None or actual.universe_version_id!=scope.universe_version_id
+            or policy is None or not policy["enabled"] or not policy["new_entry_submit_enabled"]
+            or observed_at_ms<proof.first_eligible_close_time_ms or observed_at_ms!=now//3_600_000*3_600_000):
+            raise RuntimeError("Static recovery Observation authority changed")
+        key = build_episode_domain_key(event_spec_id=scope.event_spec_id,exchange_instrument_id=scope.exchange_instrument_id,position_side=scope.position_side)
+        episode = await self.lock_exposure_episode(key)
+        recovery = await self.get_authority_recovery_checkpoint(key)
+        comparison = await selection.get_comparison_universe_binding(scope.event_spec_id,for_update=True)
+        checkpoint = await self.get_comparison_episode_checkpoint(key)
+        transition = advance_recovery_bound_exposure_episode(contract=strategy_contract_for(scope.event_spec_id),
+            current_episode=episode,current_recovery=recovery,current_comparison=checkpoint,recovery_id=proof.recovery_id,
+            recovery_revision=proof.result_selection_control_version,effective_from_ms=proof.prepared_at_ms,
+            first_eligible_close_time_ms=proof.first_eligible_close_time_ms,detector_status=detector_status,occurred_at_ms=occurred_at_ms,
+            observed_at_ms=observed_at_ms,exchange_instrument_id=scope.exchange_instrument_id,selection_mode="static_baseline",
+            universe_version_id=scope.universe_version_id,comparison_binding=comparison)
+        if recovery is None:
+            raise RuntimeError("Static recovery checkpoint missing")
+        if transition.recovery_checkpoint==recovery:
+            return transition
+        async with self._connection.begin_nested():
+            if transition.comparison_checkpoint is not None and transition.comparison_checkpoint!=checkpoint:
+                await self.save_comparison_episode_transition(ComparisonBoundExposureEpisodeTransition(
+                    checkpoint=transition.comparison_checkpoint,episode_transition=transition.episode_transition,
+                    signal_eligible=transition.signal_eligible,suppression_reason=transition.suppression_reason),
+                    event_spec_id=scope.event_spec_id,exchange_instrument_id=scope.exchange_instrument_id,position_side=scope.position_side,
+                    expected_episode_version=0 if episode is None else episode.projection_version,
+                    expected_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version)
+            elif transition.episode_transition is not None:
+                await self.save_exposure_episode(transition.episode_transition.current,expected_version=0 if episode is None else episode.projection_version)
+            nxt = transition.recovery_checkpoint
+            extra = {"last_observed_at_ms":observed_at_ms,"projection_version":episode.projection_version+1} if (
+                transition.episode_transition is None and episode is not None and episode.state=="authority_rebase_required") else {}
+            changed = await self._connection.execute(sa.update(exposure_episode_current).where(
+                exposure_episode_current.c.episode_domain_key==key,
+                exposure_episode_current.c.authority_recovery_checkpoint_version==recovery.projection_version,
+                exposure_episode_current.c.authority_recovery_id==proof.recovery_id).values(**extra,
+                    authority_recovery_armed_at_ms=nxt.armed_at_close_time_ms,authority_recovery_last_observed_at_ms=nxt.last_observed_close_time_ms,
+                    authority_recovery_last_detector_status=None if nxt.last_detector_status is None else nxt.last_detector_status.value,
+                    authority_recovery_checkpoint_version=nxt.projection_version))
+            if changed.rowcount!=1:
+                raise RuntimeError("Static recovery checkpoint CAS changed")
+            ended = await selection.read_authority_clock_ms()
+            if ended<now or observed_at_ms!=ended//3_600_000*3_600_000:
+                raise RuntimeError("Static recovery latest close changed")
+        return transition
+
     async def get_authority_recovery_checkpoint(self, episode_domain_key: str) -> AuthorityRecoveryCheckpoint | None:
         row = (await self._connection.execute(sa.select(exposure_episode_current).where(
             exposure_episode_current.c.episode_domain_key == episode_domain_key))).mappings().one_or_none()

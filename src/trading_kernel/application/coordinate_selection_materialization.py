@@ -464,6 +464,14 @@ async def coordinate_selection_materialization_once(
             control = await uow.instrument_selection.get_selection_control(request.strategy_group_id,for_update=True)
             if owner is None or owner.entry_state is StrategyEntryState.PAUSED:
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED)
+            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is None:
+                active_static_spec = await uow.instrument_selection.get_generic_spec(control.selection_spec_id)
+                current_static = await uow.strategy_universes.get_current(active_static_spec.event_spec_id)
+                if current_static is not None:
+                    committed_static = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(current_static.universe_version_id)
+                    if committed_static is not None and committed_static.result_selection_control_version==control.control_version:
+                        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
+                            materialization_generation_id=committed_static.materialization_generation_id)
             if control is None or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE or (
                 control.pending_effective_period_anchor_ms is None):
                 return _blocked("GENERIC_STATIC_OWNER_INTENT_MISSING")
@@ -506,6 +514,19 @@ async def coordinate_selection_materialization_once(
                         expected_projection_version=claimed_static.projection_version,desired_at_ms=now_ms)
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
                         materialization_generation_id=gid)
+                if claimed_static.lifecycle_state is MaterializationGenerationState.STAGED:
+                    static_proof = await uow.instrument_selection.prepare_generic_static_activation_proof(gid,
+                        worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch)
+                    if static_proof.target_event.universe_version_id is None:
+                        return _blocked("GENERIC_STATIC_ACTIVATION_TARGET_MISSING")
+                    static_activated = await advance_strategy_universe(uow,UniverseActivationRequest(
+                        universe_version_id=static_proof.target_event.universe_version_id,
+                        attempted_at_ms=static_proof.prepared_at_ms,operation=UniverseActivationOperation.ACTIVATE_GENERIC_STATIC,
+                        materialization_generation_id=gid,materialization_lease_owner=request.worker_id,
+                        materialization_lease_epoch=claimed_static.lease_epoch,static_activation_proof=static_proof))
+                    return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.ACTIVE_NEW
+                        if static_activated.status is UniverseActivationStatus.ACTIVATED else MaterializationDisposition.BLOCKED),
+                        materialization_generation_id=gid,reason_code=static_activated.reason_code)
                 if claimed_static.lifecycle_state is MaterializationGenerationState.DESIRED:
                     static_vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+gid,
                         strategy_group_id=request.strategy_group_id,selection_spec_id=claimed_static.selection_spec_id,

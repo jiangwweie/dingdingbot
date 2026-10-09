@@ -1070,6 +1070,9 @@ class EntryAdmissionRepository(Protocol):
 
 
 class SignalRepository(Protocol):
+    async def advance_static_recovery_observation(self, *, runtime_scope_id: str, observed_at_ms: int,
+        detector_status: DetectorStatus, occurred_at_ms: int | None,
+    ) -> RecoveryBoundExposureEpisodeTransition: ...
     async def advance_recovery_observation(self, *, runtime_scope_id: str, selection_authority_id: str,
         observed_at_ms: int, detector_status: DetectorStatus, occurred_at_ms: int | None,
     ) -> RecoveryBoundExposureEpisodeTransition: ...
@@ -1777,6 +1780,15 @@ class InstrumentSelectionRepository(Protocol):
 
     async def prepare_generic_static_activation_proof(self, materialization_generation_id: str, *,
         worker_id: str, lease_epoch: int) -> GenericStaticActivationProof: ...
+
+    async def require_generic_static_activation_proof(self, proof: GenericStaticActivationProof, *,
+        worker_id: str, lease_epoch: int) -> int: ...
+
+    async def get_generic_static_activation_proof(self, materialization_generation_id: str) -> GenericStaticActivationProof | None: ...
+
+    async def get_generic_static_activation_proof_for_universe(self, universe_version_id: str) -> GenericStaticActivationProof | None: ...
+
+    async def initialize_generic_static_recovery_checkpoints(self, proof: GenericStaticActivationProof) -> None: ...
 
     async def recover_expired_dynamic_activation(
         self,

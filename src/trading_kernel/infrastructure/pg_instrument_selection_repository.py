@@ -2173,6 +2173,89 @@ class PostgresInstrumentSelectionRepository:
             comparison_universe_id=comparison_id,comparison_transition_revision=None if old_revision is None else (
                 old_revision+int(comparison_id!=old_comparison)),observation_cursors=cursors)
 
+    async def require_generic_static_activation_proof(self, proof: GenericStaticActivationProof, *,
+        worker_id: str, lease_epoch: int,
+    ) -> int:
+        """Re-derive locked pre-state; a previously prepared object is not authority."""
+        proof = GenericStaticActivationProof.model_validate(proof.model_dump())
+        started = await self.read_authority_clock_ms()
+        if started<proof.prepared_at_ms or started//3600000!=proof.prepared_at_ms//3600000:
+            raise SelectionJobConflict("Static activation proof crossed close boundary")
+        current = await self.prepare_generic_static_activation_proof(proof.materialization_generation_id,
+            worker_id=worker_id,lease_epoch=lease_epoch)
+        # The original preparation timestamp stays immutable. Every other
+        # field, including cursors, is freshly derived in this transaction.
+        expected = GenericStaticActivationProof.model_validate({**current.model_dump(),"prepared_at_ms":proof.prepared_at_ms})
+        if expected!=proof:
+            raise SelectionJobConflict("Static activation proof changed")
+        checked = await self.read_authority_clock_ms()
+        if checked<started or checked//3600000!=started//3600000:
+            raise SelectionJobConflict("Static activation proof crossed close boundary")
+        return checked
+
+    async def get_generic_static_activation_proof(self, materialization_generation_id: str) -> GenericStaticActivationProof | None:
+        generation = await self.get_generic_static_materialization_generation(materialization_generation_id)
+        if generation is None or generation.lifecycle_state is not MaterializationGenerationState.ACTIVE:
+            return None
+        rows = (await self._connection.execute(sa.select(strategy_universe_materialization_events).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_events.c.event_type=="ACTIVE").limit(2))).mappings().all()
+        if len(rows)!=1 or "static_activation_proof" not in rows[0]["payload"]:
+            raise SelectionJobConflict("Static activation committed proof missing")
+        proof = GenericStaticActivationProof.model_validate(rows[0]["payload"]["static_activation_proof"])
+        if proof.materialization_generation_id!=generation.materialization_generation_id or proof.authorization_id!=generation.authorization_id or (
+            proof.rollback_baseline_id!=generation.rollback_baseline_id or proof.selection_spec_id!=generation.selection_spec_id
+            or proof.selection_epoch_id!=generation.selection_epoch_id or proof.selection_control_version!=generation.selection_control_version
+            or generation.activated_at_ms!=rows[0]["occurred_at_ms"] or generation.terminal_at_ms!=generation.activated_at_ms
+            or generation.activated_at_ms is None or proof.prepared_at_ms>generation.activated_at_ms):
+            raise SelectionJobConflict("Static activation committed source changed")
+        return proof
+
+    async def get_generic_static_activation_proof_for_universe(self, universe_version_id: str) -> GenericStaticActivationProof | None:
+        row = (await self._connection.execute(sa.select(strategy_universe_versions).where(
+            strategy_universe_versions.c.universe_version_id==universe_version_id))).mappings().one_or_none()
+        if row is None or row["source_kind"]!="static_baseline":
+            return None
+        if row["lifecycle_state"]!="active" or row["materialization_generation_id"] is None:
+            raise SelectionJobConflict("Static activation Universe is not current active source")
+        proof = await self.get_generic_static_activation_proof(row["materialization_generation_id"])
+        if proof is None or proof.target_event.universe_version_id!=universe_version_id:
+            raise SelectionJobConflict("Static activation Universe proof missing")
+        return proof
+
+    async def initialize_generic_static_recovery_checkpoints(self, proof: GenericStaticActivationProof) -> None:
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+        if not proof.episode_rebase_required:
+            return
+        signals = PostgresSignalRepository(self._connection)
+        async with self._connection.begin_nested():
+            for cursor in proof.observation_cursors:
+                current = await signals.lock_exposure_episode(cursor.episode_domain_key)
+                prior = await signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+                if (0 if current is None else current.projection_version)!=cursor.episode_version or (
+                    (0 if prior is None else prior.projection_version)!=cursor.authority_recovery_checkpoint_version):
+                    raise SelectionJobConflict("Static recovery initialization cursor changed")
+                checkpoint = begin_authority_recovery_rebase(current=prior,episode_domain_key=cursor.episode_domain_key,
+                    recovery_id=proof.recovery_id,recovery_revision=proof.result_selection_control_version,
+                    effective_from_ms=proof.prepared_at_ms,first_eligible_close_time_ms=proof.first_eligible_close_time_ms,
+                    latest_consumed_close_time_ms=cursor.last_observed_at_ms)
+                values = {"authority_recovery_id":checkpoint.recovery_id,"authority_recovery_revision":checkpoint.recovery_revision,
+                    "authority_recovery_effective_from_ms":checkpoint.effective_from_ms,
+                    "authority_recovery_first_eligible_close_time_ms":checkpoint.first_eligible_close_time_ms,
+                    "authority_recovery_armed_at_ms":None,"authority_recovery_last_observed_at_ms":checkpoint.last_observed_close_time_ms,
+                    "authority_recovery_last_detector_status":None,"authority_recovery_checkpoint_version":checkpoint.projection_version}
+                if current is None:
+                    current = ExposureEpisodeState(episode_domain_key=cursor.episode_domain_key,
+                        event_spec_id=proof.target_event.event_spec_id,exchange_instrument_id=cursor.exchange_instrument_id,
+                        position_side=proof.target_event.position_side,state="authority_rebase_required",exposure_episode_id=None,
+                        triggered_at_ms=None,rearmed_at_ms=None,last_observed_at_ms=cursor.last_observed_at_ms,projection_version=1)
+                    await self._connection.execute(sa.insert(exposure_episode_current).values(**current.model_dump(),**values))
+                else:
+                    await self._connection.execute(sa.update(exposure_episode_current).where(
+                        exposure_episode_current.c.episode_domain_key==cursor.episode_domain_key).values(**values))
+
     async def get_generic_materialization_generation(
         self, materialization_generation_id: str, *, for_update: bool = False,
     ) -> GenericMaterializationGeneration | None:

@@ -339,7 +339,8 @@ async def test_current_recovery_cannot_fall_through_to_static_or_normal_entry(st
         position_side=proof.event_binding.position_side,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
         universe_version_id=proof.event_binding.universe_version_id,universe_semantic_digest="digest:test",exchange_instrument_id=proof.observation_cursors[0].exchange_instrument_id)
     uow = SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control),
-        get_current_entry_vacuum=AsyncMock(return_value=None),get_current_generic_authority=AsyncMock(return_value=CurrentGenericSelectionAuthority(authority=authority,projection_version=1))),
+        get_current_entry_vacuum=AsyncMock(return_value=None),get_current_generic_authority=AsyncMock(return_value=CurrentGenericSelectionAuthority(authority=authority,projection_version=1)),
+        get_generic_static_activation_proof_for_universe=AsyncMock(return_value=None)),
         owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=SimpleNamespace(entry_state=SimpleNamespace(value="enabled"),control_version=proof.owner_control_version))),
         entry_admission=SimpleNamespace(get_owner_policy=AsyncMock(return_value=SimpleNamespace(enabled=True,new_entry_submit_enabled=True,scope=SimpleNamespace(authorizes=lambda **_:True)))),
         strategy_universes=SimpleNamespace(get_current=AsyncMock(return_value=SimpleNamespace(universe_version_id=proof.event_binding.universe_version_id,semantic_digest="digest:test"))),

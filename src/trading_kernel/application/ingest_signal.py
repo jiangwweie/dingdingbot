@@ -17,6 +17,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
 )
 from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
 from src.trading_kernel.domain.instrument_selection import (
+    HOUR_MS,
     SOR_LONG_EVENT_SPEC_ID,
     SOR_SHORT_EVENT_SPEC_ID,
 )
@@ -526,6 +527,46 @@ async def _resolve_generic_selection_authority(
         selection_spec_id=control.selection_spec_id,for_update=lock_current)
     if vacuum is not None and vacuum.blocks_new_entry:
         return decision(SelectionEntryAuthorityStatus.VACUUM_OPEN,"selection_entry_vacuum_open")
+    if control.selection_mode is SelectionMode.STATIC_BASELINE and birth_selection_authority_id is None:
+        static_proof = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(runtime_scope.universe_version_id)
+        if static_proof is not None:
+            if control.selection_epoch_id is not None or control.control_version!=static_proof.result_selection_control_version or (
+                runtime_scope.event_spec_id!=static_proof.target_event.event_spec_id
+                or runtime_scope.position_side!=static_proof.target_event.position_side):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_control_changed")
+            if observed_close_time_ms%HOUR_MS or observed_close_time_ms!=now_ms//HOUR_MS*HOUR_MS or not static_proof.first_eligible_close_time_ms<=observed_close_time_ms<=now_ms:
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_close_ineligible")
+            universe = await uow.strategy_universes.get_current(runtime_scope.event_spec_id)
+            members = await uow.signals.get_observation_universe_members(event_spec_id=runtime_scope.event_spec_id,
+                universe_version_id=runtime_scope.universe_version_id)
+            if universe is None or members is None or universe.universe_version_id!=runtime_scope.universe_version_id or (
+                members.lifecycle_state!="active" or runtime_scope.exchange_instrument_id not in members.exchange_instrument_ids
+                or members.semantic_digest!=runtime_scope.universe_semantic_digest or universe.semantic_digest!=runtime_scope.universe_semantic_digest
+                or selected_member_set_digest(members.exchange_instrument_ids)!=static_proof.target_event.member_set_digest):
+                return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_universe_changed")
+            if static_proof.comparison_universe_id is not None:
+                binding = await uow.instrument_selection.get_comparison_universe_binding(runtime_scope.event_spec_id,for_update=lock_current)
+                if binding is None or (binding.comparison_universe_id,binding.comparison_transition_revision,binding.source_static_universe_version_id)!=(
+                    static_proof.comparison_universe_id,static_proof.comparison_transition_revision,runtime_scope.universe_version_id):
+                    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_comparison_changed")
+            if static_proof.episode_rebase_required:
+                key = build_episode_domain_key(event_spec_id=runtime_scope.event_spec_id,exchange_instrument_id=runtime_scope.exchange_instrument_id,
+                    position_side=runtime_scope.position_side)
+                if lock_current:
+                    await uow.signals.lock_exposure_episode(key)
+                checkpoint = await uow.signals.get_authority_recovery_checkpoint(key)
+                if checkpoint is None or (checkpoint.recovery_id,checkpoint.recovery_revision,checkpoint.first_eligible_close_time_ms)!=(
+                    static_proof.recovery_id,static_proof.result_selection_control_version,static_proof.first_eligible_close_time_ms):
+                    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_rebase_changed")
+                if recovery_observation:
+                    return decision(SelectionEntryAuthorityStatus.VALID,"generic_static_recovery_observation")
+                blocker = recovery_rebase_entry_rejection(checkpoint=checkpoint,episode_domain_key=key,
+                    recovery_id=static_proof.recovery_id,recovery_revision=static_proof.result_selection_control_version,
+                    recovery_committed_at_ms=static_proof.prepared_at_ms,first_eligible_close_time_ms=static_proof.first_eligible_close_time_ms,
+                    signal_close_time_ms=observed_close_time_ms)
+                if blocker is not None:
+                    return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,blocker)
+            return decision(SelectionEntryAuthorityStatus.VALID,"static_baseline")
     current = await uow.instrument_selection.get_current_generic_authority(control.selection_spec_id,for_update=lock_current)
     authority = None if current is None else current.authority
     current_id = None if authority is None else authority.selection_authority_id

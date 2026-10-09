@@ -1838,6 +1838,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 previous_source brc_materialization_generation_event_baselines%ROWTYPE;
                 frozen_count integer; frozen_digest text; source_json text; expected_digest text;
                 failure_source jsonb; failure_at bigint; deadline bigint; failure_vacuum brc_strategy_entry_vacuums_current%ROWTYPE;
+                activation_source jsonb; active_at bigint; target_id text;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
@@ -1964,6 +1965,78 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 OR failure_vacuum.fenced_at_ms<>g.fenced_at_ms OR failure_vacuum.drained_at_ms IS NULL
                 OR failure_vacuum.resolved_at_ms IS NOT NULL OR failure_vacuum.first_blocker IS DISTINCT FROM failure_source->>'reason_code' THEN
                 RAISE EXCEPTION 'Static failure requires unresolved original Vacuum'; END IF;
+            END IF;
+            IF g.lifecycle_state='ACTIVE' THEN
+              SELECT payload->'static_activation_proof',occurred_at_ms INTO activation_source,active_at
+                FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=gid AND event_type='ACTIVE'
+                ORDER BY event_sequence DESC LIMIT 1;
+              target_id:=activation_source->'target_event'->>'universe_version_id';
+              IF activation_source IS NULL OR target_id IS NULL OR g.activated_at_ms IS NULL
+                OR g.activated_at_ms IS DISTINCT FROM g.terminal_at_ms OR active_at IS DISTINCT FROM g.activated_at_ms
+                OR g.lease_owner IS NOT NULL OR g.lease_expires_at_ms IS NOT NULL
+                OR activation_source->>'materialization_generation_id' IS DISTINCT FROM gid
+                OR activation_source->>'authorization_id' IS DISTINCT FROM owner_proof.authorization_id
+                OR activation_source->>'rollback_baseline_id' IS DISTINCT FROM g.rollback_baseline_id
+                OR activation_source->>'selection_spec_id' IS DISTINCT FROM g.selection_spec_id
+                OR activation_source->>'selection_epoch_id' IS DISTINCT FROM g.selection_epoch_id
+                OR (activation_source->>'selection_control_version')::bigint IS DISTINCT FROM g.selection_control_version
+                OR (activation_source->>'prepared_at_ms')::bigint IS NULL
+                OR (activation_source->>'prepared_at_ms')::bigint>g.activated_at_ms
+                OR (activation_source->>'prepared_at_ms')::bigint/3600000<>g.activated_at_ms/3600000
+                OR activation_source->>'transition_rule' IS NULL
+                OR activation_source->>'transition_rule' NOT IN ('NORMAL_TRANSITION','RECOVERY_TRANSITION')
+                OR (activation_source->>'first_eligible_close_time_ms')::bigint IS DISTINCT FROM
+                  (((activation_source->>'prepared_at_ms')::bigint/3600000)+CASE WHEN activation_source->>'transition_rule'='RECOVERY_TRANSITION' THEN 1 ELSE 0 END)*3600000
+                OR (activation_source->>'first_eligible_close_time_ms')::bigint<(owner_source->>'effective_period_anchor_ms')::bigint+3600000
+                OR (activation_source->>'owner_authorized_at_ms')::bigint IS DISTINCT FROM owner_proof.authorized_at_ms
+                OR (activation_source->>'transition_rule'='NORMAL_TRANSITION' AND
+                  (owner_proof.authorized_at_ms>=(activation_source->>'first_eligible_close_time_ms')::bigint
+                    OR activation_source->>'recovery_reason' IS NOT NULL))
+                OR (activation_source->>'transition_rule'='RECOVERY_TRANSITION' AND activation_source->>'recovery_reason' IS NULL)
+                OR (activation_source->>'fenced_at_ms')::bigint IS DISTINCT FROM g.fenced_at_ms
+                OR activation_source->'previous_event' IS DISTINCT FROM (to_jsonb(previous_source)-'materialization_generation_id')
+                OR NOT EXISTS (SELECT 1 FROM brc_selection_session_authorities a
+                  JOIN brc_selection_authority_event_bindings b USING(selection_authority_id)
+                  WHERE a.selection_authority_id=activation_source->>'source_selection_authority_id'
+                    AND a.selection_spec_id=g.selection_spec_id AND a.selection_epoch_id=g.selection_epoch_id
+                    AND a.selection_control_version=g.selection_control_version
+                    AND ((b.universe_version_id=previous_source.universe_version_id AND b.member_set_digest=previous_source.member_set_digest)
+                      OR (a.authority_outcome='VALID_EMPTY' AND b.grant_state='EMPTY')))
+                OR activation_source->'target_event'->>'member_set_digest' IS DISTINCT FROM frozen_digest
+                OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_current c JOIN brc_strategy_universe_versions u USING(universe_version_id)
+                  WHERE c.event_spec_id=previous_source.event_spec_id AND c.universe_version_id=target_id
+                    AND c.lifecycle_state='active' AND u.lifecycle_state='active' AND u.source_kind='static_baseline'
+                    AND u.materialization_generation_id=gid AND u.activated_at_ms=g.activated_at_ms
+                    AND brc_selected_universe_member_digest_v1(target_id)=frozen_digest)
+                OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions old_u WHERE old_u.universe_version_id=previous_source.universe_version_id
+                  AND old_u.lifecycle_state='retired' AND old_u.retired_at_ms=g.activated_at_ms)
+                OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current c WHERE c.strategy_group_id=g.strategy_group_id
+                  AND c.selection_mode='static_baseline' AND c.selection_epoch_id IS NULL
+                  AND c.control_version=g.selection_control_version+1 AND c.pending_authorization_id IS NULL
+                  AND c.pending_selection_mode IS NULL AND c.pending_effective_period_anchor_ms IS NULL AND c.updated_at_ms=g.activated_at_ms)
+                OR EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id)
+                OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v WHERE v.entry_vacuum_id=activation_source->>'entry_vacuum_id'
+                  AND v.source_generation_id=gid AND v.state='RESOLVED_ACTIVE' AND v.resolved_at_ms=g.activated_at_ms
+                  AND v.fenced_at_ms=g.fenced_at_ms AND v.drained_at_ms IS NOT NULL)
+              THEN RAISE EXCEPTION 'Static activation requires atomic current Control Vacuum and source'; END IF;
+              IF frozen_source.comparison_universe_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM brc_comparison_binding_current cb WHERE cb.event_spec_id=frozen_source.event_spec_id
+                  AND cb.comparison_universe_id=frozen_source.comparison_universe_id
+                  AND cb.source_static_universe_version_id=target_id
+                  AND cb.comparison_transition_revision=(activation_source->>'comparison_transition_revision')::bigint
+              ) THEN RAISE EXCEPTION 'Static activation requires exact comparison transition'; END IF;
+              IF activation_source->>'transition_rule'='RECOVERY_TRANSITION' AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(activation_source->'observation_cursors') cursor
+                LEFT JOIN brc_exposure_episode_current ep ON ep.episode_domain_key=cursor->>'episode_domain_key'
+                WHERE ep.episode_domain_key IS NULL
+                  OR ep.authority_recovery_id IS DISTINCT FROM 'recovery:static:' || encode(sha256(convert_to(
+                    '{"generation":' || to_json(gid)::text || ',"version":' || (g.selection_control_version+1)::text || '}','UTF8')),'hex')
+                  OR ep.authority_recovery_revision IS DISTINCT FROM g.selection_control_version+1
+                  OR ep.authority_recovery_effective_from_ms IS DISTINCT FROM (activation_source->>'prepared_at_ms')::bigint
+                  OR ep.authority_recovery_first_eligible_close_time_ms IS DISTINCT FROM (activation_source->>'first_eligible_close_time_ms')::bigint
+                  OR ep.authority_recovery_checkpoint_version IS DISTINCT FROM (cursor->>'authority_recovery_checkpoint_version')::bigint+1
+                  OR ep.authority_recovery_armed_at_ms IS NOT NULL
+              ) THEN RAISE EXCEPTION 'Static activation requires complete recovery rebase'; END IF;
             END IF;
           END IF;
           RETURN NULL;
@@ -2207,6 +2280,28 @@ def _selection_job_epochs() -> None:
     """))
     op.execute(sa.text(f"CREATE TRIGGER trg_selection_control_epoch_v1 BEFORE INSERT OR UPDATE ON {control} "
         "FOR EACH ROW EXECUTE FUNCTION brc_validate_selection_control_epoch_v1()"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_validate_generic_static_control_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.selection_mode<>'dynamic_selection' OR NEW.selection_mode<>'static_baseline'
+          OR NOT EXISTS(SELECT 1 FROM brc_instrument_selection_specs s WHERE s.selection_spec_id=NEW.selection_spec_id
+            AND s.selection_kind='generic_dynamic_v1') THEN RETURN NULL; END IF;
+        IF OLD.pending_selection_mode IS DISTINCT FROM 'static_baseline' OR OLD.pending_authorization_id IS NULL
+          OR NEW.control_version<>OLD.control_version+1 OR NEW.selection_epoch_id IS NOT NULL
+          OR NEW.pending_authorization_id IS NOT NULL OR NEW.pending_selection_mode IS NOT NULL
+          OR NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations g
+            JOIN brc_strategy_universe_materialization_events e USING(materialization_generation_id)
+            WHERE g.strategy_group_id=NEW.strategy_group_id AND g.selection_spec_id=NEW.selection_spec_id
+              AND g.selection_mode='static_baseline' AND g.lifecycle_state='ACTIVE'
+              AND g.selection_control_version=OLD.control_version AND g.selection_epoch_id=OLD.selection_epoch_id
+              AND g.activated_at_ms=NEW.updated_at_ms AND e.event_type='ACTIVE'
+              AND e.payload->'static_activation_proof'->>'authorization_id'=OLD.pending_authorization_id)
+          THEN RAISE EXCEPTION 'Static mode cutover requires atomic Owner materialization'; END IF;
+        RETURN NULL;
+      END; $$
+    """))
+    op.execute(sa.text(f"CREATE CONSTRAINT TRIGGER trg_generic_static_control_commit AFTER UPDATE ON {control} "
+        "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_generic_static_control_commit()"))
     op.execute(sa.text("""
         CREATE FUNCTION brc_validate_selection_job_epoch_v1() RETURNS trigger LANGUAGE plpgsql AS $$
         DECLARE kind text; cadence integer;

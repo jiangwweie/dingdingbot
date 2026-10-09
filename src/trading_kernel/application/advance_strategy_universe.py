@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.generic_materialization import (
+    GenericStaticActivationProof,
+)
 from src.trading_kernel.domain.selection_authority import (
     GenericRecoveryAuthority,
     GenericSelectionAuthority,
@@ -30,6 +33,7 @@ class UniverseActivationOperation(StrEnum):
     CERTIFY_CURRENT = "certify_current"
     CERTIFY_STAGED = "certify_staged"
     ACTIVATE_GENERIC = "activate_generic"
+    ACTIVATE_GENERIC_STATIC = "activate_generic_static"
     ACTIVATE_MANUAL = "activate_manual"
     STAGE_DYNAMIC = "stage_dynamic"
     ACTIVATE_DYNAMIC_PAIR = "activate_dynamic_pair"
@@ -145,6 +149,7 @@ class UniverseActivationRequest(BaseModel):
     paired_universe_version_id: str | None = None
     selection_authority: SelectionSessionAuthority | None = None
     generic_authority: GenericSelectionAuthority | GenericRecoveryAuthority | None = None
+    static_activation_proof: GenericStaticActivationProof | None = None
 
     @field_validator("universe_version_id", mode="before")
     @classmethod
@@ -174,6 +179,14 @@ class UniverseActivationRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_operation_shape(self) -> UniverseActivationRequest:
+        if self.operation is UniverseActivationOperation.ACTIVATE_GENERIC_STATIC:
+            proof = self.static_activation_proof
+            if proof is None or proof.materialization_generation_id!=self.materialization_generation_id or (
+                proof.target_event.universe_version_id!=self.universe_version_id or proof.prepared_at_ms!=self.attempted_at_ms
+                or self.materialization_lease_owner is None or self.materialization_lease_epoch is None):
+                raise ValueError("Static activation requires exact prepared source and lease")
+        elif self.static_activation_proof is not None:
+            raise ValueError("Only Static activation may carry Static proof")
         if self.operation is UniverseActivationOperation.ACTIVATE_GENERIC:
             authority = self.generic_authority
             if authority is None or authority.authority_outcome != "ACTIVE_NEW" or (
@@ -187,7 +200,7 @@ class UniverseActivationRequest(BaseModel):
         if (self.materialization_lease_owner is None) != (self.materialization_lease_epoch is None):
             raise ValueError("materialization lease token must be complete")
         if self.materialization_lease_epoch is not None and (
-            self.materialization_lease_epoch <= 0 or self.operation not in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED, UniverseActivationOperation.ACTIVATE_GENERIC}
+            self.materialization_lease_epoch <= 0 or self.operation not in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED, UniverseActivationOperation.ACTIVATE_GENERIC, UniverseActivationOperation.ACTIVATE_GENERIC_STATIC}
         ):
             raise ValueError("materialization lease token is only valid for Dynamic staging")
         if (
