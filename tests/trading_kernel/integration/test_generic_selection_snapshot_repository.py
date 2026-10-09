@@ -7897,7 +7897,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             self.calls.append(request)
             return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
                 observed_at_ms=self.now_ms+1,
-                exchange_order_id=f"hourly-{group}-{request.kind.value}-{len(self.calls)}")
+                exchange_order_id=f"hourly-{group}-{issued.ticket_id}-{request.kind.value}-{len(self.calls)}")
 
     async with database.begin() as conn:
         await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
@@ -8114,7 +8114,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         settled = await settle_ticket(uow,SettleTicketRequest(
             ticket_id=issued.ticket_id,settled_at_ms=now_ms+exit_offset+600))
         reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
-            ticket_id=issued.ticket_id,review_id=f"review:hourly-{group}",
+            ticket_id=issued.ticket_id,review_id=f"review:hourly-{group}" if selection_authority_id is not None else f"review:static:{issued.ticket_id}",
             outcome="closed",metrics={"realized_pnl":"1.25"},
             decision_impact={"strategy_action":"keep"},recorded_at_ms=now_ms+exit_offset+700))
         terminal = await uow.aggregates.get(issued.ticket_id)
@@ -8136,6 +8136,16 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert reservation is not None and reservation.status == "released"
     assert incident is None and not active_domain
     assert len(commands) == len(venue.calls)
+    if selection_authority_id is None:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            signal = await uow.signals.get(signal_event_id)
+            decision = await uow.admission_decisions.get_for_signal(signal_event_id)
+            proof = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(ticket.universe_version_id)
+        assert signal.selection_authority_id is None and decision.selection_authority_id is None
+        assert signal.universe_version_id==ticket.universe_version_id and decision.ticket_id==issued.ticket_id
+        assert proof is not None and proof.target_event.universe_version_id==ticket.universe_version_id
+        assert ticket.exit_binding_id is not None and ticket.initial_stop_price>0
+        return
     async with database.connect() as conn:
         path = (await conn.execute(sa.text("SELECT a.selection_spec_id,a.selection_epoch_id,"
             "a.selection_snapshot_id,s.occurred_at_ms,s.fact_digest,t.fact_digest AS ticket_fact_digest,"
@@ -8166,6 +8176,41 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert member["qualification_semantic_digest"].startswith("sha256:")
     assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
         "BudgetSettled","ReviewRecorded"} <= event_types
+    if fault_stage=="static_after_protection" and group in {"CPM-RO-001","BRF2-001"}:
+        await _issue_new_static_natural_trade(database,group=group)
+
+
+async def _issue_new_static_natural_trade(database, *, group):
+    spec = inputs(group).spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.strategy_universes.get_current(spec.event_spec_id)
+        proof = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(current.universe_version_id)
+        assert uow._connection is not None
+        scope_id,member = (await uow._connection.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
+            "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":current.universe_version_id})).one()
+    first_close = proof.first_eligible_close_time_ms
+    class Market:
+        def __init__(self,template,close):
+            self.template,self.delta = template,close-template.trigger_candle_close_time_ms
+        async def fetch_closed_candles(self,request):
+            candles = self.template.candles_1h if request.timeframe=="1h" else self.template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+self.delta,"close_time_ms":c.close_time_ms+self.delta}) for c in candles)
+    for close,template in ((first_close,cpm_flat_snapshot()),(first_close+HOUR,cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot())):
+        await make_warming_ready(database,universe_version_id=current.universe_version_id,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+            observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),Market(template,close),
+                ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                    trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
+        assert observed.status is (ObservationStatus.NO_SIGNAL if close==first_close else ObservationStatus.SIGNAL_CREATED),observed
+    await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
+        selection_authority_id=None,member=member,universe_version_id=current.universe_version_id,
+        closed_at_ms=first_close+HOUR,now_ms=first_close+HOUR+2,fault_stage=None)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status<>'terminal'"))==0
+        assert await conn.scalar(sa.text("SELECT count(DISTINCT exposure_episode_id) FROM brc_trade_tickets"))==2
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry'"))==2
+        assert await conn.scalar(sa.text("SELECT count(DISTINCT entry_exchange_order_id) FROM brc_trade_aggregates"))==2
 
 
 @pytest.mark.asyncio

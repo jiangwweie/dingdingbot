@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮新Static natural ENTRY末版回归：自然入口/hourly faults60 passed（含两条新增Static第二Ticket终态链与不同order/episode身份断言）；既有Full-chain/文档76 passed、文档更新后25 passed、Ruff/diff通过。本轮仅tests/docs，未跑全Unit/Mypy或最终R4，集合重叠不合计。
+
+2026-10-09CPM/BRF2 Static切换后新自然交易增量（基于`730d5bbe`，GS-06/08/09关联）：在原正式Owner→Runner→Dynamic自然Signal/Ticket链、原Ticket protected时完成正式Static cutover并让原Ticket终态关闭后，新的Active Static scope分别消费合法NOT_TRIGGERED与更晚TRIGGERED closed bars，再由原issue_ready_signal/Claim/Ticket/durable ENTRY/recording venue/reconcile/protect/TP1/Runner/exit/Settlement/Review闭环。不直接写Signal或checkpoint；两策略各最终2条terminal Ticket、2个不同Exposure Episode与2条ENTRY、2个不同accepted Entry order ID。Static Signal/Claim/AdmissionDecision/Ticket不伪造Dynamic Selection Authority（birth字段NULL），而是原Control/current Universe与已冻结Static activation proof；新Ticket仍冻结同Event/Universe/Initial Stop/Exit Binding，旧Ticket lineage不改。复用原入场helper时给每条Ticket独立Review/venue ID，避免第二笔复用首笔fixture身份。CPM LONG/BRF2 SHORT专项2 passed；这不是MPG/MI comparative新Static Entry或第二Dynamic epoch交易认证。所有fill/flat/费用与Review经济值为本地fixture，非实盘/收益证明；GS-04～09未Done、非exact R4，production_modified=NO。
+
 本轮Pause EMPTY atomicity末版验证：EMPTY/Gap/early Pause28 passed；Generic migration/SOR materialization/ENTRY Vacuum163 passed；源码+0008 Mypy161 files、文档25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4或全Unit/Generic。
 
 2026-10-09Pause→EMPTY最终原子性补强（基于`3f15b519`，GS-04/08关联）：在四策略×PENDING/DESIRED暂停后合法resume/latest EMPTY上下文，故障替换commit_generic_valid_empty，使应用只把已retarget的Vacuum写VALID_EMPTY/resolve而不insert负向Authority/current；真实PG此前DID_NOT_RAISE八分支RED。现扩展既有brc_validate_generic_gap_empty_resolution deferred guard到supersedes_owner_pause=true的EMPTY intent，要求最终同Spec/current/目标Snapshot/period/resolved timestamp的VALID_EMPTY negative Authority原子存在；无新表/平行linkage。非法事务整体回滚，正确正式commit随后继续PASS。初版测试误以为empty handoff分两次tick，实际无单路径同一事务已能完成，已在正确commit边界注入而非人为拆生产事务；没有修改EMPTY业务规则。四策略负向/正向复验包含在相邻EMPTY/Gap组合中，仍不能替代非空pause恢复/新Universe activation并发或完整GS-04～09认证。全部Docker PG，无生产修改，非exact R4。
