@@ -3127,7 +3127,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
-        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection")),
+        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -7884,7 +7884,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     if delayed_static or fault_stage in {"static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}:
         static_at = await _cutover_static_with_protected_ticket(database,group=group,ticket=ticket,at_ms=now_ms+350,
             timeout=fault_stage=="static_timeout_after_protection",
-            continuous=delayed_static or fault_stage in {"static_normal_after_protection","static_close_boundary_after_protection"},
+            continuous=group in {"MPG-001","MI-001"} and (delayed_static or fault_stage in {"static_normal_after_protection","static_close_boundary_after_protection"}),
             close_failure=fault_stage=="static_close_boundary_after_protection",normal_delay_ms=int(fault_stage.rsplit(":",1)[1]) if delayed_static else 0)
         static_cutover_finished = True
         exit_offset = static_at-now_ms+400

@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮non-comparative hour-only末版验证：四策略hour-only4 passed；自然入口/hourly faults60 passed；既有Full-chain/文档76 passed，更新文档后25 passed，Ruff/diff通过。本轮tests/docs-only，未重跑全Unit/Mypy或R4，集合重叠不合计。
+
+2026-10-09CPM/BRF2独立hour-only末尾回滚增量（基于`60b9f45c`，GS-08/09关联）：把既有正式protected Ticket→Static cutover事务末尾跨close测试扩展到两个non-comparative策略。测试明确crossed时间仍早于本次30s lease及原1800s materialization deadline，故障发生于事务内mode/current已经切Static后的最终clock check，返回STATIC_ACTIVATION_COMMIT_CROSSED_CLOSE而非DEADLINE。四策略独立hour-only4分支均验证Current/Authority/Control/STAGED Generation/原Vacuum/完整Ticket/Aggregate/Reservation/保护Command回滚，随后旧Ticket在Selection-read-forbidden安全链内继续至terminal。新增CPM/BRF2并不伪造hourly PRE_FENCE_CONTINUITY；它们以本策略的4h source contract建立合法准备状态，不改变NORMAL/RECOVERY判定。本轮仅tests/docs补强，未改生产逻辑，仍需实际positive Universe activation并发、新Static/第二Dynamic自然Entry及完整卡级证据，GS-04～09未Done、非exact R4。全部Docker PG，无生产修改。
+
 本轮暂停drain证明末版回归：16分支PASS；Generic migration/SOR materialization/ENTRY Vacuum163 passed；源码+0008 Mypy161 files、文档25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4。
 
 2026-10-09暂停drain完成证明类型攻击补强（基于`58ef3be7`，GS-08关联）：四策略在正式Static paused-drain completion的INSERT边界分别注入entry_drain_complete=false和JSON字符串"true"，再经正式Owner Resume/新授权及到期Coordinator handoff。false已被既有独立SQL拒绝；string_true四分支RED证明旧->>/astext文本比较把字符串当布尔true，能够commit新retry。现Python repository与0008 SQL handoff predicate统一精确JSONB布尔true比较，普通暂停、false、string均不能证明完成drain；正常booltrue仍沿原恢复activation成功。攻击失败事务保持原OWNER_PAUSED Vacuum/Current Authority，零新Generation；没有修改真实drain判定或新交易范围。Dynamic/Static正常与两类损坏证明共16分支PASS，源码+0008 Mypy161 files、Ruff/diff通过；全部Docker PG、无生产修改。不代表有单drain证据或GS-04～09 Done，非exact R4。
