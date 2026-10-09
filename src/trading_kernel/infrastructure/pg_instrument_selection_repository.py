@@ -2055,7 +2055,9 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Static retry handoff provenance changed")
         if not await self._connection.scalar(sa.select(sa.exists().where(
             strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
-            strategy_entry_vacuum_events.c.event_type=="ENTRY_DRAINED",
+            sa.or_(strategy_entry_vacuum_events.c.event_type=="ENTRY_DRAINED",sa.and_(
+                strategy_entry_vacuum_events.c.event_type=="OWNER_PAUSED",
+                strategy_entry_vacuum_events.c.payload["entry_drain_complete"].astext=="true")),
             strategy_entry_vacuum_events.c.occurred_at_ms==vacuum.drained_at_ms))):
             raise SelectionJobConflict("Static retry original drain provenance changed")
         return True

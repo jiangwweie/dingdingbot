@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮paused-drain Static恢复验证：8个Dynamic/Static分支PASS，末版Generic migration/SOR materialization/ENTRY Vacuum163 passed、源码+0008 Mypy161 files、文档authority25 passed、Ruff/diff通过。集合重叠不合计，未跑最终R4或末版完整Generic模块。
+
+2026-10-09Static暂停drain后的重新授权恢复增量（基于`c0c7b1a1`，GS-08关联）：四策略正式Static Generation在DRAINING阶段Pause→终态ABANDONED→下一Coordinator tick确认无Ticket drain并记OWNER_PAUSED后，正式Owner Resume再用新TOTP授权排期，复用既有terminal reauthorization/handoff/activation全链。RED复现Python/独立SQL原drain provenance仅认ENTRY_DRAINED，拒绝实际上由正式drain产生的OWNER_PAUSED + entry_drain_complete=true。现两个边界都只额外接受同Vacuum、occurred_at恰等于原drained_at且明确完成flag的该事件；普通OwnerPause事件不能冒充完成drain，无直接SQL清fence、无终态revival。正式重授权仍保持旧source/Control/原Vacuum直到新操作到期；相同原fence/drain被保留，新目标重新warming/staged，typed RECOVERY proof/未来close/rebase及PG payload攻击仍有效。四策略Static成功恢复加Dynamic原pause drain合计8分支PASS；不代表有单cancel/unknown/partial恢复、unfenced pause或全部GS-08认证完成。全为Docker PG，无生产修改、无真实exchange写入，GS-04～09未Done、非exact R4。
+
 本轮Generic drain-pause末版验证：Dynamic/Static无单drain暂停及warming/staged相邻16 passed；Unit/Architecture1327 passed、源码Mypy160 files、Ruff/diff、文档25 passed。193个Vacuum/SOR/Full-chain为next-tick接线前相邻证据，未冒称末版完整Release，集合不合计。
 
 2026-10-09Owner Pause Generic DRAINING增量（基于`66142e94`，GS-08关联）：真实四策略Generation到DRAINING_ENTRY后正式Owner Pause，RED复现Coordinator只返回OWNER_PAUSED但Generation仍可行动；现Dynamic/Static两个正式入口均沿共享abandon边界终态ABANDONED、清lease，原DRAINING_ENTRY Vacuum仅标Owner pause而保留fence与source，不提前resolve或切current。后续同Coordinator tick对已ABANDONED来源继续调用现有正式drain；无Ticket分支完成后进入OWNER_PAUSED，旧Active Universe/Authority不改、零targets/Command。共享mark_owner_pause_vacuum_drained按SOR/Generic Dynamic/Generic Static exact source decoder分派，不再把Generic父解析为SOR pair。四策略×Dynamic/Static8分支含提交前全回滚、原fence保全、终态源与正式next-tick drain完成；加已有warming/staged pause16分支PASS。仅证明无Ticket drain完成，不能代替prepared/sent/unknown/partial交叉、unfenced PENDING/DESIRED暂停或后续resume/supersession恢复链；这些仍为GS-08缺口。相邻ENTRY Vacuum/SOR Materialization/既有Full-chain193 passed为next-tick接线前代码，末版16分支及Unit/Architecture/Mypy另重验。全部Docker PG与recording facts，无生产修改，不标GS-04～09 Done或exact R4。

@@ -5358,6 +5358,13 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==original
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
         assert await uow.strategy_universes.get_generation_universe_targets(abandoned.materialization_generation_id)==()
+    if static_source:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            paused_owner = await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=paused_owner.control_version,reason="retry_static_after_paused_drain",
+                    idempotency_key=f"resume-static-drain:{group}",owner_identity="owner",now_ms=at+4),authentication_strength="totp_step_up")
+        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=at+5)
 
 
 @pytest.mark.asyncio

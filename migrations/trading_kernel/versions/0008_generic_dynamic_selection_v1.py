@@ -1912,7 +1912,8 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
             OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
               AND e.event_type='OPEN' AND e.occurred_at_ms=v.fenced_at_ms)
             OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
-              AND e.event_type='ENTRY_DRAINED' AND e.occurred_at_ms=v.drained_at_ms)
+              AND e.occurred_at_ms=v.drained_at_ms
+              AND (e.event_type='ENTRY_DRAINED' OR (e.event_type='OWNER_PAUSED' AND e.payload->>'entry_drain_complete'='true')))
             OR NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e WHERE e.materialization_generation_id=gid
               AND e.event_type='MATERIALIZING' AND e.payload->>'entry_vacuum_id'=v.entry_vacuum_id
               AND (e.payload->>'original_fenced_at_ms')::bigint=v.fenced_at_ms
