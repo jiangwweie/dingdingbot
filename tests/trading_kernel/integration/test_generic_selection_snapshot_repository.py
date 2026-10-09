@@ -204,10 +204,10 @@ async def _install_static_selection_source(database: AsyncEngine, group: str):
             digest = canonical_digest({"exchange_instrument_ids":members})
             comparison_id = "comparison:"+digest[7:]
             await conn.execute(sa.text(
-                "INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,1)"
+                "INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,1) ON CONFLICT DO NOTHING"
             ),{"id":comparison_id,"digest":digest})
             await conn.execute(sa.text(
-                "INSERT INTO brc_comparison_universe_members VALUES(:id,:member)"
+                "INSERT INTO brc_comparison_universe_members VALUES(:id,:member) ON CONFLICT DO NOTHING"
             ),{"id":comparison_id,"member":members[0]})
             await conn.execute(sa.text(
                 "INSERT INTO brc_comparison_binding_current VALUES(:event,:id,0,:uid)"
@@ -972,10 +972,14 @@ async def test_future_static_schedule_preserves_prior_period_continuity(database
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("failure_case", [None,"timeout","owner_action","pause","pause_staged"])
+@pytest.mark.parametrize("group,failure_case,second_entry_fault", [
+    (group,failure,None) for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")
+    for failure in (None,"timeout","owner_action","pause","pause_staged")
+] + [pytest.param(group,None,fault,id=f"second_epoch_{fault}_{group}")
+    for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")
+    for fault in ("before_dispatch","entry_rejected","entry_unknown","real_pause_drain:unknown_recover","real_pause_drain:partial_recover")])
 async def test_due_static_owner_intent_creates_exact_generation_not_selection_snapshot(
-    database: AsyncEngine, group: str, failure_case: str | None,
+    database: AsyncEngine, group: str, failure_case: str | None, second_entry_fault: str | None,
 ) -> None:
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateGenericStaticRequest,
@@ -1701,11 +1705,19 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
     from src.trading_kernel.domain.owner_control import StrategyEntryState
     pause_base_at = second_at
     if group in {"CPM-RO-001","BRF2-001"}:
-        pause_base_at = await _issue_second_dynamic_noncomparative_trade(database,group=group)
+        pause_base_at = await _issue_second_dynamic_noncomparative_trade(database,group=group,fault_stage=second_entry_fault)
     else:
-        pause_base_at = await _issue_second_dynamic_comparative_trade(database,group=group)
+        pause_base_at = await _issue_second_dynamic_comparative_trade(database,group=group,fault_stage=second_entry_fault)
         async with PostgresKernelUnitOfWork(database) as uow:
             rotated_authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    if second_entry_fault is not None:
+        async with database.connect() as conn:
+            ticket=(await conn.execute(sa.text("SELECT t.*,a.selection_epoch_id FROM brc_trade_tickets t JOIN brc_selection_session_authorities a ON a.selection_authority_id=t.selection_authority_id"))).mappings().one()
+            assert ticket["selection_epoch_id"]==again_dynamic.selection_epoch_id
+            assert ticket["universe_version_id"]==rotated_uid
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry' AND generation=1"))==1
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry' AND generation<>1"))==0
+        return
     async with PostgresKernelUnitOfWork(database) as uow:
         before_pause = await uow.owner_controls.get_strategy_control(group)
         assert before_pause is not None
@@ -3603,6 +3615,9 @@ async def _assert_natural_sent_entry_drained_by_selection(
     async with PostgresKernelUnitOfWork(database) as uow:
         parent = await uow.instrument_selection.get_generic_snapshot(
             current.authority.selection_snapshot_id)
+        assert uow._connection is not None
+        source_signal_ids=frozenset((await uow._connection.execute(sa.text("SELECT signal_event_id FROM brc_signal_events"))).scalars())
+        assert ticket.identity.signal_event_id in source_signal_ids
     empty_source = next_input(initial_source.model_copy(update={
         "selection_epoch_id":parent.selection_epoch_id})).model_copy(update={
             "predecessor_snapshot":parent})
@@ -4019,7 +4034,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
         assert len(venue.calls)==2
     assert entry_dispatched_at_ms<vacuum.fenced_at_ms
     async with database.connect() as conn:
-        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
+        assert frozenset((await conn.execute(sa.text("SELECT signal_event_id FROM brc_signal_events"))).scalars()) == source_signal_ids
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'")) == 0
     if partial_fill:
@@ -8811,6 +8826,9 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
 async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,
     selection_authority_id, member, universe_version_id, closed_at_ms, now_ms,
     fault_stage: str | None, authority_transition=None):
+    entry_result_fault=fault_stage if fault_stage in {"entry_rejected","entry_unknown"} else None
+    if entry_result_fault is not None:
+        fault_stage=None
     prepared_pause_fault=None
     if fault_stage is not None and fault_stage.startswith("prepared_pause:"):
         prepared_pause_fault=fault_stage.split(":",1)[1]
@@ -9102,6 +9120,9 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 command = await uow.exchange_commands.get(request.command_id)
                 assert command.status is ExchangeCommandStatus.CLAIMED
             self.calls.append(request)
+            if request.kind.value=="entry" and entry_result_fault is not None:
+                return ExchangeCommandResult(status=ExchangeCommandStatus.REJECTED if entry_result_fault=="entry_rejected" else ExchangeCommandStatus.OUTCOME_UNKNOWN,
+                    observed_at_ms=self.now_ms+1,reason="authoritative_entry_rejection" if entry_result_fault=="entry_rejected" else "entry_response_lost")
             return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
                 observed_at_ms=self.now_ms+1,
                 exchange_order_id=f"hourly-{group}-{issued.ticket_id}-{request.kind.value}-{len(self.calls)}")
@@ -9146,7 +9167,52 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert payload["entry_vacuum_id"]==vacuum.entry_vacuum_id
             assert payload["command_id"]==commands[0].command_id
         return
-    assert dispatched.status.value == "accepted", dispatched
+    if entry_result_fault is not None:
+        assert dispatched.status.value==("rejected" if entry_result_fault=="entry_rejected" else "outcome_unknown"),dispatched
+        assert len(venue.calls)==1
+        await database.dispose()
+        redispatch=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            DispatchCommandRequest(worker_id="second-epoch-no-resend",ticket_id=issued.ticket_id,now_ms=now_ms+7,lease_until_ms=now_ms+30000,
+                timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=60000),entry_facts_source=ActionFacts())
+        assert redispatch.status.value=="no_command" and len(venue.calls)==1
+        async with PostgresKernelUnitOfWork(database) as uow:
+            original_commands=await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+            assert len(original_commands)==1 and original_commands[0].generation==1
+            original_command=original_commands[0]
+            assert original_command.status is (ExchangeCommandStatus.REJECTED if entry_result_fault=="entry_rejected" else ExchangeCommandStatus.OUTCOME_UNKNOWN)
+            if entry_result_fault=="entry_rejected":
+                aggregate=await uow.aggregates.get(issued.ticket_id)
+                assert aggregate.status.value=="entry_rejected" and aggregate.position_qty==0
+                assert (await uow.budgets.get_for_ticket(issued.ticket_id)).status=="released"
+                assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+                return
+        from src.trading_kernel.application.recover_unknown_command import (
+            RecoverUnknownCommandRequest,
+            recover_unknown_command,
+        )
+        from src.trading_kernel.domain.venue_truth import (
+            UnknownRecoveryStatus,
+            VenueLookupStatus,
+            VenueOrderTruth,
+            VenueTruthSnapshot,
+        )
+        class EntryTruth:
+            async def lookup_command_truth(self,request):
+                assert request.command_id==original_command.command_id
+                return VenueTruthSnapshot(lookup_status=VenueLookupStatus.VISIBLE,order=VenueOrderTruth(
+                    exchange_order_id=f"hourly-{group}-{issued.ticket_id}-entry-1",venue_client_order_id=original_command.venue_client_order_id,
+                    exchange_instrument_id=member,position_side=ticket.identity.netting_domain.position_side,
+                    order_side="buy" if ticket.identity.netting_domain.position_side=="long" else "sell",
+                    quantity=ticket.quantity,reduce_only=False),position_quantity=Decimal(0),matching_fill_quantity=Decimal(0),
+                    regular_open_client_order_ids=(original_command.venue_client_order_id,),conditional_open_client_order_ids=(),observed_at_ms=now_ms+8)
+        recovered=await recover_unknown_command(lambda:PostgresKernelUnitOfWork(database),EntryTruth(),RecoverUnknownCommandRequest(
+            command_id=original_command.command_id,now_ms=now_ms+8,visibility_deadline_ms=now_ms+7,timeout_seconds=1))
+        assert recovered.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert (await uow.exchange_commands.get(original_command.command_id)).status is ExchangeCommandStatus.RECONCILED_ACCEPTED
+            assert len(await uow.exchange_commands.list_for_ticket(issued.ticket_id))==1
+    else:
+        assert dispatched.status.value == "accepted", dispatched
     assert len(venue.calls) == 1
     if real_pause_fault is not None:
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -9432,7 +9498,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
 
 
-async def _issue_second_dynamic_comparative_trade(database, *, group,selection_input=None):
+async def _issue_second_dynamic_comparative_trade(database, *, group,selection_input=None,fault_stage=None):
     spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
@@ -9509,11 +9575,11 @@ async def _issue_second_dynamic_comparative_trade(database, *, group,selection_i
             assert observed.detector_reason=="COMPARISON_REBASE_REQUIRED",observed
     await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
         selection_authority_id=current.authority.selection_authority_id,member=member,universe_version_id=uid,
-        closed_at_ms=close,now_ms=attempted+1,fault_stage=None)
+        closed_at_ms=close,now_ms=attempted+1,fault_stage=fault_stage)
     return attempted+800
 
 
-async def _issue_second_dynamic_noncomparative_trade(database, *, group):
+async def _issue_second_dynamic_noncomparative_trade(database, *, group,fault_stage=None):
     spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
@@ -9539,7 +9605,7 @@ async def _issue_second_dynamic_noncomparative_trade(database, *, group):
         assert observed.status is (ObservationStatus.NO_SIGNAL if at==close else ObservationStatus.SIGNAL_CREATED),observed
     await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
         selection_authority_id=current.authority.selection_authority_id,member=member,universe_version_id=uid,
-        closed_at_ms=close+HOUR,now_ms=close+HOUR+2,fault_stage=None)
+        closed_at_ms=close+HOUR,now_ms=close+HOUR+2,fault_stage=fault_stage)
     return close+HOUR+800
 
 
@@ -11409,8 +11475,77 @@ async def test_generic_runner_discards_source_when_period_expires_during_market_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group,defect", [("CPM-RO-001", None), ("MPG-001", None), ("MI-001", None), ("BRF2-001", None),
-    ("CPM-RO-001", "missing"), ("CPM-RO-001", "empty"), ("CPM-RO-001", "flat"), ("CPM-RO-001", "unknown"), ("CPM-RO-001", "control_changed")])
+async def test_four_generic_selectors_have_independent_jobs_and_no_network_transaction(database: AsyncEngine) -> None:
+    groups=("CPM-RO-001","MPG-001","MI-001","BRF2-001")
+    for group in groups:
+        await enable_epoch(database,group)
+    blocked_source=asyncio.Event()
+    release_source=asyncio.Event()
+    active_transactions={group:0 for group in groups}
+    calls={group:[] for group in groups}
+    tasks={}
+    def start(group):
+        source=inputs(group)
+        timestamp=CUTOFF
+        def clock():
+            nonlocal timestamp
+            timestamp+=1
+            return timestamp
+        class ObservedUow(PostgresKernelUnitOfWork):
+            async def __aenter__(self):
+                entered=await super().__aenter__()
+                active_transactions[group]+=1
+                return entered
+            async def __aexit__(self,*args):
+                try:
+                    return await super().__aexit__(*args)
+                finally:
+                    active_transactions[group]-=1
+        class Market:
+            async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                assert active_transactions[group]==0 and event_spec_id==source.spec.event_spec_id and len(product_profiles)==24
+                calls[group].append("qualification")
+                if group=="CPM-RO-001":
+                    blocked_source.set()
+                    await release_source.wait()
+                return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in source.member_windows)
+            async def fetch_generic_selection_klines(self,request):
+                assert active_transactions[group]==0
+                calls[group].append(request.exchange_instrument_id)
+                return next(w.candles for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+        return asyncio.create_task(run_instrument_selection_once(uow_factory=lambda:ObservedUow(database),market_source=Market(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=source.selection_epoch_id,
+                period_anchor_ms=CUTOFF,worker_id=f"independent-selector:{group}"),clock_ms=clock))
+    try:
+        tasks={group:start(group) for group in groups}
+        await asyncio.wait_for(blocked_source.wait(),timeout=10)
+        results=await asyncio.wait_for(asyncio.gather(*(tasks[group] for group in groups[1:])),timeout=20)
+        assert all(result.outcome=="SNAPSHOT_READY" for result in results)
+        assert not tasks["CPM-RO-001"].done() and calls["CPM-RO-001"]==["qualification"]
+        async with PostgresKernelUnitOfWork(database) as uow:
+            for group in groups:
+                job=await uow.instrument_selection.get_selection_job(selection_spec_id=inputs(group).spec.selection_spec_id,
+                    selection_epoch_id=inputs(group).selection_epoch_id,period_anchor_ms=CUTOFF)
+                assert job.state==("CLAIMED" if group=="CPM-RO-001" else "SNAPSHOT_READY")
+        release_source.set()
+        assert (await asyncio.wait_for(tasks["CPM-RO-001"],timeout=20)).outcome=="SNAPSHOT_READY"
+    finally:
+        release_source.set()
+        await asyncio.gather(*tasks.values(),return_exceptions=True)
+    assert all(active_transactions[group]==0 and len(calls[group])==25 for group in groups)
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_jobs_current"))==4
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==4
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_member_decisions"))==96
+        for table in ("brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_trade_tickets","brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group,defect", [(group,defect)
+    for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")
+    for defect in (None,"missing","gap","future","duplicate","qualification_event","qualification_future","empty","unknown","control_changed")
+] + [("CPM-RO-001","flat")])
 async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_snapshot(database: AsyncEngine, group: str, defect: str | None) -> None:
     source_input = inputs(group)
     if defect == "empty":
@@ -11445,7 +11580,13 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
             calls.append("qualification")
             if defect == "unknown":
                 raise ValueError("qualification unavailable")
-            return tuple(w.qualification.model_copy(update={"observed_at_ms": observed_at_ms}) for w in source_input.member_windows)
+            qualifications=tuple(w.qualification.model_copy(update={"observed_at_ms": observed_at_ms}) for w in source_input.member_windows)
+            if defect=="qualification_event":
+                wrong_event=inputs("MI-001" if group!="MI-001" else "CPM-RO-001").spec.event_spec_id
+                return (qualifications[0].model_copy(update={"event_spec_id":wrong_event}),*qualifications[1:])
+            if defect=="qualification_future":
+                return (qualifications[0].model_copy(update={"observed_at_ms":observed_at_ms+10000}),*qualifications[1:])
+            return qualifications
 
         async def fetch_generic_selection_klines(self, request):
             assert active_transactions == 0
@@ -11455,6 +11596,14 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
             if request.exchange_instrument_id == source_input.spec.candidate_ids[0]:
                 if defect == "missing":
                     return candles[:-1]
+                if defect in {"gap","future","duplicate"}:
+                    corrupted=list(candles)
+                    if defect=="duplicate":
+                        corrupted[1]=corrupted[0]
+                    else:
+                        index=-1 if defect=="future" else 1
+                        corrupted[index]=corrupted[index].model_copy(update={"open_time_ms":corrupted[index].open_time_ms+HOUR,"close_time_ms":corrupted[index].close_time_ms+HOUR})
+                    return tuple(corrupted)
                 if defect == "control_changed":
                     async with database.begin() as conn:
                         await conn.execute(sa.update(strategy_selection_control_current).where(
@@ -11482,7 +11631,7 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
             assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
         return
     result = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
-    if defect in {"missing", "unknown", "flat"}:
+    if defect in {"missing","gap","future","duplicate","qualification_event","qualification_future","unknown","flat"}:
         assert result.outcome == ("COMPUTE_FAILED" if defect == "flat" else "SOURCE_FAILED")
         call_count = len(calls)
         replay = await run_instrument_selection_once(uow_factory=factory, market_source=market, request=request, clock_ms=clock)
@@ -11490,7 +11639,11 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
         async with database.connect() as conn:
             assert await conn.scalar(sa.select(sa.func.count()).select_from(instrument_selection_snapshots)) == 0
             attempt = (await conn.execute(sa.select(instrument_selection_attempts))).mappings().one()
-            assert attempt["source_member_count"] == (0 if defect == "unknown" else 23 if defect == "missing" else 24)
+            assert attempt["source_member_count"] == (0 if defect == "unknown" else 23 if defect in {"missing","gap","future","duplicate"} else 24)
+            assert await conn.scalar(sa.text("SELECT next_retry_at_ms FROM brc_instrument_selection_jobs_current")) is None
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations"))==0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_selection_session_authorities"))==0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
             if defect == "flat":
                 assert attempt["source_digest"].startswith("sha256:")
                 assert source_input.spec.candidate_ids[0] in attempt["reason_code"]
