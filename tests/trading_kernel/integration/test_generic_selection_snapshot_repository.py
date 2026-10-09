@@ -5275,9 +5275,14 @@ async def test_generic_continuity_preserves_event_side_and_comparison(database: 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
 @pytest.mark.parametrize("stage", ["PENDING","DESIRED"])
-async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncEngine,group: str,stage: str) -> None:
+@pytest.mark.parametrize("static_source", [False,True])
+async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncEngine,group: str,stage: str,static_source: bool) -> None:
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateGenericStaticRequest,
+    )
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
+        stage_generic_static_selection_mode,
     )
     from src.trading_kernel.domain.owner_control import StrategyEntryState
     source,first,_,uid = await _exercise_generic_generation(database,group,False,
@@ -5288,16 +5293,30 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
             window.exchange_instrument_id==source.spec.candidate_ids[0]) for window in shifted.member_windows)})
     snapshot = compute_generic_selection(next_source)
     async with PostgresKernelUnitOfWork(database) as uow:
-        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
+        if not static_source:
+            await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
         authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="pause-unfenced")
     at = snapshot.effective_from_ms+1
+    if static_source:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            control = await uow.instrument_selection.get_selection_control(group)
+            schedule_at = authority.authority.created_at_ms+1
+            cadence = source.spec.cadence_hours*HOUR
+            anchor = (schedule_at//cadence+1)*cadence
+            await stage_generic_static_selection_mode(uow,strategy_group_id=group,rollback_baseline_id=control.rollback_baseline_id,
+                selection_epoch_id=control.selection_epoch_id,effective_period_anchor_ms=anchor,authentication_strength="totp_step_up",
+                request=ControlMutationRequest(expected_version=control.control_version,reason="pause_unfenced_static_intent",
+                    idempotency_key=f"unfenced-static:{group}:{stage}",owner_identity="owner",now_ms=schedule_at))
+        request = CoordinateGenericStaticRequest(strategy_group_id=group,worker_id="pause-unfenced-static")
+        at = anchor+HOUR+1
     for offset in range(2 if stage=="DESIRED" else 1):
         tick = at+offset
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
             result = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda tick=tick:tick)
     async with PostgresKernelUnitOfWork(database) as uow:
-        before = await uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id)
+        before = await (uow.instrument_selection.get_generic_static_materialization_generation(result.materialization_generation_id)
+            if static_source else uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id))
         assert before.lifecycle_state.value==stage
         assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
         owner = await uow.owner_controls.get_strategy_control(group)
@@ -5308,7 +5327,8 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
         paused = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:tick+2)
     assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
     async with PostgresKernelUnitOfWork(database) as uow:
-        abandoned = await uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id)
+        abandoned = await (uow.instrument_selection.get_generic_static_materialization_generation(before.materialization_generation_id)
+            if static_source else uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id))
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert abandoned.lifecycle_state.value=="ABANDONED" and abandoned.terminal_at_ms==tick+2
         assert abandoned.semantic_digest==before.semantic_digest and abandoned.fenced_at_ms is None
@@ -5323,7 +5343,8 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
         drained = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert drained.entry_vacuum_id==vacuum.entry_vacuum_id and drained.fenced_at_ms==vacuum.fenced_at_ms
         assert drained.state is StrategyEntryVacuumState.OWNER_PAUSED and drained.resolved_at_ms is None
-        assert await uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id)==abandoned
+        assert await (uow.instrument_selection.get_generic_static_materialization_generation(before.materialization_generation_id)
+            if static_source else uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id))==abandoned
 
 
 @pytest.mark.asyncio

@@ -466,9 +466,19 @@ async def coordinate_selection_materialization_once(
                 if owner is not None and control is not None and control.pending_selection_mode is SelectionMode.STATIC_BASELINE and control.pending_authorization_id is not None:
                     pending_id = GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id)
                     paused_static = await uow.instrument_selection.get_generic_static_materialization_generation(pending_id,for_update=True)
-                    if paused_static is not None and paused_static.lifecycle_state in {MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                    if paused_static is not None and paused_static.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED,
+                        MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
                         paused_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                             strategy_group_id=request.strategy_group_id,selection_spec_id=paused_static.selection_spec_id,for_update=True)
+                        if paused_vacuum is None and paused_static.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}:
+                            paused_vacuum = await uow.instrument_selection.open_owner_paused_entry_vacuum(StrategyEntryVacuum(
+                                entry_vacuum_id="vacuum:owner-pause:"+pending_id,
+                                strategy_group_id=request.strategy_group_id,selection_spec_id=paused_static.selection_spec_id,
+                                period_anchor_ms=paused_static.effective_period_anchor_ms,source_generation_id=None,
+                                state=StrategyEntryVacuumState.OPEN,fenced_at_ms=now_ms,drained_at_ms=None,
+                                resolved_at_ms=None,first_blocker="OWNER_PAUSED",projection_version=1))
+                        if paused_vacuum is not None and paused_vacuum.state is StrategyEntryVacuumState.OPEN and paused_vacuum.first_blocker=="OWNER_PAUSED":
+                            paused_vacuum = await uow.instrument_selection.mark_entry_vacuum_draining(paused_vacuum,started_at_ms=now_ms)
                         if paused_vacuum is None:
                             return _blocked("OWNER_PAUSED_VACUUM_MISSING")
                         await _abandon_generation_targets(uow=uow,generation_id=pending_id,reason_code="owner_paused",attempted_at_ms=now_ms)
@@ -477,7 +487,7 @@ async def coordinate_selection_materialization_once(
                     elif paused_static is not None and paused_static.lifecycle_state is MaterializationGenerationState.ABANDONED:
                         paused_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                             strategy_group_id=request.strategy_group_id,selection_spec_id=paused_static.selection_spec_id,for_update=True)
-                        if paused_vacuum is not None and paused_vacuum.source_generation_id==pending_id and (
+                        if paused_vacuum is not None and paused_vacuum.source_generation_id in {None,pending_id} and (
                             paused_vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY and paused_vacuum.first_blocker=="OWNER_PAUSED"):
                             await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
                                 strategy_group_id=request.strategy_group_id,selection_spec_id=paused_static.selection_spec_id,now_ms=now_ms))

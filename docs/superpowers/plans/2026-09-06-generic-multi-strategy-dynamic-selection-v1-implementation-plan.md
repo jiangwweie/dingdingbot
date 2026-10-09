@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮Static unfenced Pause末版回归：early/draining/正式Static链52 passed；SOR materialization/ENTRY Vacuum/既有Full-chain193 passed；Unit/Architecture1327 passed、Mypy160 files、文档25 passed、Ruff/diff通过。集合重叠不合计，非exact R4。
+
+2026-10-09Static未围栏Owner Pause增量（基于`5de58b6f`，GS-08关联）：已有Dynamic early-pause矩阵扩展到正式Owner Static intent创建的PENDING/DESIRED Generation，四策略Static八分支RED复现仍可行动。Static Coordinator现与Dynamic共用原Owner-created OPEN Vacuum、mark_entry_vacuum_draining及abandon_generation_for_owner_pause，不新增取消表/队列或来源；旧Static intent终态ABANDONED、terminal time/lease清理，Generation.fenced_at仍NULL，不伪造已materialize。下一同Coordinator tick允许generation-free Owner-paused drain完成且保持fence/Current/Authority；仅OwnerPause持有负向权限，没有fallback/grant。Dynamic/Static×PENDING/DESIRED×四策略16分支PASS，语义digest/原Universe与Authority/零目标均保全。此处仍为无Ticket场景；generation-free Pause后的新Owner Static授权、Dynamic最新Selection恢复/空集、prepared/sent/unknown/partial交叉仍需闭合。全为Docker PG，无生产修改，GS-04～09未Done、非exact R4。
+
 本轮unfenced Pause末版回归：未围栏Pause/DRAINING Pause/Generic activation32 passed；SOR materialization/ENTRY Vacuum142 passed；Unit/Architecture1327 passed、Mypy160 files、Ruff/diff、文档25 passed。集合重叠不合计，不构成exact R4。
 
 2026-10-09Generic未围栏请求Owner Pause增量（基于`f930f030`，GS-08关联）：四策略真实后续Generation处于PENDING/DESIRED时正式Owner Pause，RED复现旧请求仍可行动。Dynamic Coordinator现复用Owner已开的OPEN Vacuum（没有才沿原Owner Pause边界创建），推进原drain状态，再沿既有shared abandon函数终态ABANDONED并清lease；Generation没有materialization fenced_at，不伪装进入warming。后续同tick入口对ABANDONED且Owner-paused的generation-free Vacuum完成无单drain，保持原Vacuum/fence，旧Current/Authority及目标列表不变、不grant。初版误用不存在的drain方法名及仅处理新建Vacuum，按实际mark_entry_vacuum_draining接口和Owner Pause已有OPEN事实修复。共享成功夹具中原临时raw Pause/re-enable会与新终态语义冲突，改为独立savepoint全回滚的negative probe；正式Pause→恢复测试仍单独验收，不绕过真实Owner状态。四策略×两状态8分支PASS、源码Mypy160 files、Ruff/diff及Unit/Architecture1327 passed；现有无单DRAINING/Static恢复相邻重验。仍缺Static未围栏取消、generation-free OwnerPaused Vacuum在resume后的合法supersession、新ENTRY/有单交叉，不标GS-04～09 Done或exact R4。全部Docker PG，无生产修改。
