@@ -1888,10 +1888,10 @@ class InstrumentSelectionRepository(Protocol):
     async def abandon_generation_for_owner_pause(
         self,
         *,
-        generation: MaterializationGeneration,
+        generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration,
         vacuum: StrategyEntryVacuum,
         paused_at_ms: int,
-    ) -> MaterializationGeneration: ...
+    ) -> MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration: ...
 
     async def get_materialization_generation(
         self,

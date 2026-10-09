@@ -3861,10 +3861,10 @@ class PostgresInstrumentSelectionRepository:
     async def abandon_generation_for_owner_pause(
         self,
         *,
-        generation: MaterializationGeneration,
+        generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration,
         vacuum: StrategyEntryVacuum,
         paused_at_ms: int,
-    ) -> MaterializationGeneration:
+    ) -> MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration:
         if generation.lifecycle_state not in {
             MaterializationGenerationState.PENDING,
             MaterializationGenerationState.DESIRED,
@@ -3906,10 +3906,25 @@ class PostgresInstrumentSelectionRepository:
             )
         if not valid_vacuum:
             raise ValueError("Owner Pause requires the exact open Generation fence")
-        locked_generation = await self.get_materialization_generation(
-            generation.materialization_generation_id,
-            for_update=True,
-        )
+        locked_generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
+        if isinstance(generation,(GenericMaterializationGeneration,GenericStaticMaterializationGeneration)):
+            owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+                strategy_entry_controls_current.c.strategy_group_id==generation.strategy_group_id).with_for_update())).mappings().one_or_none()
+            now = await self.read_authority_clock_ms()
+            if owner is None or owner["entry_state"]!="paused" or not generation.created_at_ms<=paused_at_ms<=now:
+                raise SelectionJobConflict("Generic abandonment requires current Owner Pause")
+            if isinstance(generation,GenericStaticMaterializationGeneration):
+                locked_generation = await self.get_generic_static_materialization_generation(generation.materialization_generation_id,for_update=True)
+            else:
+                locked_generation = await self.get_generic_materialization_generation(generation.materialization_generation_id,for_update=True)
+            unfinished_target = await self._connection.scalar(sa.select(strategy_universe_versions.c.universe_version_id).where(
+                strategy_universe_versions.c.materialization_generation_id==generation.materialization_generation_id,
+                strategy_universe_versions.c.lifecycle_state!="abandoned").limit(1))
+            if unfinished_target is not None:
+                raise SelectionJobConflict("Generic Owner Pause requires abandoned targets")
+        else:
+            locked_generation = await self.get_materialization_generation(
+                generation.materialization_generation_id,for_update=True)
         locked_vacuum = await self.get_current_entry_vacuum(
             strategy_group_id=vacuum.strategy_group_id,
             selection_spec_id=vacuum.selection_spec_id,
@@ -3922,11 +3937,13 @@ class PostgresInstrumentSelectionRepository:
             first_blocker="OWNER_PAUSED",
             failed_at_ms=paused_at_ms,
         )
-        abandoned = MaterializationGeneration.model_validate(
+        abandoned = type(generation).model_validate(
             generation.model_copy(
                 update={
                     "lifecycle_state": MaterializationGenerationState.ABANDONED,
                     "projection_version": generation.projection_version + 1,
+                    **({"terminal_at_ms":paused_at_ms,"lease_owner":None,"lease_expires_at_ms":None}
+                        if isinstance(generation,(GenericMaterializationGeneration,GenericStaticMaterializationGeneration)) else {}),
                 }
             ).model_dump()
         )

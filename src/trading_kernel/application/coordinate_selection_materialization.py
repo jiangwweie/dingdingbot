@@ -463,6 +463,17 @@ async def coordinate_selection_materialization_once(
             owner = await uow.owner_controls.get_strategy_control(request.strategy_group_id,for_update=True)
             control = await uow.instrument_selection.get_selection_control(request.strategy_group_id,for_update=True)
             if owner is None or owner.entry_state is StrategyEntryState.PAUSED:
+                if owner is not None and control is not None and control.pending_selection_mode is SelectionMode.STATIC_BASELINE and control.pending_authorization_id is not None:
+                    pending_id = GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id)
+                    paused_static = await uow.instrument_selection.get_generic_static_materialization_generation(pending_id,for_update=True)
+                    if paused_static is not None and paused_static.lifecycle_state in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                        paused_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                            strategy_group_id=request.strategy_group_id,selection_spec_id=paused_static.selection_spec_id,for_update=True)
+                        if paused_vacuum is None:
+                            return _blocked("OWNER_PAUSED_VACUUM_MISSING")
+                        await _abandon_generation_targets(uow=uow,generation_id=pending_id,reason_code="owner_paused",attempted_at_ms=now_ms)
+                        await uow.instrument_selection.abandon_generation_for_owner_pause(
+                            generation=paused_static,vacuum=paused_vacuum,paused_at_ms=now_ms)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED)
             if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is None:
                 active_static_spec = await uow.instrument_selection.get_generic_spec(control.selection_spec_id)
@@ -493,6 +504,8 @@ async def coordinate_selection_materialization_once(
                     materialization_generation_id=gid,entry_vacuum_id=None if failed_static_vacuum is None else failed_static_vacuum.entry_vacuum_id,
                     reason_code=(failed_static_vacuum.first_blocker if failed_static_vacuum is not None
                         and failed_static_vacuum.source_generation_id==gid else "GENERIC_STATIC_RECOVERY_REQUIRED"))
+            if existing_static.lifecycle_state is MaterializationGenerationState.ABANDONED:
+                return _blocked("GENERIC_STATIC_RECOVERY_REQUIRED")
             claimed_static = await uow.instrument_selection.claim_generic_static_materialization_generation(gid,
                 worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
             if claimed_static is None:
@@ -1674,6 +1687,15 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         if owner is None:
             return _blocked("MATERIALIZATION_CONTROL_MISSING")
         if owner.entry_state is StrategyEntryState.PAUSED:
+            if initial.lifecycle_state in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
+                if vacuum is None:
+                    return _blocked("OWNER_PAUSED_VACUUM_MISSING")
+                await _abandon_generation_targets(uow=uow,generation_id=initial.materialization_generation_id,
+                    reason_code="owner_paused",attempted_at_ms=now_ms)
+                await uow.instrument_selection.abandon_generation_for_owner_pause(
+                    generation=initial,vacuum=vacuum,paused_at_ms=now_ms)
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
                 materialization_generation_id=initial.materialization_generation_id)
         if initial.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
