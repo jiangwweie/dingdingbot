@@ -6913,7 +6913,8 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection"])
+@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
+    *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000))])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -7471,7 +7472,8 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}
+    delayed_static = fault_stage is not None and fault_stage.startswith("static_slow_normal_after_protection:")
+    assert delayed_static or fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}
     if fault_stage in {"between_claim_ticket","switch_between_claim_ticket"}:
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -7707,11 +7709,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert protected.initial_stop_exchange_order_id is not None
     assert protected.tp1_exchange_order_id is not None
     exit_offset = 400
-    if fault_stage in {"static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}:
+    if delayed_static or fault_stage in {"static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}:
         static_at = await _cutover_static_with_protected_ticket(database,group=group,ticket=ticket,at_ms=now_ms+350,
             timeout=fault_stage=="static_timeout_after_protection",
-            continuous=fault_stage in {"static_normal_after_protection","static_close_boundary_after_protection"},
-            close_failure=fault_stage=="static_close_boundary_after_protection")
+            continuous=delayed_static or fault_stage in {"static_normal_after_protection","static_close_boundary_after_protection"},
+            close_failure=fault_stage=="static_close_boundary_after_protection",normal_delay_ms=int(fault_stage.rsplit(":",1)[1]) if delayed_static else 0)
         static_cutover_finished = True
         exit_offset = static_at-now_ms+400
     if fault_stage == "valid_empty_after_protection":
@@ -7901,7 +7903,7 @@ async def test_recovered_entry_dispatch_rejects_changed_rebase_before_venue_call
     await _exercise_generic_generation(database,"CPM-RO-001",False,failure_case="timeout_then_prepare_dispatch_refusal",first_activation=True)
 
 
-async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_ms, timeout=False, continuous=False,close_failure=False):
+async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_ms, timeout=False, continuous=False,close_failure=False,normal_delay_ms=0):
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateGenericStaticRequest,
     )
@@ -7950,8 +7952,10 @@ async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_m
         assert continued.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY, continued
     request = CoordinateGenericStaticRequest(strategy_group_id=group,worker_id="protected-static-materializer")
     due = anchor+2*HOUR-10 if close_failure else anchor+HOUR+1
+    staged_for_delay = False
+    staged_fence = None
     for offset in range(12):
-        tick = due+offset
+        tick = due+offset+(normal_delay_ms if staged_for_delay else 0)
         if close_failure:
             async with PostgresKernelUnitOfWork(database) as uow:
                 pending = await uow.instrument_selection.get_generic_static_materialization_generation(
@@ -7987,6 +7991,10 @@ async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_m
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
             outcome = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
                 request=request,clock_ms=lambda tick=tick:tick)
+        if normal_delay_ms and outcome.disposition is MaterializationDisposition.GENERATION_STAGED:
+            staged_for_delay = True
+            async with PostgresKernelUnitOfWork(database) as uow:
+                staged_fence = (await uow.instrument_selection.get_generic_static_materialization_generation(outcome.materialization_generation_id)).fenced_at_ms
         async with PostgresKernelUnitOfWork(database) as uow:
             assert await uow.tickets.get(ticket_id)==frozen
             assert await uow.aggregates.get(ticket_id)==before
@@ -8046,6 +8054,10 @@ async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_m
             assert proof.first_eligible_close_time_ms==anchor+HOUR and proof.first_eligible_close_time_ms<proof.prepared_at_ms
             assert proof.comparison_rebase_required and not proof.episode_rebase_required
             assert proof.source_selection_authority_id==continued.selection_authority_id
+            if normal_delay_ms:
+                assert proof.prepared_at_ms-proof.first_eligible_close_time_ms>=normal_delay_ms
+                assert proof.materialization_started_at_ms==staged_fence==proof.fenced_at_ms
+                assert proof.prepared_at_ms<staged_fence+spec.materialization_timeout_ms
     if continuous:
         close = proof.first_eligible_close_time_ms
         template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
