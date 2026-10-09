@@ -465,7 +465,9 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 
 
 def test_runtime_identity_points_to_current_schema_head() -> None:
-    assert CURRENT_SCHEMA_REVISION == "0007_exit_profile_authority_v1"
+    # HEAD_REVISION in this historical fixture is its frozen 0003 target,
+    # not the current runtime identity used by head-schema tests.
+    assert CURRENT_SCHEMA_REVISION == "0008_generic_dynamic_selection_v1"
 
 
 def test_alembic_has_one_exact_current_head() -> None:

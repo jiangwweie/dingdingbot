@@ -266,11 +266,12 @@ async def _seed_active_signal_authority(conn: asyncpg.Connection) -> None:
             certification, updated_at_ms
         ) VALUES (
             'strategy_signal_ingest', true, 'commit-test',
-            '0007_exit_profile_authority_v1', '{}'::jsonb, 1000
+            '__CURRENT_SCHEMA_REVISION__', '{}'::jsonb, 1000
         )
         """
     await conn.execute(
         statement.replace("$1", f"'{DIGEST_A}'").replace("$2", f"'{DIGEST_B}'")
+        .replace("__CURRENT_SCHEMA_REVISION__",CURRENT_SCHEMA_REVISION)
     )
 
 
