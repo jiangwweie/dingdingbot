@@ -19,6 +19,8 @@ from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
     MaterializationGenerationClaimStatus,
     MaterializationGenerationState,
+    SelectionControl,
+    SelectionMode,
     selected_member_set_digest,
 )
 
@@ -373,6 +375,16 @@ class GenericStaticActivationProof(BaseModel):
     def recovery_id(self) -> str:
         return "recovery:static:"+canonical_digest({"generation":self.materialization_generation_id,
             "version":self.result_selection_control_version})[7:]
+
+    def permits_static_control(self, control: SelectionControl) -> bool:
+        if control.selection_mode is not SelectionMode.STATIC_BASELINE or control.selection_spec_id!=self.selection_spec_id or (
+            control.rollback_baseline_id!=self.rollback_baseline_id):
+            return False
+        if control.pending_selection_mode is None:
+            return control.selection_epoch_id is None and control.control_version==self.result_selection_control_version
+        return (control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and control.pending_authorization_id is not None
+            and control.pending_effective_period_anchor_ms is not None and control.selection_epoch_id is not None
+            and control.control_version==self.result_selection_control_version+1)
 
     @property
     def semantic_digest(self) -> str:

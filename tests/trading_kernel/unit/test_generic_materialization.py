@@ -164,6 +164,19 @@ def test_static_activation_proof_keeps_normal_and_recovery_close_rules_distinct(
     assert proof.episode_rebase_required is (rule=="RECOVERY_TRANSITION")
     assert proof.comparison_rebase_required is comparative
     assert proof.result_selection_control_version == 4
+    from src.trading_kernel.domain.selection_authority import SelectionControl
+    static_control = SelectionControl(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,
+        selection_mode="static_baseline",selection_epoch_id=None,control_version=4,
+        rollback_baseline_id=proof.rollback_baseline_id,
+        pending_selection_mode=None,pending_authorization_id=None,pending_effective_period_anchor_ms=None,updated_at_ms=at)
+    assert proof.permits_static_control(static_control)
+    pending = SelectionControl.model_validate({**static_control.model_dump(),"control_version":5,
+        "selection_epoch_id":"epoch:next","pending_selection_mode":"dynamic_selection",
+        "pending_authorization_id":"owner:next","pending_effective_period_anchor_ms":CUTOFF+spec.cadence_hours*HOUR})
+    assert proof.permits_static_control(pending)
+    for wrong in ({"control_version":6},{"rollback_baseline_id":"rollback-baseline:"+"b"*64},
+        {"selection_mode":"dynamic_selection"}):
+        assert not proof.permits_static_control(SelectionControl.model_validate({**pending.model_dump(),**wrong}))
     wrong_close = CUTOFF+HOUR if rule=="RECOVERY_TRANSITION" else CUTOFF+2*HOUR
     with pytest.raises(ValueError,match="close"):
         GenericStaticActivationProof.model_validate({**proof.model_dump(),"first_eligible_close_time_ms":wrong_close})

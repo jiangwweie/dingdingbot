@@ -530,7 +530,7 @@ async def _resolve_generic_selection_authority(
     if control.selection_mode is SelectionMode.STATIC_BASELINE and birth_selection_authority_id is None:
         static_proof = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(runtime_scope.universe_version_id)
         if static_proof is not None:
-            if control.selection_epoch_id is not None or control.control_version!=static_proof.result_selection_control_version or (
+            if not static_proof.permits_static_control(control) or (
                 runtime_scope.event_spec_id!=static_proof.target_event.event_spec_id
                 or runtime_scope.position_side!=static_proof.target_event.position_side):
                 return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"static_activation_control_changed")

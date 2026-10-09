@@ -492,8 +492,7 @@ class PostgresSignalRepository:
         policy = (await self._connection.execute(sa.select(owner_policy_current).where(
             owner_policy_current.c.owner_policy_id==scope.owner_policy_id))).mappings().one_or_none()
         if owner is None or owner.entry_state.value!="enabled" or control is None or (
-            control.selection_mode.value!="static_baseline" or control.selection_epoch_id is not None
-            or control.control_version!=proof.result_selection_control_version
+            not proof.permits_static_control(control)
             or actual is None or actual.universe_version_id!=scope.universe_version_id
             or policy is None or not policy["enabled"] or not policy["new_entry_submit_enabled"]
             or observed_at_ms<proof.first_eligible_close_time_ms or observed_at_ms!=now//3_600_000*3_600_000):
