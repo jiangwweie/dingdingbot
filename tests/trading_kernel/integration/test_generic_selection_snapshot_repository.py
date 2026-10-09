@@ -5,6 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
@@ -213,6 +214,73 @@ async def _install_static_selection_source(database: AsyncEngine, group: str):
                 "INSERT INTO brc_comparison_binding_current VALUES(:event,:id,0,:uid)"
             ),{"event":spec.event_spec_id,"id":comparison_id,"uid":uid})
     return uid,comparison_id
+
+
+async def _apply_owner_control_grants(database: AsyncEngine) -> None:
+    role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
+    grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]
+    async with database.begin() as conn:
+        role_exists=await conn.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_control')"))
+        if not role_exists:
+            await conn.execute(sa.text("CREATE ROLE brc_owner_control NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"))
+        for statement in grants.split(";"):
+            if statement.strip():
+                await conn.execute(sa.text(statement))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_formal_generic_owner_role_can_capture_baseline_without_runtime_write_authority(database: AsyncEngine,group: str) -> None:
+    await _install_static_selection_source(database,group)
+    await _apply_owner_control_grants(database)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+        result=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="formal_role_baseline_capture",idempotency_key=f"role:baseline:{group}",owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")
+        assert result.rollback_baseline_id is not None and result.pending_selection_mode.value=="dynamic_selection"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines WHERE strategy_group_id=:group"),{"group":group})==1
+        for table in ("brc_strategy_universe_current","brc_comparison_binding_current","brc_strategy_universe_materialization_generations","brc_selection_authority_current"):
+            assert not await conn.scalar(sa.text("SELECT has_table_privilege('brc_owner_control',:table,'UPDATE')"),{"table":table})
+        function=(await conn.execute(sa.text("SELECT prosecdef,proconfig,prosrc FROM pg_proc WHERE oid='brc_lock_owner_static_selection_source_v1(text)'::regprocedure"))).mappings().one()
+        assert function["prosecdef"] and function["proconfig"]==["search_path=pg_catalog, public"]
+        assert "INSERT" not in function["prosrc"] and "DELETE" not in function["prosrc"]
+        assert function["prosrc"].count("FOR UPDATE")==2
+        for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_trade_tickets","brc_exchange_commands"):
+            assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+        assert await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="formal_role_baseline_capture",idempotency_key=f"role:baseline:{group}",owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")==result
+    with pytest.raises(sa.exc.DBAPIError,match="uncaptured Static Control"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+            await conn.execute(sa.text("SELECT brc_lock_owner_static_selection_source_v1(:spec)"),{"spec":inputs(group).spec.selection_spec_id})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_formal_generic_owner_pause_opens_vacuum_without_resolution_authority(database: AsyncEngine,group: str) -> None:
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    await _install_static_selection_source(database,group)
+    await _apply_owner_control_grants(database)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+        paused=await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=1,reason="formal_role_pause",idempotency_key=f"role:pause:{group}",owner_identity="owner",now_ms=CUTOFF+1),authentication_strength="totp_step_up")
+        assert paused.entry_state is StrategyEntryState.PAUSED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=inputs(group).spec.selection_spec_id)
+        assert vacuum is not None and vacuum.state.value=="OPEN" and vacuum.first_blocker=="OWNER_PAUSED"
+        assert await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id) is None
+    async with database.connect() as conn:
+        assert not await conn.scalar(sa.text("SELECT has_table_privilege('brc_owner_control','brc_strategy_entry_vacuums_current','UPDATE')"))
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
 
 
 @pytest.mark.asyncio
@@ -977,7 +1045,8 @@ async def test_future_static_schedule_preserves_prior_period_continuity(database
     for failure in (None,"timeout","owner_action","pause","pause_staged")
 ] + [pytest.param(group,None,fault,id=f"second_epoch_{fault}_{group}")
     for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")
-    for fault in ("before_dispatch","entry_rejected","entry_unknown","real_pause_drain:unknown_recover","real_pause_drain:partial_recover")])
+    for fault in ("before_dispatch","entry_rejected","entry_unknown","real_pause_drain:unknown_recover","real_pause_drain:partial_recover")]
+  + [pytest.param(group,"timeout","owner_retry_role",id=f"owner_retry_role_{group}") for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")])
 async def test_due_static_owner_intent_creates_exact_generation_not_selection_snapshot(
     database: AsyncEngine, group: str, failure_case: str | None, second_entry_fault: str | None,
 ) -> None:
@@ -1275,7 +1344,7 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state='warming'")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=failed_at+2,
-            fail_retries=1 if failure_case=="timeout" else 0)
+            fail_retries=1 if failure_case=="timeout" else 0,owner_role=second_entry_fault=="owner_retry_role")
         return
     await make_warming_ready(database,universe_version_id=target_uid,warm_closed_bar_time_ms=anchor+HOUR,
         valid_until_ms=due+HOUR)
@@ -1986,6 +2055,9 @@ async def test_generic_vacuum_roundtrips_hourly_period(database: AsyncEngine, gr
         source_generation_id=None,state="OPEN",fenced_at_ms=CUTOFF+HOUR+1,
         drained_at_ms=None,resolved_at_ms=None,first_blocker="OWNER_PAUSED",projection_version=1)
     async with PostgresKernelUnitOfWork(database) as uow:
+        # Storage roundtrip prerequisite; formal Owner Pause has separate role/full-chain coverage.
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id=:group"),{"group":group})
         await uow.instrument_selection.open_owner_paused_entry_vacuum(vacuum)
     async with PostgresKernelUnitOfWork(database) as uow:
         loaded = await uow.instrument_selection.get_current_entry_vacuum(
@@ -8506,7 +8578,7 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         fault_stage=fault_stage)
 
 
-async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms, fail_retries=0):
+async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms, fail_retries=0,owner_role=False):
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
         stage_generic_static_selection_mode,
@@ -8524,6 +8596,8 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
     request = ControlMutationRequest(expected_version=control.control_version,
         reason="retry_terminal_static_intent",idempotency_key=f"retry-static:{group}:{old.authorization_id}",
         owner_identity="owner",now_ms=at_ms)
+    if owner_role:
+        await _apply_owner_control_grants(database)
     for defect in ("version","epoch","baseline","period","step_up","time"):
         async with PostgresKernelUnitOfWork(database) as uow:
             with pytest.raises((OwnerControlBlocked,OwnerControlConflict)):
@@ -8549,6 +8623,8 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
     @asynccontextmanager
     async def interrupted_authorization():
         async with PostgresKernelUnitOfWork(database) as uow:
+            if owner_role:
+                await uow._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
             yield uow
             raise RuntimeError("injected Static reauthorization rollback")
     with pytest.raises(RuntimeError,match="reauthorization rollback"):
@@ -8559,9 +8635,20 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.instrument_selection.get_selection_control(group)==control
         assert await uow.owner_controls.get_authorization_by_idempotency_key(request.idempotency_key) is None
+    if owner_role:
+        async with database.connect() as conn:
+            assert not await conn.scalar(sa.text("SELECT has_table_privilege('brc_owner_control','brc_strategy_universe_materialization_events','INSERT')"))
+            assert not await conn.scalar(sa.text("SELECT has_table_privilege('brc_owner_control','brc_strategy_universe_materialization_generations','UPDATE')"))
+        with pytest.raises(sa.exc.DBAPIError,match="exact new current authorization"):
+            async with database.begin() as conn:
+                await conn.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+                await conn.execute(sa.text("SELECT brc_append_owner_static_reauthorization_v1(:gid,:aid,:at)"),
+                    {"gid":old.materialization_generation_id,"aid":control.pending_authorization_id,"at":at_ms})
     async def authorize(retry_request):
         try:
             async with PostgresKernelUnitOfWork(database) as uow:
+                if owner_role:
+                    await uow._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
                 return await stage_generic_static_selection_mode(uow,strategy_group_id=group,
                     rollback_baseline_id=control.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
                     effective_period_anchor_ms=anchor,request=retry_request,authentication_strength="totp_step_up")
@@ -8590,6 +8677,13 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
             "WHERE materialization_generation_id=:gid AND event_type='OWNER_REAUTHORIZED'"),{"gid":old.materialization_generation_id})).scalars().all()
     assert events==[{"authorization_id":new.pending_authorization_id,
         "effective_period_anchor_ms":anchor,"entry_vacuum_id":vacuum.entry_vacuum_id}]
+    if owner_role:
+        async with database.begin() as conn:
+            await conn.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+            await conn.execute(sa.text("SELECT brc_append_owner_static_reauthorization_v1(:gid,:aid,:at)"),
+                {"gid":old.materialization_generation_id,"aid":new.pending_authorization_id,"at":at_ms})
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='OWNER_REAUTHORIZED'"),{"gid":old.materialization_generation_id})==1
     async with PostgresKernelUnitOfWork(database) as uow:
         with pytest.raises(OwnerControlBlocked,match="already_pending"):
             await stage_generic_static_selection_mode(uow,strategy_group_id=group,

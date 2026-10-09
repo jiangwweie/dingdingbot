@@ -34,8 +34,20 @@ GRANT INSERT ON TABLE
     brc_owner_control_operation_events,
     brc_owner_control_operations_current,
     brc_owner_policy_events,
+    brc_strategy_selection_rollback_baselines,
+    brc_selection_rollback_baseline_events,
+    brc_strategy_entry_vacuums_current,
+    brc_strategy_entry_vacuum_events,
     brc_event_exit_profile_bindings,
     brc_event_exit_profile_binding_events
+TO brc_owner_control;
+
+GRANT EXECUTE ON FUNCTION brc_lock_owner_static_selection_source_v1(text)
+TO brc_owner_control;
+GRANT EXECUTE ON FUNCTION brc_lock_owner_pause_vacuum_v1(text,text)
+TO brc_owner_control;
+GRANT EXECUTE ON FUNCTION brc_lock_owner_static_retry_sources_v1(text,text),
+    brc_append_owner_static_reauthorization_v1(text,text,bigint)
 TO brc_owner_control;
 
 GRANT UPDATE ON TABLE

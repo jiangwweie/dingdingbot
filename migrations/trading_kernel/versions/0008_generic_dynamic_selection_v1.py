@@ -83,7 +83,126 @@ def upgrade() -> None:
     _generic_recovered_activation_commit_guard()
     _generic_gap_continuity_commit_guard()
     _generic_gap_empty_resolution_guard()
+    _owner_static_source_lock()
     _grant_existing_owner_read_roles(bind)
+
+
+def _owner_static_source_lock() -> None:
+    """Owner may lock exact immutable-capture sources, never update runtime pointers."""
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_lock_owner_static_selection_source_v1(spec_id text) RETURNS void
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      DECLARE source_event text;
+      BEGIN
+        SELECT e.event_spec_id INTO source_event FROM public.brc_instrument_selection_specs installed
+          JOIN public.brc_instrument_selection_spec_events e USING(selection_spec_id)
+          JOIN public.brc_strategy_selection_control_current control USING(selection_spec_id)
+          WHERE installed.selection_spec_id=spec_id AND installed.selection_kind='generic_dynamic_v1'
+            AND installed.status='active' AND installed.strategy_group_id=control.strategy_group_id
+            AND control.selection_mode='static_baseline' AND control.pending_selection_mode IS NULL
+            AND control.rollback_baseline_id IS NULL;
+        IF source_event IS NULL THEN RAISE EXCEPTION 'Owner Static source lock requires exact uncaptured Static Control'; END IF;
+        PERFORM 1 FROM public.brc_strategy_universe_current WHERE event_spec_id=source_event FOR UPDATE;
+        PERFORM 1 FROM public.brc_comparison_binding_current WHERE event_spec_id=source_event FOR UPDATE;
+      END; $$
+    """))
+    op.execute(sa.text("REVOKE ALL ON FUNCTION brc_lock_owner_static_selection_source_v1(text) FROM PUBLIC"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_lock_owner_pause_vacuum_v1(group_id text,spec_id text) RETURNS void
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM public.brc_strategy_entry_controls_current owner_control
+          JOIN public.brc_strategy_selection_control_current selection_control USING(strategy_group_id)
+          WHERE owner_control.strategy_group_id=group_id AND owner_control.entry_state='paused'
+            AND selection_control.selection_spec_id=spec_id) THEN
+          RAISE EXCEPTION 'Owner Pause lock requires exact paused selection scope';
+        END IF;
+        PERFORM 1 FROM public.brc_strategy_entry_vacuums_current
+          WHERE strategy_group_id=group_id AND selection_spec_id=spec_id
+            AND state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING','OWNER_PAUSED','SUPERSEDED','FAILED_CLOSED')
+          ORDER BY fenced_at_ms DESC LIMIT 1 FOR UPDATE;
+      END; $$
+    """))
+    op.execute(sa.text("REVOKE ALL ON FUNCTION brc_lock_owner_pause_vacuum_v1(text,text) FROM PUBLIC"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_lock_owner_static_retry_sources_v1(group_id text,spec_id text) RETURNS void
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      DECLARE pending_id text; source_event text; generation_id text;
+      BEGIN
+        SELECT selection_control.pending_authorization_id,e.event_spec_id INTO pending_id,source_event
+          FROM public.brc_strategy_selection_control_current selection_control
+          JOIN public.brc_instrument_selection_specs installed USING(selection_spec_id)
+          JOIN public.brc_instrument_selection_spec_events e USING(selection_spec_id)
+          WHERE selection_control.strategy_group_id=group_id AND selection_control.selection_spec_id=spec_id
+            AND selection_control.selection_mode='dynamic_selection' AND selection_control.pending_selection_mode='static_baseline'
+            AND installed.selection_kind='generic_dynamic_v1' AND installed.status='active';
+        IF pending_id IS NULL THEN RAISE EXCEPTION 'Owner Static retry lock requires exact pending scope'; END IF;
+        generation_id:='generation:' || encode(sha256(convert_to('{"static_authorization":' || to_json(pending_id)::text || '}','UTF8')),'hex');
+        PERFORM 1 FROM public.brc_strategy_universe_materialization_generations WHERE materialization_generation_id=generation_id FOR UPDATE;
+        PERFORM 1 FROM public.brc_strategy_entry_vacuums_current WHERE strategy_group_id=group_id AND selection_spec_id=spec_id
+          AND state IN ('OPEN','DRAINING_ENTRY','RECONFIGURING','RECOVERY_PENDING','OWNER_PAUSED','SUPERSEDED','FAILED_CLOSED')
+          ORDER BY fenced_at_ms DESC LIMIT 1 FOR UPDATE;
+        PERFORM 1 FROM public.brc_strategy_universe_current WHERE event_spec_id=source_event FOR UPDATE;
+        PERFORM 1 FROM public.brc_comparison_binding_current WHERE event_spec_id=source_event FOR UPDATE;
+      END; $$
+    """))
+    op.execute(sa.text("REVOKE ALL ON FUNCTION brc_lock_owner_static_retry_sources_v1(text,text) FROM PUBLIC"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_append_owner_static_reauthorization_v1(gid text,aid text,at_ms bigint) RETURNS void
+      LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+      DECLARE old_generation public.brc_strategy_universe_materialization_generations%ROWTYPE;
+        selection_control public.brc_strategy_selection_control_current%ROWTYPE;
+        owner_proof public.brc_owner_authorizations%ROWTYPE;
+        source_vacuum public.brc_strategy_entry_vacuums_current%ROWTYPE; next_sequence bigint;
+      BEGIN
+        SELECT * INTO old_generation FROM public.brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid FOR UPDATE;
+        IF NOT FOUND OR old_generation.selection_mode<>'static_baseline' OR old_generation.selection_epoch_id='sor-v0'
+          OR old_generation.lifecycle_state NOT IN ('FAILED_CLOSED','ABANDONED') OR old_generation.terminal_at_ms IS NULL THEN
+          RAISE EXCEPTION 'Owner Static reauthorization requires terminal original Generation'; END IF;
+        SELECT * INTO selection_control FROM public.brc_strategy_selection_control_current WHERE strategy_group_id=old_generation.strategy_group_id;
+        SELECT * INTO owner_proof FROM public.brc_owner_authorizations WHERE authorization_id=aid;
+        SELECT * INTO source_vacuum FROM public.brc_strategy_entry_vacuums_current WHERE source_generation_id=gid
+          AND state IN ('RECONFIGURING','OWNER_PAUSED') AND resolved_at_ms IS NULL ORDER BY fenced_at_ms DESC LIMIT 1;
+        IF selection_control.selection_spec_id IS DISTINCT FROM old_generation.selection_spec_id
+          OR selection_control.selection_mode IS DISTINCT FROM 'dynamic_selection'
+          OR selection_control.pending_selection_mode IS DISTINCT FROM 'static_baseline'
+          OR selection_control.pending_authorization_id IS DISTINCT FROM aid
+          OR selection_control.selection_epoch_id IS DISTINCT FROM old_generation.selection_epoch_id
+          OR selection_control.rollback_baseline_id IS DISTINCT FROM old_generation.rollback_baseline_id
+          OR selection_control.control_version IS DISTINCT FROM old_generation.selection_control_version
+          OR selection_control.updated_at_ms IS DISTINCT FROM at_ms
+          OR owner_proof.purpose IS DISTINCT FROM 'selection_mode_change' OR owner_proof.authentication_strength IS DISTINCT FROM 'totp_step_up'
+          OR owner_proof.authorized_at_ms IS DISTINCT FROM at_ms OR at_ms<old_generation.terminal_at_ms
+          OR owner_proof.target_scope IS DISTINCT FROM jsonb_build_object('strategy_group_id',old_generation.strategy_group_id,
+            'selection_spec_id',old_generation.selection_spec_id,'target_selection_mode','static_baseline',
+            'rollback_baseline_id',old_generation.rollback_baseline_id,'selection_epoch_id',old_generation.selection_epoch_id,
+            'effective_period_anchor_ms',selection_control.pending_effective_period_anchor_ms)
+          OR source_vacuum.entry_vacuum_id IS NULL OR source_vacuum.drained_at_ms IS NULL
+          OR source_vacuum.strategy_group_id<>old_generation.strategy_group_id OR source_vacuum.selection_spec_id<>old_generation.selection_spec_id
+          OR NOT EXISTS (SELECT 1 FROM public.brc_strategy_entry_controls_current owner_control
+            WHERE owner_control.strategy_group_id=old_generation.strategy_group_id AND owner_control.entry_state='enabled')
+          OR NOT EXISTS (SELECT 1 FROM public.brc_materialization_generation_event_baselines previous_source
+            JOIN public.brc_strategy_universe_current source_current ON source_current.event_spec_id=previous_source.event_spec_id
+              AND source_current.universe_version_id=previous_source.universe_version_id AND source_current.lifecycle_state='active'
+            WHERE previous_source.materialization_generation_id=gid
+              AND previous_source.member_set_digest=public.brc_selected_universe_member_digest_v1(source_current.universe_version_id)
+              AND (previous_source.comparison_universe_id IS NULL OR EXISTS (
+                SELECT 1 FROM public.brc_comparison_binding_current comparison_current WHERE comparison_current.event_spec_id=previous_source.event_spec_id
+                  AND comparison_current.comparison_universe_id=previous_source.comparison_universe_id
+                  AND comparison_current.comparison_transition_revision=previous_source.comparison_transition_revision)))
+          OR EXISTS (SELECT 1 FROM public.brc_strategy_universe_versions WHERE materialization_generation_id=gid AND lifecycle_state<>'abandoned')
+          OR gid='generation:' || encode(sha256(convert_to('{"static_authorization":' || to_json(aid)::text || '}','UTF8')),'hex') THEN
+          RAISE EXCEPTION 'Owner Static reauthorization requires exact new current authorization and drained source'; END IF;
+        IF EXISTS (SELECT 1 FROM public.brc_strategy_universe_materialization_events
+          WHERE materialization_generation_id=gid AND event_type='OWNER_REAUTHORIZED' AND payload->>'authorization_id'=aid) THEN RETURN; END IF;
+        SELECT coalesce(max(event_sequence),0)+1 INTO next_sequence FROM public.brc_strategy_universe_materialization_events WHERE materialization_generation_id=gid;
+        INSERT INTO public.brc_strategy_universe_materialization_events(materialization_event_id,materialization_generation_id,event_sequence,event_type,payload,occurred_at_ms)
+          VALUES('materialization-event:' || gid || ':' || next_sequence::text,gid,next_sequence,'OWNER_REAUTHORIZED',
+            jsonb_build_object('authorization_id',aid,'effective_period_anchor_ms',selection_control.pending_effective_period_anchor_ms,
+              'entry_vacuum_id',source_vacuum.entry_vacuum_id),at_ms);
+      END; $$
+    """))
+    op.execute(sa.text("REVOKE ALL ON FUNCTION brc_append_owner_static_reauthorization_v1(text,text,bigint) FROM PUBLIC"))
 
 
 def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
@@ -104,6 +223,11 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
             bind.execute(sa.text(
                 f"GRANT SELECT ON TABLE {', '.join(tables)} TO {role}"
             ))
+    if bind.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_control')")):
+        bind.execute(sa.text("GRANT INSERT ON TABLE brc_strategy_selection_rollback_baselines,brc_selection_rollback_baseline_events,brc_strategy_entry_vacuums_current,brc_strategy_entry_vacuum_events TO brc_owner_control"))
+        bind.execute(sa.text("GRANT EXECUTE ON FUNCTION brc_lock_owner_static_selection_source_v1(text) TO brc_owner_control"))
+        bind.execute(sa.text("GRANT EXECUTE ON FUNCTION brc_lock_owner_pause_vacuum_v1(text,text) TO brc_owner_control"))
+        bind.execute(sa.text("GRANT EXECUTE ON FUNCTION brc_lock_owner_static_retry_sources_v1(text,text),brc_append_owner_static_reauthorization_v1(text,text,bigint) TO brc_owner_control"))
 
 
 def _generic_vacuum_owner_resume_proof() -> None:

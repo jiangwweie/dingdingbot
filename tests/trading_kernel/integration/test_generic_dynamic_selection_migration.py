@@ -99,7 +99,7 @@ NEW_OWNER_READ_TABLES = (
 
 
 @pytest.mark.asyncio
-async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> None:
+async def test_0008_grants_owner_fact_inserts_without_runtime_mutation_permissions() -> None:
     admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
     name: str | None = None
     engine: AsyncEngine | None = None
@@ -122,12 +122,19 @@ async def test_0008_grants_new_table_select_only_to_existing_owner_roles() -> No
                     assert await conn.scalar(sa.text(
                         "SELECT has_table_privilege(:role,:table,'SELECT')"
                     ), {"role":role,"table":table}), (role,table)
-                    assert not await conn.scalar(sa.text(
+                    can_insert=await conn.scalar(sa.text(
                         "SELECT has_table_privilege(:role,:table,'INSERT')"
-                    ), {"role":role,"table":table}), (role,table)
+                    ), {"role":role,"table":table})
+                    assert can_insert==(role=="brc_owner_control" and table=="brc_selection_rollback_baseline_events"), (role,table)
                     assert not await conn.scalar(sa.text(
                         "SELECT has_table_privilege(:role,:table,'UPDATE')"
                     ), {"role":role,"table":table}), (role,table)
+                for signature in ("brc_lock_owner_static_selection_source_v1(text)","brc_lock_owner_pause_vacuum_v1(text,text)",
+                                  "brc_lock_owner_static_retry_sources_v1(text,text)","brc_append_owner_static_reauthorization_v1(text,text,bigint)"):
+                    assert await conn.scalar(sa.text("SELECT has_function_privilege(:role,:function,'EXECUTE')"),
+                        {"role":role,"function":signature})==(role=="brc_owner_control")
+                for table in ("brc_strategy_universe_current","brc_comparison_binding_current","brc_strategy_universe_materialization_generations","brc_selection_authority_current","brc_strategy_entry_vacuums_current"):
+                    assert not await conn.scalar(sa.text("SELECT has_table_privilege(:role,:table,'UPDATE')"),{"role":role,"table":table})
     finally:
         if engine is not None:
             await engine.dispose()

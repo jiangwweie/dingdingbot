@@ -501,8 +501,9 @@ async def stage_generic_static_selection_mode(
     if current.pending_selection_mode is not None:
         if current.pending_selection_mode is not SelectionMode.STATIC_BASELINE or current.pending_authorization_id is None:
             raise OwnerControlBlocked("selection_mode_transition_already_pending")
+        await uow.instrument_selection.lock_generic_static_owner_retry_sources(strategy_group_id=strategy_group_id,selection_spec_id=current.selection_spec_id)
         previous = await uow.instrument_selection.get_generic_static_materialization_generation(
-            GenericStaticMaterializationGeneration.id_for_authorization(current.pending_authorization_id),for_update=True)
+            GenericStaticMaterializationGeneration.id_for_authorization(current.pending_authorization_id))
         if previous is None or previous.lifecycle_state not in {MaterializationGenerationState.FAILED_CLOSED,MaterializationGenerationState.ABANDONED}:
             raise OwnerControlBlocked("selection_mode_transition_already_pending")
         replacement_authorization_id = current.pending_authorization_id

@@ -1334,6 +1334,10 @@ class PostgresInstrumentSelectionRepository:
         row = result.mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
 
+    async def lock_generic_static_owner_retry_sources(self, *, strategy_group_id: str, selection_spec_id: str) -> None:
+        await self._connection.execute(sa.text("SELECT brc_lock_owner_static_retry_sources_v1(:group,:spec)"),
+            {"group":strategy_group_id,"spec":selection_spec_id})
+
     async def stage_pending_generic_static_mode(self, *, strategy_group_id: str,
         selection_spec_id: str, selection_epoch_id: str, rollback_baseline_id: str,
         expected_control_version: int, effective_period_anchor_ms: int,
@@ -1346,9 +1350,10 @@ class PostgresInstrumentSelectionRepository:
             owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
                 strategy_entry_controls_current.c.strategy_group_id==strategy_group_id).with_for_update())).mappings().one_or_none()
             control = await self.get_selection_control(strategy_group_id,for_update=True)
+            await self.lock_generic_static_owner_retry_sources(strategy_group_id=strategy_group_id,selection_spec_id=selection_spec_id)
             previous = await self.get_generic_static_materialization_generation(
-                GenericStaticMaterializationGeneration.id_for_authorization(expected_pending_authorization_id),for_update=True)
-            vacuum = await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=selection_spec_id,for_update=True)
+                GenericStaticMaterializationGeneration.id_for_authorization(expected_pending_authorization_id))
+            vacuum = await self.get_current_entry_vacuum(strategy_group_id=strategy_group_id,selection_spec_id=selection_spec_id)
             if control is None or owner is None or owner["entry_state"]!="enabled" or previous is None or (
                 control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
                 or control.pending_authorization_id!=expected_pending_authorization_id
@@ -1366,11 +1371,11 @@ class PostgresInstrumentSelectionRepository:
                 raise SelectionJobConflict("Static reauthorization requires abandoned targets")
             prior = previous.previous_events[0]
             active = (await self._connection.execute(sa.select(strategy_universe_current).where(
-                strategy_universe_current.c.event_spec_id==prior.event_spec_id).with_for_update())).mappings().one_or_none()
+                strategy_universe_current.c.event_spec_id==prior.event_spec_id))).mappings().one_or_none()
             if active is None or active["lifecycle_state"]!="active" or active["universe_version_id"]!=prior.universe_version_id:
                 raise SelectionJobConflict("Static reauthorization previous Universe changed")
             if prior.comparison_universe_id is not None:
-                comparison = await self.get_comparison_universe_binding(prior.event_spec_id,for_update=True)
+                comparison = await self.get_comparison_universe_binding(prior.event_spec_id)
                 if comparison is None or (comparison.comparison_universe_id,comparison.comparison_transition_revision)!=(
                     prior.comparison_universe_id,prior.comparison_transition_revision):
                     raise SelectionJobConflict("Static reauthorization previous comparison changed")
@@ -1403,14 +1408,8 @@ class PostgresInstrumentSelectionRepository:
         if row is not None and expected_pending_authorization_id is not None:
             if previous is None or vacuum is None:
                 raise SelectionJobConflict("Static reauthorization source disappeared")
-            sequence = int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
-                strategy_universe_materialization_events.c.materialization_generation_id==previous.materialization_generation_id)) or 0)+1
-            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
-                materialization_event_id=f"materialization-event:{previous.materialization_generation_id}:{sequence}",
-                materialization_generation_id=previous.materialization_generation_id,event_sequence=sequence,
-                event_type="OWNER_REAUTHORIZED",payload={"authorization_id":authorization_id,
-                    "effective_period_anchor_ms":effective_period_anchor_ms,"entry_vacuum_id":vacuum.entry_vacuum_id},
-                occurred_at_ms=updated_at_ms))
+            await self._connection.execute(sa.text("SELECT brc_append_owner_static_reauthorization_v1(:gid,:aid,:at)"),
+                {"gid":previous.materialization_generation_id,"aid":authorization_id,"at":updated_at_ms})
         return None if row is None else _selection_control_from_row(row)
 
     async def _read_static_baseline_universe(
@@ -1509,9 +1508,13 @@ class PostgresInstrumentSelectionRepository:
         ))
         if previous is not None:
             raise SelectionJobConflict("Generic Static baseline Control linkage is missing")
+        # Lock-only privileged helper avoids granting Owner UPDATE on runtime
+        # Universe/Comparison authority. All reads/writes below stay invoker-bound.
+        await self._connection.execute(sa.text("SELECT brc_lock_owner_static_selection_source_v1(:spec)"),
+            {"spec":selection_spec_id})
         current = (await self._connection.execute(sa.select(strategy_universe_current).where(
             strategy_universe_current.c.event_spec_id == spec.event_spec_id,
-        ).with_for_update(of=strategy_universe_current))).mappings().one_or_none()
+        ))).mappings().one_or_none()
         if current is None or current["lifecycle_state"] != "active" or current["activated_at_ms"] > captured_at_ms:
             raise SelectionJobConflict("Generic Static baseline source is missing or not active")
         universe = await self._read_static_baseline_universe(
@@ -1521,7 +1524,7 @@ class PostgresInstrumentSelectionRepository:
             or universe.semantic_digest != current["semantic_digest"]
             or universe.installed_at_ms > captured_at_ms):
             raise SelectionJobConflict("Generic Static source current pointer differs")
-        comparison = await self.get_comparison_universe_binding(spec.event_spec_id,for_update=True)
+        comparison = await self.get_comparison_universe_binding(spec.event_spec_id)
         if spec.strategy_group_id in {"MPG-001","MI-001"} and (
             comparison is None or comparison.source_static_universe_version_id != universe.universe_version_id
             or comparison.exchange_instrument_ids != universe.exchange_instrument_ids
@@ -5645,10 +5648,11 @@ class PostgresInstrumentSelectionRepository:
             or vacuum.first_blocker != "OWNER_PAUSED"
         ):
             raise ValueError("Owner Pause requires an open generation-free Vacuum")
+        await self._connection.execute(sa.text("SELECT brc_lock_owner_pause_vacuum_v1(:group,:spec)"),
+            {"group":vacuum.strategy_group_id,"spec":vacuum.selection_spec_id})
         existing = await self.get_current_entry_vacuum(
             strategy_group_id=vacuum.strategy_group_id,
             selection_spec_id=vacuum.selection_spec_id,
-            for_update=True,
         )
         if existing is not None:
             return existing
