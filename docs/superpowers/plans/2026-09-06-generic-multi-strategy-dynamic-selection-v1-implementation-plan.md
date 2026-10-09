@@ -67,6 +67,10 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 
 #### 2026-10-09逐卡验收审计（替代下方早期表格的当前缺口解释）
 
+本轮paused非空末版验证：32分支包含篡改handoff来源的独立SQL拒绝、rollback、same/different-current与连续接管，32 passed；与warming/staged EMPTY组合40 passed（重叠不相加）。Generic migration/SOR materialization/ENTRY Vacuum完整三模块163 passed、Full-chain51 passed、Unit/Architecture1327 passed、Mypy161 files、document authority25 passed、Ruff/diff通过。无skip，但不是末版完整Generic模块或exact R4；逐卡未完成状态不变。
+
+2026-10-10 paused warming/staged非空接管增量（基于`5d94136e`）：四策略正式Dynamic→第二Generation warming/staged→Owner Pause回收→正式TOTP Resume→最新非空Snapshot接管原Vacuum；旧Generation保持ABANDONED，目标保持abandoned，原fence/drain时间不重置，新目标独立deadline。恢复proof以OWNER_PAUSE标记该来源并沿future-close-only+rebase，不使用NORMAL追认过去close。原Authority的Owner version保留历史值，只有同Vacuum已完成drain、精确ABANDONED/OwnerPause事实、当前resume与其前一pause的连续control version、正式授权及当前历史source完整匹配，才允许新Recovery Authority使用当前Owner version；不修改历史Authority。独立SQL BEFORE guard校验latest nonempty Desired及handoff来源；恢复proof函数再次核验，伪造source/未来resume/旧Owner version拒绝。测试扩展same/different-current名单、warming/staged、pause/no-pause与连续第二次接管，共32分支，初版先复现BLOCKED后补齐正式链；末版篡改materialization handoff metadata攻击及相关EMPTY回归正在执行，结果以随后追加证据为准。Full-chain51 passed、Unit/Architecture1327 passed、源码+0008 Mypy161 files、Ruff/diff通过。generation-free/DRAINING非空恢复、有真实ENTRY的pause交叉、positive activation并发与卡级认证仍未闭合；GS-04～09未Done、非exact R4，无生产修改。
+
 2026-10-10 EMPTY接管末版验证：Generic/历史SOR migration、SOR materialization、ENTRY Vacuum四模块完整组合168 passed（修正前167 passed+1 frozen-schema fixture FAIL）；warming/staged pause→resume→EMPTY包含两类独立SQL攻击、rollback和终态重复请求same Authority ID，末版8 passed。generation-free pause/authority-gap EMPTY相关组合26 passed与本组重叠，不相加。Full-chain51 passed、Unit/Architecture1327 passed、源码与0008 Mypy161 files、document authority25 passed、Ruff/diff通过。此为局部修复证据，不是GS-04～09整卡认证或exact R4。
 
 以下审计基于tracked source与正式入口tests，不把测试名或历史PASS摘要直接提升为Done。GS-04～09的本地卡级验收与GS-10～13的hosting/API/soak/最终R4交付分开，后者仍在完整计划内。

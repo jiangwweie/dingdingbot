@@ -5905,8 +5905,9 @@ async def test_latest_nonempty_snapshot_takes_over_early_generation_after_drain(
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 @pytest.mark.parametrize("restore_current_members", [False, True])
 @pytest.mark.parametrize("staged_old_target", [False, True])
+@pytest.mark.parametrize("pause_before_takeover", [False, True])
 async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
-    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool,
+    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool, pause_before_takeover: bool,
 ) -> None:
     source, first_snapshot, _, active_uid = await _exercise_generic_generation(
         database, group, False, durable=True, first_activation=True, natural_selection=True)
@@ -5973,6 +5974,27 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
                 uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request,
                 clock_ms=lambda: stage_at)
         assert staged.disposition is MaterializationDisposition.GENERATION_STAGED, staged
+    if pause_before_takeover:
+        from src.trading_kernel.application.owner_control import (
+            set_strategy_entry_state,
+        )
+        from src.trading_kernel.domain.owner_control import StrategyEntryState
+        for offset,state in ((21,StrategyEntryState.PAUSED),(23,StrategyEntryState.ENABLED)):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                owner=await uow.owner_controls.get_strategy_control(group)
+                await set_strategy_entry_state(uow,strategy_group_id=group,target_state=state,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="paused_nonempty_takeover",
+                        idempotency_key=f"paused-nonempty:{group}:{restore_current_members}:{staged_old_target}:{offset}",
+                        owner_identity="owner",now_ms=second.effective_from_ms+offset),authentication_strength="totp_step_up")
+            if state is StrategyEntryState.PAUSED:
+                paused_at=second.effective_from_ms+22
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=paused_at)):
+                    paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda paused_at=paused_at:paused_at)
+                assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    old=await uow.instrument_selection.get_generic_materialization_generation(old_id)
+                    original_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+                assert old.lifecycle_state.value=="ABANDONED" and original_vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
     newest_source = next_input(source if restore_current_members else second_source)
     if restore_current_members:
         # Restore the first selection's geometry at the third period, not a SQL member edit.
@@ -5999,6 +6021,18 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
         new=AsyncMock(return_value=at)), pytest.raises(RuntimeError, match="supersession rollback"):
         await coordinate_selection_materialization_once(uow_factory=interrupted_takeover,
             request=newest_request, clock_ms=lambda: at)
+    if pause_before_takeover:
+        actual_execute=sa.ext.asyncio.AsyncConnection.execute
+        async def corrupt_paused_nonempty_handoff(connection,statement,*args,**kwargs):
+            if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
+                params=statement.compile().params
+                if params.get("event_type")=="MATERIALIZING" and params.get("payload",{}).get("supersedes_generation_id")==old_id:
+                    statement=statement.values(payload={**params["payload"],"supersedes_generation_id":"generation:forged"})
+            return await actual_execute(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_paused_nonempty_handoff), pytest.raises(
+                sa.exc.DBAPIError,match="Owner Pause nonempty handoff requires exact"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=newest_request,clock_ms=lambda:at)
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id) == original_vacuum
@@ -6018,7 +6052,9 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
             strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
         authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         active = await uow.strategy_universes.get_current(source.spec.event_spec_id)
-    assert retired is not None and retired.lifecycle_state.value == "SUPERSEDED"
+    assert retired is not None and retired.lifecycle_state.value == ("ABANDONED" if pause_before_takeover else "SUPERSEDED")
+    if pause_before_takeover:
+        assert retired==old
     assert all(target.lifecycle_state.value == "abandoned" for target in targets)
     assert replacement is not None and replacement.selection_snapshot_id == newest.selection_snapshot_id
     assert replacement.previous_events == old.previous_events
@@ -6089,6 +6125,16 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
     assert proof.first_eligible_close_time_ms > proof.committed_at_ms
     assert proof.episode_rebase_required is True
     async with database.connect() as conn:
+        if pause_before_takeover:
+            params={"vid":original_vacuum.entry_vacuum_id,"source":original_authority.authority.selection_authority_id,"at":proof.committed_at_ms}
+            assert await conn.scalar(sa.text("SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),params) is True
+            assert await conn.scalar(sa.text("SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+                {**params,"at":second.effective_from_ms+22}) is False
+            assert await conn.scalar(sa.text("SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+                {**params,"source":"authority:forged"}) is False
+            wrong_owner=proof.model_copy(update={"owner_control_version":original_authority.authority.owner_control_version})
+            assert await conn.scalar(sa.text("SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
+                {"proof":wrong_owner.model_dump_json(),"checked_at":proof.committed_at_ms}) is False
         assert await conn.scalar(sa.text(
             "SELECT brc_generic_recovered_activation_proof_matches(CAST(:proof AS jsonb),:checked_at)"),
             {"proof": proof.model_dump_json(), "checked_at": proof.committed_at_ms}) is True

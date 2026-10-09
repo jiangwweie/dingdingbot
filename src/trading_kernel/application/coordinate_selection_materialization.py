@@ -1531,7 +1531,7 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 and prior_vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING
                 and prior_vacuum.first_blocker == "AUTHORITY_GAP")
             if prior_vacuum is not None and (not gap_handoff and (prior_vacuum.source_generation_id is None
-                or prior_vacuum.state is not StrategyEntryVacuumState.RECONFIGURING)
+                or prior_vacuum.state not in {StrategyEntryVacuumState.RECONFIGURING,StrategyEntryVacuumState.OWNER_PAUSED})
                 or prior_vacuum.drained_at_ms is None or (
                     prior_vacuum.period_anchor_ms > snapshot.feature_cutoff_at_ms if gap_handoff
                     else prior_vacuum.period_anchor_ms >= snapshot.feature_cutoff_at_ms)):

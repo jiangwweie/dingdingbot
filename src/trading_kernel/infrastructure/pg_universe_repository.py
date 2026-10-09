@@ -1111,11 +1111,14 @@ class PostgresStrategyUniverseRepository:
             raise UniverseInstallConflict("GENERIC_ACTIVATION_REQUIRES_RECOVERY")
         if recovery_authority is not None and (current_authority is None or current_authority.authority.selection_authority_id!=recovery_authority.recovery_proof.source_selection_authority_id):
             raise UniverseInstallConflict("GENERIC_RECOVERY_SOURCE_AUTHORITY_CHANGED")
+        resumed_source = recovery_authority is not None and current_authority is not None and bool(await self._connection.scalar(sa.text(
+            "SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+            {"vid":vacuum.entry_vacuum_id,"source":current_authority.authority.selection_authority_id,"at":now}))
         if current_authority is not None and (
             current_authority.authority.event_binding.universe_version_id != previous.universe_version_id
             or current_authority.authority.event_binding.member_set_digest != previous.member_set_digest
             or current_authority.authority.selection_epoch_id != authority.selection_epoch_id
-            or current_authority.authority.owner_control_version != authority.owner_control_version
+            or (current_authority.authority.owner_control_version != authority.owner_control_version and not resumed_source)
             or current_authority.authority.comparison_universe_id != previous.comparison_universe_id
             or current_authority.authority.comparison_transition_revision != previous.comparison_transition_revision):
             raise UniverseInstallConflict("GENERIC_PREVIOUS_AUTHORITY_CHANGED")

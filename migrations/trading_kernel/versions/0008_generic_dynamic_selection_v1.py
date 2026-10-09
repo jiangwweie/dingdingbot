@@ -76,6 +76,7 @@ def upgrade() -> None:
     _generic_normal_binding_guard()
     _generic_continuity_commit_guard()
     _generic_static_recovery_proof_function()
+    _generic_vacuum_owner_resume_proof()
     _generic_recovered_activation_proof_function()
     _generic_gap_continuity_proof_function()
     _generic_static_recovery_commit_guard()
@@ -103,6 +104,46 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
             bind.execute(sa.text(
                 f"GRANT SELECT ON TABLE {', '.join(tables)} TO {role}"
             ))
+
+
+def _generic_vacuum_owner_resume_proof() -> None:
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_vacuum_owner_resume_matches(vid text, source_id text, checked_at bigint)
+      RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT EXISTS (
+          SELECT 1 FROM brc_strategy_entry_vacuums_current v
+          JOIN brc_strategy_entry_vacuum_events p ON p.entry_vacuum_id=v.entry_vacuum_id AND p.event_type='OWNER_PAUSED'
+          JOIN brc_strategy_universe_materialization_generations g ON g.materialization_generation_id=p.payload->>'materialization_generation_id'
+          JOIN brc_strategy_universe_materialization_events a ON a.materialization_generation_id=g.materialization_generation_id
+          JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=v.strategy_group_id
+          JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+          JOIN brc_strategy_entry_control_events pause ON pause.strategy_group_id=o.strategy_group_id AND pause.control_version=r.control_version-1
+          JOIN brc_owner_authorizations auth ON auth.authorization_id=r.authorization_id
+          JOIN brc_owner_authorizations pause_auth ON pause_auth.authorization_id=pause.authorization_id
+          JOIN brc_selection_authority_current current_a ON current_a.selection_spec_id=v.selection_spec_id AND current_a.selection_authority_id=source_id
+          JOIN brc_selection_session_authorities src ON src.selection_authority_id=source_id
+          WHERE v.entry_vacuum_id=vid AND v.selection_spec_id<>'sor-dynamic-selection-v0'
+            AND g.selection_mode='dynamic_selection' AND g.lifecycle_state='ABANDONED'
+            AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
+            AND g.selection_epoch_id=src.selection_epoch_id AND g.fenced_at_ms>=v.fenced_at_ms
+            AND g.terminal_at_ms=p.occurred_at_ms AND g.terminal_at_ms>=v.drained_at_ms
+            AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+            AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
+            AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=g.terminal_at_ms AND r.created_at_ms<=checked_at
+            AND pause.operation='pause' AND pause.target_state='paused' AND pause.created_at_ms<=g.terminal_at_ms
+            AND pause_auth.purpose='strategy_pause' AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND pause_auth.authorized_at_ms=pause.created_at_ms
+            AND src.owner_control_version<pause.control_version AND src.created_at_ms<=pause.created_at_ms
+            AND auth.purpose='strategy_resume' AND auth.authentication_strength='totp_step_up'
+            AND auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND auth.authorized_at_ms=r.created_at_ms
+            AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
+            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=vid
+              AND d.event_type='ENTRY_DRAINED' AND d.occurred_at_ms=v.drained_at_ms AND d.payload->>'target_state'='RECONFIGURING')
+        );
+      $$
+    """))
 
 
 def _generic_gap_vacuum_states() -> None:
@@ -133,6 +174,31 @@ def _generic_gap_vacuum_states() -> None:
     op.execute(sa.text("""
       CREATE FUNCTION brc_guard_generic_gap_vacuum_transition() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
+        IF OLD.selection_spec_id<>'sor-dynamic-selection-v0' AND OLD.state='OWNER_PAUSED'
+          AND NEW.state='SUPERSEDED' AND NEW.first_blocker='SUPERSEDED_BY_NEWER_SELECTION' THEN
+          IF NEW.source_generation_id IS DISTINCT FROM OLD.source_generation_id OR OLD.source_generation_id IS NULL
+            OR OLD.drained_at_ms IS NULL OR NEW.drained_at_ms IS DISTINCT FROM OLD.drained_at_ms
+            OR NEW.fenced_at_ms<>OLD.fenced_at_ms OR NEW.resolved_at_ms IS NOT NULL
+            OR NEW.period_anchor_ms<=OLD.period_anchor_ms OR NEW.projection_version<>OLD.projection_version+1
+            OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations g
+              JOIN brc_strategy_universe_materialization_events e ON e.materialization_generation_id=g.materialization_generation_id
+              JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=g.selection_snapshot_id
+              JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=g.strategy_group_id
+              WHERE g.selection_spec_id=OLD.selection_spec_id AND g.selection_epoch_id=c.selection_epoch_id
+                AND g.strategy_group_id=OLD.strategy_group_id AND g.period_anchor_ms=NEW.period_anchor_ms
+                AND g.lifecycle_state='MATERIALIZING' AND g.selection_mode='dynamic_selection'
+                AND g.selection_control_version=c.control_version AND s.selected_count>0
+                AND e.event_type='MATERIALIZING' AND e.payload->>'entry_vacuum_id'=OLD.entry_vacuum_id
+                AND e.payload->>'supersedes_generation_id'=OLD.source_generation_id AND e.occurred_at_ms=g.fenced_at_ms
+                AND brc_generic_vacuum_owner_resume_matches(OLD.entry_vacuum_id,
+                  (SELECT selection_authority_id FROM brc_selection_authority_current WHERE selection_spec_id=OLD.selection_spec_id),e.occurred_at_ms)
+                AND s.created_at_ms<=e.occurred_at_ms AND s.eligibility_not_before_ms<=e.occurred_at_ms AND e.occurred_at_ms<s.expires_at_ms
+                AND NOT EXISTS (SELECT 1 FROM brc_instrument_selection_snapshots newer
+                  WHERE newer.selection_spec_id=s.selection_spec_id AND newer.selection_epoch_id=s.selection_epoch_id
+                    AND newer.eligibility_not_before_ms<=e.occurred_at_ms AND newer.period_anchor_ms>s.period_anchor_ms))
+          THEN RAISE EXCEPTION 'Owner Pause nonempty handoff requires exact resumed source and latest Desired'; END IF;
+          RETURN NEW;
+        END IF;
         IF OLD.selection_spec_id<>'sor-dynamic-selection-v0' AND OLD.state='OWNER_PAUSED'
           AND NEW.state='DRAINING_ENTRY' AND NEW.source_generation_id IS NULL THEN
           IF OLD.first_blocker<>'OWNER_PAUSED' OR OLD.drained_at_ms IS NULL OR NEW.source_generation_id IS NOT NULL
@@ -931,14 +997,16 @@ def _generic_recovered_activation_proof_function() -> None:
             OR oldg.selection_epoch_id<>g.selection_epoch_id OR oldg.selection_spec_id<>g.selection_spec_id
             OR oldg.selection_control_version<>g.selection_control_version OR oldg.period_anchor_ms>=g.period_anchor_ms
             THEN RETURN false; END IF;
-          IF old_event->>'recovery_origin'='UNFINISHED_MATERIALIZATION' THEN
-            IF oldg.lifecycle_state<>'SUPERSEDED' THEN RETURN false; END IF;
+          IF old_event->>'recovery_origin' IN ('UNFINISHED_MATERIALIZATION','OWNER_PAUSE') THEN
+            IF oldg.lifecycle_state<>(CASE WHEN old_event->>'recovery_origin'='OWNER_PAUSE' THEN 'ABANDONED' ELSE 'SUPERSEDED' END) THEN RETURN false; END IF;
             SELECT payload INTO failure FROM brc_strategy_universe_materialization_events
               WHERE materialization_generation_id=oldg.materialization_generation_id AND event_type='SUPERSEDED_BY_NEWER_SELECTION'
               ORDER BY event_sequence DESC LIMIT 1;
             IF failure IS NULL OR failure->>'entry_vacuum_id' IS DISTINCT FROM v.entry_vacuum_id
               OR failure->>'replacement_generation_id' IS DISTINCT FROM g.materialization_generation_id
-              OR failure->>'previous_lifecycle_state' IS NULL OR failure->>'previous_lifecycle_state' NOT IN ('MATERIALIZING','STAGED')
+              OR failure->>'previous_lifecycle_state' IS NULL
+              OR (old_event->>'recovery_origin'='OWNER_PAUSE' AND failure->>'previous_lifecycle_state'<>'ABANDONED')
+              OR (old_event->>'recovery_origin'='UNFINISHED_MATERIALIZATION' AND failure->>'previous_lifecycle_state' NOT IN ('MATERIALIZING','STAGED'))
               OR (failure->>'original_fenced_at_ms')::bigint IS DISTINCT FROM v.fenced_at_ms
               OR (failure->>'original_drained_at_ms')::bigint IS DISTINCT FROM v.drained_at_ms THEN RETURN false; END IF;
             reason:='AUTHORITY_GAP';
@@ -971,7 +1039,9 @@ def _generic_recovered_activation_proof_function() -> None:
         IF NOT FOUND OR src.selection_authority_id IS DISTINCT FROM p->>'source_selection_authority_id'
           OR (gap_origin AND src.selection_authority_id IS DISTINCT FROM opened->>'source_selection_authority_id')
           OR src.selection_epoch_id<>g.selection_epoch_id OR src.selection_control_version<>c.control_version
-          OR src.owner_control_version<>o.control_version OR src.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
+          OR (old_event->>'recovery_origin'='OWNER_PAUSE' AND NOT brc_generic_vacuum_owner_resume_matches(v.entry_vacuum_id,src.selection_authority_id,checked_at))
+          OR (src.owner_control_version<>o.control_version AND NOT brc_generic_vacuum_owner_resume_matches(v.entry_vacuum_id,src.selection_authority_id,checked_at))
+          OR src.comparison_universe_id IS DISTINCT FROM b.comparison_universe_id
           OR src.comparison_transition_revision IS DISTINCT FROM b.comparison_transition_revision
           OR NOT EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings sb
             WHERE sb.selection_authority_id=src.selection_authority_id AND sb.event_spec_id=b.event_spec_id
