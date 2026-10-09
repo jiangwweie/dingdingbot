@@ -3078,7 +3078,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
-        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket")),
+        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection")),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -6653,7 +6653,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket"])
+@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection"])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -7211,7 +7211,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts"}
+    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection"}
     if fault_stage in {"between_claim_ticket","switch_between_claim_ticket"}:
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -7405,6 +7405,18 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 venue_reported_liquidation_price=Decimal(0),open_orders=(),observed_at_ms=now_ms+100)))
     assert filled.status.value == "entry_fill_recorded"
 
+    static_cutover_finished = False
+    class SelectionReadsForbidden:
+        def __getattr__(self,name):
+            raise AssertionError(f"frozen Ticket lifecycle read Selection repository: {name}")
+
+    @asynccontextmanager
+    async def safety_uow():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            if static_cutover_finished:
+                uow.instrument_selection = SelectionReadsForbidden()
+            yield uow
+
     async def dispatch_safety(step):
         async with PostgresKernelUnitOfWork(database) as uow:
             pending = await uow.aggregates.get(issued.ticket_id)
@@ -7422,7 +7434,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
                     expected_version=pending.version)
         venue.now_ms = now_ms+step
-        result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        result = await dispatch_one_command(safety_uow,venue,
             DispatchCommandRequest(worker_id=f"hourly-{group}-lifecycle",ticket_id=issued.ticket_id,
                 now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1))
         assert result.status.value == "accepted", result
@@ -7435,6 +7447,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert protected.initial_stop_exchange_order_id is not None
     assert protected.tp1_exchange_order_id is not None
     exit_offset = 400
+    if fault_stage in {"static_after_protection","static_timeout_after_protection"}:
+        static_at = await _cutover_static_with_protected_ticket(database,group=group,ticket=ticket,at_ms=now_ms+350,
+            timeout=fault_stage=="static_timeout_after_protection")
+        static_cutover_finished = True
+        exit_offset = static_at-now_ms+400
     if fault_stage == "valid_empty_after_protection":
         async with PostgresKernelUnitOfWork(database) as uow:
             current_authority = await uow.instrument_selection.get_current_generic_authority(
@@ -7507,7 +7524,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands "
                 "WHERE command_kind='entry'")) == 1
         exit_offset = empty_at-now_ms+400
-    async with PostgresKernelUnitOfWork(database) as uow:
+    async with safety_uow() as uow:
         runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(
             ticket_id=issued.ticket_id,
             facts=TicketLifecycleFacts(position_quantity=ticket.quantity-ticket.take_profit_quantities[0],
@@ -7519,7 +7536,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert runner.status.value == "break_even_requested"
     await dispatch_safety(exit_offset+100)
     await dispatch_safety(exit_offset+200)
-    async with PostgresKernelUnitOfWork(database) as uow:
+    async with safety_uow() as uow:
         external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
@@ -7527,7 +7544,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 observed_at_ms=now_ms+exit_offset+300)))
     assert external_flat.status.value == "external_flat_incident"
     await dispatch_safety(exit_offset+400)
-    async with PostgresKernelUnitOfWork(database) as uow:
+    async with safety_uow() as uow:
         matched = await reconcile_ticket(uow,ReconcileTicketRequest(
             ticket_id=issued.ticket_id,
             snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,
@@ -7549,6 +7566,12 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert settled.status.value == "budget_settled" and reviewed.status.value == "review_recorded"
     assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
     assert frozen is not None and frozen.selection_authority_id == selection_authority_id
+    assert frozen.universe_version_id==ticket.universe_version_id
+    assert frozen.model_dump(exclude={"status"})==ticket.model_dump(exclude={"status"})
+    assert frozen.status.value=="terminal"
+    assert frozen.exit_binding_id==ticket.exit_binding_id and frozen.exit_binding_semantic_hash==ticket.exit_binding_semantic_hash
+    assert all(command.ticket_identity==ticket.identity for command in commands)
+    assert sum(command.kind.value=="entry" for command in commands)==1
     assert reservation is not None and reservation.status == "released"
     assert incident is None and not active_domain
     assert len(commands) == len(venue.calls)
@@ -7614,6 +7637,99 @@ async def test_static_recovery_proposal_is_built_from_database_without_grant(dat
 @pytest.mark.asyncio
 async def test_recovered_entry_dispatch_rejects_changed_rebase_before_venue_call(database):
     await _exercise_generic_generation(database,"CPM-RO-001",False,failure_case="timeout_then_prepare_dispatch_refusal",first_activation=True)
+
+
+async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_ms, timeout=False):
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateGenericStaticRequest,
+    )
+    from src.trading_kernel.application.owner_control import (
+        stage_generic_static_selection_mode,
+    )
+    from src.trading_kernel.domain.aggregate import AggregateStatus
+
+    spec = inputs(group).spec
+    ticket_id = ticket.identity.ticket_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control = await uow.instrument_selection.get_selection_control(group)
+        before = await uow.aggregates.get(ticket_id)
+        frozen = await uow.tickets.get(ticket_id)
+        reservation = await uow.budgets.get_for_ticket(ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket_id)
+        baseline = await uow.instrument_selection.get_generic_static_rollback_baseline(control.rollback_baseline_id)
+        cadence = spec.cadence_hours*HOUR
+        anchor = (at_ms//cadence+1)*cadence
+        await stage_generic_static_selection_mode(uow,strategy_group_id=group,
+            rollback_baseline_id=baseline.rollback_baseline_id,selection_epoch_id=control.selection_epoch_id,
+            effective_period_anchor_ms=anchor,authentication_strength="totp_step_up",
+            request=ControlMutationRequest(expected_version=control.control_version,reason="static_cutover_with_protected_ticket",
+                idempotency_key=f"static:protected:{group}",owner_identity="owner",now_ms=at_ms))
+    assert before.status is AggregateStatus.POSITION_PROTECTED
+    request = CoordinateGenericStaticRequest(strategy_group_id=group,worker_id="protected-static-materializer")
+    due = anchor+HOUR+1
+    for offset in range(12):
+        tick = due+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            outcome = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda tick=tick:tick)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.tickets.get(ticket_id)==frozen
+            assert await uow.aggregates.get(ticket_id)==before
+            assert await uow.budgets.get_for_ticket(ticket_id)==reservation
+            assert await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+            assert await uow.exchange_commands.list_for_ticket(ticket_id)==commands
+        if outcome.disposition is MaterializationDisposition.ACTIVE_NEW:
+            break
+        if outcome.materialization_generation_id is None:
+            continue
+        async with PostgresKernelUnitOfWork(database) as uow:
+            targets = await uow.strategy_universes.get_generation_universe_targets(outcome.materialization_generation_id)
+        if targets:
+            target = targets[0]
+            if timeout:
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    generation = await uow.instrument_selection.get_generic_static_materialization_generation(outcome.materialization_generation_id)
+                failed_at = generation.fenced_at_ms+spec.materialization_timeout_ms
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)):
+                    failed = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda failed_at=failed_at:failed_at)
+                assert failed.disposition is MaterializationDisposition.BLOCKED and failed.reason_code=="MATERIALIZATION_TIMEOUT"
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    assert await uow.tickets.get(ticket_id)==frozen and await uow.aggregates.get(ticket_id)==before
+                    assert await uow.budgets.get_for_ticket(ticket_id)==reservation
+                    assert await uow.exchange_commands.list_for_ticket(ticket_id)==commands
+                    assert await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+                    vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=spec.selection_spec_id)
+                    assert vacuum.blocks_new_entry and vacuum.resolved_at_ms is None
+                    assert (await uow.strategy_universes.get_current(spec.event_spec_id)).universe_version_id==ticket.universe_version_id
+                    assert (await uow.instrument_selection.get_selection_control(group)).selection_mode.value=="dynamic_selection"
+                    assert (await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id))[0].lifecycle_state.value=="abandoned"
+                return failed_at
+            await make_warming_ready(database,universe_version_id=target.universe_version_id,
+                warm_closed_bar_time_ms=anchor+HOUR,valid_until_ms=due+HOUR)
+            if group in {"MPG-001","MI-001"}:
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    members = await uow.strategy_universes.get_members(target.universe_version_id)
+                template = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                delta = anchor+HOUR-template.trigger_candle_close_time_ms
+                candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+                projection = build_comparative_universe_projection(event_spec_id=spec.event_spec_id,
+                    universe_version_id=target.universe_version_id,strategy_group_id=group,exchange_instrument_ids=members,
+                    closed_bar_time_ms=anchor+HOUR,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                    member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles) for member in members))
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow.strategy_universes.save_comparative_projection(projection)
+    assert outcome.disposition is MaterializationDisposition.ACTIVE_NEW, outcome
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.strategy_universes.get_current(spec.event_spec_id)
+        changed = await uow.instrument_selection.get_selection_control(group)
+        assert current.universe_version_id!=ticket.universe_version_id
+        assert changed.selection_mode.value=="static_baseline"
+        assert await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id) is None
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),
+            {"uid":ticket.universe_version_id})=="retired"
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==1
+    return tick
 
 
 async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False):
