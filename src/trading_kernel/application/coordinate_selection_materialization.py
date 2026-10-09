@@ -1695,9 +1695,19 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
         if owner is None:
             return _blocked("MATERIALIZATION_CONTROL_MISSING")
         if owner.entry_state is StrategyEntryState.PAUSED:
-            if initial.lifecycle_state in {MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+            if initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED,
+                MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
+                if vacuum is None and initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}:
+                    vacuum = await uow.instrument_selection.open_owner_paused_entry_vacuum(StrategyEntryVacuum(
+                        entry_vacuum_id="vacuum:owner-pause:"+initial.materialization_generation_id,
+                        strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,
+                        period_anchor_ms=initial.period_anchor_ms,source_generation_id=None,
+                        state=StrategyEntryVacuumState.OPEN,fenced_at_ms=now_ms,drained_at_ms=None,
+                        resolved_at_ms=None,first_blocker="OWNER_PAUSED",projection_version=1))
+                if vacuum is not None and vacuum.state is StrategyEntryVacuumState.OPEN and vacuum.first_blocker=="OWNER_PAUSED":
+                    vacuum = await uow.instrument_selection.mark_entry_vacuum_draining(vacuum,started_at_ms=now_ms)
                 if vacuum is None:
                     return _blocked("OWNER_PAUSED_VACUUM_MISSING")
                 await _abandon_generation_targets(uow=uow,generation_id=initial.materialization_generation_id,
@@ -1707,7 +1717,7 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             elif initial.lifecycle_state is MaterializationGenerationState.ABANDONED:
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
-                if vacuum is not None and vacuum.source_generation_id==initial.materialization_generation_id and (
+                if vacuum is not None and vacuum.source_generation_id in {None,initial.materialization_generation_id} and (
                     vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY and vacuum.first_blocker=="OWNER_PAUSED"):
                     await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
                         strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,now_ms=now_ms))

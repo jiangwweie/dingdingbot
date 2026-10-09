@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮unfenced Pause末版回归：未围栏Pause/DRAINING Pause/Generic activation32 passed；SOR materialization/ENTRY Vacuum142 passed；Unit/Architecture1327 passed、Mypy160 files、Ruff/diff、文档25 passed。集合重叠不合计，不构成exact R4。
+
+2026-10-09Generic未围栏请求Owner Pause增量（基于`f930f030`，GS-08关联）：四策略真实后续Generation处于PENDING/DESIRED时正式Owner Pause，RED复现旧请求仍可行动。Dynamic Coordinator现复用Owner已开的OPEN Vacuum（没有才沿原Owner Pause边界创建），推进原drain状态，再沿既有shared abandon函数终态ABANDONED并清lease；Generation没有materialization fenced_at，不伪装进入warming。后续同tick入口对ABANDONED且Owner-paused的generation-free Vacuum完成无单drain，保持原Vacuum/fence，旧Current/Authority及目标列表不变、不grant。初版误用不存在的drain方法名及仅处理新建Vacuum，按实际mark_entry_vacuum_draining接口和Owner Pause已有OPEN事实修复。共享成功夹具中原临时raw Pause/re-enable会与新终态语义冲突，改为独立savepoint全回滚的negative probe；正式Pause→恢复测试仍单独验收，不绕过真实Owner状态。四策略×两状态8分支PASS、源码Mypy160 files、Ruff/diff及Unit/Architecture1327 passed；现有无单DRAINING/Static恢复相邻重验。仍缺Static未围栏取消、generation-free OwnerPaused Vacuum在resume后的合法supersession、新ENTRY/有单交叉，不标GS-04～09 Done或exact R4。全部Docker PG，无生产修改。
+
 本轮non-comparative hour-only末版验证：四策略hour-only4 passed；自然入口/hourly faults60 passed；既有Full-chain/文档76 passed，更新文档后25 passed，Ruff/diff通过。本轮tests/docs-only，未重跑全Unit/Mypy或R4，集合重叠不合计。
 
 2026-10-09CPM/BRF2独立hour-only末尾回滚增量（基于`60b9f45c`，GS-08/09关联）：把既有正式protected Ticket→Static cutover事务末尾跨close测试扩展到两个non-comparative策略。测试明确crossed时间仍早于本次30s lease及原1800s materialization deadline，故障发生于事务内mode/current已经切Static后的最终clock check，返回STATIC_ACTIVATION_COMMIT_CROSSED_CLOSE而非DEADLINE。四策略独立hour-only4分支均验证Current/Authority/Control/STAGED Generation/原Vacuum/完整Ticket/Aggregate/Reservation/保护Command回滚，随后旧Ticket在Selection-read-forbidden安全链内继续至terminal。新增CPM/BRF2并不伪造hourly PRE_FENCE_CONTINUITY；它们以本策略的4h source contract建立合法准备状态，不改变NORMAL/RECOVERY判定。本轮仅tests/docs补强，未改生产逻辑，仍需实际positive Universe activation并发、新Static/第二Dynamic自然Entry及完整卡级证据，GS-04～09未Done、非exact R4。全部Docker PG，无生产修改。
