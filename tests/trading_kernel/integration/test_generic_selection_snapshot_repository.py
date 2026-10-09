@@ -1046,13 +1046,34 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         loaded = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
         assert loaded is not None and loaded.authorization_id == scheduled.pending_authorization_id
         assert loaded.semantic_digest == generation["semantic_digest"]
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due)):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            held_lease = await uow.instrument_selection.claim_generic_static_materialization_generation(
+                created.materialization_generation_id,worker_id="static-held-lease",now_ms=due,lease_duration_ms=1000)
+    assert held_lease is not None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+1)):
+        held_tick = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+1)
+    assert held_tick.disposition is MaterializationDisposition.GENERATION_LEASE_HELD
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+1)), pytest.raises(
+        SelectionJobConflict,match="lease/version"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.mark_generic_static_materialization_generation_desired(
+                created.materialization_generation_id,worker_id="static-held-lease",lease_epoch=held_lease.lease_epoch+1,
+                expected_projection_version=held_lease.projection_version,desired_at_ms=due+1)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert not await uow.instrument_selection.release_generic_materialization_generation_lease(created.materialization_generation_id,
+            worker_id="static-held-lease",lease_epoch=held_lease.lease_epoch+1)
+        assert await uow.instrument_selection.release_generic_materialization_generation_lease(created.materialization_generation_id,
+            worker_id="static-held-lease",lease_epoch=held_lease.lease_epoch)
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+1)):
         repeated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
             request=request,clock_ms=lambda:due+1)
     assert repeated.materialization_generation_id == created.materialization_generation_id
+    assert repeated.disposition is MaterializationDisposition.GENERATION_DESIRED, repeated
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events "
-            "WHERE materialization_generation_id=:gid"),{"gid":created.materialization_generation_id}) == 1
+            "WHERE materialization_generation_id=:gid"),{"gid":created.materialization_generation_id}) == 2
     with pytest.raises(sa.exc.DBAPIError,match="source identity is immutable"):
         async with database.begin() as conn:
             await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET semantic_digest=:digest "
@@ -1068,6 +1089,136 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
                 **{**dict(old),"materialization_generation_id":broken_id}))
             await conn.execute(sa.insert(strategy_universe_materialization_targets).values(
                 **{**dict(target),"materialization_generation_id":broken_id}))
+    @asynccontextmanager
+    async def interrupted_static_fence():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected static fence rollback")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+2)), pytest.raises(
+        RuntimeError,match="static fence rollback"):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_static_fence,request=request,clock_ms=lambda:due+2)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,
+            selection_spec_id=source.spec.selection_spec_id) is None
+        preserved = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+        assert preserved is not None and preserved.lifecycle_state.value == "DESIRED" and preserved.lease_owner is None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+2)):
+        fenced = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+2)
+    assert fenced.disposition is MaterializationDisposition.WAITING_VACUUM, fenced
+    async with PostgresKernelUnitOfWork(database) as uow:
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,
+            selection_spec_id=source.spec.selection_spec_id)
+        draining = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+        assert vacuum is not None and vacuum.state.value == "DRAINING_ENTRY"
+        assert vacuum.period_anchor_ms == anchor and vacuum.source_generation_id == created.materialization_generation_id
+        assert draining is not None and draining.lifecycle_state.value == "DRAINING_ENTRY"
+        assert draining.fenced_at_ms == vacuum.fenced_at_ms == due+2
+        assert draining.lease_owner is None
+        assert await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id) == ()
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+3)):
+        drained = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+3)
+    assert drained.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, drained
+    async with PostgresKernelUnitOfWork(database) as uow:
+        prepared = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+        vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,
+            selection_spec_id=source.spec.selection_spec_id)
+        assert prepared is not None and prepared.lifecycle_state.value == "MATERIALIZING"
+        assert vacuum is not None and vacuum.state.value == "RECONFIGURING"
+        assert vacuum.drained_at_ms == due+3 and vacuum.fenced_at_ms == due+2
+        assert prepared.lease_owner is None
+        assert await uow.instrument_selection.get_selection_control(group) == scheduled
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+        assert await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id) == ()
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+4)):
+        warming = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+4)
+    assert warming.disposition is MaterializationDisposition.TARGET_WARMING, warming
+    async with PostgresKernelUnitOfWork(database) as uow:
+        targets = await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id)
+        assert len(targets) == 1 and targets[0].lifecycle_state.value == "warming"
+        target_uid = targets[0].universe_version_id
+        assert target_uid not in {uid,baseline.source_event.universe_version_id}
+        static_target_members = await uow.strategy_universes.get_members(target_uid)
+        assert static_target_members == await uow.strategy_universes.get_members(baseline.source_event.universe_version_id)
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+        assert await uow.instrument_selection.get_selection_control(group) == scheduled
+    await make_warming_ready(database,universe_version_id=target_uid,warm_closed_bar_time_ms=anchor+HOUR,
+        valid_until_ms=due+HOUR)
+    @asynccontextmanager
+    async def interrupted_static_stage():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+            raise RuntimeError("injected static staging rollback")
+    if group in {"MPG-001","MI-001"}:
+        template = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+        shift = anchor+HOUR-template.trigger_candle_close_time_ms
+        static_candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift})
+            for c in template.candles_1h)
+        projection = build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+            universe_version_id=target_uid,strategy_group_id=group,
+            exchange_instrument_ids=static_target_members,closed_bar_time_ms=anchor+HOUR,
+            lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+            member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=static_candles)
+                for member in static_target_members))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.strategy_universes.save_comparative_projection(projection)
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='temporarily_unavailable',"
+            "blocker_code='readonly_facts_unavailable' WHERE exchange_instrument_id IN "
+            "(SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),{"uid":target_uid})
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+5)):
+        retry = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+5)
+    assert retry.disposition is MaterializationDisposition.TARGET_WARMING
+    assert retry.reason_code == "CERTIFICATION_TEMPORARILY_UNAVAILABLE"
+    async with database.begin() as conn:
+        await conn.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL "
+            "WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members "
+            "WHERE universe_version_id=:uid)"),{"uid":target_uid})
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+5)), pytest.raises(
+        RuntimeError,match="static staging rollback"):
+        await coordinate_selection_materialization_once(uow_factory=interrupted_static_stage,request=request,clock_ms=lambda:due+5)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        after_failure = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+        assert after_failure is not None and after_failure.lifecycle_state.value == "MATERIALIZING"
+        assert after_failure.fenced_at_ms == due+2 and after_failure.lease_owner is None
+        assert (await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id))[0].lifecycle_state.value == "warming"
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+5)):
+        staged = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+5)
+    assert staged.disposition is MaterializationDisposition.GENERATION_STAGED, staged
+    async with PostgresKernelUnitOfWork(database) as uow:
+        finalized_staging = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+        staged_target = await uow.strategy_universes.get_generation_universe_targets(created.materialization_generation_id)
+        assert finalized_staging is not None and finalized_staging.lifecycle_state.value == "STAGED"
+        assert finalized_staging.lease_owner is None
+        assert len(staged_target) == 1 and staged_target[0].lifecycle_state.value == "staged"
+        assert finalized_staging.fenced_at_ms == due+2
+        assert await uow.instrument_selection.get_selection_control(group) == scheduled
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    async with PostgresKernelUnitOfWork(database) as uow:
+        before_pause = await uow.owner_controls.get_strategy_control(group)
+        assert before_pause is not None
+        await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=before_pause.control_version,
+                reason="pause_static_materialization",idempotency_key=f"owner:pause:static:{group}",
+                owner_identity="owner",now_ms=due+6),authentication_strength="totp_step_up")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+7)):
+        paused = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:due+7)
+    assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert (await uow.owner_controls.get_strategy_control(group)).entry_state is StrategyEntryState.PAUSED
+        assert await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id) == finalized_staging
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
 
 
 @pytest.mark.asyncio

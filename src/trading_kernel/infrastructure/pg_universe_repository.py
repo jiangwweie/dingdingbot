@@ -1131,7 +1131,7 @@ class PostgresStrategyUniverseRepository:
         )
         if (
             generation_id is None
-            or target["source_kind"] != "dynamic_selection"
+            or target["source_kind"] not in {"dynamic_selection","static_baseline"}
             or target["materialization_generation_id"] != generation_id
         ):
             return _not_ready_activation(
@@ -1172,6 +1172,8 @@ class PostgresStrategyUniverseRepository:
             or (spec["selection_kind"] == "sor_dynamic_v0" and len(expected_events) != 2)
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
+        if target["source_kind"]=="static_baseline" and spec["selection_kind"]!="generic_dynamic_v1":
+            return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if spec["selection_kind"] == "generic_dynamic_v1":
             from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
                 PostgresInstrumentSelectionRepository,
@@ -1185,11 +1187,16 @@ class PostgresStrategyUniverseRepository:
                 or control["control_version"] != generation["selection_control_version"]
             ):
                 return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_CONTROL_CHANGED")
-            snapshot = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
-                instrument_selection_snapshots.c.selection_snapshot_id == generation["selection_snapshot_id"],
-            ))).mappings().one_or_none()
-            if snapshot is None or not snapshot["eligibility_not_before_ms"] <= request.attempted_at_ms < snapshot["expires_at_ms"]:
-                return _not_ready_activation(target=target,current=None,reason_code="GENERATION_SOURCE_PERIOD_EXPIRED")
+            if generation["selection_mode"]=="static_baseline":
+                static_source = await PostgresInstrumentSelectionRepository(self._connection)._require_current_static_generation(generation_id)
+                if static_source.effective_period_anchor_ms+3_600_000>request.attempted_at_ms:
+                    return _not_ready_activation(target=target,current=None,reason_code="GENERATION_SOURCE_PERIOD_NOT_DUE")
+            else:
+                snapshot = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+                    instrument_selection_snapshots.c.selection_snapshot_id == generation["selection_snapshot_id"],
+                ))).mappings().one_or_none()
+                if snapshot is None or not snapshot["eligibility_not_before_ms"] <= request.attempted_at_ms < snapshot["expires_at_ms"]:
+                    return _not_ready_activation(target=target,current=None,reason_code="GENERATION_SOURCE_PERIOD_EXPIRED")
             if generation["fenced_at_ms"] is None or request.attempted_at_ms>=generation["fenced_at_ms"]+generic_spec.materialization_timeout_ms:
                 return _not_ready_activation(target=target,current=None,reason_code="MATERIALIZATION_TIMEOUT")
             if request.materialization_lease_owner is None or request.materialization_lease_epoch is None or (
@@ -3976,6 +3983,21 @@ class PostgresStrategyUniverseRepository:
         if spec is None or spec["status"]!="active" or spec["strategy_group_id"]!=generation["strategy_group_id"]:
             raise UniverseInstallConflict("GENERATION_SPEC_AUTHORITY_CONFLICT")
         limit = 10
+        if request.source_kind=="static_baseline" and spec["selection_kind"]=="generic_dynamic_v1":
+            from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+                PostgresInstrumentSelectionRepository,
+            )
+            selection = PostgresInstrumentSelectionRepository(self._connection)
+            static_source = await selection._require_current_static_generation(generation_id)
+            vacuum = await selection.get_current_entry_vacuum(strategy_group_id=static_source.strategy_group_id,
+                selection_spec_id=static_source.selection_spec_id,for_update=True)
+            if vacuum is None or vacuum.source_generation_id!=generation_id or vacuum.state.value!="RECONFIGURING" or (
+                vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None or static_source.fenced_at_ms!=vacuum.fenced_at_ms
+                or await selection.entry_vacuum_has_drain_blockers(strategy_group_id=static_source.strategy_group_id)):
+                raise UniverseInstallConflict("GENERATION_STATIC_DRAIN_AUTHORITY_CONFLICT")
+            static_spec = await selection.get_generic_spec(static_source.selection_spec_id)
+            if static_source.fenced_at_ms is None or request.installed_at_ms>=static_source.fenced_at_ms+static_spec.materialization_timeout_ms:
+                raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
         if request.source_kind=="dynamic_selection":
             if spec["selection_kind"]=="sor_dynamic_v0":
                 limit = 7

@@ -47,6 +47,7 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.generic_materialization import (
     GenericMaterializationGeneration,
+    GenericStaticMaterializationGeneration,
     MaterializationEventBaseline,
     generic_input_is_unchanged,
 )
@@ -468,10 +469,84 @@ async def coordinate_selection_materialization_once(
                 return _blocked("GENERIC_STATIC_OWNER_INTENT_MISSING")
             if now_ms<control.pending_effective_period_anchor_ms+HOUR_MS:
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NOT_DUE)
-            static_generation = await uow.instrument_selection.create_generic_static_materialization_generation(
-                strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
-            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
-                materialization_generation_id=static_generation.materialization_generation_id)
+            if control.pending_authorization_id is None:
+                return _blocked("GENERIC_STATIC_OWNER_INTENT_MISSING")
+            gid = GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id)
+            existing_static = await uow.instrument_selection.get_generic_static_materialization_generation(gid)
+            if existing_static is None:
+                created_static = await uow.instrument_selection.create_generic_static_materialization_generation(
+                    strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,
+                    materialization_generation_id=created_static.materialization_generation_id)
+            claimed_static = await uow.instrument_selection.claim_generic_static_materialization_generation(gid,
+                worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
+            if claimed_static is None:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_LEASE_HELD,
+                    materialization_generation_id=gid,reason_code="GENERIC_GENERATION_LEASE_UNAVAILABLE")
+            static_failed = False
+            try:
+                if claimed_static.lifecycle_state is MaterializationGenerationState.PENDING:
+                    await uow.instrument_selection.mark_generic_static_materialization_generation_desired(gid,
+                        worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch,
+                        expected_projection_version=claimed_static.projection_version,desired_at_ms=now_ms)
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        materialization_generation_id=gid)
+                if claimed_static.lifecycle_state is MaterializationGenerationState.DESIRED:
+                    static_vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+gid,
+                        strategy_group_id=request.strategy_group_id,selection_spec_id=claimed_static.selection_spec_id,
+                        period_anchor_ms=claimed_static.effective_period_anchor_ms,source_generation_id=gid,
+                        state=StrategyEntryVacuumState.DRAINING_ENTRY,fenced_at_ms=now_ms,drained_at_ms=None,
+                        resolved_at_ms=None,first_blocker="ENTRY_DRAIN_REQUIRED",projection_version=2)
+                    await uow.instrument_selection.open_generation_entry_vacuum(static_vacuum,
+                        expected_generation_version=claimed_static.projection_version,
+                        worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch)
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                        materialization_generation_id=gid,entry_vacuum_id=static_vacuum.entry_vacuum_id)
+                if claimed_static.lifecycle_state is MaterializationGenerationState.DRAINING_ENTRY:
+                    static_drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                        strategy_group_id=request.strategy_group_id,selection_spec_id=claimed_static.selection_spec_id,now_ms=now_ms))
+                    return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.GENERATION_MATERIALIZING
+                        if static_drain.status is VacuumDrainStatus.ENTRY_DRAINED else MaterializationDisposition.WAITING_VACUUM),
+                        materialization_generation_id=gid,entry_vacuum_id=static_drain.entry_vacuum_id,
+                        reason_code=static_drain.reason_code or static_drain.status.value)
+                if claimed_static.lifecycle_state is MaterializationGenerationState.MATERIALIZING:
+                    materializing_static_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                        strategy_group_id=request.strategy_group_id,selection_spec_id=claimed_static.selection_spec_id,for_update=True)
+                    if materializing_static_vacuum is None or materializing_static_vacuum.source_generation_id!=gid or (
+                        materializing_static_vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or materializing_static_vacuum.drained_at_ms is None):
+                        return _blocked("GENERIC_STATIC_DRAIN_REQUIRED")
+                    baseline = await uow.instrument_selection.get_generic_static_rollback_baseline(claimed_static.rollback_baseline_id)
+                    static_members = await uow.strategy_universes.get_members(baseline.source_event.universe_version_id)
+                    static_contract = strategy_contract_for(baseline.source_event.event_spec_id)
+                    install_context = await uow.strategy_universes.resolve_install_context(runtime_profile_id="tiny-live-v1",
+                        event_id=static_contract.event_id)
+                    installed_static = await install_strategy_universe(uow,UniverseInstallRequest(
+                        event_spec_id=baseline.source_event.event_spec_id,runtime_profile_id="tiny-live-v1",
+                        owner_policy_id=install_context.owner_policy_id,exchange_instrument_ids=static_members,
+                        source_kind="static_baseline",materialization_generation_id=gid,
+                        expected_member_set_digest=baseline.source_event.member_set_digest,installed_at_ms=now_ms))
+                    if installed_static.status is UniverseInstallStatus.WARMING_UNIVERSE_ALREADY_EXISTS:
+                        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.TARGET_WARMING,
+                            materialization_generation_id=gid,reason_code="GLOBAL_WARMING_SLOT_BUSY")
+                    if installed_static.universe is None:
+                        return _blocked("GENERIC_STATIC_INSTALLATION_FAILED")
+                    static_staged = await advance_strategy_universe(uow,UniverseActivationRequest(
+                        universe_version_id=installed_static.universe.universe_version_id,attempted_at_ms=now_ms,
+                        operation=UniverseActivationOperation.STAGE_DYNAMIC,materialization_generation_id=gid,
+                        materialization_lease_owner=request.worker_id,materialization_lease_epoch=claimed_static.lease_epoch))
+                    static_disposition = (MaterializationDisposition.GENERATION_STAGED
+                        if static_staged.status is UniverseActivationStatus.STAGED else MaterializationDisposition.TARGET_WARMING
+                        if static_staged.reason_code in _GENERIC_TRANSIENT_WARMING_BLOCKERS else MaterializationDisposition.BLOCKED)
+                    return CoordinateSelectionMaterializationResult(disposition=static_disposition,
+                        materialization_generation_id=gid,reason_code=static_staged.reason_code)
+                return _blocked("GENERIC_STATIC_TARGET_MATERIALIZATION_REQUIRED")
+            except BaseException:
+                static_failed = True
+                raise
+            finally:
+                if not static_failed:
+                    await uow.instrument_selection.release_generic_materialization_generation_lease(gid,
+                        worker_id=request.worker_id,lease_epoch=claimed_static.lease_epoch)
     if isinstance(request, CoordinateGenericPeriodRequest):
         return await _coordinate_generic_period(uow_factory=uow_factory,request=request,now_ms=now_ms)
     if isinstance(request, CoordinateGenericSnapshotRequest):

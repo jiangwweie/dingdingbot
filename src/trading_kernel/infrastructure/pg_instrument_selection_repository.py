@@ -1918,6 +1918,79 @@ class PostgresInstrumentSelectionRepository:
                 "effective_period_anchor_ms":control.pending_effective_period_anchor_ms},occurred_at_ms=created_at_ms))
         return generation
 
+    async def _require_current_static_generation(self, materialization_generation_id: str) -> GenericStaticMaterializationGeneration:
+        initial = await self.get_generic_static_materialization_generation(materialization_generation_id)
+        if initial is None:
+            raise SelectionJobConflict("Static Generation missing")
+        owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==initial.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control = await self.get_selection_control(initial.strategy_group_id,for_update=True)
+        current = await self.get_generic_static_materialization_generation(materialization_generation_id,for_update=True)
+        if owner is None or owner["entry_state"]!="enabled" or current is None or control is None or (
+            control.selection_spec_id!=current.selection_spec_id
+            or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
+            or control.selection_epoch_id!=current.selection_epoch_id or control.control_version!=current.selection_control_version
+            or control.pending_authorization_id!=current.authorization_id
+            or control.pending_effective_period_anchor_ms!=current.effective_period_anchor_ms
+            or control.rollback_baseline_id!=current.rollback_baseline_id):
+            raise SelectionJobConflict("Static Generation Owner or Control changed")
+        prior = current.previous_events[0]
+        active = (await self._connection.execute(sa.select(strategy_universe_current).where(
+            strategy_universe_current.c.event_spec_id==prior.event_spec_id))).mappings().one_or_none()
+        if active is None or active["lifecycle_state"]!="active" or active["universe_version_id"]!=prior.universe_version_id:
+            raise SelectionJobConflict("Static Generation previous current Universe changed")
+        if prior.comparison_universe_id is not None:
+            comparison = await self.get_comparison_universe_binding(prior.event_spec_id)
+            if comparison is None or (comparison.comparison_universe_id,comparison.comparison_transition_revision)!=(
+                prior.comparison_universe_id,prior.comparison_transition_revision):
+                raise SelectionJobConflict("Static Generation previous comparison changed")
+        return current
+
+    async def claim_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        worker_id: str, now_ms: int, lease_duration_ms: int,
+    ) -> GenericStaticMaterializationGeneration | None:
+        current = await self._require_current_static_generation(materialization_generation_id)
+        now = await self.read_authority_clock_ms()
+        if not current.created_at_ms<=now_ms<=now or current.lifecycle_state not in {
+            MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED,MaterializationGenerationState.DRAINING_ENTRY,
+            MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+            raise SelectionJobConflict("Static Generation is not actionable")
+        row = (await self._connection.execute(sa.select(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id))).mappings().one()
+        if not await self._acquire_materialization_lease(row,worker_id=worker_id,now_ms=now_ms,
+            lease_duration_ms=lease_duration_ms,strict_owner=True):
+            return None
+        return await self.get_generic_static_materialization_generation(materialization_generation_id)
+
+    async def mark_generic_static_materialization_generation_desired(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int, expected_projection_version: int, desired_at_ms: int,
+    ) -> GenericStaticMaterializationGeneration:
+        current = await self._require_current_static_generation(materialization_generation_id)
+        now = await self.read_authority_clock_ms()
+        if not current.created_at_ms<=desired_at_ms<=now or current.projection_version!=expected_projection_version or (
+            current.lease_owner!=worker_id or current.lease_epoch!=lease_epoch or current.lease_expires_at_ms is None
+            or now>=current.lease_expires_at_ms):
+            raise SelectionJobConflict("Static Generation lease/version changed")
+        if current.lifecycle_state is MaterializationGenerationState.DESIRED:
+            return current
+        if current.lifecycle_state is not MaterializationGenerationState.PENDING:
+            raise SelectionJobConflict("Static Generation is not PENDING")
+        desired = GenericStaticMaterializationGeneration.model_validate({**current.model_dump(),
+            "lifecycle_state":"DESIRED","desired_at_ms":desired_at_ms,"projection_version":current.projection_version+1})
+        changed = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version==expected_projection_version,
+            strategy_universe_materialization_generations.c.lease_epoch==lease_epoch).values(
+                lifecycle_state="DESIRED",desired_at_ms=desired_at_ms,projection_version=desired.projection_version))
+        if changed.rowcount!=1:
+            raise SelectionJobConflict("Static Generation desired CAS changed")
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id=f"materialization-event:{materialization_generation_id}:2",
+            materialization_generation_id=materialization_generation_id,event_sequence=2,event_type="DESIRED",
+            payload={"authorization_id":current.authorization_id},occurred_at_ms=desired_at_ms))
+        return desired
+
     async def get_generic_materialization_generation(
         self, materialization_generation_id: str, *, for_update: bool = False,
     ) -> GenericMaterializationGeneration | None:
@@ -4767,18 +4840,26 @@ class PostgresInstrumentSelectionRepository:
             raise ValueError(
                 "Generation Vacuum must include OPEN and DRAINING_ENTRY projections"
             )
-        generation: MaterializationGeneration | GenericMaterializationGeneration | None
+        generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
         anchor: int | None
         if vacuum.strategy_group_id != "SOR-001":
-            initial = await self.get_generic_materialization_generation(vacuum.source_generation_id)
-            if initial is None or initial.lifecycle_state is not MaterializationGenerationState.DESIRED:
-                raise SelectionJobConflict("Generic Generation is not DESIRED before fence")
             if worker_id is None or lease_epoch is None:
                 raise SelectionJobConflict("Generic Generation fence requires lease authority")
-            generation = await self.mark_generic_materialization_generation_desired(
-                vacuum.source_generation_id,worker_id=worker_id,lease_epoch=lease_epoch,
-                expected_projection_version=expected_generation_version,desired_at_ms=vacuum.fenced_at_ms)
-            anchor = generation.period_anchor_ms
+            source_mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==vacuum.source_generation_id))
+            if source_mode=="static_baseline":
+                generation = await self.mark_generic_static_materialization_generation_desired(
+                    vacuum.source_generation_id,worker_id=worker_id,lease_epoch=lease_epoch,
+                    expected_projection_version=expected_generation_version,desired_at_ms=vacuum.fenced_at_ms)
+                anchor = generation.effective_period_anchor_ms
+            else:
+                initial = await self.get_generic_materialization_generation(vacuum.source_generation_id)
+                if initial is None or initial.lifecycle_state is not MaterializationGenerationState.DESIRED:
+                    raise SelectionJobConflict("Generic Generation is not DESIRED before fence")
+                generation = await self.mark_generic_materialization_generation_desired(
+                    vacuum.source_generation_id,worker_id=worker_id,lease_epoch=lease_epoch,
+                    expected_projection_version=expected_generation_version,desired_at_ms=vacuum.fenced_at_ms)
+                anchor = generation.period_anchor_ms
         else:
             generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
             anchor = None if generation is None else generation.session_start_ms
@@ -5329,11 +5410,16 @@ class PostgresInstrumentSelectionRepository:
         if target is StrategyEntryVacuumState.RECOVERY_PENDING:
             return drained
         assert vacuum.source_generation_id is not None
-        generation: MaterializationGeneration | GenericMaterializationGeneration | None
+        generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
         if vacuum.strategy_group_id == "SOR-001":
             generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
         else:
-            generation = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
+            source_mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==vacuum.source_generation_id))
+            if source_mode=="static_baseline":
+                generation = await self.get_generic_static_materialization_generation(vacuum.source_generation_id,for_update=True)
+            else:
+                generation = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
         if (
             generation is None
             or generation.lifecycle_state

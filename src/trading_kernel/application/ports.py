@@ -1762,6 +1762,13 @@ class InstrumentSelectionRepository(Protocol):
     async def get_generic_static_materialization_generation(self, materialization_generation_id: str, *,
         for_update: bool = False) -> GenericStaticMaterializationGeneration | None: ...
 
+    async def claim_generic_static_materialization_generation(self, materialization_generation_id: str, *,
+        worker_id: str, now_ms: int, lease_duration_ms: int) -> GenericStaticMaterializationGeneration | None: ...
+
+    async def mark_generic_static_materialization_generation_desired(self, materialization_generation_id: str, *,
+        worker_id: str, lease_epoch: int, expected_projection_version: int,
+        desired_at_ms: int) -> GenericStaticMaterializationGeneration: ...
+
     async def recover_expired_dynamic_activation(
         self,
         request: RecoverExpiredDynamicActivationRequest,
