@@ -4364,8 +4364,9 @@ async def test_generic_continuity_is_replaced_by_same_period_no_change(database:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group", ["CPM-RO-001","BRF2-001"])
-@pytest.mark.parametrize("fault_stage", [None,"switch_before_claim","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts"])
+@pytest.mark.parametrize("group", ["CPM-RO-001","BRF2-001","MPG-001","MI-001"])
+@pytest.mark.parametrize("fault_stage", [None,"switch_before_claim","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts",
+    "activated_before_claim","activated_between_claim_ticket","activated_before_dispatch"])
 async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -4374,7 +4375,7 @@ async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(
     next_source = next_input(first_source)
     next_source = next_source.model_copy(update={
         "predecessor_snapshot":first_snapshot,
-        "member_windows":tuple(qualify_window(window,window.exchange_instrument_id==next_source.spec.candidate_ids[0])
+        "member_windows":tuple(qualify_window(window.model_copy(update={"candles":next_source.member_windows[0].candles}),window.exchange_instrument_id==next_source.spec.candidate_ids[0])
             for window in next_source.member_windows)})
     class NextSelectionMarket:
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
@@ -4401,6 +4402,41 @@ async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(
         next_snapshot = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
     assert next_snapshot.selected_members and next_snapshot.selected_members!=first_snapshot.selected_members
     e = next_snapshot.effective_from_ms
+    member=next(m for m in first_snapshot.selected_members if m!=next_source.spec.candidate_ids[0])
+    async def comparative_cache(universe_id,at,*,flat=False):
+        if group not in {"MPG-001","MI-001"}:
+            return
+        template=(mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()) if flat else (
+            mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot())
+        delta=at-template.trigger_candle_close_time_ms
+        candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+        quiet=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+        quiet_delta=at-quiet.trigger_candle_close_time_ms
+        quiet_candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+quiet_delta,"close_time_ms":c.close_time_ms+quiet_delta}) for c in quiet.candles_1h)
+        projection=build_comparative_universe_projection(event_spec_id=first_source.spec.event_spec_id,universe_version_id=universe_id,strategy_group_id=group,
+            exchange_instrument_ids=first_source.spec.candidate_ids,closed_bar_time_ms=at,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+            member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles if flat or m==member else quiet_candles) for m in first_source.spec.candidate_ids))
+        async with PostgresKernelUnitOfWork(database) as uow:
+            binding=await uow.instrument_selection.get_comparison_universe_binding(first_source.spec.event_spec_id)
+            await uow.strategy_universes.save_comparative_projection(projection.model_copy(update={"comparison_transition_revision":binding.comparison_transition_revision if universe_id==uid else 0}))
+    if group in {"MPG-001","MI-001"}:
+        async with database.connect() as conn:
+            old_scope=await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND exchange_instrument_id=:member"),{"uid":uid,"member":member})
+        await comparative_cache(uid,first_snapshot.effective_from_ms,flat=True)
+        quiet=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+        delta=first_snapshot.effective_from_ms-quiet.trigger_candle_close_time_ms
+        class FlatMarket:
+            async def fetch_closed_candles(self,request):
+                path=quiet.candles_1h if request.timeframe=="1h" else quiet.candles_4h
+                return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in path)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            initial=await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=initial.authority.created_at_ms+1)):
+            arm=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),FlatMarket(),ObservationRequest(
+                runtime_scope_id=old_scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=first_snapshot.effective_from_ms,attempted_at_ms=initial.authority.created_at_ms+1))
+        assert arm.status is ObservationStatus.NO_SIGNAL,arm
+        await comparative_cache(uid,e)
     await make_warming_ready(database,universe_version_id=uid,
         warm_closed_bar_time_ms=e,valid_until_ms=e+HOUR)
     period_request = CoordinateGenericPeriodRequest(strategy_group_id=group,
@@ -4416,9 +4452,9 @@ async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(
     if fault_stage is not None:
         async with database.connect() as conn:
             row = (await conn.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
-                "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid "
-                "ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})).one()
-        template = cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot()
+                "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND exchange_instrument_id=:member "
+                "ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid,"member":member})).one()
+        template = {"CPM-RO-001":cpm_long_snapshot,"BRF2-001":brf2_short_snapshot,"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot}[group]()
         delta = e-template.trigger_candle_close_time_ms
         class NaturalMarket:
             async def fetch_closed_candles(self, request):
@@ -4431,19 +4467,35 @@ async def test_generic_new_desired_fences_pre_fence_continuity_before_warming(
         assert observed.status is ObservationStatus.SIGNAL_CREATED, observed
 
         async def commit_switch_fence():
-            for offset in range(4,8):
+            activating=fault_stage.startswith("activated_")
+            for offset in range(4,24 if activating else 8):
                 at = e+offset
                 with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
                     step = await coordinate_selection_materialization_once(
                         uow_factory=lambda:PostgresKernelUnitOfWork(database),request=snapshot_request,
                         clock_ms=lambda at=at:at)
-                if step.disposition is MaterializationDisposition.WAITING_VACUUM:
+                if activating and step.disposition is MaterializationDisposition.TARGET_WARMING:
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        target=(await uow.strategy_universes.get_generation_universe_targets(step.materialization_generation_id))[0]
+                    await make_warming_ready(database,universe_version_id=target.universe_version_id,warm_closed_bar_time_ms=e,valid_until_ms=e+HOUR)
+                    await comparative_cache(target.universe_version_id,e,flat=True)
+                if step.disposition is (MaterializationDisposition.ACTIVE_NEW if activating else MaterializationDisposition.WAITING_VACUUM):
                     break
-            assert step.disposition is MaterializationDisposition.WAITING_VACUUM, step
+            assert step.disposition is (MaterializationDisposition.ACTIVE_NEW if activating else MaterializationDisposition.WAITING_VACUUM), step
             async with PostgresKernelUnitOfWork(database) as uow:
                 active = await uow.strategy_universes.get_current(first_source.spec.event_spec_id)
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=group,selection_spec_id=first_source.spec.selection_spec_id)
+            if activating:
+                assert active.universe_version_id!=uid and vacuum is None
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    signal=await uow.signals.get(observed.signal_event_id)
+                    current=await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
+                assert signal.selection_authority_id==continued.selection_authority_id
+                assert current.authority.selection_authority_id==step.selection_authority_id
+                assert signal.expires_at_ms>e+30 and current.authority.expires_at_ms>e+30
+                assert signal.universe_version_id==uid and current.authority.event_binding.universe_version_id==active.universe_version_id
+                return
             assert active.universe_version_id==uid
             assert vacuum is not None and vacuum.blocks_new_entry
             assert vacuum.source_generation_id is not None
@@ -7975,13 +8027,19 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
             notional_coefficient=Decimal(1),notional_coefficient_certified=True,
             observed_at_ms=now_ms,valid_until_ms=now_ms+60_000)
-    if fault_stage == "switch_before_claim":
+    if fault_stage in {"switch_before_claim","activated_before_claim"}:
         await authority_transition()
         async with PostgresKernelUnitOfWork(database) as uow:
             refused = await issue_ready_signal(uow,IssueReadySignalRequest(
                 signal_event_id=signal_event_id,admission_snapshot=admission,
                 claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
-                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms+5))
+                schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms+(30 if fault_stage=="activated_before_claim" else 5)))
+        if fault_stage=="activated_before_claim":
+            assert refused.status.value=="scope_or_policy_mismatch",refused
+            await assert_no_ticket_for_signal()
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.capacity_claims.get_for_signal(signal_event_id) is None
+            return
         assert refused.status.value=="selection_entry_vacuum", refused
         async with PostgresKernelUnitOfWork(database) as uow:
             decision = await uow.admission_decisions.get_for_signal(signal_event_id)
@@ -8053,17 +8111,19 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         await assert_no_ticket_for_signal()
         return
     delayed_static = fault_stage is not None and fault_stage.startswith("static_slow_normal_after_protection:")
-    assert delayed_static or fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}
-    if fault_stage in {"between_claim_ticket","switch_between_claim_ticket"}:
+    assert delayed_static or fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection","activated_between_claim_ticket","activated_before_dispatch"}
+    if fault_stage in {"between_claim_ticket","switch_between_claim_ticket","activated_between_claim_ticket"}:
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
         )
 
         async def pause_after_claim(uow, issue_request):
             assert issue_request.capacity_claim.selection_authority_id == selection_authority_id
-            if fault_stage=="switch_between_claim_ticket":
+            if fault_stage=="activated_between_claim_ticket":
+                assert issue_request.capacity_claim.expires_at_ms>now_ms+30
+            if fault_stage in {"switch_between_claim_ticket","activated_between_claim_ticket"}:
                 await authority_transition()
-                issue_request = issue_request.model_copy(update={"now_ms":now_ms+5})
+                issue_request = issue_request.model_copy(update={"now_ms":now_ms+(30 if fault_stage=="activated_between_claim_ticket" else 5)})
             else:
                 await owner_pause(now_ms+1)
             return await actual_issue_ticket(uow,issue_request)
@@ -8075,7 +8135,8 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                     signal_event_id=signal_event_id,admission_snapshot=admission,
                     claim_owner=f"hourly-{group}-entry",runtime_commit="a"*40,
                     schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now_ms))
-        assert refused.status.value == ("selection_entry_vacuum" if fault_stage=="switch_between_claim_ticket" else "strategy_paused"), refused
+        assert refused.status.value == ("scope_or_policy_mismatch" if fault_stage=="activated_between_claim_ticket" else
+            "selection_entry_vacuum" if fault_stage=="switch_between_claim_ticket" else "strategy_paused"), refused
         if fault_stage=="switch_between_claim_ticket":
             async with PostgresKernelUnitOfWork(database) as uow:
                 decision = await uow.admission_decisions.get_for_signal(signal_event_id)
@@ -8084,6 +8145,9 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert decision.selection_authority_id==selection_authority_id
             assert decision.capacity_claim_id is None and decision.ticket_id is None
         await assert_no_ticket_for_signal()
+        if fault_stage=="activated_between_claim_ticket":
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.capacity_claims.get_for_signal(signal_event_id) is None
         return
     async def issue_natural_signal():
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -8184,16 +8248,16 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
     if fault_stage == "before_dispatch":
         await owner_pause(now_ms+1)
-    if fault_stage == "switch_before_dispatch":
+    if fault_stage in {"switch_before_dispatch","activated_before_dispatch"}:
         await authority_transition()
     venue = Venue()
     dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
         DispatchCommandRequest(worker_id=f"hourly-{group}-dispatch",ticket_id=issued.ticket_id,
-            now_ms=now_ms+5,lease_until_ms=now_ms+30_000,timeout_seconds=1,
+            now_ms=now_ms+(30 if fault_stage=="activated_before_dispatch" else 5),lease_until_ms=now_ms+30_000,timeout_seconds=1,
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=60_000),entry_facts_source=ActionFacts())
-    if fault_stage in {"before_dispatch","stale_before_dispatch","switch_before_dispatch","switch_during_dispatch_facts"}:
-        assert dispatched.status.value == "superseded", dispatched
+    if fault_stage in {"before_dispatch","stale_before_dispatch","switch_before_dispatch","switch_during_dispatch_facts","activated_before_dispatch"}:
+        assert dispatched.status.value == ("no_command" if fault_stage=="activated_before_dispatch" else "superseded"), dispatched
         assert venue.calls == []
         async with database.connect() as conn:
             assert await conn.scalar(sa.text(
@@ -8205,6 +8269,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
             commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
             assert len(commands)==1 and commands[0].generation==1
+            if fault_stage=="activated_before_dispatch":
+                retained=await uow.tickets.get(issued.ticket_id)
+                assert retained.model_dump(exclude={"status"})==ticket.model_dump(exclude={"status"})
+                aggregate=await uow.aggregates.get(issued.ticket_id)
+                assert aggregate.position_qty==0
         if fault_stage in {"switch_before_dispatch","switch_during_dispatch_facts"}:
             async with database.connect() as conn:
                 payload = await conn.scalar(sa.text("SELECT payload FROM brc_trade_events "
