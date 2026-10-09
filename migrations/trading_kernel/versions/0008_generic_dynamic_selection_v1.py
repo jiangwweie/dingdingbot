@@ -218,15 +218,18 @@ def _generic_gap_vacuum_states() -> None:
                   AND g.selection_spec_id=OLD.selection_spec_id AND g.selection_epoch_id=c.selection_epoch_id
                   AND g.strategy_group_id=OLD.strategy_group_id AND g.period_anchor_ms=OLD.period_anchor_ms
                   AND g.fenced_at_ms>=OLD.fenced_at_ms AND g.fenced_at_ms<=g.terminal_at_ms
-                  AND g.terminal_at_ms>=OLD.drained_at_ms AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
-                  AND p.event_type='OWNER_PAUSED' AND p.occurred_at_ms=g.terminal_at_ms
+                  AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+                  AND p.event_type IN ('OWNER_PAUSED','OWNER_PAUSE_REQUESTED') AND p.occurred_at_ms=g.terminal_at_ms
                   AND p.payload->>'materialization_generation_id'=g.materialization_generation_id
                   AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
                   AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t
                     WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
-                  AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=OLD.entry_vacuum_id
+                  AND ((p.event_type='OWNER_PAUSED' AND g.terminal_at_ms>=OLD.drained_at_ms AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=OLD.entry_vacuum_id
                     AND d.event_type='ENTRY_DRAINED' AND d.occurred_at_ms=OLD.drained_at_ms
-                    AND d.payload->>'target_state'='RECONFIGURING')))
+                    AND d.payload->>'target_state'='RECONFIGURING'))
+                    OR (p.event_type='OWNER_PAUSE_REQUESTED' AND g.terminal_at_ms<=OLD.drained_at_ms AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
+                      WHERE d.entry_vacuum_id=OLD.entry_vacuum_id AND d.event_type='OWNER_PAUSED' AND d.occurred_at_ms=OLD.drained_at_ms
+                        AND d.payload->'entry_drain_complete'='true'::jsonb)))))
               )
             OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events e
               JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=e.payload->>'selection_snapshot_id'

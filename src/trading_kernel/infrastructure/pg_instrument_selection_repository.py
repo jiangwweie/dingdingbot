@@ -5421,16 +5421,19 @@ class PostgresInstrumentSelectionRepository:
                         AND g.selection_spec_id=:spec AND g.selection_epoch_id=:epoch
                         AND g.strategy_group_id=:group AND g.period_anchor_ms=:period
                         AND g.fenced_at_ms>=:fenced AND g.fenced_at_ms<=g.terminal_at_ms
-                        AND g.terminal_at_ms>=:drained AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
-                        AND p.event_type='OWNER_PAUSED' AND p.occurred_at_ms=g.terminal_at_ms
+                        AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+                        AND p.event_type IN ('OWNER_PAUSED','OWNER_PAUSE_REQUESTED') AND p.occurred_at_ms=g.terminal_at_ms
                         AND p.payload->>'materialization_generation_id'=g.materialization_generation_id
                         AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms
                         AND a.payload->>'reason_code'='owner_paused'
                         AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t
                           WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
-                        AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
+                        AND ((p.event_type='OWNER_PAUSED' AND g.terminal_at_ms>=:drained AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
                           WHERE d.entry_vacuum_id=:vacuum_id AND d.event_type='ENTRY_DRAINED'
-                            AND d.occurred_at_ms=:drained AND d.payload->>'target_state'='RECONFIGURING')
+                            AND d.occurred_at_ms=:drained AND d.payload->>'target_state'='RECONFIGURING'))
+                          OR (p.event_type='OWNER_PAUSE_REQUESTED' AND g.terminal_at_ms<=:drained AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
+                            WHERE d.entry_vacuum_id=:vacuum_id AND d.event_type='OWNER_PAUSED' AND d.occurred_at_ms=:drained
+                              AND d.payload->'entry_drain_complete'='true'::jsonb)))
                     )
                 """), {"vacuum_id":vacuum.entry_vacuum_id,"generation_id":vacuum.source_generation_id,
                     "spec":snapshot.selection_spec_id,"epoch":snapshot.selection_epoch_id,"group":snapshot.strategy_group_id,
