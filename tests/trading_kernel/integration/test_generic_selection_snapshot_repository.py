@@ -1695,14 +1695,17 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
     from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.domain.owner_control import StrategyEntryState
+    pause_base_at = second_at
+    if group in {"CPM-RO-001","BRF2-001"}:
+        pause_base_at = await _issue_second_dynamic_noncomparative_trade(database,group=group)
     async with PostgresKernelUnitOfWork(database) as uow:
         before_pause = await uow.owner_controls.get_strategy_control(group)
         assert before_pause is not None
         await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.PAUSED,
             request=ControlMutationRequest(expected_version=before_pause.control_version,
                 reason="pause_static_materialization",idempotency_key=f"owner:pause:static:{group}",
-                owner_identity="owner",now_ms=second_at+1),authentication_strength="totp_step_up")
-    pause_at = second_at+2
+                owner_identity="owner",now_ms=pause_base_at+1),authentication_strength="totp_step_up")
+    pause_at = pause_base_at+2
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=pause_at)):
         paused = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
             request=request,clock_ms=lambda:pause_at)
@@ -8186,6 +8189,36 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         "BudgetSettled","ReviewRecorded"} <= event_types
     if fault_stage=="static_after_protection":
         await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
+
+
+async def _issue_second_dynamic_noncomparative_trade(database, *, group):
+    spec = inputs(group).spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
+        assert current.authority.authority_outcome=="ACTIVE_NEW"
+        uid = current.authority.event_binding.universe_version_id
+        close = current.authority.first_eligible_close_time_ms
+        assert uow._connection is not None
+        scope_id,member = (await uow._connection.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
+            "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})).one()
+    class Market:
+        def __init__(self,template,at):
+            self.template,self.delta=template,at-template.trigger_candle_close_time_ms
+        async def fetch_closed_candles(self,request):
+            candles=self.template.candles_1h if request.timeframe=="1h" else self.template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+self.delta,"close_time_ms":c.close_time_ms+self.delta}) for c in candles)
+    for at,template in ((close,cpm_flat_snapshot()),(close+HOUR,cpm_long_snapshot() if group=="CPM-RO-001" else brf2_short_snapshot())):
+        attempted = max(at+1,current.authority.created_at_ms+1)
+        await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=at,valid_until_ms=at+HOUR)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=attempted)):
+            observed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),Market(template,at),
+                ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                    trigger_candle_close_time_ms=at,attempted_at_ms=attempted))
+        assert observed.status is (ObservationStatus.NO_SIGNAL if at==close else ObservationStatus.SIGNAL_CREATED),observed
+    await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
+        selection_authority_id=current.authority.selection_authority_id,member=member,universe_version_id=uid,
+        closed_at_ms=close+HOUR,now_ms=close+HOUR+2,fault_stage=None)
+    return close+HOUR+800
 
 
 async def _issue_new_static_natural_trade(database, *, group,fault_stage=None):
