@@ -1266,7 +1266,8 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
                 "WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":created.materialization_generation_id}) == 1
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state='warming'")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
-        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=failed_at+2)
+        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=failed_at+2,
+            fail_retries=1 if failure_case=="timeout" else 0)
         return
     await make_warming_ready(database,universe_version_id=target_uid,warm_closed_bar_time_ms=anchor+HOUR,
         valid_until_ms=due+HOUR)
@@ -6836,7 +6837,7 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         fault_stage=fault_stage)
 
 
-async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms):
+async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms, fail_retries=0):
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
         stage_generic_static_selection_mode,
@@ -6966,6 +6967,36 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
     assert retained_vacuum.fenced_at_ms==vacuum.fenced_at_ms and retained_vacuum.drained_at_ms==vacuum.drained_at_ms
     assert retained_vacuum.source_generation_id==replacement.materialization_generation_id
     assert retained_vacuum.state is StrategyEntryVacuumState.RECONFIGURING and retained_vacuum.blocks_new_entry
+    if fail_retries:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+1)):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:due+1)
+        failed_at = due+inputs(group).spec.materialization_timeout_ms
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at)):
+            failed_again = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=retry_request,clock_ms=lambda:failed_at)
+        assert failed_again.reason_code=="MATERIALIZATION_TIMEOUT"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            failed_replacement = await uow.instrument_selection.get_generic_static_materialization_generation(replacement.materialization_generation_id)
+        assert failed_replacement.lifecycle_state.value=="FAILED_CLOSED"
+        await _assert_terminal_static_owner_reauthorization(database,group=group,at_ms=failed_at+1,fail_retries=fail_retries-1)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_generic_static_materialization_generation(old.materialization_generation_id)==old
+            assert await uow.instrument_selection.get_generic_static_materialization_generation(replacement.materialization_generation_id)==failed_replacement
+            with patch.object(uow.instrument_selection,"read_authority_clock_ms",new=AsyncMock(return_value=failed_at+HOUR)), pytest.raises(SelectionJobConflict,match="Owner or Control"):
+                await uow.instrument_selection.claim_generic_static_materialization_generation(replacement.materialization_generation_id,
+                    worker_id="old-retry-callback",now_ms=failed_at+HOUR,lease_duration_ms=30000)
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT brc_static_retry_handoff_matches_v1(:gid)"),{"gid":replacement.materialization_generation_id})
+            assert await conn.scalar(sa.text("SELECT brc_static_retry_successor_matches_v1(:gid,:vid)"),
+                {"gid":old.materialization_generation_id,"vid":vacuum.entry_vacuum_id})
+            assert not await conn.scalar(sa.text("SELECT brc_static_retry_successor_matches_v1(:gid,:vid)"),
+                {"gid":old.materialization_generation_id,"vid":"vacuum:wrong-scope"})
+        # Force independent deferred validation of historical terminal facts.
+        # A no-op update must not invalidate them when Current has advanced.
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations "
+                "SET projection_version=projection_version WHERE materialization_generation_id IN (:root,:retry)"),
+                {"root":old.materialization_generation_id,"retry":replacement.materialization_generation_id})
+        return
     # A new Owner intent does not cure permanent certification failure.
     # Supply renewed eligible certification facts before testing recovery.
     async with PostgresKernelUnitOfWork(database) as uow:

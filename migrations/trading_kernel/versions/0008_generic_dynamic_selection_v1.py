@@ -1829,6 +1829,47 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
         END; $$
     """))
     op.execute(sa.text("""
+        CREATE FUNCTION brc_static_retry_successor_matches_v1(gid text,vid text) RETURNS boolean LANGUAGE sql AS $$
+          SELECT EXISTS (
+            SELECT 1 FROM brc_strategy_universe_materialization_generations g
+              JOIN brc_strategy_entry_vacuum_events next_handoff ON next_handoff.entry_vacuum_id=vid
+              JOIN brc_strategy_universe_materialization_generations nextg
+                ON nextg.materialization_generation_id=next_handoff.payload->>'replacement_generation_id'
+              JOIN brc_strategy_universe_materialization_events next_source
+                ON next_source.materialization_generation_id=nextg.materialization_generation_id
+                  AND next_source.event_sequence=1 AND next_source.event_type='PENDING'
+              JOIN brc_owner_authorizations oa ON oa.authorization_id=next_source.payload->>'authorization_id'
+            WHERE g.materialization_generation_id=gid AND g.lifecycle_state IN ('FAILED_CLOSED','ABANDONED')
+              AND next_handoff.event_type='SUPERSEDED' AND next_handoff.payload->>'recovery_origin'='STATIC_RETRY'
+              AND next_handoff.payload->>'previous_generation_id'=gid
+              AND next_source.payload->>'previous_static_generation_id'=gid
+              AND nextg.selection_spec_id=g.selection_spec_id AND nextg.selection_epoch_id=g.selection_epoch_id
+              AND nextg.rollback_baseline_id=g.rollback_baseline_id AND nextg.selection_control_version=g.selection_control_version
+              AND nextg.selection_mode='static_baseline' AND nextg.created_at_ms>=g.terminal_at_ms
+              AND nextg.fenced_at_ms=next_handoff.occurred_at_ms AND next_handoff.occurred_at_ms>=g.terminal_at_ms
+              AND oa.authentication_strength='totp_step_up' AND oa.purpose='selection_mode_change'
+              AND oa.authorized_at_ms>=g.terminal_at_ms AND oa.authorized_at_ms<=nextg.created_at_ms
+              AND oa.target_scope=jsonb_build_object('strategy_group_id',g.strategy_group_id,'selection_spec_id',g.selection_spec_id,
+                'target_selection_mode','static_baseline','rollback_baseline_id',g.rollback_baseline_id,
+                'selection_epoch_id',g.selection_epoch_id,'effective_period_anchor_ms',(next_source.payload->>'effective_period_anchor_ms')::bigint)
+              AND nextg.materialization_generation_id='generation:' || encode(sha256(convert_to(
+                '{"static_authorization":' || to_json(oa.authorization_id)::text || '}','UTF8')),'hex')
+              AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions old_target WHERE old_target.materialization_generation_id=gid
+                AND old_target.lifecycle_state<>'abandoned')
+              AND EXISTS (SELECT 1 FROM brc_materialization_generation_event_baselines b
+                JOIN brc_materialization_generation_event_baselines nextb ON nextb.materialization_generation_id=nextg.materialization_generation_id
+                WHERE b.materialization_generation_id=gid AND b.event_spec_id=nextb.event_spec_id
+                  AND b.position_side=nextb.position_side AND b.universe_version_id=nextb.universe_version_id
+                  AND b.member_set_digest=nextb.member_set_digest
+                  AND b.comparison_universe_id IS NOT DISTINCT FROM nextb.comparison_universe_id
+                  AND b.comparison_transition_revision IS NOT DISTINCT FROM nextb.comparison_transition_revision)
+              AND EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_events e
+                WHERE e.materialization_generation_id=gid AND e.event_type='OWNER_REAUTHORIZED'
+                  AND e.payload->>'authorization_id'=oa.authorization_id AND e.occurred_at_ms=oa.authorized_at_ms)
+          );
+        $$
+    """))
+    op.execute(sa.text("""
         CREATE FUNCTION brc_static_retry_handoff_matches_v1(gid text) RETURNS boolean LANGUAGE plpgsql AS $$
         DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE;
           oldg brc_strategy_universe_materialization_generations%ROWTYPE; src jsonb; oldid text;
@@ -1865,7 +1906,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
             WHERE handoff.event_type='SUPERSEDED' AND handoff.payload->>'recovery_origin'='STATIC_RETRY'
               AND handoff.payload->>'previous_generation_id'=oldid AND handoff.payload->>'replacement_generation_id'=gid
               AND handoff.occurred_at_ms=g.fenced_at_ms LIMIT 1;
-          IF NOT FOUND OR v.source_generation_id<>gid OR v.selection_spec_id<>g.selection_spec_id
+          IF NOT FOUND OR v.selection_spec_id<>g.selection_spec_id
             OR v.strategy_group_id<>g.strategy_group_id OR v.fenced_at_ms>v.drained_at_ms
             OR v.drained_at_ms IS NULL OR v.drained_at_ms>=g.fenced_at_ms
             OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=v.entry_vacuum_id
@@ -1876,6 +1917,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
               AND e.event_type='MATERIALIZING' AND e.payload->>'entry_vacuum_id'=v.entry_vacuum_id
               AND (e.payload->>'original_fenced_at_ms')::bigint=v.fenced_at_ms
               AND (e.payload->>'original_drained_at_ms')::bigint=v.drained_at_ms) THEN RETURN false; END IF;
+          IF v.source_generation_id<>gid AND NOT brc_static_retry_successor_matches_v1(gid,v.entry_vacuum_id) THEN RETURN false; END IF;
           RETURN true;
         END; $$
     """))
@@ -2014,12 +2056,14 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 OR (failure_source->>'reason_code'='MATERIALIZATION_TIMEOUT' AND g.terminal_at_ms<deadline) THEN
                 RAISE EXCEPTION 'Static failure requires exact terminal cause'; END IF;
               SELECT * INTO failure_vacuum FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=failure_source->>'entry_vacuum_id';
-              IF NOT FOUND OR failure_vacuum.source_generation_id<>gid OR failure_vacuum.state<>'RECONFIGURING'
-                OR failure_vacuum.strategy_group_id<>g.strategy_group_id OR failure_vacuum.selection_spec_id<>g.selection_spec_id
+              IF NOT FOUND OR failure_vacuum.strategy_group_id<>g.strategy_group_id OR failure_vacuum.selection_spec_id<>g.selection_spec_id
                 OR failure_vacuum.fenced_at_ms>g.fenced_at_ms OR failure_vacuum.drained_at_ms IS NULL
-                OR (owner_source->>'previous_static_generation_id' IS NULL AND failure_vacuum.fenced_at_ms<>g.fenced_at_ms)
-                OR failure_vacuum.resolved_at_ms IS NOT NULL OR failure_vacuum.first_blocker IS DISTINCT FROM failure_source->>'reason_code' THEN
+                OR (owner_source->>'previous_static_generation_id' IS NULL AND failure_vacuum.fenced_at_ms<>g.fenced_at_ms) THEN
                 RAISE EXCEPTION 'Static failure requires unresolved original Vacuum'; END IF;
+              IF (failure_vacuum.source_generation_id<>gid OR failure_vacuum.state<>'RECONFIGURING'
+                OR failure_vacuum.resolved_at_ms IS NOT NULL OR failure_vacuum.first_blocker IS DISTINCT FROM failure_source->>'reason_code')
+                AND NOT brc_static_retry_successor_matches_v1(gid,failure_vacuum.entry_vacuum_id) THEN
+                RAISE EXCEPTION 'Static failure requires unresolved original Vacuum or exact authorized successor'; END IF;
             END IF;
             IF g.lifecycle_state='ACTIVE' THEN
               SELECT payload->'static_activation_proof',occurred_at_ms INTO activation_source,active_at
