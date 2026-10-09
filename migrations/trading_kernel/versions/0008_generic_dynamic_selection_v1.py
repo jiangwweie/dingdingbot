@@ -1933,6 +1933,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 failure_source jsonb; failure_at bigint; deadline bigint; failure_vacuum brc_strategy_entry_vacuums_current%ROWTYPE;
                 activation_source jsonb; active_at bigint; target_id text;
                 activation_predecessor brc_selection_session_authorities%ROWTYPE;
+                recovery_origin_id text;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
@@ -2072,6 +2073,11 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
               target_id:=activation_source->'target_event'->>'universe_version_id';
               SELECT * INTO activation_predecessor FROM brc_selection_session_authorities
                 WHERE selection_authority_id=activation_source->>'source_selection_authority_id';
+              recovery_origin_id:=CASE WHEN activation_predecessor.recovery_grant_proof IS NOT NULL
+                THEN activation_predecessor.selection_authority_id
+                WHEN activation_predecessor.authority_outcome='PRE_FENCE_CONTINUITY'
+                THEN activation_predecessor.current_close_proof->>'origin_recovery_authority_id'
+                ELSE activation_predecessor.continued_from_selection_authority_id END;
               IF jsonb_typeof(activation_source->'observation_cursors') IS DISTINCT FROM 'array'
                 OR jsonb_array_length(activation_source->'observation_cursors')<>g.desired_member_count
                 OR (SELECT count(DISTINCT cursor->>'exchange_instrument_id') FROM jsonb_array_elements(activation_source->'observation_cursors') cursor)<>g.desired_member_count
@@ -2096,6 +2102,35 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                   WHERE scope.universe_version_id=target_id AND ev.operation='owner_control_entry_pause'
                     AND ev.created_at_ms>activation_predecessor.created_at_ms AND ev.created_at_ms<=g.activated_at_ms)
               ) THEN RAISE EXCEPTION 'Static NORMAL cannot cross authority gap or interruption'; END IF;
+              IF activation_source->>'transition_rule'='NORMAL_TRANSITION' AND (
+                (recovery_origin_id IS NOT NULL AND NOT EXISTS (
+                  SELECT 1 FROM brc_selection_session_authorities origin WHERE origin.selection_authority_id=recovery_origin_id
+                    AND origin.recovery_grant_proof IS NOT NULL AND origin.selection_epoch_id=g.selection_epoch_id
+                    AND origin.selection_spec_id=g.selection_spec_id
+                    AND origin.selection_control_version=activation_predecessor.selection_control_version
+                    AND origin.comparison_universe_id IS NOT DISTINCT FROM activation_predecessor.comparison_universe_id
+                    AND origin.comparison_transition_revision IS NOT DISTINCT FROM activation_predecessor.comparison_transition_revision
+                    AND EXISTS (SELECT 1 FROM brc_selection_authority_event_bindings origin_binding
+                      JOIN brc_selection_authority_event_bindings source_binding ON source_binding.selection_authority_id=activation_predecessor.selection_authority_id
+                      WHERE origin_binding.selection_authority_id=origin.selection_authority_id
+                        AND origin_binding.event_spec_id=source_binding.event_spec_id
+                        AND origin_binding.position_side=source_binding.position_side
+                        AND origin_binding.universe_version_id=source_binding.universe_version_id
+                        AND origin_binding.member_set_digest=source_binding.member_set_digest)))
+                OR EXISTS (
+                  SELECT 1 FROM brc_selection_session_authorities origin
+                    JOIN brc_strategy_universe_members prev_member ON prev_member.universe_version_id=previous_source.universe_version_id
+                    JOIN brc_strategy_universe_members target_member ON target_member.universe_version_id=target_id
+                      AND target_member.exchange_instrument_id=prev_member.exchange_instrument_id
+                    LEFT JOIN brc_exposure_episode_current ep ON ep.event_spec_id=previous_source.event_spec_id
+                      AND ep.exchange_instrument_id=target_member.exchange_instrument_id AND ep.position_side=previous_source.position_side
+                  WHERE origin.selection_authority_id=recovery_origin_id
+                    AND (ep.authority_recovery_id IS DISTINCT FROM origin.recovery_grant_proof->'recovery_close_plan'->>'recovery_id'
+                      OR ep.authority_recovery_revision IS DISTINCT FROM (origin.recovery_grant_proof->'recovery_close_plan'->>'recovery_revision')::bigint
+                      OR ep.authority_recovery_effective_from_ms IS DISTINCT FROM (origin.recovery_grant_proof->>'committed_at_ms')::bigint
+                      OR ep.authority_recovery_first_eligible_close_time_ms IS DISTINCT FROM (origin.recovery_grant_proof->'recovery_close_plan'->>'first_eligible_close_time_ms')::bigint
+                      OR ep.authority_recovery_armed_at_ms IS NULL))
+              ) THEN RAISE EXCEPTION 'Static NORMAL cannot skip recovery provenance'; END IF;
               IF activation_source->>'transition_rule'='NORMAL_TRANSITION' AND (
                 jsonb_typeof(activation_source->'observation_cursors') IS DISTINCT FROM 'array'
                 OR jsonb_array_length(activation_source->'observation_cursors')<>g.desired_member_count
