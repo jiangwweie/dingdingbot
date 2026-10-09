@@ -112,7 +112,7 @@ def _generic_vacuum_owner_resume_proof() -> None:
       RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT EXISTS (
           SELECT 1 FROM brc_strategy_entry_vacuums_current v
-          JOIN brc_strategy_entry_vacuum_events p ON p.entry_vacuum_id=v.entry_vacuum_id AND p.event_type='OWNER_PAUSED'
+          JOIN brc_strategy_entry_vacuum_events p ON p.entry_vacuum_id=v.entry_vacuum_id AND p.event_type IN ('OWNER_PAUSED','OWNER_PAUSE_REQUESTED')
           JOIN brc_strategy_universe_materialization_generations g ON g.materialization_generation_id=p.payload->>'materialization_generation_id'
           JOIN brc_strategy_universe_materialization_events a ON a.materialization_generation_id=g.materialization_generation_id
           JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=v.strategy_group_id
@@ -126,11 +126,11 @@ def _generic_vacuum_owner_resume_proof() -> None:
             AND g.selection_mode='dynamic_selection' AND g.lifecycle_state='ABANDONED'
             AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
             AND g.selection_epoch_id=src.selection_epoch_id AND g.fenced_at_ms>=v.fenced_at_ms
-            AND g.terminal_at_ms=p.occurred_at_ms AND g.terminal_at_ms>=v.drained_at_ms
+            AND g.terminal_at_ms=p.occurred_at_ms AND g.terminal_at_ms<=checked_at
             AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
             AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
             AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
-            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=g.terminal_at_ms AND r.created_at_ms<=checked_at
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=greatest(g.terminal_at_ms,v.drained_at_ms) AND r.created_at_ms<=checked_at
             AND pause.operation='pause' AND pause.target_state='paused' AND pause.created_at_ms<=g.terminal_at_ms
             AND pause_auth.purpose='strategy_pause' AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
             AND pause_auth.authorized_at_ms=pause.created_at_ms
@@ -139,8 +139,11 @@ def _generic_vacuum_owner_resume_proof() -> None:
             AND auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
             AND auth.authorized_at_ms=r.created_at_ms
             AND NOT EXISTS (SELECT 1 FROM brc_strategy_universe_versions t WHERE t.materialization_generation_id=g.materialization_generation_id AND t.lifecycle_state<>'abandoned')
-            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=vid
-              AND d.event_type='ENTRY_DRAINED' AND d.occurred_at_ms=v.drained_at_ms AND d.payload->>'target_state'='RECONFIGURING')
+            AND ((p.event_type='OWNER_PAUSED' AND g.terminal_at_ms>=v.drained_at_ms AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d WHERE d.entry_vacuum_id=vid
+              AND d.event_type='ENTRY_DRAINED' AND d.occurred_at_ms=v.drained_at_ms AND d.payload->>'target_state'='RECONFIGURING'))
+              OR (p.event_type='OWNER_PAUSE_REQUESTED' AND g.terminal_at_ms<=v.drained_at_ms AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events d
+                WHERE d.entry_vacuum_id=vid AND d.event_type='OWNER_PAUSED' AND d.occurred_at_ms=v.drained_at_ms
+                  AND d.payload->'entry_drain_complete'='true'::jsonb)))
         );
       $$
     """))

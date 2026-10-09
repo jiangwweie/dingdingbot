@@ -3133,7 +3133,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
-    *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string")),
+    *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string","_recover","_unknown_recover","_partial_recover")),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
         for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
     *((group,"entry_fault:static_new_entry:"+fault) for group in ("CPM-RO-001","BRF2-001")
@@ -3351,10 +3351,11 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
             group=group,current=current,issued=issued,ticket=ticket,venue=venue,
             initial_source=source,entry_dispatched_at_ms=issued_at+5,
             supersede_with_nonempty=isinstance(cancel_before_fill,str) and cancel_before_fill.startswith("latest_nonempty"),
-            unknown_cancel=isinstance(cancel_before_fill,str) and cancel_before_fill.endswith("_unknown"),
-            partial_fill=isinstance(cancel_before_fill,str) and cancel_before_fill.endswith("_partial"),
+            unknown_cancel=isinstance(cancel_before_fill,str) and "_unknown" in cancel_before_fill,
+            partial_fill=isinstance(cancel_before_fill,str) and "_partial" in cancel_before_fill,
             pause_owner=isinstance(cancel_before_fill,str) and "_pause" in cancel_before_fill,
-            corrupt_pause_completion=cancel_before_fill.rsplit("_",1)[-1] if isinstance(cancel_before_fill,str) and cancel_before_fill.endswith(("_false","_string")) else None)
+            corrupt_pause_completion=cancel_before_fill.rsplit("_",1)[-1] if isinstance(cancel_before_fill,str) and cancel_before_fill.endswith(("_false","_string")) else None,
+            paused_nonempty_recovery=isinstance(cancel_before_fill,str) and cancel_before_fill.endswith("_recover"))
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
@@ -3527,6 +3528,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
     partial_fill: bool = False,
     pause_owner: bool = False,
     corrupt_pause_completion: str | None = None,
+    paused_nonempty_recovery: bool = False,
 ) -> None:
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
@@ -3596,7 +3598,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
         # The exact original ENTRY is still open when a third-period Desired arrives.
         # Reuse Runner/source acquisition; do not mutate the old Vacuum pointer.
         empty_source = next_input(empty_source).model_copy(update={"predecessor_snapshot": empty})
-        if pause_owner:
+        if pause_owner and not paused_nonempty_recovery:
             empty_source=empty_source.model_copy(update={"member_windows":tuple(qualify_window(window,False) for window in empty_source.member_windows)})
         tick = empty_source.feature_cutoff_at_ms
         selected = await run_instrument_selection_once(
@@ -3608,7 +3610,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
         assert selected.outcome == "SNAPSHOT_READY", selected
         async with PostgresKernelUnitOfWork(database) as uow:
             empty = await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
-        assert bool(empty.selected_members)==(not pause_owner)
+        assert bool(empty.selected_members)==(not pause_owner or paused_nonempty_recovery)
         request = CoordinateGenericSnapshotRequest(selection_snapshot_id=empty.selection_snapshot_id,
             worker_id=f"natural-{group}-latest-nonempty-materializer")
         now = empty.effective_from_ms+1
@@ -3834,7 +3836,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
                 request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_after_exact_entry_drain",
                     idempotency_key=f"resume-real-drain:{group}:{unknown_cancel}:{partial_fill}",owner_identity="owner",now_ms=now+resume_offset+1),authentication_strength="totp_step_up")
         resume_offset+=2
-        supersede_with_nonempty=False
+        supersede_with_nonempty=paused_nonempty_recovery
         if corrupt_pause_completion:
             checked_at=now+resume_offset
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=checked_at)), pytest.raises(
@@ -3889,7 +3891,38 @@ async def _assert_natural_sent_entry_drained_by_selection(
             superseded = await uow.instrument_selection.get_generic_materialization_generation(original_vacuum.source_generation_id)
         assert inherited is not None and inherited.entry_vacuum_id == original_vacuum.entry_vacuum_id
         assert inherited.fenced_at_ms == original_vacuum.fenced_at_ms and inherited.drained_at_ms is not None
-        assert superseded is not None and superseded.lifecycle_state.value == "SUPERSEDED"
+        assert superseded is not None and superseded.lifecycle_state.value == ("ABANDONED" if pause_owner else "SUPERSEDED")
+        if pause_owner:
+            assert superseded==abandoned
+        if paused_nonempty_recovery:
+            for offset in (resume_offset+3,resume_offset+4,resume_offset+5):
+                recovery_at=now+offset
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    targets=await uow.strategy_universes.get_generation_universe_targets(negative.materialization_generation_id)
+                if targets:
+                    await make_warming_ready(database,universe_version_id=targets[0].universe_version_id,
+                        warm_closed_bar_time_ms=recovery_at//HOUR*HOUR,valid_until_ms=recovery_at+HOUR)
+                    if group in {"MPG-001","MI-001"}:
+                        template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                        shift=recovery_at//HOUR*HOUR-template.trigger_candle_close_time_ms
+                        candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+                        projection=build_comparative_universe_projection(event_spec_id=empty_source.spec.event_spec_id,universe_version_id=targets[0].universe_version_id,
+                            strategy_group_id=group,exchange_instrument_ids=empty_source.spec.candidate_ids,closed_bar_time_ms=recovery_at//HOUR*HOUR,
+                            lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                            member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in empty_source.spec.candidate_ids))
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            await uow.strategy_universes.save_comparative_projection(projection)
+                with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=recovery_at)):
+                    recovered=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda recovery_at=recovery_at:recovery_at)
+            assert recovered.disposition is MaterializationDisposition.ACTIVE_NEW,recovered
+            async with PostgresKernelUnitOfWork(database) as uow:
+                active=await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)
+                assert isinstance(active.authority,GenericRecoveryAuthority)
+                assert active.authority.recovery_proof.recovery_close_plan.reason=="AUTHORITY_GAP"
+                assert active.authority.first_eligible_close_time_ms>recovery_at
+                assert active.authority.recovery_proof.episode_rebase_required
+                assert await uow.instrument_selection.get_generic_materialization_generation(original_vacuum.source_generation_id)==abandoned
+                assert (await uow.strategy_universes.get_current(empty_source.spec.event_spec_id)).universe_version_id!=current.authority.event_binding.universe_version_id
     else:
         assert authority.authority.authority_outcome == "VALID_EMPTY"
     if partial_fill:
@@ -6204,10 +6237,10 @@ async def test_latest_nonempty_snapshot_takes_over_early_generation_after_drain(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
 @pytest.mark.parametrize("restore_current_members", [False, True])
-@pytest.mark.parametrize("staged_old_target", [False, True])
-@pytest.mark.parametrize("pause_before_takeover", [False, True])
+@pytest.mark.parametrize("staged_old_target,pause_before_takeover,corrupt_completion", [(False,False,None),(True,False,None),(False,True,None),(True,True,None),
+    ("draining",True,None),("draining",True,"false"),("draining",True,"string")])
 async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
-    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool, pause_before_takeover: bool,
+    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool | str, pause_before_takeover: bool,corrupt_completion: str | None,
 ) -> None:
     source, first_snapshot, _, active_uid = await _exercise_generic_generation(
         database, group, False, durable=True, first_activation=True, natural_selection=True)
@@ -6235,17 +6268,17 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
             step = await coordinate_selection_materialization_once(
                 uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request,
                 clock_ms=lambda at=at: at)
-        if step.disposition is MaterializationDisposition.TARGET_WARMING:
+        if step.disposition is (MaterializationDisposition.WAITING_VACUUM if staged_old_target=="draining" else MaterializationDisposition.TARGET_WARMING):
             break
-    assert step.disposition is MaterializationDisposition.TARGET_WARMING, step
+    assert step.disposition is (MaterializationDisposition.WAITING_VACUUM if staged_old_target=="draining" else MaterializationDisposition.TARGET_WARMING), step
     old_id = step.materialization_generation_id
     async with PostgresKernelUnitOfWork(database) as uow:
         old = await uow.instrument_selection.get_generic_materialization_generation(old_id)
         old_targets = await uow.strategy_universes.get_generation_universe_targets(old_id)
         original_vacuum = await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
-    assert old is not None and old.lifecycle_state.value == "MATERIALIZING"
-    assert len(old_targets) == 1 and old_targets[0].lifecycle_state.value == "warming"
+    assert old is not None and old.lifecycle_state.value == ("DRAINING_ENTRY" if staged_old_target=="draining" else "MATERIALIZING")
+    assert (old_targets==()) if staged_old_target=="draining" else (len(old_targets) == 1 and old_targets[0].lifecycle_state.value == "warming")
     assert original_vacuum is not None
 
     async def ready_target(uid: str, at: int) -> None:
@@ -6265,7 +6298,7 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
             async with PostgresKernelUnitOfWork(database) as uow:
                 await uow.strategy_universes.save_comparative_projection(projection)
 
-    if staged_old_target:
+    if staged_old_target is True:
         stage_at = second.effective_from_ms+20
         await ready_target(old_targets[0].universe_version_id, stage_at)
         with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
@@ -6279,7 +6312,7 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
             set_strategy_entry_state,
         )
         from src.trading_kernel.domain.owner_control import StrategyEntryState
-        for offset,state in ((21,StrategyEntryState.PAUSED),(23,StrategyEntryState.ENABLED)):
+        for offset,state in ((21,StrategyEntryState.PAUSED),(25,StrategyEntryState.ENABLED)):
             async with PostgresKernelUnitOfWork(database) as uow:
                 owner=await uow.owner_controls.get_strategy_control(group)
                 await set_strategy_entry_state(uow,strategy_group_id=group,target_state=state,
@@ -6291,6 +6324,20 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
                 with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=paused_at)):
                     paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda paused_at=paused_at:paused_at)
                 assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+                if staged_old_target=="draining":
+                    actual_execute=sa.ext.asyncio.AsyncConnection.execute
+                    async def corrupt_completion_event(connection,statement,*args,actual_execute=actual_execute,**kwargs):
+                        if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+                            params=statement.compile().params
+                            if params.get("event_type")=="OWNER_PAUSED" and params.get("payload",{}).get("entry_drain_complete"):
+                                statement=statement.values(payload={"entry_drain_complete":"true" if corrupt_completion=="string" else False})
+                        return await actual_execute(connection,statement,*args,**kwargs)
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=paused_at+1)):
+                        if corrupt_completion:
+                            with patch.object(sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_completion_event):
+                                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda paused_at=paused_at:paused_at+1)
+                        else:
+                            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda paused_at=paused_at:paused_at+1)
                 async with PostgresKernelUnitOfWork(database) as uow:
                     old=await uow.instrument_selection.get_generic_materialization_generation(old_id)
                     original_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
@@ -6310,6 +6357,27 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
     at = newest.effective_from_ms + 1
     newest_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=newest.selection_snapshot_id,
         worker_id="latest-target-owner")
+    if corrupt_completion:
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+                {"vid":original_vacuum.entry_vacuum_id,"source":original_authority.authority.selection_authority_id,"at":at}) is False
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), pytest.raises(
+            SelectionJobConflict,match="Owner resume provenance missing"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=newest_request,clock_ms=lambda:at)
+        actual_scalar=sa.ext.asyncio.AsyncConnection.scalar
+        async def bypass_python_proof(connection,statement,*args,**kwargs):
+            if "brc_generic_vacuum_owner_resume_matches" in str(statement):
+                return True
+            return await actual_scalar(connection,statement,*args,**kwargs)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), patch.object(
+            sa.ext.asyncio.AsyncConnection,"scalar",new=bypass_python_proof), pytest.raises(sa.exc.DBAPIError,match="Owner Pause nonempty handoff requires exact"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=newest_request,clock_ms=lambda:at)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==original_vacuum
+            assert await uow.instrument_selection.get_generic_materialization_generation(old_id)==old
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==original_authority
+            assert await uow.instrument_selection.get_generic_materialization_generation(GenericMaterializationGeneration.id_for_snapshot(newest.selection_snapshot_id)) is None
+        return
 
     @asynccontextmanager
     async def interrupted_takeover():
@@ -7616,7 +7684,7 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 @pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
     *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
     *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
-    *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string"))])
+    *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover"))])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -8377,8 +8445,9 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         assert source.feature_cutoff_at_ms==parent.feature_cutoff_at_ms
         await _assert_natural_sent_entry_drained_by_selection(database,group=group,current=current,issued=issued,
             ticket=ticket,venue=venue,initial_source=source,entry_dispatched_at_ms=now_ms+5,
-            supersede_with_nonempty=True,unknown_cancel=real_pause_fault=="unknown",partial_fill=real_pause_fault=="partial",
-            pause_owner=True,corrupt_pause_completion=real_pause_fault if real_pause_fault in {"false","string"} else None)
+            supersede_with_nonempty=True,unknown_cancel=real_pause_fault.startswith("unknown"),partial_fill=real_pause_fault.startswith("partial"),
+            pause_owner=True,corrupt_pause_completion=real_pause_fault if real_pause_fault in {"false","string"} else None,
+            paused_nonempty_recovery=real_pause_fault.endswith("_recover"))
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
