@@ -1680,7 +1680,10 @@ def _authority_snapshot_epoch() -> None:
                   WHERE current_auth.selection_spec_id=NEW.selection_spec_id;
                 IF FOUND THEN
                   origin_id:=CASE WHEN source_authority_row.recovery_grant_proof IS NOT NULL
-                    THEN source_authority_row.selection_authority_id ELSE source_authority_row.continued_from_selection_authority_id END;
+                    THEN source_authority_row.selection_authority_id
+                    WHEN source_authority_row.authority_outcome='PRE_FENCE_CONTINUITY'
+                    THEN source_authority_row.current_close_proof->>'origin_recovery_authority_id'
+                    ELSE source_authority_row.continued_from_selection_authority_id END;
                   IF origin_id IS NOT NULL THEN
                     SELECT recovery_grant_proof INTO origin_proof FROM brc_selection_session_authorities
                       WHERE selection_authority_id=origin_id AND selection_spec_id=NEW.selection_spec_id;

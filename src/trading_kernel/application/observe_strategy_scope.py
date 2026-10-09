@@ -506,9 +506,12 @@ async def observe_strategy_scope(
                 reason="warm_facts_invalid",
             )
     async with uow_factory() as uow:
-        if recovery_observation:
-            # Revalidate under Owner/Control/current/Episode locks before the
-            # comparison lock or any Facts write. Market I/O happened outside.
+        if recovery_observation or (scope.lifecycle_state == "active" and scope.strategy_group_id in {
+            "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001",
+        }):
+            # Generic NORMAL and Recovery must both revalidate before Facts
+            # or Episode writes, in Owner/Control/current/Episode lock order.
+            # Market I/O happened outside the transaction.
             refreshed_selection = await resolve_selection_observation_authority(uow,runtime_scope=scope,
                 birth_selection_authority_id=selection_authority_id,observed_close_time_ms=request.trigger_candle_close_time_ms,
                 now_ms=attempted_at_ms,allow_current_as_birth=False,lock_current=True)

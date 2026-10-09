@@ -4005,6 +4005,178 @@ async def test_generic_continuity_precedes_selection_result_and_has_one_miss_bud
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","BRF2-001","MPG-001","MI-001"])
+@pytest.mark.parametrize("activation_commits_first", [False,True])
+@pytest.mark.parametrize("detector_triggers", [False,True])
+async def test_generic_replacement_revalidates_inflight_old_observation_before_any_fact_or_cursor(
+    database: AsyncEngine, group: str, activation_commits_first: bool, detector_triggers: bool,
+) -> None:
+    source,first,_,old_uid=await _exercise_generic_generation(database,group,False,
+        durable=True,first_activation=True,natural_selection=True)
+    shifted=next_input(source)
+    chosen=first.selected_members[0]
+    next_source=shifted.model_copy(update={"predecessor_snapshot":first,"member_windows":tuple(
+        qualify_window(window.model_copy(update={"candles":shifted.member_windows[0].candles}),window.exchange_instrument_id==chosen)
+        for window in shifted.member_windows)})
+    snapshot=compute_generic_selection(next_source)
+    assert snapshot.selected_members!=first.selected_members
+    close=snapshot.effective_from_ms
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=next_source.decision_at_ms,source_observed_at_ms=next_source.source_observed_at_ms)
+    await make_warming_ready(database,universe_version_id=old_uid,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+    async with database.connect() as conn:
+        scope_id=await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND exchange_instrument_id=:member"),
+            {"uid":old_uid,"member":chosen})
+    template={"CPM-RO-001":cpm_long_snapshot,"BRF2-001":brf2_short_snapshot,"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot}[group]()
+    if not detector_triggers:
+        template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot() if group=="MI-001" else cpm_flat_snapshot()
+    delta=close-template.trigger_candle_close_time_ms
+    candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+    async def comparison(uid):
+        if group in {"MPG-001","MI-001"}:
+            flat=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+            flat_delta=close-flat.trigger_candle_close_time_ms
+            flat_candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+flat_delta,"close_time_ms":c.close_time_ms+flat_delta}) for c in flat.candles_1h)
+            projection=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=uid,strategy_group_id=group,
+                exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=close,lookback_bars=8 if group=="MPG-001" else 12,
+                freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles if m==chosen else flat_candles) for m in source.spec.candidate_ids))
+            async with PostgresKernelUnitOfWork(database) as uow:
+                binding=await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id)
+                await uow.strategy_universes.save_comparative_projection(projection.model_copy(update={"comparison_transition_revision":binding.comparison_transition_revision if uid==old_uid else 0}))
+    await comparison(old_uid)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+        continuity=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericPeriodRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                period_anchor_ms=snapshot.feature_cutoff_at_ms,worker_id="inflight-continuity"),clock_ms=lambda:close+1)
+    assert continuity.disposition is MaterializationDisposition.PRE_FENCE_CONTINUITY,continuity
+    network_started=asyncio.Event()
+    release_market=asyncio.Event()
+    reads=0
+    @asynccontextmanager
+    async def delayed_observation_uow():
+        nonlocal reads
+        reads+=1
+        initial_read=reads==1
+        async with PostgresKernelUnitOfWork(database) as uow:
+            yield uow
+        if initial_read:
+            # The read transaction has committed; activation must never wait
+            # on a market-I/O transaction, including MI's cached-only path.
+            network_started.set()
+            await asyncio.wait_for(release_market.wait(),timeout=30)
+    class Market:
+        async def fetch_closed_candles(self,request):
+            network_started.set()
+            await asyncio.wait_for(release_market.wait(),timeout=30)
+            path=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in path)
+    key=build_episode_domain_key(event_spec_id=source.spec.event_spec_id,exchange_instrument_id=chosen,position_side=source.spec.position_side)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        before=await uow.signals.lock_exposure_episode(key)
+    async with database.connect() as conn:
+        before_facts=(await conn.execute(sa.text("SELECT * FROM brc_facts_current WHERE runtime_scope_id=:id ORDER BY fact_definition_id"),{"id":scope_id})).mappings().all()
+    observation=None
+    if not activation_commits_first:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+2)):
+            observation=asyncio.create_task(observe_strategy_scope(delayed_observation_uow,Market(),ObservationRequest(
+                runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=close,attempted_at_ms=close+2)))
+            await asyncio.wait_for(network_started.wait(),timeout=10)
+    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="inflight-replacement")
+    try:
+        for offset in range(3,11):
+            tick=close+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+                step=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda tick=tick:tick)
+            if step.disposition is MaterializationDisposition.TARGET_WARMING:
+                break
+        assert step.disposition is MaterializationDisposition.TARGET_WARMING,step
+        async with PostgresKernelUnitOfWork(database) as uow:
+            target=(await uow.strategy_universes.get_generation_universe_targets(step.materialization_generation_id))[0]
+        await make_warming_ready(database,universe_version_id=target.universe_version_id,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+        await comparison(target.universe_version_id)
+        for offset in (11,12):
+            tick=close+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+                if activation_commits_first and offset==12:
+                    written=asyncio.Event()
+                    release_activation=asyncio.Event()
+                    waiter_started=asyncio.Event()
+                    pids={}
+                    @asynccontextmanager
+                    async def activation_uow(pids=pids,written=written,release_activation=release_activation):
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            yield uow
+                            state=await uow._connection.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:id"),{"id":target.universe_version_id})
+                            if state=="active":
+                                pids["first"]=await uow._connection.scalar(sa.text("SELECT pg_backend_pid()"))
+                                written.set()
+                                await asyncio.wait_for(release_activation.wait(),timeout=15)
+                    @asynccontextmanager
+                    async def waiting_observation_uow(pids=pids,waiter_started=waiter_started):
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            pids["waiter"]=await uow._connection.scalar(sa.text("SELECT pg_backend_pid()"))
+                            waiter_started.set()
+                            yield uow
+                    activation=asyncio.create_task(coordinate_selection_materialization_once(uow_factory=activation_uow,request=request,clock_ms=lambda tick=tick:tick))
+                    done,_=await asyncio.wait({activation,asyncio.create_task(written.wait())},timeout=10,return_when=asyncio.FIRST_COMPLETED)
+                    if activation in done:
+                        await activation
+                        raise AssertionError("activation returned before its commit barrier")
+                    assert written.is_set()
+                    observation=asyncio.create_task(observe_strategy_scope(waiting_observation_uow,Market(),ObservationRequest(
+                        runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=close,attempted_at_ms=close+13)))
+                    try:
+                        await asyncio.wait_for(waiter_started.wait(),timeout=10)
+                        deadline=asyncio.get_running_loop().time()+3
+                        while True:
+                            async with database.connect() as conn:
+                                blockers=await conn.scalar(sa.text("SELECT pg_blocking_pids(:pid)"),{"pid":pids["waiter"]})
+                            if pids["first"] in blockers:
+                                break
+                            assert asyncio.get_running_loop().time()<deadline,(pids,blockers)
+                            await asyncio.sleep(0.01)
+                    finally:
+                        release_activation.set()
+                    step=await asyncio.wait_for(activation,timeout=10)
+                else:
+                    step=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda tick=tick:tick)
+        assert step.disposition is MaterializationDisposition.ACTIVE_NEW,step
+    finally:
+        release_market.set()
+        if observation is not None and not observation.done() and ("step" not in locals() or step.disposition is not MaterializationDisposition.ACTIVE_NEW):
+            observation.cancel()
+            await asyncio.gather(observation,return_exceptions=True)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+13)):
+        assert observation is not None
+        observed=await asyncio.wait_for(observation,timeout=10)
+    assert observed.status is ObservationStatus.INVALID,observed
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.signals.lock_exposure_episode(key)==before
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==target.universe_version_id
+        current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert isinstance(current.authority,GenericSelectionAuthority)
+        assert current.authority.first_eligible_close_time_ms==close
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+        assert (await conn.execute(sa.text("SELECT * FROM brc_facts_current WHERE runtime_scope_id=:id ORDER BY fact_definition_id"),{"id":scope_id})).mappings().all()==before_facts
+        new_scope=await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND exchange_instrument_id=:member"),
+            {"uid":target.universe_version_id,"member":chosen})
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+14)):
+        fresh=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),Market(),ObservationRequest(
+            runtime_scope_id=new_scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=close,attempted_at_ms=close+14))
+    if not detector_triggers:
+        assert fresh.status is ObservationStatus.NO_SIGNAL,fresh
+    elif group in {"MPG-001","MI-001"}:
+        assert fresh.status is ObservationStatus.NO_SIGNAL and fresh.detector_reason=="COMPARISON_REBASE_REQUIRED",fresh
+    else:
+        assert fresh.status is ObservationStatus.SIGNAL_CREATED,fresh
+        async with PostgresKernelUnitOfWork(database) as uow:
+            signal=await uow.signals.get(fresh.signal_event_id)
+            assert signal.selection_authority_id==step.selection_authority_id and signal.universe_version_id==target.universe_version_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001","BRF2-001","MPG-001","MI-001"])
 @pytest.mark.parametrize("consume_first", [True,False])
 async def test_generic_same_close_observation_and_no_change_grant_serialize(
     database: AsyncEngine, group: str, consume_first: bool,
