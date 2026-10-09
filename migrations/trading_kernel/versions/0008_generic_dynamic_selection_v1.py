@@ -108,6 +108,63 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
 
 def _generic_vacuum_owner_resume_proof() -> None:
     op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_early_resume_drain_matches(vid text,checked_at bigint) RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT EXISTS (
+          SELECT 1 FROM brc_strategy_entry_vacuums_current v
+          JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=v.strategy_group_id
+          JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+          JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=o.strategy_group_id AND p.control_version=r.control_version-1
+          JOIN brc_owner_authorizations a ON a.authorization_id=r.authorization_id
+          JOIN brc_owner_authorizations pa ON pa.authorization_id=p.authorization_id
+          WHERE v.entry_vacuum_id=vid AND v.selection_spec_id<>'sor-dynamic-selection-v0'
+            AND v.state='DRAINING_ENTRY' AND v.first_blocker='OWNER_PAUSED' AND v.resolved_at_ms IS NULL
+            AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms<=checked_at
+            AND p.operation='pause' AND p.target_state='paused' AND p.created_at_ms<=r.created_at_ms
+            AND a.purpose='strategy_resume' AND a.authentication_strength='totp_step_up' AND a.authorized_at_ms=r.created_at_ms
+            AND a.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND pa.purpose='strategy_pause' AND pa.authorized_at_ms=p.created_at_ms
+            AND pa.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND ((v.source_generation_id IS NULL AND p.created_at_ms=v.fenced_at_ms AND EXISTS (
+              SELECT 1 FROM brc_strategy_entry_vacuum_events e WHERE e.entry_vacuum_id=vid AND e.event_type='OPEN'
+                AND e.occurred_at_ms=v.fenced_at_ms AND e.payload->>'intended_outcome'='OWNER_PAUSED'))
+              OR EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations g
+                JOIN brc_strategy_entry_vacuum_events e ON e.entry_vacuum_id=vid
+                WHERE g.materialization_generation_id=v.source_generation_id AND g.lifecycle_state='ABANDONED'
+                  AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
+                  AND g.terminal_at_ms>=p.created_at_ms AND g.terminal_at_ms<=r.created_at_ms
+                  AND e.event_type='OWNER_PAUSE_REQUESTED' AND e.occurred_at_ms=g.terminal_at_ms
+                  AND e.payload->>'materialization_generation_id'=g.materialization_generation_id))
+        );
+      $$
+    """))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_early_resume_drain_event_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.event_type='OWNER_PAUSED' AND NEW.payload ? 'resumed_before_drain' THEN
+          IF NEW.payload->'resumed_before_drain' IS DISTINCT FROM 'true'::jsonb
+            OR NEW.payload->'entry_drain_complete' IS DISTINCT FROM 'true'::jsonb
+            OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v
+              JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=v.strategy_group_id
+              JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+              JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=o.strategy_group_id AND p.control_version=r.control_version-1
+              JOIN brc_owner_authorizations a ON a.authorization_id=r.authorization_id
+              WHERE v.entry_vacuum_id=NEW.entry_vacuum_id AND v.state='OWNER_PAUSED' AND v.first_blocker='OWNER_PAUSED'
+                AND v.drained_at_ms=NEW.occurred_at_ms AND v.resolved_at_ms IS NULL
+                AND o.entry_state='enabled' AND o.control_version=r.control_version
+                AND NEW.payload->>'owner_control_version'=r.control_version::text AND NEW.payload->>'owner_resume_authorization_id'=r.authorization_id
+                AND r.operation='resume' AND r.target_state='enabled' AND r.strategy_group_id=o.strategy_group_id
+                AND r.created_at_ms<=NEW.occurred_at_ms AND p.operation='pause' AND p.target_state='paused'
+                AND a.purpose='strategy_resume' AND a.authentication_strength='totp_step_up' AND a.authorized_at_ms=r.created_at_ms
+                AND a.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id))
+          THEN RAISE EXCEPTION 'Early Resume drain completion requires exact Owner evidence'; END IF;
+        END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_brc_generic_early_resume_drain_event BEFORE INSERT ON brc_strategy_entry_vacuum_events "
+        "FOR EACH ROW EXECUTE FUNCTION brc_generic_early_resume_drain_event_guard()"))
+    op.execute(sa.text("""
       CREATE FUNCTION brc_generic_vacuum_owner_resume_matches(vid text, source_id text, checked_at bigint)
       RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT EXISTS (
@@ -130,7 +187,11 @@ def _generic_vacuum_owner_resume_proof() -> None:
             AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
             AND a.event_type='ABANDONED' AND a.occurred_at_ms=g.terminal_at_ms AND a.payload->>'reason_code'='owner_paused'
             AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
-            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=greatest(g.terminal_at_ms,v.drained_at_ms) AND r.created_at_ms<=checked_at
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=g.terminal_at_ms AND r.created_at_ms<=checked_at
+            AND (r.created_at_ms>=v.drained_at_ms OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events completed
+              WHERE completed.entry_vacuum_id=vid AND completed.event_type='OWNER_PAUSED' AND completed.occurred_at_ms=v.drained_at_ms
+                AND completed.payload->'resumed_before_drain'='true'::jsonb AND completed.payload->'entry_drain_complete'='true'::jsonb
+                AND completed.payload->>'owner_control_version'=r.control_version::text AND completed.payload->>'owner_resume_authorization_id'=r.authorization_id))
             AND pause.operation='pause' AND pause.target_state='paused' AND pause.created_at_ms<=g.terminal_at_ms
             AND pause_auth.purpose='strategy_pause' AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
             AND pause_auth.authorized_at_ms=pause.created_at_ms
@@ -161,7 +222,9 @@ def _generic_vacuum_owner_resume_proof() -> None:
             AND drained.payload->'entry_drain_complete'='true'::jsonb AND drained.occurred_at_ms=v.drained_at_ms
             AND drained.payload->>'materialization_generation_id' IS NULL
             AND o.entry_state='enabled' AND r.strategy_group_id=o.strategy_group_id AND r.control_version=o.control_version
-            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms>=v.drained_at_ms AND r.created_at_ms<=checked_at
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms<=checked_at
+            AND (r.created_at_ms>=v.drained_at_ms OR (drained.payload->'resumed_before_drain'='true'::jsonb
+              AND drained.payload->>'owner_control_version'=r.control_version::text AND drained.payload->>'owner_resume_authorization_id'=r.authorization_id))
             AND paused.operation='pause' AND paused.target_state='paused' AND paused.created_at_ms=v.fenced_at_ms
             AND pause_auth.purpose='strategy_pause' AND pause_auth.authorized_at_ms=paused.created_at_ms
             AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)

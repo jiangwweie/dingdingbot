@@ -3133,7 +3133,7 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
-    *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string","_recover","_unknown_recover","_partial_recover")),
+    *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string","_recover","_unknown_recover","_partial_recover","_early_resume","_early_resume_unknown","_early_resume_partial","_early_resume_recover","_early_resume_unknown_recover","_early_resume_partial_recover")),
     *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
         for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
     *((group,"entry_fault:static_new_entry:"+fault) for group in ("CPM-RO-001","BRF2-001")
@@ -3355,7 +3355,8 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
             partial_fill=isinstance(cancel_before_fill,str) and "_partial" in cancel_before_fill,
             pause_owner=isinstance(cancel_before_fill,str) and "_pause" in cancel_before_fill,
             corrupt_pause_completion=cancel_before_fill.rsplit("_",1)[-1] if isinstance(cancel_before_fill,str) and cancel_before_fill.endswith(("_false","_string")) else None,
-            paused_nonempty_recovery=isinstance(cancel_before_fill,str) and cancel_before_fill.endswith("_recover"))
+            paused_nonempty_recovery=isinstance(cancel_before_fill,str) and cancel_before_fill.endswith("_recover"),
+            early_resume=isinstance(cancel_before_fill,str) and "_early_resume" in cancel_before_fill)
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
@@ -3529,6 +3530,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
     pause_owner: bool = False,
     corrupt_pause_completion: str | None = None,
     paused_nonempty_recovery: bool = False,
+    early_resume: bool = False,
 ) -> None:
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
@@ -3646,6 +3648,12 @@ async def _assert_natural_sent_entry_drained_by_selection(
             assert abandoned.lifecycle_state.value=="ABANDONED" and owner_vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY
             assert owner_vacuum.fenced_at_ms==original_vacuum.fenced_at_ms and owner_vacuum.drained_at_ms is None
         original_vacuum=owner_vacuum
+        if early_resume:
+            async with PostgresKernelUnitOfWork(database) as uow:
+                owner=await uow.owner_controls.get_strategy_control(group)
+                await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_before_actual_entry_drain",
+                        idempotency_key=f"early-resume:{group}:{unknown_cancel}:{partial_fill}:{paused_nonempty_recovery}",owner_identity="owner",now_ms=now+5),authentication_strength="totp_step_up")
     open_order = VenueOrderSnapshot(exchange_order_id=aggregate.entry_exchange_order_id,
         venue_client_order_id=commands[0].venue_client_order_id,
         position_side=ticket.identity.netting_domain.position_side,reduce_only=False,
@@ -3669,8 +3677,8 @@ async def _assert_natural_sent_entry_drained_by_selection(
             new=AsyncMock(return_value=now+5)):
             waiting_cancel = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+5)
-        assert waiting_cancel.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner else MaterializationDisposition.WAITING_VACUUM), waiting_cancel
-        if not pause_owner:
+        assert waiting_cancel.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), waiting_cancel
+        if not pause_owner or early_resume:
             assert waiting_cancel.reason_code == "VACUUM_CANCEL_NOT_DISPATCHED"
     venue.now_ms = now+6
     dispatch_request = DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
@@ -3702,8 +3710,8 @@ async def _assert_natural_sent_entry_drained_by_selection(
             new=AsyncMock(return_value=now+7)):
             blocked = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+7)
-        assert blocked.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner else MaterializationDisposition.WAITING_VACUUM), blocked
-        if not pause_owner:
+        assert blocked.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), blocked
+        if not pause_owner or early_resume:
             assert blocked.reason_code == "VACUUM_DRAIN_UNKNOWN_OUTCOME"
         async with PostgresKernelUnitOfWork(database) as uow:
             held = await uow.instrument_selection.get_current_entry_vacuum(
@@ -3760,7 +3768,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
             new=AsyncMock(return_value=now+9)):
             waiting_protection = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+9)
-        assert waiting_protection.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner else MaterializationDisposition.WAITING_VACUUM), waiting_protection
+        assert waiting_protection.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), waiting_protection
         async with PostgresKernelUnitOfWork(database) as uow:
             assert await uow.strategy_universes.get_generation_universe_targets(original_vacuum.source_generation_id) == ()
             assert await uow.instrument_selection.get_generic_materialization_generation(
@@ -3779,7 +3787,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
             new=AsyncMock(return_value=now+11)):
             waiting_stress = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+11)
-        assert waiting_stress.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner else MaterializationDisposition.WAITING_VACUUM), waiting_stress
+        assert waiting_stress.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), waiting_stress
         from src.trading_kernel.domain.cross_margin_stress import (
             evaluate_cross_margin_stress,
         )
@@ -3814,6 +3822,21 @@ async def _assert_natural_sent_entry_drained_by_selection(
     resume_offset = 13 if partial_fill else 9
     if pause_owner:
         actual_execute=sa.ext.asyncio.AsyncConnection.execute
+        if early_resume:
+            async def corrupt_early_resume_record(connection,statement,*args,**kwargs):
+                if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
+                    params=statement.compile().params
+                    if params.get("event_type")=="OWNER_PAUSED" and params.get("payload",{}).get("resumed_before_drain"):
+                        statement=statement.values(payload={**params["payload"],"owner_resume_authorization_id":"authorization:forged"})
+                return await actual_execute(connection,statement,*args,**kwargs)
+            checked_at=now+resume_offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=checked_at)), patch.object(
+                sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_early_resume_record), pytest.raises(sa.exc.DBAPIError,match="Early Resume drain completion requires exact"):
+                await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=paused_request,clock_ms=lambda:checked_at)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=empty.selection_spec_id)==original_vacuum
+                assert await uow.instrument_selection.get_generic_materialization_generation(original_vacuum.source_generation_id)==abandoned
+                assert await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)==current
         async def corrupt_pause_drain_completion(connection,statement,*args,**kwargs):
             if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
                 params=statement.compile().params
@@ -3826,15 +3849,16 @@ async def _assert_natural_sent_entry_drained_by_selection(
                     paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=paused_request,clock_ms=lambda:now+resume_offset)
             else:
                 paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=paused_request,clock_ms=lambda:now+resume_offset)
-        assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+        assert paused.disposition in ({MaterializationDisposition.OWNER_PAUSED,MaterializationDisposition.WAITING_VACUUM} if early_resume else {MaterializationDisposition.OWNER_PAUSED})
         async with PostgresKernelUnitOfWork(database) as uow:
             drained=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=empty.selection_spec_id)
             assert drained.state is StrategyEntryVacuumState.OWNER_PAUSED and drained.drained_at_ms==now+resume_offset
             assert await uow.instrument_selection.get_generic_materialization_generation(original_vacuum.source_generation_id)==abandoned
             owner=await uow.owner_controls.get_strategy_control(group)
-            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
-                request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_after_exact_entry_drain",
-                    idempotency_key=f"resume-real-drain:{group}:{unknown_cancel}:{partial_fill}",owner_identity="owner",now_ms=now+resume_offset+1),authentication_strength="totp_step_up")
+            if not early_resume:
+                await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_after_exact_entry_drain",
+                        idempotency_key=f"resume-real-drain:{group}:{unknown_cancel}:{partial_fill}",owner_identity="owner",now_ms=now+resume_offset+1),authentication_strength="totp_step_up")
         resume_offset+=2
         supersede_with_nonempty=paused_nonempty_recovery
         if corrupt_pause_completion:
@@ -5810,7 +5834,7 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true")])
+@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true"),(False,"early_resume"),(True,"early_resume")])
 async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finishes_drain(
     database: AsyncEngine, group: str,static_source: bool,corrupt_completion: bool | str,
 ) -> None:
@@ -5822,6 +5846,9 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         stage_generic_static_selection_mode,
     )
     from src.trading_kernel.domain.owner_control import StrategyEntryState
+    early_resume=corrupt_completion=="early_resume"
+    if early_resume:
+        corrupt_completion=False
     source,first,_,uid = await _exercise_generic_generation(database,group,False,
         durable=True,first_activation=True,natural_selection=True)
     shifted = next_input(source)
@@ -5883,6 +5910,13 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         assert abandoned.lease_owner is None and abandoned.terminal_at_ms==at+2
         marked = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert marked.state is StrategyEntryVacuumState.DRAINING_ENTRY and marked.first_blocker=="OWNER_PAUSED"
+    if early_resume:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control(group)
+            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="early_resume_static_or_dynamic_drain",
+                    idempotency_key=f"early-resume-drain:{group}:{static_source}",owner_identity="owner",now_ms=at+3),authentication_strength="totp_step_up")
+        at+=1
     actual_execute = sa.ext.asyncio.AsyncConnection.execute
     async def corrupt_pause_completion(connection,statement,*args,**kwargs):
         if corrupt_completion and getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_entry_vacuum_events" and getattr(statement,"is_insert",False):
@@ -5893,7 +5927,7 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+3)), patch.object(
         sa.ext.asyncio.AsyncConnection,"execute",new=corrupt_pause_completion):
         drained = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+3)
-    assert drained.disposition is MaterializationDisposition.OWNER_PAUSED,drained
+    assert drained.disposition is (MaterializationDisposition.WAITING_VACUUM if early_resume else MaterializationDisposition.OWNER_PAUSED),drained
     async with PostgresKernelUnitOfWork(database) as uow:
         finished = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
         assert finished.state is StrategyEntryVacuumState.OWNER_PAUSED
@@ -7753,7 +7787,8 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 @pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
     *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
     *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
-    *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover"))])
+    *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover",
+        "sent_early_resume","unknown_early_resume","partial_early_resume","sent_early_resume_recover","unknown_early_resume_recover","partial_early_resume_recover"))])
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
@@ -8516,7 +8551,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             ticket=ticket,venue=venue,initial_source=source,entry_dispatched_at_ms=now_ms+5,
             supersede_with_nonempty=True,unknown_cancel=real_pause_fault.startswith("unknown"),partial_fill=real_pause_fault.startswith("partial"),
             pause_owner=True,corrupt_pause_completion=real_pause_fault if real_pause_fault in {"false","string"} else None,
-            paused_nonempty_recovery=real_pause_fault.endswith("_recover"))
+            paused_nonempty_recovery=real_pause_fault.endswith("_recover"),early_resume="early_resume" in real_pause_fault)
         return
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,

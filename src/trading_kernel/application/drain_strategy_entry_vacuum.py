@@ -584,7 +584,7 @@ async def _complete_entry_drain(
         )
         if (
             owner_control is None
-            or owner_control.entry_state.value != "paused"
+            or (owner_control.entry_state.value != "paused" and vacuum.strategy_group_id=="SOR-001")
         ):
             return DrainStrategyEntryVacuumResult(
                 status=VacuumDrainStatus.BLOCKED,

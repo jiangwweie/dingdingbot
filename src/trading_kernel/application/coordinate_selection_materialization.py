@@ -523,6 +523,14 @@ async def coordinate_selection_materialization_once(
                     reason_code=(failed_static_vacuum.first_blocker if failed_static_vacuum is not None
                         and failed_static_vacuum.source_generation_id==gid else "GENERIC_STATIC_RECOVERY_REQUIRED"))
             if existing_static.lifecycle_state is MaterializationGenerationState.ABANDONED:
+                vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
+                    selection_spec_id=existing_static.selection_spec_id,for_update=True)
+                if vacuum is not None and vacuum.source_generation_id in {None,gid} and (
+                    vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY and vacuum.first_blocker=="OWNER_PAUSED"):
+                    drain=await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                        strategy_group_id=request.strategy_group_id,selection_spec_id=existing_static.selection_spec_id,now_ms=now_ms))
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                        materialization_generation_id=gid,entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
                 return _blocked("GENERIC_STATIC_RECOVERY_REQUIRED")
             claimed_static = await uow.instrument_selection.claim_generic_static_materialization_generation(gid,
                 worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
@@ -1733,6 +1741,17 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                         strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,now_ms=now_ms))
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
                 materialization_generation_id=initial.materialization_generation_id)
+        if initial.lifecycle_state is MaterializationGenerationState.ABANDONED:
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
+            if vacuum is not None and vacuum.source_generation_id in {None,initial.materialization_generation_id} and (
+                vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY and vacuum.first_blocker=="OWNER_PAUSED"):
+                drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,now_ms=now_ms))
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    materialization_generation_id=initial.materialization_generation_id,entry_vacuum_id=vacuum.entry_vacuum_id,
+                    reason_code=drain.reason_code or drain.status.value)
+            return _blocked("GENERIC_GENERATION_NOT_ACTIONABLE")
         if initial.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
             control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
             committed = await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)

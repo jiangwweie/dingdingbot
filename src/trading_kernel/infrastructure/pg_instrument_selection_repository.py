@@ -5690,6 +5690,19 @@ class PostgresInstrumentSelectionRepository:
             or vacuum.first_blocker != "OWNER_PAUSED"
         ):
             raise ValueError("Owner Pause drain requires its exact Vacuum")
+        completion_payload: dict[str, bool | int | str | None] = {"entry_drain_complete": True}
+        if vacuum.strategy_group_id!="SOR-001":
+            owner=(await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+                strategy_entry_controls_current.c.strategy_group_id==vacuum.strategy_group_id).with_for_update())).mappings().one_or_none()
+            if owner is None:
+                raise SelectionJobConflict("Owner Pause drain control missing")
+            if owner["entry_state"]=="enabled":
+                if not await self._connection.scalar(sa.text("SELECT brc_generic_early_resume_drain_matches(:vid,:at)"),
+                    {"vid":vacuum.entry_vacuum_id,"at":drained_at_ms}):
+                    raise SelectionJobConflict("Owner Pause early Resume drain proof missing")
+                resume=await self._connection.scalar(sa.text("SELECT authorization_id FROM brc_strategy_entry_control_events WHERE strategy_entry_control_event_id=:id"),
+                    {"id":owner["last_event_id"]})
+                completion_payload.update({"resumed_before_drain":True,"owner_control_version":owner["control_version"],"owner_resume_authorization_id":resume})
         if vacuum.source_generation_id is not None:
             generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
             if vacuum.strategy_group_id=="SOR-001":
@@ -5746,7 +5759,7 @@ class PostgresInstrumentSelectionRepository:
                 entry_vacuum_id=vacuum.entry_vacuum_id,
                 event_sequence=paused.projection_version,
                 event_type="OWNER_PAUSED",
-                payload={"entry_drain_complete": True},
+                payload=completion_payload,
                 occurred_at_ms=drained_at_ms,
             )
         )
