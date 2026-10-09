@@ -5625,10 +5625,16 @@ class PostgresInstrumentSelectionRepository:
         ):
             raise ValueError("Owner Pause drain requires its exact Vacuum")
         if vacuum.source_generation_id is not None:
-            generation = await self.get_materialization_generation(
-                vacuum.source_generation_id,
-                for_update=True,
-            )
+            generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
+            if vacuum.strategy_group_id=="SOR-001":
+                generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
+            else:
+                mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id==vacuum.source_generation_id))
+                if mode=="static_baseline":
+                    generation = await self.get_generic_static_materialization_generation(vacuum.source_generation_id,for_update=True)
+                else:
+                    generation = await self.get_generic_materialization_generation(vacuum.source_generation_id,for_update=True)
             if (
                 generation is None
                 or generation.lifecycle_state

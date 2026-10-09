@@ -779,6 +779,10 @@ Generic drain闭环补充：unknown分支现继续派发generation 2、确认订
 
 ### GS-09 — Signal / Claim / Ticket / ENTRY dispatch
 
+本轮Generic drain-pause末版验证：Dynamic/Static无单drain暂停及warming/staged相邻16 passed；Unit/Architecture1327 passed、源码Mypy160 files、Ruff/diff、文档25 passed。193个Vacuum/SOR/Full-chain为next-tick接线前相邻证据，未冒称末版完整Release，集合不合计。
+
+2026-10-09Owner Pause Generic DRAINING增量（基于`66142e94`，GS-08关联）：真实四策略Generation到DRAINING_ENTRY后正式Owner Pause，RED复现Coordinator只返回OWNER_PAUSED但Generation仍可行动；现Dynamic/Static两个正式入口均沿共享abandon边界终态ABANDONED、清lease，原DRAINING_ENTRY Vacuum仅标Owner pause而保留fence与source，不提前resolve或切current。后续同Coordinator tick对已ABANDONED来源继续调用现有正式drain；无Ticket分支完成后进入OWNER_PAUSED，旧Active Universe/Authority不改、零targets/Command。共享mark_owner_pause_vacuum_drained按SOR/Generic Dynamic/Generic Static exact source decoder分派，不再把Generic父解析为SOR pair。四策略×Dynamic/Static8分支含提交前全回滚、原fence保全、终态源与正式next-tick drain完成；加已有warming/staged pause16分支PASS。仅证明无Ticket drain完成，不能代替prepared/sent/unknown/partial交叉、unfenced PENDING/DESIRED暂停或后续resume/supersession恢复链；这些仍为GS-08缺口。相邻ENTRY Vacuum/SOR Materialization/既有Full-chain193 passed为next-tick接线前代码，末版16分支及Unit/Architecture/Mypy另重验。全部Docker PG与recording facts，无生产修改，不标GS-04～09 Done或exact R4。
+
 本轮Static延迟末版验证：delay/normal/hour-only10 passed，既有Full-chain与文档76 passed，更新台账后文档25 passed、Ruff/diff通过。本轮仅tests/docs，未跑全Unit/Mypy或R4，集合重叠不合计。
 
 2026-10-09正常Static跨tick延迟验收增量（基于`cf717c30`，GS-03/06/08关联）：在已有MPG/MI连续Authority、正式Static预排期与protected Ticket链中，将已STAGED目标的下一个activation tick分别推迟8000/30000/120000ms；真实Coordinator重新claim本次tick lease，原Generation materialization_started/fenced时间不改变且仍在原1800s deadline内，不能靠重设timeout通过。三档均生成NORMAL_TRANSITION，first eligible保持原hourly close，不因超过单次30s lease窗口误造AUTHORITY_GAP/RECOVERY；真实新Static Observation消费原close但保留comparison rebase抑制，重复close幂等，已有Ticket在Selection-read-forbidden安全链中至终态。新delay6分支加既有normal/末尾独立hour-only4分支共10 passed。此处只模拟跨tick时间推进，不宣称真实network耗时/Worker cadence/24h soak已完成；没有修改生产时钟或配置，仍需实际activation并发及逐卡认证，GS-04～09未Done、非exact R4。全部Docker PG与recording venue，production_modified=NO。
