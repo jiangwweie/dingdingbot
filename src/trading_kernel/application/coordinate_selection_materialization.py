@@ -1777,6 +1777,20 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                     materialization_generation_id=initial.materialization_generation_id,entry_vacuum_id=vacuum.entry_vacuum_id,
                     reason_code=drain.reason_code or drain.status.value)
+            control=await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)
+            current=await uow.instrument_selection.get_current_generic_authority(initial.selection_spec_id,for_update=True)
+            if current is not None and isinstance(current.authority,GenericRecoveryAuthority) and current.authority.materialization_generation_id==initial.materialization_generation_id:
+                recovered=await uow.instrument_selection.commit_generic_recovery(current.authority.recovery_proof)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
+                    materialization_generation_id=initial.materialization_generation_id,selection_authority_id=recovered.selection_authority_id)
+            if control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and current is None:
+                try:
+                    first_pause_proof=await uow.instrument_selection.prepare_generic_recovery_grant_proof(initial.materialization_generation_id)
+                except SelectionPersistenceConflict as exc:
+                    return _blocked(str(exc))
+                recovered=await uow.instrument_selection.commit_generic_recovery(first_pause_proof)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,
+                    materialization_generation_id=initial.materialization_generation_id,selection_authority_id=recovered.selection_authority_id)
             return _blocked("GENERIC_GENERATION_NOT_ACTIONABLE")
         if initial.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
             control = await uow.instrument_selection.get_selection_control(initial.strategy_group_id,for_update=True)

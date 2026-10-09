@@ -108,6 +108,47 @@ def _grant_existing_owner_read_roles(bind: sa.Connection) -> None:
 
 def _generic_vacuum_owner_resume_proof() -> None:
     op.execute(sa.text("""
+      CREATE FUNCTION brc_generic_first_pause_recovery_matches(gid text,vid text,checked_at bigint) RETURNS boolean LANGUAGE sql STABLE AS $$
+        SELECT EXISTS (
+          SELECT 1 FROM brc_strategy_universe_materialization_generations g
+          JOIN brc_strategy_entry_vacuums_current v ON v.entry_vacuum_id=vid
+          JOIN brc_strategy_selection_control_current c ON c.strategy_group_id=g.strategy_group_id
+          JOIN brc_strategy_entry_controls_current o ON o.strategy_group_id=g.strategy_group_id
+          JOIN brc_strategy_entry_control_events r ON r.strategy_entry_control_event_id=o.last_event_id
+          JOIN brc_strategy_entry_control_events p ON p.strategy_group_id=o.strategy_group_id AND p.control_version=r.control_version-1
+          JOIN brc_owner_authorizations ra ON ra.authorization_id=r.authorization_id
+          JOIN brc_owner_authorizations pa ON pa.authorization_id=p.authorization_id
+          JOIN brc_strategy_universe_materialization_events abandoned ON abandoned.materialization_generation_id=g.materialization_generation_id AND abandoned.event_type='ABANDONED'
+          JOIN brc_strategy_entry_vacuum_events drained ON drained.entry_vacuum_id=vid
+          WHERE g.materialization_generation_id=gid AND g.lifecycle_state='ABANDONED' AND g.selection_mode='dynamic_selection'
+            AND g.activated_at_ms IS NULL AND g.fallback_at_ms IS NULL AND g.terminal_at_ms<=checked_at
+            AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
+            AND c.selection_spec_id=g.selection_spec_id AND c.selection_epoch_id=g.selection_epoch_id AND c.control_version=g.selection_control_version
+            AND c.selection_mode='static_baseline' AND c.pending_selection_mode='dynamic_selection' AND c.pending_effective_period_anchor_ms=g.period_anchor_ms
+            AND c.pending_authorization_id IS NOT NULL
+            AND v.state='OWNER_PAUSED' AND v.first_blocker='OWNER_PAUSED' AND v.resolved_at_ms IS NULL AND v.drained_at_ms<=checked_at
+            AND drained.occurred_at_ms=v.drained_at_ms AND ((drained.event_type='OWNER_PAUSED' AND drained.payload->'entry_drain_complete'='true'::jsonb)
+              OR (drained.event_type='ENTRY_DRAINED' AND drained.payload->>'target_state'='RECONFIGURING'))
+            AND abandoned.occurred_at_ms=g.terminal_at_ms AND abandoned.payload->>'reason_code'='owner_paused'
+            AND p.created_at_ms>=g.created_at_ms AND p.created_at_ms<=g.terminal_at_ms
+            AND p.operation='pause' AND p.target_state='paused' AND pa.purpose='strategy_pause' AND pa.authorized_at_ms=p.created_at_ms
+            AND pa.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND o.entry_state='enabled' AND o.control_version=r.control_version AND r.strategy_group_id=o.strategy_group_id
+            AND r.operation='resume' AND r.target_state='enabled' AND r.created_at_ms<=checked_at
+            AND ra.purpose='strategy_resume' AND ra.authentication_strength='totp_step_up' AND ra.authorized_at_ms=r.created_at_ms
+            AND ra.target_scope=jsonb_build_object('strategy_group_id',o.strategy_group_id)
+            AND (r.created_at_ms>=g.terminal_at_ms OR (abandoned.payload->'cleanup_deferred'='true'::jsonb
+              AND abandoned.payload->>'owner_resume_authorization_id'=r.authorization_id AND abandoned.payload->>'owner_pause_authorization_id'=p.authorization_id))
+            AND (r.created_at_ms>=v.drained_at_ms OR (drained.payload->'resumed_before_drain'='true'::jsonb
+              AND drained.payload->>'owner_resume_authorization_id'=r.authorization_id AND drained.payload->>'owner_control_version'=r.control_version::text))
+            AND ((v.source_generation_id=gid AND g.fenced_at_ms IS NOT NULL AND v.fenced_at_ms<=g.fenced_at_ms)
+              OR (v.source_generation_id IS NULL AND g.fenced_at_ms IS NULL AND v.fenced_at_ms=p.created_at_ms AND EXISTS (
+                SELECT 1 FROM brc_strategy_entry_vacuum_events opened WHERE opened.entry_vacuum_id=vid AND opened.event_type='OPEN'
+                  AND opened.occurred_at_ms=v.fenced_at_ms AND opened.payload->>'intended_outcome'='OWNER_PAUSED')))
+        );
+      $$
+    """))
+    op.execute(sa.text("""
       CREATE FUNCTION brc_generic_deferred_owner_pause_matches(gid text,checked_at bigint) RETURNS boolean LANGUAGE sql STABLE AS $$
         SELECT EXISTS (
           SELECT 1 FROM brc_strategy_universe_materialization_generations g
@@ -807,11 +848,13 @@ def _generic_static_recovery_commit_guard() -> None:
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_controls_current
             WHERE strategy_group_id=p->>'strategy_group_id' AND entry_state='enabled' AND control_version=a.owner_control_version)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current
-            WHERE entry_vacuum_id=p->>'source_entry_vacuum_id' AND source_generation_id=a.materialization_generation_id
+            WHERE entry_vacuum_id=p->>'source_entry_vacuum_id' AND (source_generation_id=a.materialization_generation_id OR
+              (source_generation_id IS NULL AND NOT dynamic_recovery AND EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations g
+                WHERE g.materialization_generation_id=a.materialization_generation_id AND g.lifecycle_state='ABANDONED' AND g.fenced_at_ms IS NULL)))
               AND state='RESOLVED_FALLBACK' AND fenced_at_ms=(p->>'vacuum_fenced_at_ms')::bigint
               AND drained_at_ms IS NOT NULL AND resolved_at_ms=a.created_at_ms)
           OR NOT EXISTS (SELECT 1 FROM brc_strategy_universe_materialization_generations
-            WHERE materialization_generation_id=a.materialization_generation_id AND lifecycle_state='FAILED_CLOSED'
+            WHERE materialization_generation_id=a.materialization_generation_id AND (lifecycle_state='FAILED_CLOSED' OR (NOT dynamic_recovery AND lifecycle_state='ABANDONED'))
               AND selection_epoch_id=a.selection_epoch_id AND
               selection_control_version=a.selection_control_version-CASE WHEN dynamic_recovery THEN 0 ELSE 1 END)
           THEN
@@ -945,7 +988,7 @@ def _generic_static_recovery_proof_function() -> None:
         b brc_materialization_generation_event_baselines%ROWTYPE;
         source_authority brc_selection_session_authorities%ROWTYPE;
         n integer; cadence integer; rank_limit integer; evaluated bigint; committed bigint;
-        missed integer; dynamic_recovery boolean; freshness jsonb; source_id text;
+        missed integer; dynamic_recovery boolean; paused_first boolean; freshness jsonb; source_id text;
         cutoff bigint; effective bigint; expiry bigint; first_close bigint;
         ids text; members_digest text; cursors jsonb; revision bigint;
         future_cursor boolean; failure jsonb; reason text; expected jsonb;
@@ -953,14 +996,16 @@ def _generic_static_recovery_proof_function() -> None:
         IF p IS NULL OR jsonb_typeof(p)<>'object' OR checked_at IS NULL THEN RETURN false; END IF;
         SELECT * INTO g FROM brc_strategy_universe_materialization_generations
           WHERE materialization_generation_id=p->>'materialization_generation_id';
-        IF NOT FOUND OR g.selection_epoch_id='sor-v0' OR g.lifecycle_state<>'FAILED_CLOSED'
+        IF NOT FOUND OR g.selection_epoch_id='sor-v0' OR g.lifecycle_state NOT IN ('FAILED_CLOSED','ABANDONED')
           OR g.selection_mode<>'dynamic_selection' OR g.rollback_baseline_id IS NOT NULL
           OR g.activated_at_ms IS NOT NULL OR g.fallback_at_ms IS NOT NULL
-          OR g.fenced_at_ms IS NULL OR g.terminal_at_ms IS NULL THEN RETURN false; END IF;
+          OR (g.fenced_at_ms IS NULL AND g.lifecycle_state<>'ABANDONED') OR g.terminal_at_ms IS NULL THEN RETURN false; END IF;
         SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id=g.strategy_group_id;
         IF NOT FOUND OR c.selection_spec_id<>g.selection_spec_id OR c.selection_epoch_id IS DISTINCT FROM g.selection_epoch_id
           OR c.control_version<>g.selection_control_version THEN RETURN false; END IF;
         dynamic_recovery := c.selection_mode='dynamic_selection';
+        paused_first := NOT dynamic_recovery AND g.lifecycle_state='ABANDONED';
+        IF g.lifecycle_state='ABANDONED' AND NOT paused_first THEN RETURN false; END IF;
         IF NOT dynamic_recovery AND (c.selection_mode<>'static_baseline'
           OR c.pending_selection_mode IS DISTINCT FROM 'dynamic_selection'
           OR c.pending_effective_period_anchor_ms IS DISTINCT FROM g.period_anchor_ms) THEN RETURN false; END IF;
@@ -986,10 +1031,13 @@ def _generic_static_recovery_proof_function() -> None:
             OR source_authority.membership_freshness IS NULL THEN RETURN false; END IF;
         END IF;
         SELECT * INTO v FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=p->>'source_entry_vacuum_id';
-        IF NOT FOUND OR v.source_generation_id IS DISTINCT FROM g.materialization_generation_id
-          OR v.strategy_group_id<>g.strategy_group_id OR v.selection_spec_id<>g.selection_spec_id
-          OR v.state<>'RECONFIGURING' OR v.fenced_at_ms>g.fenced_at_ms
+        IF NOT FOUND OR v.strategy_group_id<>g.strategy_group_id OR v.selection_spec_id<>g.selection_spec_id
           OR v.drained_at_ms IS NULL OR v.resolved_at_ms IS NOT NULL THEN RETURN false; END IF;
+        IF paused_first THEN
+          IF NOT brc_generic_first_pause_recovery_matches(g.materialization_generation_id,v.entry_vacuum_id,checked_at) THEN RETURN false; END IF;
+        ELSE
+        IF v.source_generation_id IS DISTINCT FROM g.materialization_generation_id
+          OR v.state<>'RECONFIGURING' OR v.fenced_at_ms>g.fenced_at_ms THEN RETURN false; END IF;
         SELECT payload INTO failure FROM brc_strategy_entry_vacuum_events
           WHERE entry_vacuum_id=v.entry_vacuum_id AND event_type='RECOVERY_REQUIRED'
           ORDER BY event_sequence DESC LIMIT 1;
@@ -997,6 +1045,7 @@ def _generic_static_recovery_proof_function() -> None:
           OR failure->>'reason_code' IS DISTINCT FROM v.first_blocker THEN RETURN false; END IF;
         IF v.first_blocker NOT IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED',
           'CERTIFICATION_OWNER_ACTION_REQUIRED','CERTIFICATION_NOT_ELIGIBLE') THEN RETURN false; END IF;
+        END IF;
         IF (NOT dynamic_recovery AND EXISTS (SELECT 1 FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id))
           OR EXISTS (SELECT 1 FROM brc_strategy_universe_versions WHERE materialization_generation_id=g.materialization_generation_id AND lifecycle_state<>'abandoned') THEN RETURN false; END IF;
         SELECT count(*) INTO n FROM brc_materialization_generation_event_baselines WHERE materialization_generation_id=g.materialization_generation_id;
@@ -1068,7 +1117,7 @@ def _generic_static_recovery_proof_function() -> None:
         IF n<1 OR n>(CASE WHEN dynamic_recovery THEN rank_limit ELSE 10 END) OR future_cursor THEN RETURN false; END IF;
         members_digest:='sha256:' || encode(sha256(convert_to('{"selected_exchange_instrument_ids":[' || ids || ']}','UTF8')),'hex');
         IF members_digest<>b.member_set_digest THEN RETURN false; END IF;
-        reason:=CASE WHEN v.first_blocker IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED') THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
+        reason:=CASE WHEN paused_first THEN 'AUTHORITY_GAP' WHEN v.first_blocker IN ('MATERIALIZATION_TIMEOUT','MATERIALIZATION_PERIOD_EXPIRED') THEN 'MATERIALIZATION_TIMEOUT' ELSE 'MATERIALIZATION_FAILURE' END;
         expected:=jsonb_build_object('proof_kind','FUTURE_CLOSE_REBASE_REQUIRED',
           'authority_outcome','FALLBACK_PREVIOUS','target_snapshot_id',NULL,
           'selection_spec_id',g.selection_spec_id,'strategy_group_id',g.strategy_group_id,'selection_epoch_id',g.selection_epoch_id,

@@ -4864,9 +4864,11 @@ class PostgresInstrumentSelectionRepository:
             strategy_entry_controls_current.c.strategy_group_id==initial.strategy_group_id).with_for_update())).mappings().one_or_none()
         control = await self.get_selection_control(initial.strategy_group_id,for_update=True)
         generation = await self.get_generic_materialization_generation(materialization_generation_id,for_update=True)
+        paused_first = generation is not None and generation.lifecycle_state is MaterializationGenerationState.ABANDONED and (
+            control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION)
         if owner is None or owner["entry_state"]!="enabled" or generation is None or control is None or (
-            generation.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED
-            or generation.fenced_at_ms is None or generation.terminal_at_ms is None
+            (generation.lifecycle_state is not MaterializationGenerationState.FAILED_CLOSED and not paused_first)
+            or (generation.fenced_at_ms is None and not paused_first) or generation.terminal_at_ms is None
             or control.selection_spec_id!=generation.selection_spec_id or control.selection_epoch_id!=generation.selection_epoch_id
             or control.control_version!=generation.selection_control_version):
             raise SelectionJobConflict("Recovery Owner Control or failed Generation changed")
@@ -4910,17 +4912,20 @@ class PostgresInstrumentSelectionRepository:
                 authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>generation.created_at_ms):
                 raise SelectionJobConflict("Static recovery Owner authorization differs")
         vacuum = await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
-        if vacuum is None or vacuum.source_generation_id!=materialization_generation_id or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or (
-            vacuum.fenced_at_ms>generation.fenced_at_ms or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
+        if vacuum is None or (not paused_first and (vacuum.source_generation_id!=materialization_generation_id or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING)) or (
+            (not paused_first and (generation.fenced_at_ms is None or vacuum.fenced_at_ms>generation.fenced_at_ms)) or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None
             or await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)):
             raise SelectionJobConflict("Static recovery requires exact drained Vacuum")
+        if paused_first and not await self._connection.scalar(sa.text("SELECT brc_generic_first_pause_recovery_matches(:gid,:vid,:at)"),
+            {"gid":materialization_generation_id,"vid":vacuum.entry_vacuum_id,"at":now}):
+            raise SelectionJobConflict("First paused activation recovery proof missing")
         failure = (await self._connection.execute(sa.select(strategy_entry_vacuum_events.c.payload).where(
             strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
             strategy_entry_vacuum_events.c.event_type=="RECOVERY_REQUIRED"
         ).order_by(strategy_entry_vacuum_events.c.event_sequence.desc()).limit(1))).scalar_one_or_none()
-        if failure is None or failure.get("source_generation_id")!=materialization_generation_id or failure.get("reason_code")!=vacuum.first_blocker:
+        if not paused_first and (failure is None or failure.get("source_generation_id")!=materialization_generation_id or failure.get("reason_code")!=vacuum.first_blocker):
             raise SelectionJobConflict("Static recovery failure provenance differs")
-        reason: Literal["MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT"] = (
+        reason: Literal["AUTHORITY_GAP","MATERIALIZATION_FAILURE", "MATERIALIZATION_TIMEOUT"] = ("AUTHORITY_GAP" if paused_first else
             "MATERIALIZATION_TIMEOUT" if vacuum.first_blocker in {"MATERIALIZATION_TIMEOUT","MATERIALIZATION_PERIOD_EXPIRED"} else "MATERIALIZATION_FAILURE")
         source_authority = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
         if static_first and source_authority is not None:
