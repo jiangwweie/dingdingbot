@@ -1361,6 +1361,40 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         restored_staging = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
         assert restored_staging is not None and restored_staging.lifecycle_state.value == "STAGED" and restored_staging.lease_owner is None
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+    for clock_failure in ("hour_boundary","lease_expiry","materialization_deadline","clock_backwards"):
+        reached_post_switch_clock = []
+        async def interrupted_commit_clock(repository, *, failure=clock_failure, reached=reached_post_switch_clock):
+            inside = await repository.get_selection_control(group)
+            if inside is not None and inside.selection_mode.value=="static_baseline":
+                reached.append(inside.control_version)
+                if failure=="hour_boundary":
+                    return (due//HOUR+1)*HOUR
+                if failure=="lease_expiry":
+                    return due+6+30000
+                if failure=="materialization_deadline":
+                    return due+2+source.spec.materialization_timeout_ms
+                return due+5
+            return due+6
+        expected_code = "STATIC_ACTIVATION_COMMIT_DEADLINE_EXPIRED" if clock_failure in {
+            "lease_expiry","materialization_deadline","hour_boundary"} else "STATIC_ACTIVATION_COMMIT_CROSSED_CLOSE"
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=interrupted_commit_clock), pytest.raises(
+            UniverseInstallConflict,match=expected_code):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
+        assert reached_post_switch_clock == [scheduled.control_version+1]
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_selection_control(group) == scheduled
+            assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+            preserved_generation = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
+            assert preserved_generation is not None and preserved_generation.lifecycle_state.value=="STAGED"
+            assert preserved_generation.lease_owner is None
+            assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+            preserved_vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,
+                selection_spec_id=source.spec.selection_spec_id)
+            assert preserved_vacuum is not None and preserved_vacuum.state.value=="RECONFIGURING"
+            assert preserved_vacuum.fenced_at_ms==due+2 and preserved_vacuum.drained_at_ms==due+3
+            for cursor in proof.observation_cursors:
+                restored_checkpoint = await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+                assert restored_checkpoint is None or restored_checkpoint.recovery_id!=proof.recovery_id
     actual_execute = sa.ext.asyncio.AsyncConnection.execute
     async def omit_static_cursor_payload(connection, statement, *args, **kwargs):
         if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
@@ -2980,6 +3014,8 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
     ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
     ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
     ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
+    *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
+        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
 ])
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
@@ -3036,6 +3072,12 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
             "SELECT status FROM brc_instruments WHERE exchange_instrument_id=:member"
         ), {"member":member})
     assert observed.status == ObservationStatus.SIGNAL_CREATED, (observed,blocker,member,instrument_status)
+    if isinstance(cancel_before_fill,str) and cancel_before_fill.startswith("entry_fault:"):
+        await _issue_and_dispatch_hourly_natural_entry(database,group=group,signal_event_id=observed.signal_event_id,
+            selection_authority_id=current.authority.selection_authority_id,member=member,
+            universe_version_id=current.authority.event_binding.universe_version_id,closed_at_ms=close,
+            now_ms=close+30006,fault_stage=cancel_before_fill.split(":",1)[1])
+        return
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
@@ -6633,7 +6675,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         return
-    assert fault_stage in {None,"between_claim_ticket","before_dispatch","valid_empty_after_protection"}
+    assert fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection"}
     if fault_stage == "between_claim_ticket":
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -6671,6 +6713,11 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
 
     class ActionFacts:
         async def read_entry_admission_snapshot(self, request):
+            if fault_stage=="stale_before_dispatch":
+                stale_risk = AccountRiskSnapshot.create(**{**risk.model_dump(exclude={"snapshot_digest"}),
+                    "observed_at_ms":request.observed_at_ms-60000,"valid_until_ms":request.observed_at_ms-1})
+                return admission.model_copy(update={"account_risk_snapshot":stale_risk,
+                    "observed_at_ms":request.observed_at_ms-60000,"valid_until_ms":request.observed_at_ms-1})
             fresh_risk = AccountRiskSnapshot.create(**{
                 **risk.model_dump(exclude={"snapshot_digest"}),
                 "observed_at_ms":request.observed_at_ms,
@@ -6713,13 +6760,19 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             now_ms=now_ms+5,lease_until_ms=now_ms+30_000,timeout_seconds=1,
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=60_000),entry_facts_source=ActionFacts())
-    if fault_stage == "before_dispatch":
+    if fault_stage in {"before_dispatch","stale_before_dispatch"}:
         assert dispatched.status.value == "superseded", dispatched
         assert venue.calls == []
         async with database.connect() as conn:
             assert await conn.scalar(sa.text(
                 "SELECT status FROM brc_exchange_commands WHERE ticket_id=:ticket AND command_kind='entry'"
-            ), {"ticket":issued.ticket_id}) == "superseded"
+            ), {"ticket":issued.ticket_id}) == ("rejected" if fault_stage=="stale_before_dispatch" else "superseded")
+        async with PostgresKernelUnitOfWork(database) as uow:
+            reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
+            assert reservation is not None and reservation.status=="released"
+            assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
+            commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
+            assert len(commands)==1 and commands[0].generation==1
         return
     assert dispatched.status.value == "accepted", dispatched
     assert len(venue.calls) == 1
