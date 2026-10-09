@@ -115,6 +115,7 @@ from src.trading_kernel.domain.selection_authority import (
     SelectionSnapshotDisposition,
     StrategyTriggerSuppression,
     selected_member_set_digest,
+    static_recovery_is_first_activation_source,
 )
 from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuum,
@@ -5062,10 +5063,15 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("NO_CHANGE cannot cross an open Vacuum")
         current = await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
         now = await self.read_authority_clock_ms()
+        static_retry = first_activation and current is not None and isinstance(current.authority,GenericRecoveryAuthority) and (
+            static_recovery_is_first_activation_source(current.authority,control,owner_control_version=authority.owner_control_version,
+                activation_authorization_id=authority.activation_authorization_id))
         if current is not None and isinstance(current.authority,GenericRecoveryAuthority):
-            if authority.authority_outcome!="NO_CHANGE" or (
+            if static_retry and authority.continued_from_recovery_authority_id is not None:
+                raise SelectionJobConflict("New epoch cannot continue a Static attempted epoch")
+            if not static_retry and (authority.authority_outcome!="NO_CHANGE" or (
                 authority.continued_from_recovery_authority_id!=current.authority.selection_authority_id
-                or current.authority.authority_outcome not in {"ACTIVE_NEW","FALLBACK_PREVIOUS"}):
+                or current.authority.authority_outcome not in {"ACTIVE_NEW","FALLBACK_PREVIOUS"})):
                 raise SelectionJobConflict("Recovery successor origin changed")
         elif current is not None and isinstance(current.authority,GenericSelectionAuthority):
             if authority.continued_from_recovery_authority_id!=current.authority.continued_from_recovery_authority_id:
@@ -5078,18 +5084,18 @@ class PostgresInstrumentSelectionRepository:
             return
         if authority.activation_authorization_id is not None and not first_activation:
             raise SelectionJobConflict("NO_CHANGE activation pending required")
-        if first_activation and current is not None:
+        if first_activation and current is not None and not static_retry:
             raise SelectionJobConflict("NO_CHANGE first activation Authority exists")
         if (None if current is None else current.projection_version) != expected_current_version:
             raise SelectionJobConflict("NO_CHANGE current version changed")
         sequence = 1
         if current is not None:
-            if current.authority.blocks_new_entry or current.authority.expires_at_ms < authority.period.scheduled_effective_at_ms:
+            if not static_retry and (current.authority.blocks_new_entry or current.authority.expires_at_ms < authority.period.scheduled_effective_at_ms):
                 raise SelectionJobConflict("NO_CHANGE cannot recover an Authority gap")
             if (current.authority.event_binding != authority.event_binding
                 or current.authority.comparison_universe_id != authority.comparison_universe_id
                 or current.authority.comparison_transition_revision != authority.comparison_transition_revision
-                or current.authority.selection_epoch_id != authority.selection_epoch_id
+                or (current.authority.selection_epoch_id != authority.selection_epoch_id and not static_retry)
                 or current.authority.owner_control_version != authority.owner_control_version):
                 raise SelectionJobConflict("NO_CHANGE prior authority is not continuous")
             if current.authority.period.feature_cutoff_at_ms > authority.period.feature_cutoff_at_ms:
@@ -5115,6 +5121,10 @@ class PostgresInstrumentSelectionRepository:
         snapshot = await self.get_generic_snapshot(authority.selection_snapshot_id)
         if snapshot.member_set_digest != authority.event_binding.member_set_digest or snapshot.selection_epoch_id != authority.selection_epoch_id:
             raise SelectionJobConflict("NO_CHANGE Snapshot membership differs")
+        if static_retry:
+            blocker=await self.generic_recovery_transition_blocker(selection_spec_id=authority.selection_spec_id,target_members=snapshot.selected_members)
+            if blocker is not None:
+                raise SelectionJobConflict(blocker)
         signals = PostgresSignalRepository(self._connection)
         prior_universe = await universes.get_current(authority.event_binding.event_spec_id)
         if prior_universe is None or prior_universe.universe_version_id != uid:
@@ -5248,7 +5258,10 @@ class PostgresInstrumentSelectionRepository:
         if authority.activation_authorization_id is not None and not first_activation:
             raise SelectionJobConflict("Generic empty activation pending required")
         if first_activation and current is not None:
-            raise SelectionJobConflict("Generic empty first activation Authority exists")
+            prior_static=await self.get_current_generic_authority(authority.selection_spec_id,for_update=True)
+            if prior_static is None or not isinstance(prior_static.authority,GenericRecoveryAuthority) or not static_recovery_is_first_activation_source(
+                prior_static.authority,control,owner_control_version=authority.owner_control_version,activation_authorization_id=authority.activation_authorization_id):
+                raise SelectionJobConflict("Generic empty first activation Authority exists")
         if (None if current is None else current["projection_version"]) != expected_current_version:
             raise SelectionJobConflict("Generic empty current version changed")
         if vacuum.projection_version != expected_vacuum_version or vacuum.state is not StrategyEntryVacuumState.DRAINING_ENTRY:

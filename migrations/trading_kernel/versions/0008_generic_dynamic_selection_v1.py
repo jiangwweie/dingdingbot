@@ -1883,17 +1883,35 @@ def _authority_snapshot_epoch() -> None:
                 RAISE EXCEPTION 'Generic VALID_EMPTY requires exact zero-member Snapshot and no trading proof';
               END IF;
             ELSE
-              IF NEW.authority_outcome='ACTIVE_NEW' THEN
+              IF NEW.authority_outcome IN ('ACTIVE_NEW','NO_CHANGE') THEN
                 SELECT a.* INTO source_authority_row FROM brc_selection_authority_current current_auth
                   JOIN brc_selection_session_authorities a ON a.selection_authority_id=current_auth.selection_authority_id
                   WHERE current_auth.selection_spec_id=NEW.selection_spec_id;
                 IF FOUND THEN
+                  IF NEW.authority_outcome='NO_CHANGE' AND source_authority_row.recovery_grant_proof IS NOT NULL THEN
+                    IF source_authority_row.selection_mode='static_baseline' AND NEW.activation_authorization_id IS NOT NULL THEN
+                      IF NEW.continued_from_selection_authority_id IS NOT NULL
+                        OR source_authority_row.selection_epoch_id=NEW.selection_epoch_id
+                        OR source_authority_row.selection_control_version+2<>NEW.selection_control_version
+                        OR source_authority_row.owner_control_version<>NEW.owner_control_version
+                        OR source_authority_row.recovery_grant_proof->>'failed_activation_authorization_id' IS NULL
+                        OR source_authority_row.recovery_grant_proof->>'failed_activation_authorization_id'=NEW.activation_authorization_id
+                        OR NOT EXISTS (SELECT 1 FROM brc_strategy_selection_control_current c
+                          WHERE c.selection_spec_id=NEW.selection_spec_id AND c.selection_mode='dynamic_selection'
+                            AND c.pending_selection_mode IS NULL AND c.pending_authorization_id IS NULL
+                            AND c.selection_epoch_id=NEW.selection_epoch_id AND c.control_version=NEW.selection_control_version AND c.updated_at_ms=NEW.created_at_ms)
+                      THEN RAISE EXCEPTION 'Static recovery retry requires fresh authorized epoch'; END IF;
+                    ELSIF NEW.continued_from_selection_authority_id IS DISTINCT FROM source_authority_row.selection_authority_id THEN
+                      RAISE EXCEPTION 'NO_CHANGE cannot erase recovery origin';
+                    END IF;
+                  END IF;
                   origin_id:=CASE WHEN source_authority_row.recovery_grant_proof IS NOT NULL
                     THEN source_authority_row.selection_authority_id
                     WHEN source_authority_row.authority_outcome='PRE_FENCE_CONTINUITY'
                     THEN source_authority_row.current_close_proof->>'origin_recovery_authority_id'
                     ELSE source_authority_row.continued_from_selection_authority_id END;
-                  IF origin_id IS NOT NULL THEN
+                  IF origin_id IS NOT NULL AND (NEW.authority_outcome='ACTIVE_NEW' OR
+                    (NEW.activation_authorization_id IS NOT NULL AND source_authority_row.selection_mode='static_baseline')) THEN
                     SELECT recovery_grant_proof INTO origin_proof FROM brc_selection_session_authorities
                       WHERE selection_authority_id=origin_id AND selection_spec_id=NEW.selection_spec_id;
                     IF origin_proof IS NULL OR EXISTS (

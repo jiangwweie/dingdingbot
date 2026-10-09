@@ -1254,15 +1254,21 @@ def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
     selection_control_version: int, owner_control_version: int,
     event_spec_id: str, position_side: str, universe_version_id: str, exchange_instrument_id: str,
     birth_selection_authority_id: str | None, allow_current_as_birth: bool,
-    observed_close_time_ms: int, now_ms: int) -> str | None:
+    observed_close_time_ms: int, now_ms: int, selection_control: SelectionControl | None = None) -> str | None:
     """Exact recovery eligibility only; caller must also enforce rebase and DB facts."""
     authority = GenericRecoveryAuthority.model_validate(authority.model_dump())
     proof = authority.recovery_proof
     # Failed first activation clears the pending Dynamic epoch on Control while
     # retaining that attempted epoch in immutable transition evidence.
     expected_epoch = None if proof.selection_mode=="static_baseline" else proof.selection_epoch_id
+    pending_static = selection_control is not None and proof.selection_mode=="static_baseline" and static_recovery_is_first_activation_source(authority,selection_control,
+        owner_control_version=owner_control_version,activation_authorization_id=selection_control.pending_authorization_id)
+    if pending_static and selection_control is not None and (selection_epoch_id!=selection_control.selection_epoch_id
+        or selection_control_version!=selection_control.control_version or selection_spec_id!=selection_control.selection_spec_id):
+        return "selection_recovery_control_changed"
     if (selection_spec_id!=proof.selection_spec_id or selection_mode!=proof.selection_mode
-        or selection_epoch_id!=expected_epoch or selection_control_version!=proof.selection_control_version
+        or (selection_epoch_id!=expected_epoch and not pending_static)
+        or (selection_control_version!=proof.selection_control_version and not pending_static)
         or owner_control_version!=proof.owner_control_version):
         return "selection_recovery_control_changed"
     binding = proof.event_binding
@@ -1271,13 +1277,28 @@ def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
         return "selection_recovery_scope_changed"
     if birth_selection_authority_id!=authority.selection_authority_id and not (birth_selection_authority_id is None and allow_current_as_birth):
         return "selection_recovery_birth_changed"
-    if not authority.effective_from_ms<=now_ms<authority.expires_at_ms:
+    durable_static = proof.selection_mode=="static_baseline"
+    if now_ms<authority.effective_from_ms or (not durable_static and now_ms>=authority.expires_at_ms):
         return "selection_recovery_not_effective"
-    if observed_close_time_ms%HOUR_MS or not authority.first_eligible_close_time_ms<=observed_close_time_ms<=now_ms or observed_close_time_ms>=authority.expires_at_ms:
+    if observed_close_time_ms%HOUR_MS or observed_close_time_ms!=now_ms//HOUR_MS*HOUR_MS or not authority.first_eligible_close_time_ms<=observed_close_time_ms<=now_ms or (
+        not durable_static and observed_close_time_ms>=authority.expires_at_ms):
         return "selection_recovery_close_ineligible"
     if proof.membership_freshness is not None and not proof.membership_freshness.allows_new_entry_at(now_ms):
         return "selection_membership_stale"
     return None
+
+
+def static_recovery_is_first_activation_source(source: GenericRecoveryAuthority, control: SelectionControl, *,
+    owner_control_version: int, activation_authorization_id: str | None) -> bool:
+    """A new Owner epoch may replace historical Static transition evidence."""
+    return (source.selection_mode=="static_baseline" and source.selection_spec_id==control.selection_spec_id
+        and source.owner_control_version==owner_control_version and source.selection_control_version+1==control.control_version
+        and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+        and control.selection_epoch_id is not None and control.selection_epoch_id!=source.selection_epoch_id
+        and activation_authorization_id is not None and control.pending_authorization_id==activation_authorization_id
+        and source.recovery_proof.failed_activation_authorization_id is not None
+        and source.recovery_proof.failed_activation_authorization_id!=activation_authorization_id
+        and source.created_at_ms<=control.updated_at_ms)
 
 
 class CurrentGenericSelectionAuthority(BaseModel):

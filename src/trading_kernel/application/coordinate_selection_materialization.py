@@ -1593,7 +1593,7 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     selection_epoch_id=snapshot.selection_epoch_id,selection_snapshot_id=snapshot.selection_snapshot_id,
                     authority_sequence=sequence,owner_control_version=owner.control_version,selection_control_version=control.control_version+int(first_activation),
                     activation_authorization_id=control.pending_authorization_id if first_activation else None,
-                    continued_from_recovery_authority_id=(None if prior is None else
+                    continued_from_recovery_authority_id=(None if prior is None or first_activation else
                         prior.authority.selection_authority_id if isinstance(prior.authority,GenericRecoveryAuthority) else
                         prior.authority.continued_from_recovery_authority_id),
                     period=proof.period,authority_outcome="NO_CHANGE",event_binding=AuthorityEventBinding(event_spec_id=spec.event_spec_id,

@@ -383,7 +383,7 @@ class PostgresSignalRepository:
                 selection_control_version=control.control_version,owner_control_version=owner.control_version,
                 event_spec_id=scope.event_spec_id,position_side=scope.position_side,universe_version_id=scope.universe_version_id,
                 exchange_instrument_id=scope.exchange_instrument_id,birth_selection_authority_id=selection_authority_id,
-                allow_current_as_birth=False,observed_close_time_ms=observed_at_ms,now_ms=now)
+                allow_current_as_birth=False,observed_close_time_ms=observed_at_ms,now_ms=now,selection_control=control)
             if rejection is not None:
                 raise RuntimeError(rejection)
         elif (authority.selection_spec_id!=control.selection_spec_id
@@ -460,7 +460,7 @@ class PostgresSignalRepository:
             if changed.rowcount!=1:
                 raise RuntimeError("Recovery Observation checkpoint CAS changed")
             committed_at = await selection.read_authority_clock_ms()
-            if committed_at>=authority.expires_at_ms:
+            if proof.selection_mode!="static_baseline" and committed_at>=authority.expires_at_ms:
                 raise RuntimeError("Recovery Observation authority expired during commit")
             if committed_at<now or observed_at_ms!=committed_at//3_600_000*3_600_000:
                 raise RuntimeError("Recovery Observation latest close changed during commit")

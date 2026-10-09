@@ -5976,7 +5976,8 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
 @pytest.mark.parametrize("old_stage", ["DESIRED","DRAINING_ENTRY","warming","staged"])
-async def test_first_dynamic_pause_restores_static_through_transition_scoped_recovery(database: AsyncEngine,group: str,old_stage: str) -> None:
+@pytest.mark.parametrize("retry_dynamic", [False,True,"unchanged","empty"])
+async def test_first_dynamic_pause_restores_static_through_transition_scoped_recovery(database: AsyncEngine,group: str,old_stage: str,retry_dynamic: bool | str) -> None:
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
     )
@@ -6098,6 +6099,8 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
     first_close=current.authority.first_eligible_close_time_ms
     await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=first_close,valid_until_ms=first_close+HOUR)
     template={"CPM-RO-001":cpm_long_snapshot,"BRF2-001":brf2_short_snapshot,"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot}[group]()
+    if retry_dynamic:
+        template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot() if group=="MI-001" else cpm_flat_snapshot()
     delta=first_close-template.trigger_candle_close_time_ms
     class StaticRecoveryMarket:
         async def fetch_closed_candles(self,request):
@@ -6113,9 +6116,134 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=first_close+1)):
         suppressed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),StaticRecoveryMarket(),ObservationRequest(
             runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=first_close,attempted_at_ms=first_close+1))
-    assert suppressed.status is ObservationStatus.NO_SIGNAL and suppressed.detector_reason=="RECOVERY_REBASE_REQUIRED",suppressed
+    assert suppressed.status is ObservationStatus.NO_SIGNAL,suppressed
+    if not retry_dynamic:
+        assert suppressed.detector_reason=="RECOVERY_REBASE_REQUIRED",suppressed
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+    if retry_dynamic:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            control=await uow.instrument_selection.get_selection_control(group)
+            baseline_id=control.rollback_baseline_id
+            cadence=source.spec.cadence_hours*HOUR
+            retry_at=first_close+2
+            anchor=(retry_at//cadence+1)*cadence
+            next_control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=anchor,
+                request=ControlMutationRequest(expected_version=control.control_version,reason="fresh_dynamic_after_first_pause_static_recovery",
+                    idempotency_key=f"fresh-first-pause:{group}:{old_stage}",owner_identity="owner",now_ms=retry_at),authentication_strength="totp_step_up")
+        assert next_control.selection_epoch_id!=source.selection_epoch_id and next_control.rollback_baseline_id==baseline_id
+        before_activation_close=first_close+HOUR
+        await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=before_activation_close,valid_until_ms=before_activation_close+HOUR)
+        if group in {"MPG-001","MI-001"}:
+            shift=before_activation_close-first_close
+            cache=build_comparative_universe_projection(
+                event_spec_id=source.spec.event_spec_id,universe_version_id=static_uid,strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids[:1],
+                closed_bar_time_ms=before_activation_close,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+                member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta+shift,"close_time_ms":c.close_time_ms+delta+shift}) for c in template.candles_1h)) for m in source.spec.candidate_ids[:1]))
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(cache)
+        class ContinuedStaticMarket:
+            async def fetch_closed_candles(self,request):
+                path=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                shift=before_activation_close-template.trigger_candle_close_time_ms
+                return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in path)
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=before_activation_close+1)):
+            continued_static=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),ContinuedStaticMarket(),ObservationRequest(
+                runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=before_activation_close,attempted_at_ms=before_activation_close+1))
+        assert continued_static.status is ObservationStatus.NO_SIGNAL,continued_static
+        fresh_source=inputs(group).model_copy(update={"selection_epoch_id":next_control.selection_epoch_id})
+        while fresh_source.feature_cutoff_at_ms<anchor:
+            fresh_source=next_input(fresh_source)
+        if retry_dynamic=="unchanged":
+            fresh_source=fresh_source.model_copy(update={"member_windows":tuple(
+                qualify_window(w.model_copy(update={"candles":fresh_source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0]) for w in fresh_source.member_windows)})
+        if retry_dynamic=="empty":
+            fresh_source=fresh_source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in fresh_source.member_windows)})
+        class FreshSelectionMarket:
+            async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in fresh_source.member_windows)
+            async def fetch_generic_selection_klines(self,request):
+                return next(w.candles for w in fresh_source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+        tick=anchor
+        def selection_clock():
+            nonlocal tick
+            tick+=1
+            return tick
+        selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=FreshSelectionMarket(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=next_control.selection_epoch_id,
+                period_anchor_ms=anchor,worker_id="fresh-first-pause-selector"),clock_ms=selection_clock)
+        assert selected.outcome=="SNAPSHOT_READY",selected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            fresh=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+        assert fresh.predecessor_snapshot_id is None and len(fresh.members)==24 and fresh.selection_epoch_id==next_control.selection_epoch_id
+        fresh_request=CoordinateGenericSnapshotRequest(selection_snapshot_id=fresh.selection_snapshot_id,worker_id="fresh-first-pause-activation")
+        await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=fresh.effective_from_ms,valid_until_ms=fresh.effective_from_ms+HOUR)
+        if retry_dynamic=="unchanged" and group in {"CPM-RO-001","BRF2-001"}:
+            @asynccontextmanager
+            async def corrupted_unarmed_retry():
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    await uow._connection.execute(sa.text("UPDATE brc_exposure_episode_current SET authority_recovery_armed_at_ms=NULL,authority_recovery_last_observed_at_ms=NULL,authority_recovery_last_detector_status=NULL WHERE event_spec_id=:event"),
+                        {"event":source.spec.event_spec_id})
+                    yield uow
+            checked_at=fresh.effective_from_ms+1
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=checked_at)), patch.object(
+                PostgresInstrumentSelectionRepository,"generic_recovery_transition_blocker",new=AsyncMock(return_value=None)), pytest.raises(
+                    sa.exc.DBAPIError,match="Generic recovery rebase pending"):
+                await coordinate_selection_materialization_once(uow_factory=corrupted_unarmed_retry,request=fresh_request,clock_ms=lambda:checked_at)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.instrument_selection.get_selection_control(group)).pending_authorization_id==next_control.pending_authorization_id
+                assert (await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)).authority==current.authority
+        for offset in range(1,15):
+            activation_at=fresh.effective_from_ms+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=activation_at)):
+                activation=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=fresh_request,clock_ms=lambda activation_at=activation_at:activation_at)
+            if activation.disposition in {MaterializationDisposition.ACTIVE_NEW,MaterializationDisposition.NO_CHANGE,MaterializationDisposition.VALID_EMPTY}:
+                break
+            if activation.materialization_generation_id:
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    fresh_targets=await uow.strategy_universes.get_generation_universe_targets(activation.materialization_generation_id)
+                if fresh_targets:
+                    uid=fresh_targets[0].universe_version_id
+                    await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=fresh.effective_from_ms,valid_until_ms=activation_at+HOUR)
+                    if group in {"MPG-001","MI-001"}:
+                        flat=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+                        delta=fresh.effective_from_ms-flat.trigger_candle_close_time_ms
+                        candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in flat.candles_1h)
+                        cache=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=uid,strategy_group_id=group,
+                            exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=fresh.effective_from_ms,lookback_bars=8 if group=="MPG-001" else 12,
+                            freshness_window_ms=HOUR,member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            await uow.strategy_universes.save_comparative_projection(cache)
+        assert activation.disposition is (MaterializationDisposition.VALID_EMPTY if retry_dynamic=="empty" else
+            MaterializationDisposition.NO_CHANGE if retry_dynamic=="unchanged" and group in {"CPM-RO-001","BRF2-001"} else MaterializationDisposition.ACTIVE_NEW),activation
+        async with PostgresKernelUnitOfWork(database) as uow:
+            active=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+            actual_control=await uow.instrument_selection.get_selection_control(group)
+            assert actual_control.selection_mode.value=="dynamic_selection" and actual_control.selection_epoch_id==next_control.selection_epoch_id
+            assert active.authority.selection_epoch_id==next_control.selection_epoch_id
+            assert await uow.instrument_selection.get_generic_materialization_generation(gid)==abandoned
+        assert active.authority.activation_authorization_id==next_control.pending_authorization_id
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines WHERE strategy_group_id=:group"),{"group":group})==1
+        if retry_dynamic=="empty":
+            assert active.authority.blocks_new_entry and active.authority.event_binding.universe_version_id is None
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==static_uid
+            async with database.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+                assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+            return
+        if group in {"CPM-RO-001","BRF2-001"}:
+            await _issue_second_dynamic_noncomparative_trade(database,group=group)
+        else:
+            await _issue_second_dynamic_comparative_trade(database,group=group,selection_input=fresh_source)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert await uow.instrument_selection.get_generic_materialization_generation(gid)==abandoned
+        async with database.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==1
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands WHERE command_kind='entry'"))==1
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_aggregates WHERE status='terminal'"))==1
 
 
 @pytest.mark.asyncio
@@ -8981,7 +9109,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
 
 
-async def _issue_second_dynamic_comparative_trade(database, *, group):
+async def _issue_second_dynamic_comparative_trade(database, *, group,selection_input=None):
     spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
@@ -8992,7 +9120,7 @@ async def _issue_second_dynamic_comparative_trade(database, *, group):
         assert uow._connection is not None
         scope_id,member = (await uow._connection.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
             "FROM brc_runtime_scopes_current WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":uid})).one()
-    source = inputs(group).model_copy(update={"selection_epoch_id":current.authority.selection_epoch_id})
+    source = (inputs(group) if selection_input is None else selection_input).model_copy(update={"selection_epoch_id":current.authority.selection_epoch_id})
     while source.feature_cutoff_at_ms<previous.feature_cutoff_at_ms:
         source=next_input(source)
     trigger = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
@@ -9066,7 +9194,7 @@ async def _issue_second_dynamic_noncomparative_trade(database, *, group):
     spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
-        assert current.authority.authority_outcome=="ACTIVE_NEW"
+        assert current.authority.authority_outcome in {"ACTIVE_NEW","NO_CHANGE"}
         uid = current.authority.event_binding.universe_version_id
         close = current.authority.first_eligible_close_time_ms
         assert uow._connection is not None

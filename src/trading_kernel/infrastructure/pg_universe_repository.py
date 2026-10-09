@@ -89,6 +89,7 @@ from src.trading_kernel.domain.selection_authority import (
     GenericSelectionAuthority,
     SelectionMode,
     selected_member_set_digest,
+    static_recovery_is_first_activation_source,
 )
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
@@ -1102,11 +1103,14 @@ class PostgresStrategyUniverseRepository:
             if revision!=authority.comparison_transition_revision:
                 raise UniverseInstallConflict("GENERIC_COMPARISON_REVISION_CHANGED")
         current_authority = await selection.get_current_generic_authority(authority.selection_spec_id,for_update=True)
-        if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority) and not recovering:
+        static_recovery_retry = first_activation and current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority) and (
+            static_recovery_is_first_activation_source(current_authority.authority,control,
+                owner_control_version=authority.owner_control_version,activation_authorization_id=authorization_id))
+        if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority) and not recovering and not static_recovery_retry:
             raise UniverseInstallConflict("GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")
-        if first_activation and current_authority is not None:
+        if first_activation and current_authority is not None and not static_recovery_retry:
             raise UniverseInstallConflict("GENERIC_FIRST_ACTIVATION_AUTHORITY_EXISTS")
-        if not recovering and current_authority is not None and (current_authority.authority.blocks_new_entry
+        if not recovering and not static_recovery_retry and current_authority is not None and (current_authority.authority.blocks_new_entry
             or current_authority.authority.expires_at_ms < authority.period.scheduled_effective_at_ms):
             raise UniverseInstallConflict("GENERIC_ACTIVATION_REQUIRES_RECOVERY")
         if recovery_authority is not None and (current_authority is None or current_authority.authority.selection_authority_id!=recovery_authority.recovery_proof.source_selection_authority_id):
@@ -1117,7 +1121,7 @@ class PostgresStrategyUniverseRepository:
         if current_authority is not None and (
             current_authority.authority.event_binding.universe_version_id != previous.universe_version_id
             or current_authority.authority.event_binding.member_set_digest != previous.member_set_digest
-            or current_authority.authority.selection_epoch_id != authority.selection_epoch_id
+            or (current_authority.authority.selection_epoch_id != authority.selection_epoch_id and not static_recovery_retry)
             or (current_authority.authority.owner_control_version != authority.owner_control_version and not resumed_source)
             or current_authority.authority.comparison_universe_id != previous.comparison_universe_id
             or current_authority.authority.comparison_transition_revision != previous.comparison_transition_revision):

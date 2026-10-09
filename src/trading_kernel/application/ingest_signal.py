@@ -578,7 +578,7 @@ async def _resolve_generic_selection_authority(
             event_spec_id=runtime_scope.event_spec_id,position_side=runtime_scope.position_side,
             universe_version_id=runtime_scope.universe_version_id,exchange_instrument_id=runtime_scope.exchange_instrument_id,
             birth_selection_authority_id=birth_selection_authority_id,allow_current_as_birth=allow_current_as_birth,
-            observed_close_time_ms=observed_close_time_ms,now_ms=now_ms)
+            observed_close_time_ms=observed_close_time_ms,now_ms=now_ms,selection_control=control)
         if reason is not None:
             return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,reason)
         universe = await uow.strategy_universes.get_current(runtime_scope.event_spec_id)

@@ -277,6 +277,8 @@ def test_recovery_authority_uses_exact_proof_and_never_claims_normal_activation(
                     {"selection_control_version":proof.selection_control_version+1},
                     {"selection_epoch_id":"wrong"},{"exchange_instrument_id":"not-selected"}):
         assert generic_recovery_entry_rejection(**{**args,**changes}) is not None
+    if static:
+        assert generic_recovery_entry_rejection(**{**args,"now_ms":proof.expires_at_ms+1,"observed_close_time_ms":proof.expires_at_ms}) is None
     from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
         generic_recovery_authority_from_storage,
         generic_recovery_authority_storage_values,
@@ -328,13 +330,15 @@ async def test_current_recovery_cannot_fall_through_to_static_or_normal_entry(st
         CurrentGenericSelectionAuthority,
         GenericRecoveryAuthority,
         GenericRecoveryGrantProof,
+        SelectionControl,
         SelectionMode,
     )
     proof = GenericRecoveryGrantProof(**recovery_payload("CPM-RO-001",static))
     authority = GenericRecoveryAuthority.build(proof=proof,authority_sequence=1)
-    control = SimpleNamespace(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,
+    control = SelectionControl(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,
         selection_mode=SelectionMode(proof.selection_mode),selection_epoch_id=None if static else proof.selection_epoch_id,
-        control_version=proof.selection_control_version)
+        control_version=proof.selection_control_version,pending_selection_mode=None,pending_effective_period_anchor_ms=None,
+        pending_authorization_id=None,rollback_baseline_id=None,updated_at_ms=proof.committed_at_ms)
     scope = SimpleNamespace(strategy_group_id=proof.strategy_group_id,event_spec_id=proof.event_binding.event_spec_id,
         position_side=proof.event_binding.position_side,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
         universe_version_id=proof.event_binding.universe_version_id,universe_semantic_digest="digest:test",exchange_instrument_id=proof.observation_cursors[0].exchange_instrument_id)
@@ -347,6 +351,6 @@ async def test_current_recovery_cannot_fall_through_to_static_or_normal_entry(st
         signals=SimpleNamespace(get_observation_universe_members=AsyncMock(return_value=SimpleNamespace(lifecycle_state="active",semantic_digest="digest:test",exchange_instrument_ids=(scope.exchange_instrument_id,))),
             selection_authority_was_interrupted=AsyncMock(return_value=False),get_authority_recovery_checkpoint=AsyncMock(return_value=None)))
     result = await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=None,
-        observed_close_time_ms=authority.first_eligible_close_time_ms,now_ms=authority.expires_at_ms+1 if expired else authority.first_eligible_close_time_ms+1,
+        observed_close_time_ms=authority.expires_at_ms if expired else authority.first_eligible_close_time_ms,now_ms=authority.expires_at_ms+1 if expired else authority.first_eligible_close_time_ms+1,
         allow_current_as_birth=True)
-    assert not result.allowed and result.reason_code == ("selection_recovery_not_effective" if expired else "RECOVERY_REBASE_AUTHORITY_CHANGED")
+    assert not result.allowed and result.reason_code == ("selection_recovery_not_effective" if expired and not static else "RECOVERY_REBASE_AUTHORITY_CHANGED")
