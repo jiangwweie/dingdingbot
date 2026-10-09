@@ -1361,7 +1361,45 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         restored_staging = await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id)
         assert restored_staging is not None and restored_staging.lifecycle_state.value == "STAGED" and restored_staging.lease_owner is None
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+    actual_execute = sa.ext.asyncio.AsyncConnection.execute
+    async def omit_static_cursor_payload(connection, statement, *args, **kwargs):
+        if getattr(getattr(statement,"table",None),"name",None)=="brc_strategy_universe_materialization_events" and getattr(statement,"is_insert",False):
+            params = statement.compile().params
+            if params.get("event_type")=="ACTIVE" and "static_activation_proof" in params.get("payload",{}):
+                original_payload = params["payload"]
+                statement = statement.values(payload={**original_payload,"static_activation_proof":{
+                    **original_payload["static_activation_proof"],"observation_cursors":[]}})
+        return await actual_execute(connection,statement,*args,**kwargs)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+        sa.ext.asyncio.AsyncConnection,"execute",new=omit_static_cursor_payload), pytest.raises(
+            sa.exc.DBAPIError,match="complete cursor coverage"):
+        await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
+    if group not in {"MPG-001","MI-001"}:
+        actual_cursor_prepare = PostgresInstrumentSelectionRepository.prepare_generic_static_activation_proof
+        async def forge_consumed_cursor(repository, gid, *, worker_id, lease_epoch):
+            authentic = await actual_cursor_prepare(repository,gid,worker_id=worker_id,lease_epoch=lease_epoch)
+            cursor = authentic.observation_cursors[0]
+            changed_cursor = cursor.model_copy(update={"episode_version":cursor.episode_version+10,
+                "last_observed_at_ms":authentic.first_eligible_close_time_ms-HOUR})
+            return type(authentic).model_validate({**authentic.model_dump(),
+                "observation_cursors":(changed_cursor,*authentic.observation_cursors[1:])})
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+            PostgresInstrumentSelectionRepository,"prepare_generic_static_activation_proof",new=forge_consumed_cursor), patch.object(
+            PostgresInstrumentSelectionRepository,"require_generic_static_activation_proof",new=AsyncMock(return_value=due+6)), pytest.raises(
+                sa.exc.DBAPIError,match="Static NORMAL cursor evidence changed"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
     if group in {"MPG-001","MI-001"}:
+        actual_prepare = PostgresInstrumentSelectionRepository.prepare_generic_static_activation_proof
+        async def forge_normal_proof(repository, gid, *, worker_id, lease_epoch):
+            authentic = await actual_prepare(repository,gid,worker_id=worker_id,lease_epoch=lease_epoch)
+            assert authentic.transition_rule=="RECOVERY_TRANSITION"
+            return type(authentic).model_validate({**authentic.model_dump(),"transition_rule":"NORMAL_TRANSITION",
+                "recovery_reason":None,"first_eligible_close_time_ms":authentic.prepared_at_ms//HOUR*HOUR})
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
+            PostgresInstrumentSelectionRepository,"prepare_generic_static_activation_proof",new=forge_normal_proof), patch.object(
+            PostgresInstrumentSelectionRepository,"require_generic_static_activation_proof",new=AsyncMock(return_value=due+6)), pytest.raises(
+                sa.exc.DBAPIError,match="Static NORMAL cannot cross authority gap"):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:due+6)
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=due+6)), patch.object(
             PostgresInstrumentSelectionRepository,"initialize_generic_static_recovery_checkpoints",new=AsyncMock(return_value=None)), pytest.raises(
                 sa.exc.DBAPIError,match="complete recovery rebase"):

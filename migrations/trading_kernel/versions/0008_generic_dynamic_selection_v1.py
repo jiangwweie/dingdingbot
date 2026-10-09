@@ -1839,6 +1839,7 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 frozen_count integer; frozen_digest text; source_json text; expected_digest text;
                 failure_source jsonb; failure_at bigint; deadline bigint; failure_vacuum brc_strategy_entry_vacuums_current%ROWTYPE;
                 activation_source jsonb; active_at bigint; target_id text;
+                activation_predecessor brc_selection_session_authorities%ROWTYPE;
         BEGIN
           gid := NEW.materialization_generation_id;
           SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
@@ -1971,6 +1972,49 @@ def _materialization_event_baselines(bind: sa.Connection) -> None:
                 FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=gid AND event_type='ACTIVE'
                 ORDER BY event_sequence DESC LIMIT 1;
               target_id:=activation_source->'target_event'->>'universe_version_id';
+              SELECT * INTO activation_predecessor FROM brc_selection_session_authorities
+                WHERE selection_authority_id=activation_source->>'source_selection_authority_id';
+              IF jsonb_typeof(activation_source->'observation_cursors') IS DISTINCT FROM 'array'
+                OR jsonb_array_length(activation_source->'observation_cursors')<>g.desired_member_count
+                OR (SELECT count(DISTINCT cursor->>'exchange_instrument_id') FROM jsonb_array_elements(activation_source->'observation_cursors') cursor)<>g.desired_member_count
+                OR EXISTS (SELECT 1 FROM jsonb_array_elements(activation_source->'observation_cursors') cursor
+                  WHERE NOT EXISTS (SELECT 1 FROM brc_strategy_universe_members member WHERE member.universe_version_id=target_id
+                    AND member.exchange_instrument_id=cursor->>'exchange_instrument_id')
+                    OR cursor->>'episode_domain_key' IS DISTINCT FROM 'episode-domain:' || encode(sha256(convert_to(
+                      '{"event_spec_id":' || to_json(previous_source.event_spec_id)::text || ',"exchange_instrument_id":' ||
+                      to_json(cursor->>'exchange_instrument_id')::text || ',"position_side":' || to_json(previous_source.position_side)::text || '}','UTF8')),'hex'))
+                THEN RAISE EXCEPTION 'Static activation requires exact complete cursor coverage'; END IF;
+              IF activation_source->>'transition_rule'='NORMAL_TRANSITION' AND (
+                activation_predecessor.selection_authority_id IS NULL
+                OR activation_predecessor.authority_outcome='VALID_EMPTY'
+                OR activation_predecessor.expires_at_ms<(owner_source->>'effective_period_anchor_ms')::bigint+3600000
+                OR activation_predecessor.owner_control_version IS DISTINCT FROM (activation_source->>'owner_control_version')::bigint
+                OR EXISTS (SELECT 1 FROM brc_strategy_entry_vacuums_current v WHERE v.strategy_group_id=g.strategy_group_id
+                  AND v.selection_spec_id=g.selection_spec_id AND v.entry_vacuum_id<>activation_source->>'entry_vacuum_id'
+                  AND v.fenced_at_ms>activation_predecessor.created_at_ms AND v.fenced_at_ms<=g.activated_at_ms)
+                OR EXISTS (SELECT 1 FROM brc_strategy_entry_control_events ev WHERE ev.strategy_group_id=g.strategy_group_id
+                  AND ev.target_state='paused' AND ev.created_at_ms>activation_predecessor.created_at_ms AND ev.created_at_ms<=g.activated_at_ms)
+                OR EXISTS (SELECT 1 FROM brc_owner_policy_events ev JOIN brc_runtime_scopes_current scope USING(owner_policy_id)
+                  WHERE scope.universe_version_id=target_id AND ev.operation='owner_control_entry_pause'
+                    AND ev.created_at_ms>activation_predecessor.created_at_ms AND ev.created_at_ms<=g.activated_at_ms)
+              ) THEN RAISE EXCEPTION 'Static NORMAL cannot cross authority gap or interruption'; END IF;
+              IF activation_source->>'transition_rule'='NORMAL_TRANSITION' AND (
+                jsonb_typeof(activation_source->'observation_cursors') IS DISTINCT FROM 'array'
+                OR jsonb_array_length(activation_source->'observation_cursors')<>g.desired_member_count
+                OR (SELECT count(DISTINCT cursor->>'exchange_instrument_id') FROM jsonb_array_elements(activation_source->'observation_cursors') cursor)<>g.desired_member_count
+                OR EXISTS (SELECT 1 FROM jsonb_array_elements(activation_source->'observation_cursors') cursor
+                  LEFT JOIN brc_exposure_episode_current ep ON ep.episode_domain_key=cursor->>'episode_domain_key'
+                  WHERE NOT EXISTS (SELECT 1 FROM brc_strategy_universe_members member WHERE member.universe_version_id=target_id
+                      AND member.exchange_instrument_id=cursor->>'exchange_instrument_id')
+                    OR cursor->>'episode_domain_key' IS DISTINCT FROM 'episode-domain:' || encode(sha256(convert_to(
+                      '{"event_spec_id":' || to_json(previous_source.event_spec_id)::text || ',"exchange_instrument_id":' ||
+                      to_json(cursor->>'exchange_instrument_id')::text || ',"position_side":' || to_json(previous_source.position_side)::text || '}','UTF8')),'hex')
+                    OR (cursor->>'episode_version')::bigint IS DISTINCT FROM coalesce(ep.projection_version,0)
+                    OR (cursor->>'comparison_checkpoint_version')::bigint IS DISTINCT FROM coalesce(ep.comparison_checkpoint_version,0)
+                    OR (cursor->>'authority_recovery_checkpoint_version')::bigint IS DISTINCT FROM coalesce(ep.authority_recovery_checkpoint_version,0)
+                    OR (cursor->>'last_observed_at_ms')::bigint IS DISTINCT FROM greatest(ep.last_observed_at_ms,ep.comparison_last_observed_at_ms,ep.authority_recovery_last_observed_at_ms)
+                    OR greatest(ep.last_observed_at_ms,ep.comparison_last_observed_at_ms,ep.authority_recovery_last_observed_at_ms)>=(activation_source->>'first_eligible_close_time_ms')::bigint)
+              ) THEN RAISE EXCEPTION 'Static NORMAL cursor evidence changed'; END IF;
               IF activation_source IS NULL OR target_id IS NULL OR g.activated_at_ms IS NULL
                 OR g.activated_at_ms IS DISTINCT FROM g.terminal_at_ms OR active_at IS DISTINCT FROM g.activated_at_ms
                 OR g.lease_owner IS NOT NULL OR g.lease_expires_at_ms IS NOT NULL
