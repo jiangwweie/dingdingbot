@@ -9207,11 +9207,16 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         path = (await conn.execute(sa.text("SELECT a.selection_spec_id,a.selection_epoch_id,"
             "a.selection_snapshot_id,s.occurred_at_ms,s.fact_digest,t.fact_digest AS ticket_fact_digest,"
             "t.exit_binding_id,t.exit_binding_semantic_hash,t.exit_binding_authority_version,"
-            "t.initial_stop_price,t.exchange_instrument_id,agg.review_id "
+            "t.initial_stop_price,t.exchange_instrument_id,agg.review_id,t.terminal_at_ms,t.capacity_claim_id,"
+            "a.comparison_universe_id,a.comparison_transition_revision,spec.algorithm_semantic_digest,"
+            "claim.selection_authority_id AS claim_authority,claim.universe_version_id AS claim_universe,"
+            "claim.fact_digest AS claim_fact_digest "
             "FROM brc_trade_tickets t "
             "JOIN brc_selection_session_authorities a ON a.selection_authority_id=t.selection_authority_id "
             "JOIN brc_signal_events s ON s.signal_event_id=t.signal_event_id "
             "JOIN brc_trade_aggregates agg ON agg.ticket_id=t.ticket_id "
+            "JOIN brc_capacity_claims claim ON claim.capacity_claim_id=t.capacity_claim_id "
+            "JOIN brc_instrument_selection_specs spec ON spec.selection_spec_id=a.selection_spec_id "
             "WHERE t.ticket_id=:ticket"),{"ticket":issued.ticket_id})).mappings().one()
         member = (await conn.execute(sa.text("SELECT selected,stable_rank,input_window_digest,"
             "qualification_semantic_digest,feature_value FROM brc_instrument_selection_member_decisions "
@@ -9220,6 +9225,14 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         event_types = set((await conn.execute(sa.text("SELECT event_type FROM brc_trade_events "
             "WHERE ticket_id=:ticket"),{"ticket":issued.ticket_id})).scalars())
     assert path["selection_spec_id"] == inputs(group).spec.selection_spec_id
+    assert path["algorithm_semantic_digest"]==inputs(group).spec.algorithm_semantic_digest
+    assert path["capacity_claim_id"]==ticket.capacity_claim_id
+    assert path["claim_authority"]==selection_authority_id and path["claim_universe"]==ticket.universe_version_id
+    assert path["claim_fact_digest"]==ticket.fact_digest
+    if group in {"MPG-001","MI-001"}:
+        assert path["comparison_universe_id"] is not None and path["comparison_transition_revision"]>0
+    else:
+        assert path["comparison_universe_id"] is None and path["comparison_transition_revision"] is None
     assert path["selection_epoch_id"] is not None
     assert path["occurred_at_ms"] == closed_at_ms
     assert path["fact_digest"] == path["ticket_fact_digest"]
@@ -9233,6 +9246,19 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert member["qualification_semantic_digest"].startswith("sha256:")
     assert {"EntryFilled","TakeProfitFilled","ProtectionReplacementConfirmed",
         "BudgetSettled","ReviewRecorded"} <= event_types
+    async with PostgresKernelUnitOfWork(database) as uow:
+        events=await uow.events.list_for_ticket(issued.ticket_id)
+        review=await uow.reviews.get_for_ticket(issued.ticket_id)
+    lifecycle_times={type(event).__name__:event.occurred_at_ms for event in events}
+    assert ticket.created_at_ms<lifecycle_times["EntryFilled"]<=lifecycle_times["TakeProfitFilled"]<=lifecycle_times["BudgetSettled"]<=path["terminal_at_ms"]
+    from src.trading_kernel.domain.live_trade_evidence import (
+        build_review_execution_evidence,
+    )
+    # This historical local fixture has a manual PnL Review, not venue fills.
+    # The immutable chain is traceable but exact execution timing is incomplete.
+    execution=build_review_execution_evidence(ticket=ticket,review_id=review.review_id,review_ticket_id=review.ticket_id,metrics=review.metrics,commands=commands)
+    assert execution.status=="EVIDENCE_INCOMPLETE" and "ATTRIBUTED_FILLS_MISSING" in execution.missing
+    assert execution.first_entry_fill_at_ms is None
     if fault_stage=="static_after_protection":
         await _issue_new_static_natural_trade(database,group=group,fault_stage=static_entry_fault)
 

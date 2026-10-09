@@ -329,6 +329,7 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
         review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
         owner_projection = await uow.monitors.get(
             owner_ticket_monitor_key(ticket.identity.ticket_id)
         )
@@ -339,6 +340,17 @@ async def test_btc_like_runner_closure_uses_actual_order_id_and_records_complete
     assert owner_projection is not None
     assert owner_projection.owner_status is MonitorOwnerStatus.COMPLETED
     assert review.metrics["economics_completeness"] == "complete"
+    from src.trading_kernel.domain.live_trade_evidence import (
+        build_review_execution_evidence,
+    )
+    execution=build_review_execution_evidence(ticket=ticket,review_id=review.review_id,review_ticket_id=review.ticket_id,
+        metrics=review.metrics,commands=commands)
+    assert execution.status=="COMPLETE",execution
+    assert execution.actual_entry_quantity==Decimal("0.001")
+    assert execution.actual_entry_vwap==Decimal(60000)
+    assert execution.first_entry_fill_at_ms==2200 and execution.last_exit_fill_at_ms==3000
+    assert execution.first_entry_fill_at_ms!=next(event.occurred_at_ms for event in events if type(event).__name__=="EntryFilled")
+    assert len(execution.entry_fills)==1 and len(execution.exit_fills)==2
     assert review.metrics["entry_quantity"] == "0.001"
     assert review.metrics["exit_quantity"] == "0.0010"
     fees = Decimal(str(review.metrics["trading_fees_quote"]))
