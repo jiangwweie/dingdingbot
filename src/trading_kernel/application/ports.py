@@ -1741,6 +1741,12 @@ class InstrumentSelectionRepository(Protocol):
         updated_at_ms: int,
     ) -> SelectionControl | None: ...
 
+    async def stage_pending_generic_static_mode(
+        self, *, strategy_group_id: str, selection_spec_id: str, selection_epoch_id: str,
+        rollback_baseline_id: str, expected_control_version: int, effective_period_anchor_ms: int,
+        authorization_id: str, updated_at_ms: int,
+    ) -> SelectionControl | None: ...
+
     async def capture_generic_static_rollback_baseline(
         self, *, selection_spec_id: str, captured_at_ms: int,
     ) -> GenericStaticRollbackBaseline: ...

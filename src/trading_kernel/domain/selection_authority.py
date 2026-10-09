@@ -281,6 +281,13 @@ class SelectionControl(BaseModel):
     updated_at_ms: int
     selection_epoch_id: str | None = None
 
+    def permits_dynamic_period(self, period_anchor_ms: int) -> bool:
+        """Future Owner intent does not replace the current effective mode."""
+        if (self.pending_selection_mode is not None and self.pending_effective_period_anchor_ms is not None
+            and period_anchor_ms>=self.pending_effective_period_anchor_ms):
+            return self.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+        return self.selection_mode is SelectionMode.DYNAMIC_SELECTION
+
     @field_validator("strategy_group_id", "selection_spec_id", mode="before")
     @classmethod
     def _require_control_identity(cls, value: object) -> str:

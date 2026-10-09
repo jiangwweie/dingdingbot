@@ -1050,7 +1050,10 @@ def _generic_continuity_proof_function() -> None:
         SELECT cadence_hours,retain_rank INTO cadence,rank_limit FROM brc_generic_dynamic_selection_specs_v1
           WHERE selection_spec_id=spec_id;
         IF cadence IS NULL OR control.strategy_group_id IS NULL OR owner_control.strategy_group_id IS NULL
-          OR control.selection_mode<>'dynamic_selection' OR control.pending_selection_mode IS NOT NULL
+          OR control.selection_mode<>'dynamic_selection'
+          OR (control.pending_selection_mode IS NOT NULL AND NOT (
+            control.pending_selection_mode='static_baseline'
+            AND (p->'period'->>'feature_cutoff_at_ms')::bigint<control.pending_effective_period_anchor_ms))
           OR control.selection_epoch_id IS DISTINCT FROM source_auth.selection_epoch_id
           OR control.control_version<>source_auth.selection_control_version
           OR owner_control.entry_state<>'enabled' OR owner_control.control_version<>source_auth.owner_control_version
@@ -1172,6 +1175,12 @@ def _generic_normal_binding_guard() -> None:
       BEGIN
         SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
         IF NOT FOUND OR a.selection_epoch_id='sor-v0' THEN RETURN NULL; END IF;
+        IF a.selection_mode='dynamic_selection' AND EXISTS (
+          SELECT 1 FROM brc_strategy_selection_control_current c
+          WHERE c.selection_spec_id=a.selection_spec_id AND c.pending_selection_mode='static_baseline'
+            AND a.period_anchor_ms>=c.pending_effective_period_anchor_ms) THEN
+          RAISE EXCEPTION 'Generic Dynamic Authority crosses pending Static period';
+        END IF;
         IF a.activation_authorization_id IS NOT NULL AND NOT EXISTS (
           SELECT 1 FROM brc_owner_authorizations o
             JOIN brc_instrument_selection_specs s ON s.selection_spec_id=a.selection_spec_id
@@ -2055,6 +2064,28 @@ def _selection_job_epochs() -> None:
                OR owner_proof.target_scope->>'effective_period_anchor_ms' IS DISTINCT FROM NEW.pending_effective_period_anchor_ms::text
                OR owner_proof.target_scope->>'selection_epoch_id' IS DISTINCT FROM NEW.selection_epoch_id THEN
               RAISE EXCEPTION 'Generic pending Owner epoch proof mismatch';
+            END IF;
+          END IF;
+          IF NEW.pending_selection_mode='static_baseline' THEN
+            IF TG_OP='UPDATE' AND NEW.updated_at_ms<OLD.updated_at_ms THEN
+              RAISE EXCEPTION 'Generic pending Static Owner proof time moved backwards';
+            END IF;
+            SELECT * INTO owner_proof FROM brc_owner_authorizations
+              WHERE authorization_id=NEW.pending_authorization_id;
+            IF NOT FOUND OR NEW.selection_mode<>'dynamic_selection' OR NEW.rollback_baseline_id IS NULL
+               OR owner_proof.purpose<>'selection_mode_change' OR owner_proof.authentication_strength<>'totp_step_up'
+               OR owner_proof.authorized_at_ms>NEW.updated_at_ms
+               OR owner_proof.target_scope IS DISTINCT FROM jsonb_build_object(
+                 'strategy_group_id',NEW.strategy_group_id,'selection_spec_id',NEW.selection_spec_id,
+                 'target_selection_mode','static_baseline','selection_epoch_id',NEW.selection_epoch_id,
+                 'rollback_baseline_id',NEW.rollback_baseline_id,
+                 'effective_period_anchor_ms',NEW.pending_effective_period_anchor_ms) THEN
+              RAISE EXCEPTION 'Generic pending Static Owner proof mismatch';
+            END IF;
+            SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;
+            IF cadence IS NULL OR NEW.pending_effective_period_anchor_ms<>
+                (owner_proof.authorized_at_ms/(cadence*3600000::bigint)+1)*(cadence*3600000::bigint) THEN
+              RAISE EXCEPTION 'Generic pending Static Owner proof period mismatch';
             END IF;
           END IF;
           IF TG_OP='UPDATE' AND OLD.selection_mode='static_baseline'

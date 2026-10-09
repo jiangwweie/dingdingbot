@@ -459,6 +459,64 @@ async def stage_generic_dynamic_selection_mode(
     return staged
 
 
+async def stage_generic_static_selection_mode(
+    uow: KernelUnitOfWork, *, strategy_group_id: str, rollback_baseline_id: str,
+    selection_epoch_id: str, effective_period_anchor_ms: int, request: ControlMutationRequest,
+    authentication_strength: Literal["totp_step_up"],
+) -> SelectionControl:
+    """Schedule exact Static restoration without granting or fencing Entry.
+
+    The effective Control version stays unchanged while this future intent is
+    pending. Runtime fencing/activation must own the subsequent version change.
+    """
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("selection_mode_change_requires_step_up")
+    current = await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
+    if current is None or strategy_group_id=="SOR-001":
+        raise OwnerControlBlocked("generic_selection_control_missing")
+    scope: dict[str, JsonValue] = {"strategy_group_id":strategy_group_id,
+        "selection_spec_id":current.selection_spec_id,"target_selection_mode":"static_baseline",
+        "rollback_baseline_id":rollback_baseline_id,"selection_epoch_id":selection_epoch_id,
+        "effective_period_anchor_ms":effective_period_anchor_ms}
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(request.idempotency_key)
+    if existing is not None:
+        _require_matching_authorization(existing,purpose="selection_mode_change",request=request,target_scope=scope)
+        if existing.authentication_strength!="totp_step_up" or current.pending_authorization_id!=existing.authorization_id:
+            raise OwnerControlConflict("selection_authorization_no_longer_current")
+        return current
+    if current.control_version!=request.expected_version:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    if request.now_ms<current.updated_at_ms:
+        raise OwnerControlBlocked("selection_control_clock_moved_backwards")
+    if current.selection_mode is not SelectionMode.DYNAMIC_SELECTION or current.selection_epoch_id!=selection_epoch_id:
+        raise OwnerControlBlocked("selection_static_rollback_requires_current_dynamic_epoch")
+    if current.pending_selection_mode is not None:
+        raise OwnerControlBlocked("selection_mode_transition_already_pending")
+    if current.rollback_baseline_id!=rollback_baseline_id:
+        raise OwnerControlBlocked("selection_static_rollback_baseline_changed")
+    try:
+        baseline = await uow.instrument_selection.get_generic_static_rollback_baseline(rollback_baseline_id)
+        spec = await uow.instrument_selection.get_generic_spec(current.selection_spec_id)
+    except (LookupError,SelectionPersistenceConflict,ValueError) as exc:
+        raise OwnerControlBlocked("selection_static_baseline_source_invalid") from exc
+    if baseline.strategy_group_id!=strategy_group_id or baseline.selection_spec_id!=spec.selection_spec_id:
+        raise OwnerControlBlocked("selection_static_baseline_source_invalid")
+    cadence = spec.cadence_hours*HOUR_MS
+    if effective_period_anchor_ms!=(request.now_ms//cadence+1)*cadence:
+        raise OwnerControlBlocked("selection_effective_period_not_next")
+    authorization = _authorization(purpose="selection_mode_change",request=request,
+        authentication_strength="totp_step_up",target_scope=scope)
+    await uow.owner_controls.add_authorization(authorization)
+    staged = await uow.instrument_selection.stage_pending_generic_static_mode(
+        strategy_group_id=strategy_group_id,selection_spec_id=spec.selection_spec_id,
+        selection_epoch_id=selection_epoch_id,rollback_baseline_id=rollback_baseline_id,
+        expected_control_version=current.control_version,effective_period_anchor_ms=effective_period_anchor_ms,
+        authorization_id=authorization.authorization_id,updated_at_ms=request.now_ms)
+    if staged is None:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    return staged
+
+
 async def switch_event_exit_profile(
     uow: KernelUnitOfWork,
     *,

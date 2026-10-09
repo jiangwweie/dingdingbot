@@ -542,11 +542,7 @@ class PostgresInstrumentSelectionRepository:
     def _generic_control_allows(control: SelectionControl | None, spec_id: str, epoch: str, cutoff: int) -> bool:
         if control is None or control.selection_spec_id != spec_id or control.selection_epoch_id != epoch:
             return False
-        if control.pending_selection_mode is not None:
-            boundary = control.pending_effective_period_anchor_ms
-            if boundary is not None and cutoff >= boundary:
-                return control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-        return control.selection_mode is SelectionMode.DYNAMIC_SELECTION
+        return control.permits_dynamic_period(cutoff)
 
     async def claim_generic_selection_job(
         self, *, selection_spec_id: str, selection_epoch_id: str, feature_cutoff_at_ms: int,
@@ -1329,6 +1325,24 @@ class PostgresInstrumentSelectionRepository:
             )
             .returning(strategy_selection_control_current)
         )
+        row = result.mappings().one_or_none()
+        return None if row is None else _selection_control_from_row(row)
+
+    async def stage_pending_generic_static_mode(self, *, strategy_group_id: str,
+        selection_spec_id: str, selection_epoch_id: str, rollback_baseline_id: str,
+        expected_control_version: int, effective_period_anchor_ms: int,
+        authorization_id: str, updated_at_ms: int,
+    ) -> SelectionControl | None:
+        result = await self._connection.execute(sa.update(strategy_selection_control_current).where(
+            strategy_selection_control_current.c.strategy_group_id==strategy_group_id,
+            strategy_selection_control_current.c.selection_spec_id==selection_spec_id,
+            strategy_selection_control_current.c.selection_epoch_id==selection_epoch_id,
+            strategy_selection_control_current.c.rollback_baseline_id==rollback_baseline_id,
+            strategy_selection_control_current.c.control_version==expected_control_version,
+            strategy_selection_control_current.c.selection_mode=="dynamic_selection",
+            strategy_selection_control_current.c.pending_selection_mode.is_(None),
+        ).values(pending_selection_mode="static_baseline",pending_effective_period_anchor_ms=effective_period_anchor_ms,
+            pending_authorization_id=authorization_id,updated_at_ms=updated_at_ms).returning(strategy_selection_control_current))
         row = result.mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
 
@@ -4392,7 +4406,8 @@ class PostgresInstrumentSelectionRepository:
             and authority.activation_authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or (
             control.selection_spec_id != authority.selection_spec_id or control.selection_epoch_id != authority.selection_epoch_id
-            or control.control_version+int(first_activation) != authority.selection_control_version):
+            or control.control_version+int(first_activation) != authority.selection_control_version
+            or not control.permits_dynamic_period(authority.period.feature_cutoff_at_ms)):
             raise SelectionJobConflict("NO_CHANGE Selection control changed")
         if first_activation and not await self.generic_activation_authorization_matches(authority):
             raise SelectionJobConflict("NO_CHANGE activation authorization changed")
@@ -4507,7 +4522,8 @@ class PostgresInstrumentSelectionRepository:
         if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=authority.owner_control_version or (
             control is None or control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
             or control.selection_spec_id!=authority.selection_spec_id or control.selection_epoch_id!=authority.selection_epoch_id
-            or control.control_version!=authority.selection_control_version or control.pending_selection_mode is not None
+            or control.control_version!=authority.selection_control_version
+            or not control.permits_dynamic_period(authority.period.feature_cutoff_at_ms)
             or current is None or current.projection_version!=expected_current_version
             or current.authority.selection_authority_id!=proof.source_selection_authority_id):
             raise SelectionJobConflict("Generic continuity Owner, Control or source changed")

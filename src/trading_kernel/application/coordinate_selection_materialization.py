@@ -1163,7 +1163,7 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
         if owner is None or owner.entry_state is not StrategyEntryState.ENABLED or control is None or (
             control.selection_mode is not SelectionMode.DYNAMIC_SELECTION
             or control.selection_spec_id!=spec.selection_spec_id or control.selection_epoch_id is None
-            or control.pending_selection_mode is not None):
+            or not control.permits_dynamic_period(request.period_anchor_ms)):
             return _blocked("GENERIC_CONTINUITY_OWNER_OR_MODE_BLOCKED")
         vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
             selection_spec_id=spec.selection_spec_id,for_update=True)
@@ -1296,6 +1296,9 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.STATIC_BASELINE)
             if control.selection_epoch_id != snapshot.selection_epoch_id:
                 return _blocked("GENERIC_SELECTION_EPOCH_CHANGED")
+            if control.pending_selection_mode is SelectionMode.STATIC_BASELINE and not control.permits_dynamic_period(
+                snapshot.feature_cutoff_at_ms):
+                return _blocked("GENERIC_STATIC_ROLLBACK_PENDING")
             if now_ms < snapshot.effective_from_ms:
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NOT_DUE)
             if now_ms >= snapshot.expires_at_ms:
