@@ -24,6 +24,7 @@ from src.trading_kernel.application.market_ports import (
     InstrumentSelectionMarketSource,
     PublicMarketSource,
 )
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -136,29 +137,29 @@ async def _run(args: argparse.Namespace) -> int:
                 ),
             )
 
-        async def selection_tick():
+        async def selection_tick(strategy_group_id=SOR_STRATEGY_GROUP_ID,selection_spec_id=_SELECTION_SPEC_ID):
             now_ms = args.now_ms or int(time.time() * 1_000)
             return await run_selection_runtime_once(
                 uow_factory=uow_factory,
                 market_source=cast(InstrumentSelectionMarketSource, source),
                 request=SelectionRuntimeRequest(
-                    selection_spec_id=_SELECTION_SPEC_ID,
-                    strategy_group_id=SOR_STRATEGY_GROUP_ID,
-                    worker_id=selection_worker_id,
+                    selection_spec_id=selection_spec_id,
+                    strategy_group_id=strategy_group_id,
+                    worker_id=f"{selection_worker_id}:{strategy_group_id}",
                     now_ms=now_ms,
                 ),
                 clock_ms=lambda: int(time.time() * 1_000),
             )
 
-        async def materialization_tick():
+        async def materialization_tick(strategy_group_id=SOR_STRATEGY_GROUP_ID,selection_spec_id=_SELECTION_SPEC_ID):
             now_ms = args.now_ms or int(time.time() * 1_000)
             return await run_materialization_runtime_once(
                 uow_factory=uow_factory,
                 audit_source=audit_source,
                 request=SelectionRuntimeRequest(
-                    selection_spec_id=_SELECTION_SPEC_ID,
-                    strategy_group_id=SOR_STRATEGY_GROUP_ID,
-                    worker_id=materialization_worker_id,
+                    selection_spec_id=selection_spec_id,
+                    strategy_group_id=strategy_group_id,
+                    worker_id=f"{materialization_worker_id}:{strategy_group_id}",
                     now_ms=now_ms,
                 ),
                 clock_ms=lambda: int(time.time() * 1_000),
@@ -172,8 +173,22 @@ async def _run(args: argparse.Namespace) -> int:
                 idle_log_interval_ms=args.idle_log_interval_ms,
                 idle_statuses={"no_work"},
             )
+        generic_loops: list[WorkerProcessLoop]=[]
+        for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
+            family=generic_selection_spec(group)
+            async def generic_selection_tick(group=group,spec_id=family.selection_spec_id):
+                return await selection_tick(group,spec_id)
+            async def generic_materialization_tick(group=group,spec_id=family.selection_spec_id):
+                return await materialization_tick(group,spec_id)
+            generic_loops.extend((
+                WorkerProcessLoop(component_id=f"{selection_worker_id}:{group}",tick=generic_selection_tick,
+                    poll_interval_ms=args.selection_poll_interval_ms,idle_statuses=frozenset({"not_due","not_installed","already_ready"})),
+                WorkerProcessLoop(component_id=f"{materialization_worker_id}:{group}",tick=generic_materialization_tick,
+                    poll_interval_ms=args.materialization_poll_interval_ms,idle_statuses=frozenset({"not_due","waiting"})),
+            ))
         return await run_worker_process_group(
             (
+                *generic_loops,
                 WorkerProcessLoop(
                     component_id=selection_worker_id,
                     tick=selection_tick,

@@ -3829,6 +3829,30 @@ class PostgresStrategyUniverseRepository:
         # records durable ownership before releasing this lock at commit.
         if not await self._try_lock_installs():
             return False
+        replacing_holder = replacing_generation_id is not None and bool(await self._connection.scalar(sa.text(
+            "SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations "
+            "WHERE materialization_generation_id=:replace AND lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING'))"
+        ),{"replace":replacing_generation_id}))
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            PostgresInstrumentSelectionRepository,
+        )
+        queued_at_ms=await PostgresInstrumentSelectionRepository(self._connection).read_authority_clock_ms()
+        # Admit the oldest queued Desired work, never whichever process polls
+        # first. Paused strategies cannot reserve the queue head indefinitely.
+        oldest=await self._connection.scalar(sa.text("""
+            SELECT g.materialization_generation_id
+            FROM brc_strategy_universe_materialization_generations g
+            JOIN brc_strategy_entry_controls_current owner_control USING(strategy_group_id)
+            JOIN brc_strategy_selection_control_current selection_control USING(strategy_group_id)
+            LEFT JOIN brc_instrument_selection_snapshots snapshot USING(selection_snapshot_id)
+            WHERE g.lifecycle_state='DESIRED' AND owner_control.entry_state='enabled'
+              AND (g.selection_control_version IS NULL OR g.selection_control_version=selection_control.control_version)
+              AND (g.selection_snapshot_id IS NULL OR snapshot.expires_at_ms>:now)
+              AND g.materialization_generation_id IS DISTINCT FROM :replace
+            ORDER BY g.desired_at_ms,g.created_at_ms,g.materialization_generation_id LIMIT 1
+        """),{"replace":replacing_generation_id,"now":queued_at_ms})
+        if not replacing_holder and oldest is not None and oldest!=materialization_generation_id:
+            return False
         return not bool(await self._connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING') AND materialization_generation_id<>:gid AND materialization_generation_id IS DISTINCT FROM :replace) OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE lifecycle_state='warming' AND materialization_generation_id IS DISTINCT FROM :gid AND (:replace IS NULL OR materialization_generation_id IS DISTINCT FROM :replace))"),{"gid":materialization_generation_id,"replace":replacing_generation_id}))
 
     async def _try_lock_installs(self) -> bool:

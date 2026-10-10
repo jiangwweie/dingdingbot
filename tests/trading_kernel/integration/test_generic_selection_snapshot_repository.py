@@ -217,6 +217,25 @@ async def _install_static_selection_source(database: AsyncEngine, group: str):
     return uid,comparison_id
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_generic_runtime_status_is_bounded_readonly_for_static_install(database: AsyncEngine,group: str) -> None:
+    from src.trading_kernel.domain.selection_authority import SelectionMode
+    from src.trading_kernel.interfaces.readonly_api import (
+        GenericSelectionRuntimeReadonlyRequest,
+        get_generic_selection_runtime_view,
+    )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+        view=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=group,now_ms=CUTOFF))
+        assert view.installed and view.selection_mode is SelectionMode.STATIC_BASELINE
+        assert view.latest_successful_snapshot_id is None and view.membership_source_snapshot_id is None
+    async with database.connect() as connection:
+        for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots",
+            "brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:
     role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
     grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]
@@ -1871,6 +1890,13 @@ async def test_two_materializers_serialize_before_fence_and_pause_releases_durab
         assert prepared.disposition is MaterializationDisposition.GENERATION_DESIRED
     at=CUTOFF+HOUR+3
     entered=set()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        queued=tuple([await uow.instrument_selection.get_generic_materialization_generation(
+            GenericMaterializationGeneration.id_for_snapshot(requests[group].selection_snapshot_id)) for group in groups])
+        by_age=sorted(queued,key=lambda item:(item.desired_at_ms,item.created_at_ms,item.materialization_generation_id))
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+            assert not await uow.strategy_universes.materialization_slot_available(by_age[-1].materialization_generation_id)
+            assert await uow.strategy_universes.materialization_slot_available(by_age[0].materialization_generation_id)
     both_entered=asyncio.Event()
     actual_slot=PostgresStrategyUniverseRepository.materialization_slot_available
     async def barrier_slot(repository,gid):
@@ -10215,9 +10241,16 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     early = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
         request=snapshot_request,clock_ms=lambda:snapshot.effective_from_ms-1)
     assert early.disposition == MaterializationDisposition.NOT_DUE
-    handed_off = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
-        request=snapshot_request,
-        clock_ms=lambda:generation.created_at_ms)
+    if natural_selection:
+        from src.trading_kernel.interfaces.selection_runtime_worker import (
+            run_materialization_runtime_once,
+        )
+        handed_off = await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+            request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                worker_id="snapshot-coordinator",now_ms=generation.created_at_ms),clock_ms=lambda:generation.created_at_ms)
+    else:
+        handed_off = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+            request=snapshot_request,clock_ms=lambda:generation.created_at_ms)
     assert handed_off.disposition == MaterializationDisposition.GENERATION_PENDING
     assert handed_off.materialization_generation_id == generation.materialization_generation_id
     async with PostgresKernelUnitOfWork(database) as uow:

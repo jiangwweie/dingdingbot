@@ -5,6 +5,14 @@ import importlib
 import pytest
 
 
+def test_generic_runtime_status_cli_uses_current_age_not_sor_session() -> None:
+    module=importlib.import_module("scripts.trading_kernel.read_selection_runtime_status")
+    args=module._parser().parse_args(["--database-url","postgresql+asyncpg://unused/test",
+        "--strategy-group-id","MI-001","--selection-spec-id","MI_POSITIVE_IMPULSE_RECENCY_V0","--now-ms","360000010"])
+    request=module._request(args)
+    assert request.strategy_group_id=="MI-001" and request.now_ms==360000010
+
+
 def test_selection_runtime_status_cli_requires_exact_period_identity() -> None:
     module = importlib.import_module(
         "scripts.trading_kernel.read_selection_runtime_status"

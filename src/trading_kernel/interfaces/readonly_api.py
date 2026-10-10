@@ -21,18 +21,107 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
     build_exit_profile_catalog_digest,
 )
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
     CurrentSelectionAuthority,
+    GenericRecoveryAuthority,
     MaterializationGeneration,
     SelectionControl,
+    SelectionMode,
     SelectionSnapshotDisposition,
 )
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
 
 _PERIOD_FACT_LIMIT = 8
 _EXIT_PROFILE_LIMIT = 32
+
+
+class GenericSelectionRuntimeReadonlyRequest(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    strategy_group_id: str
+    now_ms: int
+
+    @model_validator(mode="after")
+    def _validate(self) -> GenericSelectionRuntimeReadonlyRequest:
+        generic_selection_spec(self.strategy_group_id)
+        if self.now_ms<=0:
+            raise ValueError("readonly time must be positive")
+        return self
+
+
+class GenericSelectionRuntimeReadonlyView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    strategy_group_id: str
+    selection_spec_id: str
+    installed: bool
+    selection_mode: SelectionMode | None
+    latest_successful_snapshot_id: str | None
+    latest_successful_cutoff_at_ms: int | None
+    latest_successful_committed_at_ms: int | None
+    latest_successful_completion_age_ms: int | None
+    latest_successful_selection_age_ms: int | None
+    latest_successful_cutoff_age_ms: int | None
+    membership_source_snapshot_id: str | None
+    membership_source_cutoff_at_ms: int | None
+    membership_source_age_ms: int | None
+    current_authority_id: str | None
+    current_authority_outcome: str | None
+    first_blocker: str | None
+    observed_at_ms: int
+
+
+async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
+    request: GenericSelectionRuntimeReadonlyRequest) -> GenericSelectionRuntimeReadonlyView:
+    """Display current facts with independent source ages; never grants Entry."""
+    family=generic_selection_spec(request.strategy_group_id)
+    repo=uow.instrument_selection
+    installed=True
+    try:
+        actual=await repo.get_generic_spec(family.selection_spec_id)
+        if actual!=family:
+            raise ValueError("Readonly installed Spec differs")
+    except LookupError:
+        installed=False
+    control=await repo.get_selection_control(request.strategy_group_id)
+    latest=None
+    if installed and control is not None and control.selection_epoch_id is not None:
+        latest=await repo.get_latest_generic_snapshot(family.selection_spec_id,selection_epoch_id=control.selection_epoch_id)
+    current=await repo.get_current_generic_authority(family.selection_spec_id) if installed else None
+    authority=None if current is None else current.authority
+    freshness=None if authority is None else (authority.recovery_proof.membership_freshness
+        if isinstance(authority,GenericRecoveryAuthority) else authority.membership_freshness)
+    vacuum=await repo.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,selection_spec_id=family.selection_spec_id) if installed else None
+    owner=await uow.owner_controls.get_strategy_control(request.strategy_group_id)
+    blocker=None
+    if not installed:
+        blocker="SPEC_NOT_INSTALLED"
+    elif owner is None or owner.entry_state!="enabled":
+        blocker="OWNER_PAUSED"
+    elif vacuum is not None and vacuum.blocks_new_entry:
+        blocker=vacuum.first_blocker or "ENTRY_VACUUM"
+    elif authority is not None and authority.authority_outcome=="VALID_EMPTY":
+        blocker="VALID_EMPTY"
+    elif freshness is not None and not freshness.allows_new_entry_at(request.now_ms):
+        blocker="SELECTION_STALE_PAUSED"
+    elif authority is None and control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
+        blocker="AUTHORITY_MISSING"
+    return GenericSelectionRuntimeReadonlyView(strategy_group_id=request.strategy_group_id,
+        selection_spec_id=family.selection_spec_id,installed=installed,
+        selection_mode=None if control is None else control.selection_mode,
+        latest_successful_snapshot_id=None if latest is None else latest.selection_snapshot_id,
+        latest_successful_cutoff_at_ms=None if latest is None else latest.feature_cutoff_at_ms,
+        latest_successful_committed_at_ms=None if latest is None else latest.committed_at_ms,
+        latest_successful_completion_age_ms=None if latest is None else max(0,request.now_ms-latest.committed_at_ms),
+        latest_successful_selection_age_ms=None if latest is None else max(0,request.now_ms-latest.committed_at_ms),
+        latest_successful_cutoff_age_ms=None if latest is None else max(0,request.now_ms-latest.feature_cutoff_at_ms),
+        membership_source_snapshot_id=None if freshness is None else freshness.source_snapshot_id,
+        membership_source_cutoff_at_ms=None if freshness is None else freshness.source_snapshot_cutoff_at_ms,
+        membership_source_age_ms=None if freshness is None else max(0,request.now_ms-freshness.source_snapshot_cutoff_at_ms),
+        current_authority_id=None if authority is None else authority.selection_authority_id,
+        current_authority_outcome=None if authority is None else authority.authority_outcome,
+        first_blocker=blocker,observed_at_ms=request.now_ms)
 
 
 class ExitProfileAuthorityReadonlyRequest(BaseModel):

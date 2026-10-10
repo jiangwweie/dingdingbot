@@ -1036,6 +1036,20 @@ MPG/MI小时策略自然终态增量（基于`d28fe872`）：在上述三期正�
 
 Hosting unit18 passed，真实Owner→Selection入口→Generic PG Snapshot→Materializer→Observation→Ticket→Review MPG/MI2 passed（不是仅mock下游Snapshot）。随后Unit/Architecture/API1399 passed、Mypy164与Ruff/diff PASS。该切片尚未接Observation常驻脚本的所有策略调度、Generic materialization tick、global aging/fairness、重启与bounded status，不代表GS-10 Done；CAP-01 local签收保持，GS-13 WAIT_OWNER_CONFIRMATION，无生产修改。
 
+#### 2026-10-10 Materialization / resident all-strategy / readonly增量（基于ff08107b，未整卡签收）
+
+Generic materialization使用`floor((now-1h)/cadence)`的已生效cutoff，不拿Selector当前cutoff提前授予权限。Static rollback、ready Snapshot（连续权限先于disposition）、旧非终态Generation及Vacuum原Generation recovery均走原Coordinator，Generation自有lease不与Selector/Observation合并。新增exact组/Spec/lifecycle LIMIT1 current查找，无全历史遍历。原自然Owner/Runner→Generation DB handoff的MPG/MI B链改为真正调用runtime materialization入口，2项PASS；其它阶段仍复用原helper，不能据此宣称整个resident进程已经full-chain认证。
+
+现有Observation常驻脚本在一个OS process中挂载四Generic策略各自Selection/Materialization独立loop，加SOR兼容两loop与Observation；无第五systemd服务，无串行gather等待一个慢策略。脚本测试实际调用各loop，Selection等待Observation event时Materialization和Observation仍前进；actor IDs互异。SOR Owner paused即Selector NOT_DUE，禁止retired SOR发起网络/Job；materializer仍可推进已有安全cleanup，不授予ENTRY。
+
+全局安装锁域新增Desired age排序（desired_at/created_at/ID），Paused、Control漂移及已过期Snapshot不占队头；已经持有DRAINING/MATERIALIZING的exact replacement保持接管，不被新排队者抢占。real PG年轻Desired先抢槽的RED已复现并修正，原两materializer并发/重开连接/Owner Pause释放测试仍PASS。无新队列表、lease副本或incremental warming。
+
+Generic typed readonly/CLI从exact Spec+epoch current rows读取latest successful Snapshot（committed时间与cutoff分别记录）及实际membership freshness来源，两组age独立；新Snapshot成功不能刷新旧membership source age，绝对stale后mode仍Dynamic、显示SELECTION_STALE_PAUSED。Static四策略在SET TRANSACTION READ ONLY下0Job/Snapshot/Generation/Vacuum/Authority写入，4项PASS；CLI Generic不再要求SOR00:00 Session，旧SOR精确Session规则保留。该View只做展示，不成为Entry Authority。
+
+Hosting/CLI focused27 PASS；真实PG host handoff+age-order+readonly末版7项PASS（加入expiry队头过滤后对应三项重新3 PASS）；共享SOR materialization/ENTRY drain142 PASS，Generic stage/paused/supersession/slot矩阵173 PASS、838.19s（过程中有其它source改动，非exact candidate/R4，最终age expiry过滤另focused验证）。Unit/Architecture/API1407 PASS、17.68s；Mypy163、Ruff/diff PASS。所有verification进程终态，production_modified=NO，GS-13未执行。
+
+剩余GS-10验收：所有策略真实resident进程restart/lease/rebase/stale边界、queue失效/取消/target-release完整fairness矩阵、status对authority expiry/rebase等blockers的完整展示、fault/healthy重复tick零意外持久化。不得按单测计数签收；GS-11/12仍未签收。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

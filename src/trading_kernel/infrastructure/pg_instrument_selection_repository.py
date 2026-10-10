@@ -388,6 +388,14 @@ class PostgresInstrumentSelectionRepository:
                 raise SelectionJobConflict("Static comparison differs from its source Universe")
         return binding
 
+    async def get_latest_generic_snapshot(self, selection_spec_id: str, *,
+        selection_epoch_id: str) -> GenericSelectionSnapshotV1 | None:
+        identifier=await self._connection.scalar(sa.select(instrument_selection_snapshots.c.selection_snapshot_id)
+            .where(instrument_selection_snapshots.c.selection_spec_id==selection_spec_id,
+                instrument_selection_snapshots.c.selection_epoch_id==selection_epoch_id)
+            .order_by(instrument_selection_snapshots.c.period_anchor_ms.desc()).limit(1))
+        return None if identifier is None else await self.get_generic_snapshot(identifier)
+
     async def install_generic_spec(self, spec: GenericSelectionSpecV1, *, installed_at_ms: int,
                                    certification: SpecNumericInstallationEvidence) -> None:
         """Release-owned installation; never exposed as a runtime Owner mutation."""
@@ -2426,6 +2434,17 @@ class PostgresInstrumentSelectionRepository:
         if generation.strategy_group_id!=spec.strategy_group_id or generation.semantic_digest!=row["semantic_digest"]:
             raise SelectionJobConflict("Generic Generation semantic identity differs")
         return generation
+
+    async def get_latest_unfinished_generic_generation(self, *, strategy_group_id: str,
+        selection_spec_id: str) -> GenericMaterializationGeneration | None:
+        identifier=await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.materialization_generation_id)
+            .where(strategy_universe_materialization_generations.c.strategy_group_id==strategy_group_id,
+                strategy_universe_materialization_generations.c.selection_spec_id==selection_spec_id,
+                strategy_universe_materialization_generations.c.selection_snapshot_id.is_not(None),
+                strategy_universe_materialization_generations.c.lifecycle_state.in_(("PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED")))
+            .order_by(strategy_universe_materialization_generations.c.created_at_ms.desc(),
+                strategy_universe_materialization_generations.c.materialization_generation_id).limit(1))
+        return None if identifier is None else await self.get_generic_materialization_generation(identifier)
 
     async def add_generic_pending_materialization_generation(
         self, generation: GenericMaterializationGeneration,
