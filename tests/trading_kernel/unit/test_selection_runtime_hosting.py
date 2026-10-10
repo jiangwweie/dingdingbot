@@ -87,7 +87,12 @@ def test_observation_process_exposes_three_distinct_logical_component_identities
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-async def test_generic_resident_selection_uses_its_cadence_and_epoch(monkeypatch,group):
+@pytest.mark.parametrize("runner_failure",[None,"lease_held","drift"])
+async def test_generic_resident_selection_uses_its_cadence_and_epoch(monkeypatch,group,runner_failure):
+    from src.trading_kernel.application.ports import (
+        SelectionLeaseHeld,
+        SelectionPersistenceConflict,
+    )
     from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
     spec=generic_selection_spec(group)
     cutoff=100*3600000
@@ -113,14 +118,27 @@ async def test_generic_resident_selection_uses_its_cadence_and_epoch(monkeypatch
     calls=[]
     async def runner(**kwargs):
         calls.append(kwargs["request"])
+        if runner_failure=="lease_held":
+            raise SelectionLeaseHeld("exact live Job")
+        if runner_failure=="drift":
+            raise SelectionPersistenceConflict("source identity changed")
         return SimpleNamespace(outcome="SNAPSHOT_READY",selection_job_id="job:generic",selection_snapshot_id="snapshot:generic",reason_code=None)
     monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.run_instrument_selection_once",runner)
-    result=await run_selection_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),
+    async def run():
+        return await run_selection_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),
         request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,worker_id="resident",
-            now_ms=cutoff+1234),clock_ms=lambda:cutoff+1234)
-    assert result.status is SelectionRuntimeStatus.SNAPSHOT_READY
+            now_ms=cutoff+1234,lease_duration_ms=12_345),clock_ms=lambda:cutoff+1234)
+    if runner_failure=="drift":
+        with pytest.raises(SelectionPersistenceConflict,match="source identity changed"):
+            await run()
+    else:
+        result=await run()
+        assert result.status is (SelectionRuntimeStatus.NOT_DUE if runner_failure else SelectionRuntimeStatus.SNAPSHOT_READY)
+        if runner_failure:
+            assert result.reason_code=="SELECTION_JOB_LEASE_HELD"
     assert len(calls)==1 and calls[0].selection_epoch_id=="epoch:resident"
     assert calls[0].period_anchor_ms==cutoff
+    assert calls[0].lease_duration_ms==12_345
 
 
 @pytest.mark.asyncio

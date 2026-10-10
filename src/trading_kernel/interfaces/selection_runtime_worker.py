@@ -34,7 +34,7 @@ from src.trading_kernel.application.observe_strategy_scope import (
     current_facts_refresh_vacuum_allowed,
     observe_strategy_scope,
 )
-from src.trading_kernel.application.ports import UnitOfWorkFactory
+from src.trading_kernel.application.ports import SelectionLeaseHeld, UnitOfWorkFactory
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
@@ -285,9 +285,13 @@ async def _run_generic_selection_runtime_once(
             return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_INSTALLED,reason_code="GENERIC_SPEC_NOT_INSTALLED")
         if installed!=family:
             return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="GENERIC_INSTALLED_SPEC_DRIFT")
-    result=await run_instrument_selection_once(uow_factory=uow_factory,market_source=market_source,
-        request=RunInstrumentSelectionRequest(selection_spec_id=request.selection_spec_id,period_anchor_ms=cutoff,
-            selection_epoch_id=control.selection_epoch_id,worker_id=request.worker_id,max_concurrency=request.max_concurrency),clock_ms=clock_ms)
+    try:
+        result=await run_instrument_selection_once(uow_factory=uow_factory,market_source=market_source,
+            request=RunInstrumentSelectionRequest(selection_spec_id=request.selection_spec_id,period_anchor_ms=cutoff,
+                selection_epoch_id=control.selection_epoch_id,worker_id=request.worker_id,max_concurrency=request.max_concurrency,
+                lease_duration_ms=request.lease_duration_ms),clock_ms=clock_ms)
+    except SelectionLeaseHeld:
+        return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE,period_anchor_ms=cutoff,reason_code="SELECTION_JOB_LEASE_HELD")
     return SelectionRuntimeResult(status=SelectionRuntimeStatus(result.outcome.lower()),period_anchor_ms=cutoff,
         selection_job_id=result.selection_job_id,selection_snapshot_id=result.selection_snapshot_id,reason_code=result.reason_code)
 

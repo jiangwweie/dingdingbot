@@ -318,6 +318,90 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_actual_selector_crash_preserves_live_lease_and_restarts_exact_job(database: AsyncEngine,tmp_path: Path,group: str) -> None:
+    import os
+    import sys
+
+    await _install_static_selection_source(database,group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="actual_selector_crash",idempotency_key=f"actual:crash:{group}",owner_identity="owner",now_ms=CUTOFF-1),
+            authentication_strength="totp_step_up")
+    repo=Path(__file__).resolve().parents[3]
+    env={**os.environ,"PYTHONPATH":str(repo),"PYTHONDONTWRITEBYTECODE":"1",
+        "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)}
+    async def spawn(now,worker,mode):
+        return await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_selector_probe",
+            group,str(now),worker,mode,cwd=tmp_path,env=env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    process=await spawn(CUTOFF+100,"before-crash","hang")
+    try:
+        assert process.stdout is not None
+        assert (await asyncio.wait_for(process.stdout.readline(),timeout=10)).decode().strip()=="source_waiting"
+        async with database.connect() as connection:
+            original=(await connection.execute(sa.select(instrument_selection_jobs_current).where(
+                instrument_selection_jobs_current.c.selection_spec_id==inputs(group).spec.selection_spec_id))).mappings().one()
+        assert original["state"]=="CLAIMED" and original["lease_owner"]=="before-crash"
+        process.kill()
+        await asyncio.wait_for(process.communicate(),timeout=5)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    for now,mode,expected in ((original["lease_expires_at_ms"]-1,"forbidden","not_due"),
+        (original["lease_expires_at_ms"],"ready","snapshot_ready"),
+        (original["lease_expires_at_ms"]+1,"forbidden","already_ready")):
+        process=await spawn(now,"after-crash",mode)
+        try:
+            output,error=await asyncio.wait_for(process.communicate(),timeout=15)
+            assert process.returncode==0,error.decode()
+            result=json.loads(output)
+            assert result["status"]==expected,result
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.communicate()
+        async with database.connect() as connection:
+            current=(await connection.execute(sa.select(instrument_selection_jobs_current).where(
+                instrument_selection_jobs_current.c.selection_spec_id==inputs(group).spec.selection_spec_id))).mappings().one()
+            assert current["selection_job_id"]==original["selection_job_id"]
+            assert current["selection_epoch_id"]==control.selection_epoch_id
+            if expected=="not_due":
+                assert current==original
+            else:
+                assert current["state"]=="SNAPSHOT_READY"
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==1
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts"))==1
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_member_decisions"))==24
+    next_cutoff=CUTOFF+inputs(group).spec.cadence_hours*HOUR
+    for mode,expected in (("ready","snapshot_ready"),("forbidden","already_ready")):
+        process=await spawn(next_cutoff+100,"next-period",mode)
+        try:
+            output,error=await asyncio.wait_for(process.communicate(),timeout=15)
+            assert process.returncode==0,error.decode()
+            assert json.loads(output)["status"]==expected
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.communicate()
+        async with PostgresKernelUnitOfWork(database) as uow:
+            job=await uow.instrument_selection.get_selection_job(selection_spec_id=inputs(group).spec.selection_spec_id,
+                selection_epoch_id=control.selection_epoch_id,period_anchor_ms=next_cutoff)
+            assert job.selection_job_id!=original["selection_job_id"] and job.state=="SNAPSHOT_READY"
+            next_snapshot=await uow.instrument_selection.get_generic_snapshot(job.selection_snapshot_id)
+            assert next_snapshot.feature_cutoff_at_ms==next_cutoff
+            assert next_snapshot.predecessor_snapshot_id==current["selection_snapshot_id"]
+        async with database.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==2
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts"))==2
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_member_decisions"))==48
+    assert tuple(tmp_path.rglob("*"))==()
+    async with database.connect() as connection:
+        for table in ("brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_signal_events","brc_trade_tickets","brc_exchange_commands"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
+@pytest.mark.asyncio
 async def test_real_resident_sigterm_rolls_back_inflight_postgres_transaction(database: AsyncEngine,tmp_path: Path) -> None:
     import os
     import sys

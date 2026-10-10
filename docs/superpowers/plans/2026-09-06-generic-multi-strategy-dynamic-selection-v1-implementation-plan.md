@@ -1114,6 +1114,16 @@ GS-10仍需真实resident进程多period/restart、queue完整fairness/target-re
 
 末版Unit/Architecture/API1436 passed（19.94s），focused actual process+hosting53 passed、Docker PG actual CLI/transaction2 passed（4.65s），共享SOR materialization/Vacuum142 passed（91.56s），Ruff、Mypy161 files、diff PASS；所有verification进程终态。GS-10仍IN_PROGRESS，Dynamic resident多period/restart、queue完整fairness/target release等继续待验收；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-10 actual Selector crash / cadence restart增量（基于b13b9ff2，未整卡签收）
+
+四策略正式Static→Owner pending后，独立OS process调用run_selection_runtime_once，market qualification开始等待时Job claim已durable；父进程SIGKILL，原Job/epoch/lease保留。新OS process在lease expiry前调用同一入口，原先RED抛SelectionJobConflict并使resident反复tick_failed；新增application typed SelectionLeaseHeld及PG具体异常，Generic runtime只对这一精确类别返回NOT_DUE/SELECTION_JOB_LEASE_HELD，其他SelectionPersistenceConflict仍抛出、不吞source identity错误。不按异常字符串猜lease，也不改变原claim/CAS规则。
+
+实际重启在lease expiry前用fail-on-market source，Job逐字段原样；到期后同一Job成功唯一Snapshot/Attempt/24 member事实；再一独立进程使用forbidden source取得ALREADY_READY且不重复事实。进入下一1h/4h cadence后新Job/Snapshot的cutoff/epoch正确，predecessor exact指向首Snapshot，重复重启仍只有2 Snapshot/2 Attempt/48 member。所有进程隔离目录零文件、DB零Generation/Vacuum/Authority/Signal/Ticket/Command，证明Selector止于DB handoff。冻结市场clock与typed input仅用于工程测试，不作为生产时钟/行情来源。
+
+runtime请求lease_duration_ms现在实际传给Generic Runner，不再由Runner默认值覆盖；四策略unit覆盖normal/typed lease held/source drift，证明非lease错误不被按正常等待吞掉。末版四策略actual crash+跨cadence4 passed（20.04s），此前actual crash/Job lease expiry/Static resident/transaction组合8 passed（17.89s，对应跨cadence扩展前测试切片）；Unit/Architecture/API1444 passed（19.10s），Ruff、Mypy161 files、diff PASS。所有verification终态，无生产操作。
+
+Selector Plane真实跨进程与多cutoff已有上述证据；Materialization/Observation三个plane同时resident下的多period/crash recovery、global queue完整fairness/target release、完整status仍待整卡验收。不能据Selector-only签GS-10或GS-12，GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

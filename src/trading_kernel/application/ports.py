@@ -1607,6 +1607,10 @@ class SelectionPersistenceConflict(RuntimeError):
     """A Selection operation cannot proceed against current durable facts."""
 
 
+class SelectionLeaseHeld(SelectionPersistenceConflict):
+    """Another live Selector owns this exact durable Job; wait without I/O."""
+
+
 class InstrumentSelectionRepository(Protocol):
     async def prepare_generic_gap_continuity_proof(self, *, strategy_group_id: str,
         selection_spec_id: str, period_anchor_ms: int) -> GenericRecoveryGrantProof: ...

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import (
     SelectionJobRecord,
+    SelectionLeaseHeld,
     SelectionPersistenceConflict,
 )
 from src.trading_kernel.application.recover_expired_dynamic_activation import (
@@ -210,6 +211,10 @@ class SelectionAuthorityVersionConflict(RuntimeError):
 
 class SelectionJobConflict(SelectionPersistenceConflict):
     """The exact Selection Job is already owned or has a conflicting result."""
+
+
+class SelectionJobLeaseHeld(SelectionJobConflict,SelectionLeaseHeld):
+    """Typed live-lease conflict, distinct from invalid source/commit drift."""
 
 
 class PostgresInstrumentSelectionRepository:
@@ -878,7 +883,7 @@ class PostgresInstrumentSelectionRepository:
             and lease_expires_at_ms is not None
             and int(lease_expires_at_ms) > now_ms
         ):
-            raise SelectionJobConflict("Selection Job already has a live lease")
+            raise SelectionJobLeaseHeld("Selection Job already has a live lease")
         next_retry_at_ms = row["next_retry_at_ms"]
         if next_retry_at_ms is not None and int(next_retry_at_ms) > now_ms:
             if selection_epoch_id != "sor-v0" and state in {"SOURCE_FAILED", "COMPUTE_FAILED"}:
