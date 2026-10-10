@@ -1084,6 +1084,16 @@ GS-10仍IN_PROGRESS：真实resident多period/process restart、完整queue fair
 
 first pending正常/单member timeout轮转边界已有证据；真实并发进程/多period restart、queue完整fairness/target release、Vacuum恢复freshness及完整status/rebase仍待验收，GS-10仍IN_PROGRESS；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-10 bounded member / Policy / rebase readonly增量（基于6df4c3ed，未整卡签收）
+
+Readonly status原先只显示Selection Authority层，Global ENTRY关闭、成员comparison rebase仍可能没有blocker。新增一个bounded current-member查询：exact Event→current Universe→active scope，关联该scope实际Owner Policy及同instrument/side Episode，不写monitor/projection，不扫描历史；最多16行。typed Facts冻结当前Policy identity/version、enabled/submit、scope ENTRY、warm expiry、Episode state及当前/已观察comparison revision、armed时间。显示级检查不创建或替代FinalGate。
+
+成员分别显示GLOBAL_ENTRY_DISABLED、Policy missing/disabled、scope disabled、RECOVERY_REBASE_REQUIRED、COMPARISON_REBASE_REQUIRED和warm stale。comparison正revision不匹配、无checkpoint或尚未armed均保持rebase；Static原revision0不伪造新rebase。所有成员都阻断时汇总ALL_CURRENT_MEMBERS_BLOCKED，部分rebase不能阻断另一已armed成员；OWNER_PAUSED仍高于Policy/Vacuum，Dynamic mode不因状态显示改变。无blocker不代表完整admission PASS，仍须正常Signal/FinalGate/Capacity/Execution。
+
+四策略Static双member在SET TRANSACTION READ ONLY下取当前Policy（不硬编码revision），Global disabled→本地夹具enabled后readonly变化但零Dynamic事实；MPG/MI正式comparison Episode transition TRIGGERED→NOT_TRIGGERED后，已armed一member清除rebase、另member仍阻断，checkpoint原样未被读操作推进，零Signal。末版PG组合10 passed（8.77s），Unit/Architecture1389 passed（13.15s），Ruff、Mypy161 files、diff PASS；未把这些证据称GS-11 UI或GS-12 soak。
+
+GS-10仍需真实resident进程多period/restart、queue完整fairness/target-release、Vacuum recovery freshness，以及更完整的member recovery/市场证书/运行fence展示；GS-11/12未签收。production_modified=NO，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

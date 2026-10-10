@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.ports import (
     ExitProfileAuthorityRepository,
+    GenericSelectionMemberRuntimeStatus,
     KernelUnitOfWork,
     MonitorStateRecord,
     SelectionJobRecord,
@@ -51,6 +52,31 @@ class GenericSelectionRuntimeReadonlyRequest(BaseModel):
         return self
 
 
+class GenericSelectionMemberReadonlyView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    facts: GenericSelectionMemberRuntimeStatus
+    first_blocker: str | None
+
+
+def _generic_member_blocker(member: GenericSelectionMemberRuntimeStatus,now_ms: int) -> str | None:
+    if member.policy_version is None:
+        return "OWNER_POLICY_MISSING"
+    if not member.policy_enabled:
+        return "OWNER_POLICY_DISABLED"
+    if not member.entry_submit_enabled:
+        return "GLOBAL_ENTRY_DISABLED"
+    if not member.scope_entry_enabled:
+        return "SCOPE_ENTRY_DISABLED"
+    if member.episode_state=="authority_rebase_required":
+        return "RECOVERY_REBASE_REQUIRED"
+    if member.episode_state=="comparison_rebase_required" or member.comparison_transition_revision is not None and member.comparison_transition_revision>0 and (
+        member.episode_comparison_transition_revision!=member.comparison_transition_revision or member.comparison_armed_at_ms is None):
+        return "COMPARISON_REBASE_REQUIRED"
+    if member.warm_valid_until_ms is None or now_ms>=member.warm_valid_until_ms:
+        return "WARM_READINESS_STALE"
+    return None
+
+
 class GenericSelectionRuntimeReadonlyView(BaseModel):
     model_config=ConfigDict(frozen=True,extra="forbid")
     strategy_group_id: str
@@ -68,6 +94,7 @@ class GenericSelectionRuntimeReadonlyView(BaseModel):
     membership_source_age_ms: int | None
     current_authority_id: str | None
     current_authority_outcome: str | None
+    members: tuple[GenericSelectionMemberReadonlyView,...]
     first_blocker: str | None
     observed_at_ms: int
 
@@ -94,6 +121,8 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         if isinstance(authority,GenericRecoveryAuthority) else authority.membership_freshness)
     vacuum=await repo.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,selection_spec_id=family.selection_spec_id) if installed else None
     owner=await uow.owner_controls.get_strategy_control(request.strategy_group_id)
+    members=tuple(GenericSelectionMemberReadonlyView(facts=member,first_blocker=_generic_member_blocker(member,request.now_ms))
+        for member in await uow.signals.list_generic_selection_member_status(event_spec_id=family.event_spec_id))
     blocker=None
     if not installed:
         blocker="SPEC_NOT_INSTALLED"
@@ -101,6 +130,8 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         blocker="SELECTION_CONTROL_MISSING_OR_DRIFTED"
     elif owner is None or owner.entry_state!="enabled":
         blocker="OWNER_PAUSED"
+    elif members and all(m.first_blocker in {"OWNER_POLICY_MISSING","OWNER_POLICY_DISABLED","GLOBAL_ENTRY_DISABLED"} for m in members):
+        blocker=members[0].first_blocker
     elif vacuum is not None and vacuum.blocks_new_entry:
         blocker=vacuum.first_blocker or "ENTRY_VACUUM"
     elif authority is not None and authority.authority_outcome=="VALID_EMPTY":
@@ -117,6 +148,8 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         blocker="AUTHORITY_CONTROL_CHANGED"
     elif authority is None and control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
         blocker="AUTHORITY_MISSING"
+    elif members and all(m.first_blocker is not None for m in members):
+        blocker="ALL_CURRENT_MEMBERS_BLOCKED"
     return GenericSelectionRuntimeReadonlyView(strategy_group_id=request.strategy_group_id,
         selection_spec_id=family.selection_spec_id,installed=installed,
         selection_mode=None if control is None else control.selection_mode,
@@ -131,7 +164,7 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         membership_source_age_ms=None if freshness is None else max(0,request.now_ms-freshness.source_snapshot_cutoff_at_ms),
         current_authority_id=None if authority is None else authority.selection_authority_id,
         current_authority_outcome=None if authority is None else authority.authority_outcome,
-        first_blocker=blocker,observed_at_ms=request.now_ms)
+        members=members,first_blocker=blocker,observed_at_ms=request.now_ms)
 
 
 class ExitProfileAuthorityReadonlyRequest(BaseModel):

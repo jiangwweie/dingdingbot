@@ -238,6 +238,82 @@ async def test_generic_runtime_status_is_bounded_readonly_for_static_install(dat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_generic_member_status_reads_current_policy_without_materialization(database: AsyncEngine,group: str) -> None:
+    from src.trading_kernel.domain.selection_authority import SelectionMode
+    from src.trading_kernel.interfaces.readonly_api import (
+        GenericSelectionRuntimeReadonlyRequest,
+        get_generic_selection_runtime_view,
+    )
+    uid,_=await _install_static_selection_source(database,group,member_count=2)
+    request=GenericSelectionRuntimeReadonlyRequest(strategy_group_id=group,now_ms=CUTOFF)
+    async def read():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+            return await get_generic_selection_runtime_view(uow,request)
+    disabled=await read()
+    assert disabled.first_blocker=="GLOBAL_ENTRY_DISABLED"
+    assert len(disabled.members)==2
+    async with database.connect() as connection:
+        policy_version=await connection.scalar(sa.text("SELECT policy_version FROM brc_owner_policy_current WHERE owner_policy_id='policy-main'"))
+    assert all(m.facts.owner_policy_id=="policy-main" and m.facts.policy_version==policy_version and m.first_blocker=="GLOBAL_ENTRY_DISABLED" for m in disabled.members)
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+    visible=await read()
+    assert visible.first_blocker is None
+    assert all(m.first_blocker is None for m in visible.members)
+    assert visible.selection_mode is SelectionMode.STATIC_BASELINE
+    async with database.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT universe_version_id FROM brc_strategy_universe_current WHERE event_spec_id=:event"),
+            {"event":inputs(group).spec.event_spec_id})==uid
+        for table in ("brc_exposure_episode_current","brc_signal_events","brc_trade_tickets","brc_exchange_commands",
+            "brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
+            "brc_strategy_entry_vacuums_current","brc_selection_session_authorities"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group",["MPG-001","MI-001"])
+async def test_generic_member_status_tracks_persisted_comparison_rebase(database: AsyncEngine,group: str) -> None:
+    from src.trading_kernel.interfaces.readonly_api import (
+        GenericSelectionRuntimeReadonlyRequest,
+        get_generic_selection_runtime_view,
+    )
+    source=inputs(group)
+    await _install_static_selection_source(database,group,member_count=2)
+    members=source.spec.candidate_ids[:2]
+    digest=canonical_digest({"exchange_instrument_ids":members})
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_comparison_binding_current SET comparison_transition_revision=1 WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})
+        await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+    contract=strategy_contract_for(source.spec.event_spec_id)
+    current=checkpoint=None
+    for step,status in enumerate((DetectorStatus.TRIGGERED,DetectorStatus.NOT_TRIGGERED)):
+        close=CUTOFF+step*HOUR
+        transition=advance_comparison_bound_exposure_episode(contract=contract,current_episode=current,current_checkpoint=checkpoint,
+            detector_status=status,occurred_at_ms=close if status is DetectorStatus.TRIGGERED else None,observed_at_ms=close,
+            exchange_instrument_id=members[0],comparison_binding_digest=digest,comparison_transition_revision=1)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.save_comparison_episode_transition(transition,event_spec_id=source.spec.event_spec_id,
+                exchange_instrument_id=members[0],position_side=source.spec.position_side,
+                expected_episode_version=0 if current is None else current.projection_version,
+                expected_checkpoint_version=0 if checkpoint is None else checkpoint.projection_version)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+            view=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=group,now_ms=close+1))
+        projected={m.facts.exchange_instrument_id:m for m in view.members}
+        assert projected[members[0]].first_blocker==("COMPARISON_REBASE_REQUIRED" if step==0 else None)
+        assert projected[members[1]].first_blocker=="COMPARISON_REBASE_REQUIRED"
+        assert view.first_blocker==("ALL_CURRENT_MEMBERS_BLOCKED" if step==0 else None)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current=await uow.signals.lock_exposure_episode(transition.checkpoint.episode_domain_key)
+            checkpoint=await uow.signals.get_comparison_episode_checkpoint(transition.checkpoint.episode_domain_key)
+        assert checkpoint==transition.checkpoint
+    async with database.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("refresh_fault",[None,"owner_pause","close_boundary"])
 async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: AsyncEngine,refresh_fault) -> None:
     source,first,_,uid=await _exercise_generic_generation(database,"MPG-001",True,

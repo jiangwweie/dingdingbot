@@ -292,6 +292,24 @@ class MonitorStateRecord(BaseModel):
     projection_version: int = 0
 
 
+class GenericSelectionMemberRuntimeStatus(BaseModel):
+    """Bounded display facts, not Entry eligibility or trading authority."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    runtime_scope_id: str
+    exchange_instrument_id: str
+    owner_policy_id: str
+    policy_version: int | None
+    policy_enabled: bool | None
+    entry_submit_enabled: bool | None
+    scope_entry_enabled: bool
+    episode_state: str | None
+    comparison_transition_revision: int | None
+    episode_comparison_transition_revision: int | None
+    comparison_armed_at_ms: int | None
+    warm_valid_until_ms: int | None
+
+
 class OwnerPolicySnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1234,6 +1252,8 @@ class SignalRepository(Protocol):
     async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
         universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
         limit: int) -> tuple[RuntimeScopeSnapshot,...]: ...
+
+    async def list_generic_selection_member_status(self, *, event_spec_id: str) -> tuple[GenericSelectionMemberRuntimeStatus, ...]: ...
 
     async def get_active_universe_member(
         self,

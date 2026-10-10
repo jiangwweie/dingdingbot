@@ -15,6 +15,7 @@ from src.trading_kernel.application.ports import (
     ActiveStrategyUniverseMembershipSnapshot,
     ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
+    GenericSelectionMemberRuntimeStatus,
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
     ObservationScopeClaim,
@@ -1130,6 +1131,31 @@ class PostgresSignalRepository:
             if row is None
             else EventSpecSnapshot.model_validate(row, extra="ignore")
         )
+
+    async def list_generic_selection_member_status(self, *, event_spec_id: str) -> tuple[GenericSelectionMemberRuntimeStatus, ...]:
+        rows=(await self._connection.execute(sa.select(
+            runtime_scopes_current.c.runtime_scope_id,runtime_scopes_current.c.exchange_instrument_id,
+            runtime_scopes_current.c.owner_policy_id,owner_policy_current.c.policy_version,
+            owner_policy_current.c.enabled.label("policy_enabled"),
+            owner_policy_current.c.new_entry_submit_enabled.label("entry_submit_enabled"),
+            runtime_scopes_current.c.entry_enabled.label("scope_entry_enabled"),
+            exposure_episode_current.c.state.label("episode_state"),runtime_scopes_current.c.warm_valid_until_ms,
+            comparison_binding_current.c.comparison_transition_revision,
+            exposure_episode_current.c.comparison_transition_revision.label("episode_comparison_transition_revision"),
+            exposure_episode_current.c.comparison_armed_at_ms,
+        ).select_from(runtime_scopes_current.join(strategy_universe_current,sa.and_(
+            strategy_universe_current.c.event_spec_id==runtime_scopes_current.c.event_spec_id,
+            strategy_universe_current.c.universe_version_id==runtime_scopes_current.c.universe_version_id))
+            .outerjoin(owner_policy_current,owner_policy_current.c.owner_policy_id==runtime_scopes_current.c.owner_policy_id)
+            .outerjoin(comparison_binding_current,comparison_binding_current.c.event_spec_id==runtime_scopes_current.c.event_spec_id)
+            .outerjoin(exposure_episode_current,sa.and_(
+                exposure_episode_current.c.event_spec_id==runtime_scopes_current.c.event_spec_id,
+                exposure_episode_current.c.exchange_instrument_id==runtime_scopes_current.c.exchange_instrument_id,
+                exposure_episode_current.c.position_side==runtime_scopes_current.c.position_side)))
+            .where(runtime_scopes_current.c.event_spec_id==event_spec_id,runtime_scopes_current.c.lifecycle_state=="active",
+                strategy_universe_current.c.lifecycle_state=="active")
+            .order_by(runtime_scopes_current.c.exchange_instrument_id).limit(MAX_UNIVERSE_MEMBERS))).mappings().all()
+        return tuple(GenericSelectionMemberRuntimeStatus.model_validate(row) for row in rows)
 
     async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
         universe_version_id: str, closed_at_ms: int, checked_at_ms: int,

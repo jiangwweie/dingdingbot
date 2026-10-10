@@ -262,9 +262,10 @@ async def test_generic_readonly_separates_latest_success_age_from_membership_sou
         async def get_latest_generic_snapshot(self,*_,**__): return SimpleNamespace(selection_snapshot_id="snapshot:new",feature_cutoff_at_ms=100*3600000,committed_at_ms=100*3600000+1)
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=SimpleNamespace(membership_freshness=fresh,selection_authority_id="authority:old",authority_outcome="PRE_FENCE_CONTINUITY"))
         async def get_current_entry_vacuum(self,**_): return None
+        async def list_generic_selection_member_status(self,**_): return ()
     class Owner:
         async def get_strategy_control(self,*_): return SimpleNamespace(entry_state="enabled")
-    uow=SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner())
+    uow=SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner(),signals=Repo())
     view=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id="MI-001",now_ms=100*3600000+10))
     assert view.latest_successful_selection_age_ms==9
     assert view.latest_successful_cutoff_age_ms==10
@@ -274,7 +275,9 @@ async def test_generic_readonly_separates_latest_success_age_from_membership_sou
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("defect,expected",[("expired","AUTHORITY_EXPIRED"),("control","AUTHORITY_CONTROL_CHANGED"),("future","AUTHORITY_NOT_EFFECTIVE")])
+@pytest.mark.parametrize("defect,expected",[("expired","AUTHORITY_EXPIRED"),("control","AUTHORITY_CONTROL_CHANGED"),("future","AUTHORITY_NOT_EFFECTIVE"),
+    ("policy","GLOBAL_ENTRY_DISABLED"),("rebase","ALL_CURRENT_MEMBERS_BLOCKED"),("some_rebase",None),
+    ("old_checkpoint","ALL_CURRENT_MEMBERS_BLOCKED"),("unarmed_checkpoint","ALL_CURRENT_MEMBERS_BLOCKED")])
 async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defect,expected):
     from src.trading_kernel.domain.dynamic_selection_timing import (
         build_dynamic_membership_freshness,
@@ -301,11 +304,25 @@ async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defe
         async def get_latest_generic_snapshot(self,*_,**__): return None
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=authority)
         async def get_current_entry_vacuum(self,**_): return None
+        async def list_generic_selection_member_status(self,**_):
+            from src.trading_kernel.application.ports import (
+                GenericSelectionMemberRuntimeStatus,
+            )
+            return tuple(GenericSelectionMemberRuntimeStatus(runtime_scope_id=f"scope:{index}",exchange_instrument_id=member,
+                owner_policy_id="policy:actual",policy_version=7,policy_enabled=True,entry_submit_enabled=defect!="policy",
+                scope_entry_enabled=True,episode_state="comparison_rebase_required" if defect=="rebase" or defect=="some_rebase" and index==0 else "armed",
+                comparison_transition_revision=2,episode_comparison_transition_revision=1 if defect=="old_checkpoint" else 2,
+                comparison_armed_at_ms=None if defect=="unarmed_checkpoint" else now-1,
+                warm_valid_until_ms=now+1) for index,member in enumerate(spec.candidate_ids[:2]))
     class Owner:
         async def get_strategy_control(self,*_): return SimpleNamespace(entry_state="enabled",control_version=1)
-    view=await get_generic_selection_runtime_view(SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner()),
+    view=await get_generic_selection_runtime_view(SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner(),signals=Repo()),
         GenericSelectionRuntimeReadonlyRequest(strategy_group_id="MI-001",now_ms=now))
     assert view.first_blocker==expected
+    assert len(view.members)==2
+    if defect in {"rebase","some_rebase"}:
+        assert view.members[0].first_blocker=="COMPARISON_REBASE_REQUIRED"
+    assert view.members[0].facts.policy_version==7
     assert view.selection_mode is SelectionMode.DYNAMIC_SELECTION
 
 
