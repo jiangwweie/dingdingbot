@@ -125,3 +125,15 @@ Hard Stop：旧Policy事实不明、占用计数遗漏/重复、版本竞态、�
 默认release末版扩到11项PASS，补原ENTRY enabled的0007/0008源：正式identity先pause原Policy，再生成B，两个revision可同一事务时点但原source时间必须严格更早；0009安装后仅ENTRY已fenced的修复路径允许切B。冻结0008真实源逐表保全仍PASS，Mypy163/Ruff/diff通过。相邻103与Full-chain51是增量前结果，不冒称当前exact candidate；新自然双CPM测试复用原portfolio模块内部helper，架构禁止跨test模块导入的RED已通过把测试合并原模块消除，非skip。旧forward chain test补0009及typed revision声明；Fast曾1346/1349 passed后各有明确RED，不算全套通过，末版Fast正在验证。无Tokyo动作、GS-13未执行。
 
 本轮最终checkpoint：Fast Unit/Architecture **1351 passed，12.56s**；focused默认发布/Claim-to-Ticket/自然双CPM共19 passed（自然测试随后仅移动到原portfolio模块以修复跨test import，移动后自然+architecture3 passed）；Mypy163 files、tracked Ruff与diff PASS。源码仍是本地部分实施checkpoint，不是CAP-01 Done或exact R4；部署脚本的source/target/postflight适配还需与默认B统一，不能据identity组件测试宣称整个真实部署命令已经可用。待完成项维持上一段，目标保持active。
+
+### 双Ticket终态、并发及Owner只读增量（2026-10-10，基于250f8777）
+
+自然CPM用例不再停在protected：两个Ticket各通过原request_exit/durable EXIT、exact TP/Stop CANCEL、flat/ReconciliationMatched、BudgetSettled和ReviewRecorded到terminal。immutable Ticket字段保全、Reservation/Netting释放、strategy-side占用2→1→0；Review显式structural_test_only，不冒充真实venue经济数据。并发分支让两个正式Entry Worker在action-facts读取汇合，原first-eligible arbitration竞争同head Signal仅一个dispatched，另一个不超发；lane释放后剩余不同Instrument Signal被family/strategy风险Gate拒绝。这里证明实际Worker竞争，不冒充两个不同Claim同时越过rank仲裁的独立issue_ticket race；后者仍需补充。
+
+AdmissionPortfolioUsage补nullable limit/count，B的拒绝也冻结strategy-side证据；历史all-null字段从canonical digest排除，旧Decision解析保持digest。readonly Owner controls返回actual max/count，界面显示容量但无启用按钮；OpenAPI生成器重新生成typed客户端，固定pnpm lock安装在本worktree而非复用主工作区不完整依赖。Controls3 tests、全部前端38 tests/13 files、tsc及vite build PASS，chunk>500k为现有warning，不放宽工程Gate。Owner API interfaces35 tests PASS，实际role/浏览器全GS-11仍未签收。
+
+Postflight新增必验B，缺max=2/family exact则fence；81项deploy unit PASS，readonly certifier只接受exact A或B组合，0009 target要求B，16项focused PASS。旧0007→0008 identity专项被当前0007/0008→0009默认发布11项取代；Generic迁移模块目标改current0009，Static source的arm/pause走冻结0007源码进程，目标仍当前源码。27→25不是skip，而是移除两项已被默认B当前合同替代的旧identity测试。0007 source各record/negative/quiescence/Static comparison差分等25项全PASS（79.68s）；seeder exact-row只SELECT自身compare_keys，不因无关新增字段污染source setup，不新增schema fallback。
+
+末版focused capacity/Claim/Decision/portfolio模块60 passed（含sequential/concurrent终态）；MPG/MI额外正式Owner/Selector/Materializer/rebase/Observation→Ticket→Review Policy B自然链2 passed，Claim明确limit=2与family=2。Fast+architecture+interfaces最后1393 passed对应readonly target-B检查加入前源码；末版正在重验，不作为final R4。Mypy164 source/tools、Ruff/diff PASS；GS-13未执行、production_modified=NO。剩余CAP独立不同Claim并发、policy交叉与complete signed acceptance，随后GS-10/11/12；不把本段升级为整卡Done。
+
+末版追加：readonly 0009 target必须max_same_strategy_side=2（A仅作为源合同识别，不可在新目标冒充已默认启用），deployment postflight对应负向81项PASS；随后包含target-B检查的Unit/Architecture/API完整1393 passed、17.44s，Mypy164、Ruff/diff PASS。所有本轮verification进程均已终态，未进入GS-13。前端包安装未改package/lock、未修改主工作区依赖；生成d.ts只新增两个readonly Capacity字段。当前仍IN_PROGRESS，不能把测试数量当作缺项已完成证明。

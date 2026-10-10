@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 from collections.abc import AsyncGenerator
 from decimal import Decimal
@@ -15,6 +16,10 @@ from src.trading_kernel.application.advance_strategy_universe import (
     UniverseActivationRequest,
     UniverseActivationStatus,
     advance_strategy_universe,
+)
+from src.trading_kernel.application.dispatch_exchange_command import (
+    DispatchCommandRequest,
+    dispatch_one_command,
 )
 from src.trading_kernel.application.ingest_signal import (
     SignalAuthorityStatus,
@@ -37,17 +42,30 @@ from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
     set_strategy_entry_state,
 )
+from src.trading_kernel.application.reconcile_ticket import (
+    ExitTicketRequest,
+    ReconcileTicketRequest,
+    reconcile_ticket,
+    request_exit,
+)
 from src.trading_kernel.application.runtime_facts import (
     AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
 )
+from src.trading_kernel.application.settle_ticket import (
+    RecordTradeReviewRequest,
+    SettleTicketRequest,
+    record_trade_review,
+    settle_ticket,
+)
 from src.trading_kernel.domain.admission_decision import AdmissionDecisionStatus
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.owner_control import StrategyEntryState
-from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
@@ -841,7 +859,8 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
 
 
 @pytest.mark.asyncio
-async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(issue_engine) -> None:
+@pytest.mark.parametrize("concurrent_last_slot", [False, True])
+async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(issue_engine, concurrent_last_slot) -> None:
     source_request = RuntimeAuthoritySeedRequest(account_id="subaccount-source-test", runtime_commit="kernel-test-head",
         schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=NOW_MS-10_000_000)
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -862,6 +881,41 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(i
     issued = []
     positions = None
     for index, member in enumerate((BNB,DOGE,SOL)):
+        if concurrent_last_slot and index==1:
+            for candidate in (DOGE,SOL):
+                offset=2*3_600_000
+                await _refresh_instrument_certification(issue_engine, positions,exchange_instrument_id=candidate,now_ms=NOW_MS+offset-1)
+                observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(issue_engine),market.at(offset),
+                    ObservationRequest(runtime_scope_id=await _active_scope_id(issue_engine,candidate),runtime_commit="kernel-test-head",
+                        schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=NOW_MS+offset,attempted_at_ms=NOW_MS+offset))
+                assert observed.status is ObservationStatus.SIGNAL_CREATED
+            barrier = asyncio.Event()
+            class RacingFacts(ReplayEntryAdmissionFactsSource):
+                reads=0
+                async def read_entry_admission_snapshot(self,request,*,barrier=barrier):
+                    self.reads+=1
+                    if self.reads==2:
+                        barrier.set()
+                    await asyncio.wait_for(barrier.wait(),timeout=5)
+                    return await super().read_entry_admission_snapshot(request)
+            facts=RacingFacts(reference_price=Decimal(102)*Decimal("1.03"),position_side="long")
+            async def contender(worker,*,facts=facts,offset=offset):
+                return await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(issue_engine),venue,facts,
+                    EntryWorkerRequest(worker_id=worker,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION,
+                        now_ms=NOW_MS+offset+1000,lease_until_ms=NOW_MS+offset+31000,timeout_seconds=10,
+                        admission_snapshot_validity_ms=30000))
+            results=await asyncio.gather(contender("capacity-race-a"),contender("capacity-race-b"))
+            winners=[item for item in results if item.status is EntryWorkerStatus.DISPATCHED]
+            assert len(winners)==1,results
+            issued.append(winners[0].ticket_id)
+            await _release_entry_lane(issue_engine,venue,ticket_id=winners[0].ticket_id,now_ms=NOW_MS+offset+2000)
+            retried = await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(issue_engine),venue,facts,
+                EntryWorkerRequest(worker_id="capacity-race-followup",runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION,
+                    now_ms=NOW_MS+offset+15000,lease_until_ms=NOW_MS+offset+45000,timeout_seconds=10,
+                    admission_snapshot_validity_ms=30000))
+            assert retried.status is EntryWorkerStatus.ISSUE_REFUSED, retried
+            assert retried.issue_status.value in {"exposure_family_capacity_exhausted","strategy_side_capacity_exhausted","budget_exhausted"},retried
+            break
         offset = index*2*3_600_000
         if positions is not None:
             await _refresh_instrument_certification(issue_engine, positions,exchange_instrument_id=member,now_ms=NOW_MS+offset-1)
@@ -877,14 +931,64 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(i
     async with issue_engine.connect() as connection:
         tickets = (await connection.execute(sa.select(trade_tickets))).mappings().all()
     assert len(tickets)==2
-    assert {row["exchange_instrument_id"] for row in tickets}=={BNB,DOGE}
+    assert BNB in {row["exchange_instrument_id"] for row in tickets}
+    assert {row["exchange_instrument_id"] for row in tickets}<={BNB,DOGE,SOL}
     assert len({row["signal_event_id"] for row in tickets})==2
     assert len({row["exposure_episode_id"] for row in tickets})==2
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        for ticket_id in issued:
+        for index,ticket_id in enumerate(issued):
             claim = await uow.capacity_claims.get_for_ticket(ticket_id)
             assert claim.max_same_strategy_side==2
             assert claim.family_ticket_limit==2
+            assert claim.active_strategy_side_ticket_count_at_claim==index
+    for index,ticket_id in enumerate(issued):
+        at = NOW_MS+6*3_600_000+index*100_000
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            ticket = await uow.tickets.get(ticket_id)
+            frozen = ticket.model_dump(mode="json")
+            protected = await uow.aggregates.get(ticket_id)
+            commands = await uow.exchange_commands.list_for_ticket(ticket_id)
+            opened = tuple(VenueOrderSnapshot(exchange_order_id=(protected.initial_stop_exchange_order_id
+                if command.kind is ExchangeCommandKind.INITIAL_STOP else protected.tp1_exchange_order_id),
+                venue_client_order_id=command.venue_client_order_id,position_side="long",reduce_only=True)
+                for command in commands if command.kind in {ExchangeCommandKind.INITIAL_STOP,ExchangeCommandKind.TAKE_PROFIT})
+            await request_exit(uow,ExitTicketRequest(ticket_id=ticket_id,reason="capacity_validation_controlled_exit",requested_at_ms=at))
+        result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(issue_engine),venue,
+            DispatchCommandRequest(worker_id="capacity-exit",ticket_id=ticket_id,now_ms=at+1,
+                lease_until_ms=at+5000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION))
+        assert result.status.value=="accepted"
+        matched = False
+        for step in range(5):
+            async with PostgresKernelUnitOfWork(issue_engine) as uow:
+                reconciled = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=ticket_id,
+                    snapshot=PositionSnapshot(netting_domain=ticket.identity.netting_domain,quantity=Decimal(0),
+                        average_entry_price=None,open_orders=opened,observed_at_ms=at+100+step*1000)))
+            if reconciled.status.value=="matched":
+                matched=True
+                break
+            cancel = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(issue_engine),venue,
+                DispatchCommandRequest(worker_id="capacity-cleanup",ticket_id=ticket_id,now_ms=at+200+step*1000,
+                    lease_until_ms=at+5200+step*1000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION))
+            assert cancel.status.value=="accepted"
+            async with PostgresKernelUnitOfWork(issue_engine) as uow:
+                command = await uow.exchange_commands.get(cancel.command_id)
+            assert command.kind is ExchangeCommandKind.CANCEL_ORDER
+            opened=tuple(order for order in opened if order.exchange_order_id!=command.payload.exchange_order_id)
+        assert matched and opened==()
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            await settle_ticket(uow,SettleTicketRequest(ticket_id=ticket_id,settled_at_ms=at+10_000))
+            await record_trade_review(uow,RecordTradeReviewRequest(ticket_id=ticket_id,
+                review_id=f"review:capacity:{index}",outcome="closed",metrics={"economics_evidence":"structural_test_only"},
+                decision_impact={"capacity_policy":"v0"},recorded_at_ms=at+10_001))
+            aggregate = await uow.aggregates.get(ticket_id)
+            assert aggregate.status is AggregateStatus.TERMINAL
+            assert (await uow.budgets.get_for_ticket(ticket_id)).status=="released"
+            assert (await uow.reviews.get_for_ticket(ticket_id)).review_id==f"review:capacity:{index}"
+            closed_ticket = await uow.tickets.get(ticket_id)
+            assert {k:v for k,v in closed_ticket.model_dump(mode="json").items() if k!="status"}=={k:v for k,v in frozen.items() if k!="status"}
+            assert await uow.entry_admission.count_active_strategy_side_tickets(
+                venue_id=ticket.identity.netting_domain.venue_id,account_id=ticket.identity.netting_domain.account_id,
+                strategy_group_id=ticket.identity.runtime.strategy_group_id,position_side="long")==1-index
 
 
 async def _seed_replay_runtime(

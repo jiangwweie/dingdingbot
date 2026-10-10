@@ -1960,9 +1960,9 @@ async def _generic_source_preservation_manifest(
     to the source manifest.
     """
     revision = await _alembic_revision(connection)
-    if revision not in {GENERIC_SELECTION_SOURCE_REVISION, EXPECTED_ALEMBIC_REVISION}:
+    if revision not in {GENERIC_SELECTION_SOURCE_REVISION, "0008_generic_dynamic_selection_v1", EXPECTED_ALEMBIC_REVISION}:
         raise ValueError("Generic preservation requires exact 0007 or current 0008")
-    target = revision == EXPECTED_ALEMBIC_REVISION
+    target = revision != GENERIC_SELECTION_SOURCE_REVISION
     renamed = {
         "session_start_ms": "period_anchor_ms",
         "pending_effective_session_start_ms": "pending_effective_period_anchor_ms",

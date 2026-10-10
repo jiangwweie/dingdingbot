@@ -76,6 +76,13 @@ def _canonical_decimal(value: object) -> str:
     return format(Decimal(str(value)).normalize(), "f")
 
 
+def _capacity_policy_contract_matches(*, max_same_strategy_side: object, family_ticket_limits: object) -> bool:
+    if max_same_strategy_side is None:
+        return family_ticket_limits=={"long_continuation":1,"opening_range":2,"rally_failure_short":1}
+    return type(max_same_strategy_side) is int and max_same_strategy_side==2 and family_ticket_limits=={
+        "long_continuation":2,"opening_range":2,"rally_failure_short":1}
+
+
 def _certification_batch_policy_stage_matches(
     *,
     batch_policy_version: int,
@@ -842,6 +849,7 @@ async def _certify(
                                new_entry_submit_enabled,
                                max_concurrent_tickets,
                                family_ticket_limits,
+                               max_same_strategy_side,
                                max_ticket_stop_risk_fraction,
                                max_gross_stop_risk_fraction,
                                max_ticket_initial_margin_fraction,
@@ -1263,8 +1271,9 @@ async def _certify(
             isinstance(owner_policy_row["new_entry_submit_enabled"], bool),
             int(owner_policy_row["max_concurrent_tickets"])
             == DYNAMIC_POLICY.max_concurrent_tickets,
-            owner_policy_row["family_ticket_limits"]
-            == DYNAMIC_POLICY.family_ticket_limits.model_dump(),
+            _capacity_policy_contract_matches(max_same_strategy_side=owner_policy_row["max_same_strategy_side"],
+                family_ticket_limits=owner_policy_row["family_ticket_limits"]),
+            revision != "0009_capacity_policy_v0" or owner_policy_row["max_same_strategy_side"] == 2,
             Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
             == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
             Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))

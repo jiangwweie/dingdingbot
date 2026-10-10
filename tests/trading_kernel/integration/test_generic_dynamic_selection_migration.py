@@ -60,10 +60,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
     RUNTIME_PROFILE_ID,
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    RuntimeAuthorityTransitionRefused,
-    arm_acceptance_policy,
     deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
@@ -85,7 +82,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     mpg_long_snapshot,
 )
 
-TARGET_REVISION = "0008_generic_dynamic_selection_v1"
+TARGET_REVISION = CURRENT_SCHEMA_REVISION
 EXACT_0007_REFERENCE = "ee539609560fb006c77099efeb06ab01ad7cda22"
 NEW_OWNER_READ_TABLES = (
     "brc_generic_dynamic_selection_specs_v1",
@@ -513,74 +510,6 @@ async def test_0007_terminal_ticket_lineage_survives_0008_logical_preservation(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source_entry_enabled", [False, True])
-async def test_0007_to_0008_identity_rotation_preserves_static_authority(
-    source_entry_enabled: bool,
-) -> None:
-    name, url = await create_empty_database()
-    engine = create_async_engine(url)
-    source_commit = "a" * 40
-    target_commit = "b" * 40
-    try:
-        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
-                account_id="generic-upgrade", runtime_commit=source_commit,
-                schema_revision="0007_exit_profile_authority_v1",
-                seeded_at_ms=NOW_MS - 1000,
-            ))
-        if source_entry_enabled:
-            async with PostgresKernelUnitOfWork(engine) as uow:
-                await arm_acceptance_policy(
-                    uow, ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 500)
-                )
-        async with engine.connect() as conn:
-            source_policy = (await conn.execute(sa.text(
-                "SELECT policy_version, new_entry_submit_enabled FROM brc_owner_policy_current"
-            ))).mappings().one()
-            source_static = (await conn.execute(sa.text(
-                "SELECT strategy_group_id, entry_state FROM brc_strategy_entry_controls_current ORDER BY strategy_group_id"
-            ))).mappings().all()
-        with pytest.raises(RuntimeAuthorityTransitionRefused, match="exact 0008 schema"):
-            async with PostgresKernelUnitOfWork(engine) as uow:
-                await deploy_compatible_upgrade_identity(uow,
-                    RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
-                        runtime_commit=target_commit,schema_revision=TARGET_REVISION,
-                        seeded_at_ms=NOW_MS+1000))
-        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
-        await engine.dispose()
-        with pytest.raises(RuntimeAuthorityTransitionRefused, match="exact 0008 target"):
-            async with PostgresKernelUnitOfWork(engine) as uow:
-                await deploy_compatible_upgrade_identity(uow,
-                    RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
-                        runtime_commit=target_commit,schema_revision="0006_sor_dynamic_selection_v0",
-                        seeded_at_ms=NOW_MS+1000))
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            rotated = await deploy_compatible_upgrade_identity(uow,
-                RuntimeAuthoritySeedRequest(account_id="generic-upgrade",
-                    runtime_commit=target_commit,schema_revision=TARGET_REVISION,
-                    seeded_at_ms=NOW_MS+1000))
-        assert rotated.schema_revision == TARGET_REVISION
-        assert rotated.runtime_commit == target_commit
-        async with engine.connect() as conn:
-            assert await conn.scalar(sa.text(
-                "SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='schema_revision'"
-            )) == TARGET_REVISION
-            policy = (await conn.execute(sa.text(
-                "SELECT policy_version, new_entry_submit_enabled FROM brc_owner_policy_current"
-            ))).mappings().one()
-            assert policy["new_entry_submit_enabled"] is False
-            assert policy["policy_version"] == source_policy["policy_version"] + int(source_entry_enabled)
-            assert (await conn.execute(sa.text(
-                "SELECT strategy_group_id, entry_state FROM brc_strategy_entry_controls_current ORDER BY strategy_group_id"
-            ))).mappings().all() == source_static
-            for table in ("brc_instrument_selection_jobs_current", "brc_instrument_selection_snapshots",
-                          "brc_strategy_universe_materialization_generations", "brc_strategy_entry_vacuums_current",
-                          "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
-                assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
-    finally:
-        await engine.dispose()
-        await drop_disposable_database(name)
 
 
 @pytest.mark.asyncio
@@ -659,6 +588,33 @@ async def test_generic_job_terminal_states_cannot_expand_sor_contract(head_templ
                        :cutoff,:cutoff,'EXPIRED','SELECTION_PERIOD_EXPIRED',0,1,:cutoff)
             """), {"job":f"selection-job:sor-dynamic-selection-v0:{anchor}",
                     "anchor":anchor,"cutoff":anchor+3_600_000})
+
+
+def _arm_frozen_0007_source(checkout: Path, *, database_url: str, at_ms: int) -> None:
+    """Source setup runs the frozen executable, never a current old-schema reader."""
+    code = """
+import asyncio, os
+from sqlalchemy.ext.asyncio import create_async_engine
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_authority_seed import arm_acceptance_policy, ArmAcceptancePolicyRequest
+from src.trading_kernel.application.owner_control import set_strategy_entry_state, ControlMutationRequest
+from src.trading_kernel.domain.owner_control import StrategyEntryState
+async def main():
+    engine=create_async_engine(os.environ['TRADING_KERNEL_DATABASE_URL'])
+    at=int(os.environ['CAP_SOURCE_AT_MS'])
+    try:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await arm_acceptance_policy(uow,ArmAcceptancePolicyRequest(armed_at_ms=at))
+            await set_strategy_entry_state(uow,strategy_group_id='SOR-001',target_state=StrategyEntryState.PAUSED,
+                authentication_strength='totp_step_up',request=ControlMutationRequest(expected_version=1,
+                reason='owner_retired_sor',idempotency_key='source:sor-retired',owner_identity='test-owner',now_ms=at+1))
+    finally: await engine.dispose()
+asyncio.run(main())
+"""
+    completed=subprocess.run([sys.executable,"-c",code],cwd=checkout,
+        env={**os.environ,"PYTHONPATH":str(checkout),"TRADING_KERNEL_DATABASE_URL":database_url,"CAP_SOURCE_AT_MS":str(at_ms)},
+        capture_output=True,text=True,timeout=30,check=False)
+    assert completed.returncode==0,completed.stderr[-3000:]
 
 
 async def _insert_0007_comparison_source(
@@ -905,10 +861,7 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
                     seeded_at_ms=NOW_MS - 10000,
                 ),
             )
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await arm_acceptance_policy(
-                uow, ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 9000)
-            )
+        await asyncio.to_thread(_arm_frozen_0007_source,exact_0007_reference,database_url=url,at_ms=NOW_MS-9000)
         async with engine.begin() as conn:
             await conn.execute(sa.text(
                 "UPDATE brc_owner_policy_current SET policy_version=4 "

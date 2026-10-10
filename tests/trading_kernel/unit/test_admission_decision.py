@@ -27,6 +27,20 @@ def test_rejected_decision_forbids_ticket_identity() -> None:
         )
 
 
+def test_capacity_v0_rejection_freezes_strategy_side_count_without_rewriting_legacy_digest() -> None:
+    original = _rejected_decision()
+    payload = original.model_dump(mode="python")
+    payload["portfolio_usage"].pop("max_same_strategy_side", None)
+    payload["portfolio_usage"].pop("active_strategy_side_ticket_count", None)
+    assert AdmissionDecision.model_validate(payload).decision_digest == original.decision_digest
+    usage = AdmissionPortfolioUsage.model_validate({**_usage().model_dump(),
+        "max_same_strategy_side":2,"active_strategy_side_ticket_count":2})
+    changed = _rejected_decision(usage=usage)
+    assert changed.portfolio_usage.max_same_strategy_side==2
+    assert changed.portfolio_usage.active_strategy_side_ticket_count==2
+    assert changed.decision_digest!=original.decision_digest
+
+
 def test_admission_decision_digest_binds_policy_usage_and_candidate_set() -> None:
     decision = _rejected_decision()
     changed_policy = _rejected_decision(owner_policy_version=4)

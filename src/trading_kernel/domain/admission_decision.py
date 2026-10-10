@@ -104,6 +104,8 @@ class AdmissionPortfolioUsage(BaseModel):
 
     active_ticket_count: int
     active_family_ticket_count: int
+    max_same_strategy_side: int | None = None
+    active_strategy_side_ticket_count: int | None = None
     gross_risk_at_stop: Decimal
     directional_risk_at_stop: Decimal | None
     current_reserved_margin: Decimal
@@ -112,6 +114,15 @@ class AdmissionPortfolioUsage(BaseModel):
     remaining_gross_stop_risk: Decimal | None
     remaining_directional_stop_risk: Decimal | None
     remaining_initial_margin: Decimal | None
+
+    @model_validator(mode="after")
+    def _validate_strategy_side_evidence(self) -> AdmissionPortfolioUsage:
+        limit,count=self.max_same_strategy_side,self.active_strategy_side_ticket_count
+        if (limit is None)!=(count is None):
+            raise ValueError("strategy-side usage evidence must be all-null or all-present")
+        if limit is not None and count is not None and (limit<=0 or count<0):
+            raise ValueError("strategy-side usage limit/count are invalid")
+        return self
 
     @field_validator(
         "active_ticket_count",
@@ -368,6 +379,15 @@ def build_admission_decision_digest(decision: AdmissionDecision) -> str:
 
 
 def _decision_digest_payload(payload: dict[str, object]) -> dict[str, object]:
+    usage=payload.get("portfolio_usage")
+    if isinstance(usage,AdmissionPortfolioUsage):
+        usage=usage.model_dump(mode="python")
+    if isinstance(usage,dict):
+        usage=dict(usage)
+        if usage.get("max_same_strategy_side") is None and usage.get("active_strategy_side_ticket_count") is None:
+            usage.pop("max_same_strategy_side",None)
+            usage.pop("active_strategy_side_ticket_count",None)
+        payload={**payload,"portfolio_usage":usage}
     return {
         key: value
         for key, value in payload.items()

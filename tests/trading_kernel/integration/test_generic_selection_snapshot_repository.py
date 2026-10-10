@@ -8470,7 +8470,7 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
+@pytest.mark.parametrize("fault_stage", [None, "capacity_v0", "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
     *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
     *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
     *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover",
@@ -8479,6 +8479,23 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
+    capacity_v0 = fault_stage=="capacity_v0"
+    if capacity_v0:
+        from src.trading_kernel.application.owner_control import (
+            set_strategy_entry_state,
+        )
+        from src.trading_kernel.domain.owner_control import StrategyEntryState
+        from src.trading_kernel.infrastructure.runtime_authority_seed import (
+            deploy_compatible_upgrade_identity,
+        )
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await set_strategy_entry_state(uow,strategy_group_id="SOR-001",target_state=StrategyEntryState.PAUSED,
+                request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor",idempotency_key="hourly-capacity:sor-pause",
+                    owner_identity="owner",now_ms=CUTOFF-HOUR+1),authentication_strength="totp_step_up")
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id="generic-snapshot",runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=CUTOFF-HOUR+2))
+        fault_stage=None
     await _exercise_generic_generation(database,group,True,
         durable=True,first_activation=True,natural_selection=True)
     spec = inputs(group).spec
@@ -8657,6 +8674,10 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         member=first.selected_members[0],universe_version_id=current_uid,
         closed_at_ms=third.effective_from_ms,now_ms=third_grant_at+2,
         fault_stage=fault_stage)
+    if capacity_v0:
+        async with database.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_capacity_claims WHERE max_same_strategy_side=2 AND family_ticket_limit=2"))==1
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status='terminal'"))==1
 
 
 async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms, fail_retries=0,owner_role=False):

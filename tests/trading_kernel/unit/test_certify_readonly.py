@@ -9,6 +9,20 @@ from scripts.trading_kernel.certify_readonly import (
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 
 
+@pytest.mark.parametrize("limit,families,expected", [
+    (None,{"long_continuation":1,"opening_range":2,"rally_failure_short":1},True),
+    (2,{"long_continuation":2,"opening_range":2,"rally_failure_short":1},True),
+    (2,{"long_continuation":1,"opening_range":2,"rally_failure_short":1},False),
+    (None,{"long_continuation":2,"opening_range":2,"rally_failure_short":1},False),
+    (3,{"long_continuation":2,"opening_range":2,"rally_failure_short":1},False),
+])
+def test_readonly_certification_accepts_only_exact_capacity_a_or_b(limit,families,expected):
+    from scripts.trading_kernel.certify_readonly import (
+        _capacity_policy_contract_matches,
+    )
+    assert _capacity_policy_contract_matches(max_same_strategy_side=limit,family_ticket_limits=families) is expected
+
+
 @pytest.mark.parametrize(
     (
         "batch_policy_version",
@@ -28,6 +42,8 @@ from src.trading_kernel.domain.strategy_universe import build_strategy_universe
         (0, 1, True, False),
     ),
 )
+
+
 def test_certification_batch_accepts_only_its_exact_policy_or_direct_arm_successor(
     batch_policy_version: int,
     current_policy_version: int,

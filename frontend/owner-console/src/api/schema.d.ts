@@ -626,6 +626,8 @@ export interface components {
             max_gross_initial_margin_utilization: string | null;
             /** Max Gross Stop Risk Fraction */
             max_gross_stop_risk_fraction: string | null;
+            /** Max Same Strategy Side */
+            max_same_strategy_side: number | null;
             /** Remaining Ticket Slots */
             remaining_ticket_slots: number;
             /** Reserved Margin */
@@ -637,6 +639,10 @@ export interface components {
              * @enum {string}
              */
             source: "current_projection" | "no_active_exposure";
+            /** Strategy Side Active Counts */
+            strategy_side_active_counts: {
+                [key: string]: number;
+            };
             /** Wallet Balance Basis */
             wallet_balance_basis: string | null;
         };
@@ -1738,11 +1744,13 @@ export interface components {
             control_version: number;
             /** Pending Authorization Id */
             pending_authorization_id: string | null;
-            /** Pending Effective Session Start Ms */
-            pending_effective_session_start_ms: number | null;
+            /** Pending Effective Period Anchor Ms */
+            pending_effective_period_anchor_ms: number | null;
             pending_selection_mode: components["schemas"]["SelectionMode"] | null;
             /** Rollback Baseline Id */
             rollback_baseline_id: string | null;
+            /** Selection Epoch Id */
+            selection_epoch_id?: string | null;
             selection_mode: components["schemas"]["SelectionMode"];
             /** Selection Spec Id */
             selection_spec_id: string;

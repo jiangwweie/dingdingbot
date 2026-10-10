@@ -932,6 +932,10 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
         )
+        policy=certification.get("owner_policy")
+        if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
+            "long_continuation":2,"opening_range":2,"rally_failure_short":1}:
+            raise DeploymentBlocked("default Capacity V0 Policy was not installed")
 
 
 def _require_dynamic_selection_postflight(

@@ -742,6 +742,8 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "ControlsResponse"
     ]
     assert "dynamic_selection" in controls_schema["properties"]
+    capacity_schema=owner_console_app.openapi()["components"]["schemas"]["AccountCapacityView"]
+    assert {"max_same_strategy_side","strategy_side_active_counts"} <= set(capacity_schema["required"])
 
 
 async def test_login_sets_strict_secure_http_only_cookie(

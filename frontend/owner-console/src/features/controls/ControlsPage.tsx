@@ -191,6 +191,19 @@ export function ControlsPage() {
         </div>
       </Panel>
 
+      <Panel title="组合容量（只读）">
+        <dl className="grid grid-cols-2 gap-3">
+          <div><dt>同策略同方向上限</dt><dd>{data.account_capacity.max_same_strategy_side ?? "无额外上限（旧 Policy）"}</dd></div>
+          <div><dt>全局 Ticket 上限</dt><dd>{data.account_capacity.max_concurrent_tickets}</dd></div>
+          <div><dt>long_continuation 上限</dt><dd>{data.account_capacity.family_limits.long_continuation}</dd></div>
+          <div><dt>rally_failure_short 上限</dt><dd>{data.account_capacity.family_limits.rally_failure_short}</dd></div>
+        </dl>
+        <p>Policy v{data.global_entry.policy_version} · 严格 Family、方向风险与 Netting Domain 约束仍生效；容量不授予策略 ENTRY 权限。</p>
+        {Object.entries(data.account_capacity.strategy_side_active_counts ?? {}).map(([scope,count]) => (
+          <div key={scope}>{scope}：{count} 个占用</div>
+        ))}
+      </Panel>
+
       <Panel title="StrategyGroup 控制">
         <div className="strategy-control-table" role="table">
           <div className="strategy-control-table__head" role="row">

@@ -23,7 +23,7 @@ vi.mock("./api", async (importOriginal) => {
 const controlsFixture = {
   generated_at_ms: 1_800_000_000_000,
   global_entry: { configured_state: "enabled" as const, effective_state: "enabled" as const, policy_version: 5, active_ticket_count: 2, first_blocker: null },
-  account_capacity: { max_concurrent_tickets: 3, active_ticket_count: 2, remaining_ticket_slots: 1, gross_stop_risk: "8.40", gross_stop_risk_limit: "25.80", max_gross_stop_risk_fraction: "0.06", long_stop_risk: "3.20", short_stop_risk: "5.20", directional_stop_risk_limit: "17.20", directional_stop_risk_limit_fraction: "0.04", reserved_margin: "42.00", gross_initial_margin_limit: "387.00", max_gross_initial_margin_utilization: "0.90", wallet_balance_basis: "430.00", margin_balance_basis: "430.00", family_active_counts: { long_continuation: 0, opening_range: 2, rally_failure_short: 0 }, family_limits: { long_continuation: 1, opening_range: 2, rally_failure_short: 1 }, source: "current_projection" as const },
+  account_capacity: { max_same_strategy_side: 2, strategy_side_active_counts: { "CPM-RO-001:long": 2 }, max_concurrent_tickets: 3, active_ticket_count: 2, remaining_ticket_slots: 1, gross_stop_risk: "8.40", gross_stop_risk_limit: "25.80", max_gross_stop_risk_fraction: "0.06", long_stop_risk: "3.20", short_stop_risk: "5.20", directional_stop_risk_limit: "17.20", directional_stop_risk_limit_fraction: "0.04", reserved_margin: "42.00", gross_initial_margin_limit: "387.00", max_gross_initial_margin_utilization: "0.90", wallet_balance_basis: "430.00", margin_balance_basis: "430.00", family_active_counts: { long_continuation: 0, opening_range: 2, rally_failure_short: 0 }, family_limits: { long_continuation: 1, opening_range: 2, rally_failure_short: 1 }, source: "current_projection" as const },
   runtime_entry_authority: { exchange_commands_enabled: true, effective_status: "ready" as const, runtime_profile_ids: ["tiny-live-v1", "tradfi-equity-usdm-v1"], first_blocker: null },
   dynamic_selection: { strategy_group_id: "SOR-001", selection_spec_id: "sor-dynamic-selection-v0", selection_mode: "static_baseline" as const, pending_selection_mode: null, pending_effective_session_start_ms: null, control_version: 3 },
   strategies: [
@@ -61,6 +61,8 @@ it("shows compact controls and keeps flatten scope server-owned", async () => {
   );
 
   expect(await screen.findByText("SOR-001")).toBeInTheDocument();
+  expect(screen.getByText("同策略同方向上限")).toBeInTheDocument();
+  expect(screen.queryByRole("button",{name:/启用容量|切换容量/})).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "暂停新开仓" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "受控平仓全部仓位" }));
 

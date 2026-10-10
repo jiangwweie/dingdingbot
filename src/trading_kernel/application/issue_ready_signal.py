@@ -662,6 +662,8 @@ def _portfolio_usage(
         ),
     )
     return AdmissionPortfolioUsage(
+        max_same_strategy_side=policy.max_same_strategy_side,
+        active_strategy_side_ticket_count=(usage.active_strategy_side_ticket_count if policy.max_same_strategy_side is not None else None),
         active_ticket_count=usage.active_ticket_count,
         active_family_ticket_count=(usage.active_family_ticket_count),
         gross_risk_at_stop=usage.gross_risk_at_stop,

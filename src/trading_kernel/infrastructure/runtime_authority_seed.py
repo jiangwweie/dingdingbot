@@ -2277,7 +2277,7 @@ async def _insert_exact(connection: AsyncConnection, row: _ExactRow) -> int:
     )
     existing = (
         await connection.execute(
-            sa.select(row.table)
+            sa.select(*(row.table.c[key] for key in row.compare_keys))
             .where(predicate)
             .limit(1)
         )

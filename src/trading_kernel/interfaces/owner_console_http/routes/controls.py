@@ -108,6 +108,8 @@ class AccountCapacityView(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     max_concurrent_tickets: int
+    max_same_strategy_side: int | None
+    strategy_side_active_counts: dict[str,int]
     active_ticket_count: int
     remaining_ticket_slots: int
     gross_stop_risk: Decimal
@@ -271,6 +273,14 @@ async def read_controls(request: Request) -> ControlsResponse:
             )
             for family in family_names
         }
+        capacity_sides: tuple[Literal["long","short"], ...] = ("long","short")
+        strategy_side_counts = {
+            f"{control.strategy_group_id}:{side}": await uow.entry_admission.count_active_strategy_side_tickets(
+                venue_id=settings.venue_id,account_id=settings.account_id,
+                strategy_group_id=control.strategy_group_id,position_side=side,
+            )
+            for control in strategies for side in capacity_sides
+        }
         capability = await uow.signals.get_runtime_capability("exchange_commands")
         runtime_profile_ids = tuple(
             sorted(
@@ -330,6 +340,8 @@ async def read_controls(request: Request) -> ControlsResponse:
             },
             "account_capacity": {
                 "max_concurrent_tickets": policy.max_concurrent_tickets,
+                "max_same_strategy_side":policy.max_same_strategy_side,
+                "strategy_side_active_counts":strategy_side_counts,
                 "active_ticket_count": exposure_ticket_count,
                 "remaining_ticket_slots": max(
                     policy.max_concurrent_tickets - exposure_ticket_count,

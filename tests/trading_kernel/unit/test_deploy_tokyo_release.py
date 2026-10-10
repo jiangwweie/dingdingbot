@@ -890,6 +890,7 @@ def test_dep_004_missing_target_safety_worker_fails_with_entry_fenced() -> None:
 @pytest.mark.parametrize(
     ("postflight_drift", "expected_message"),
     [
+        ("capacity", "default Capacity V0 Policy was not installed"),
         ("policy", "Owner Policy"),
         ("registry", "Registry identity"),
         ("universe", "Universe identity"),
@@ -1707,6 +1708,8 @@ class FakeDeploymentBackend:
             },
             "owner_policy": {
                 "policy_version": 4,
+                "max_same_strategy_side":2 if self.runtime_commit==TARGET_COMMIT else None,
+                "family_ticket_limits":{"long_continuation":2 if self.runtime_commit==TARGET_COMMIT else 1,"opening_range":2,"rally_failure_short":1},
                 "new_entry_submit_enabled": (
                     self.source_entry_authority_armed
                     and self.runtime_commit == CURRENT_COMMIT
@@ -1753,6 +1756,8 @@ class FakeDeploymentBackend:
                 "warming_scopes": 0,
             },
         }
+        if self.postflight_drift == "capacity":
+            payload["owner_policy"]["max_same_strategy_side"]=None
         if self.postflight_drift == "policy":
             payload["owner_policy"] = {
                 "policy_version": 5,
