@@ -2446,6 +2446,59 @@ class PostgresInstrumentSelectionRepository:
                 strategy_universe_materialization_generations.c.materialization_generation_id).limit(1))
         return None if identifier is None else await self.get_generic_materialization_generation(identifier)
 
+    async def expire_unfenced_generic_generation(self,materialization_generation_id: str) -> GenericMaterializationGeneration:
+        initial=await self.get_generic_materialization_generation(materialization_generation_id)
+        if initial is None:
+            raise SelectionJobConflict("Unfenced expiry Generation missing")
+        owner=(await self._connection.execute(sa.select(strategy_entry_controls_current).where(
+            strategy_entry_controls_current.c.strategy_group_id==initial.strategy_group_id).with_for_update())).mappings().one_or_none()
+        control=await self.get_selection_control(initial.strategy_group_id,for_update=True)
+        generation=await self.get_generic_materialization_generation(materialization_generation_id,for_update=True)
+        now=await self.read_authority_clock_ms()
+        snapshot=await self.get_generic_snapshot(initial.selection_snapshot_id)
+        if generation is None or owner is None or owner["entry_state"]!="enabled" or control is None or (
+            generation.lifecycle_state not in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}
+            or generation.fenced_at_ms is not None or now<snapshot.expires_at_ms or control.control_version!=generation.selection_control_version
+            or not self._generic_control_allows(control,generation.selection_spec_id,generation.selection_epoch_id,generation.period_anchor_ms)
+            or generation.lease_owner is not None and generation.lease_expires_at_ms is not None and now<generation.lease_expires_at_ms):
+            raise SelectionJobConflict("Unfenced expiry requires exact expired unleased source")
+        vacuum=await self.get_current_entry_vacuum(strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
+        targets=await self._connection.scalar(sa.select(sa.func.count()).select_from(strategy_universe_versions)
+            .where(strategy_universe_versions.c.materialization_generation_id==materialization_generation_id))
+        if vacuum is not None or targets:
+            raise SelectionJobConflict("Unfenced expiry cannot abandon protected runtime")
+        updated=await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version==generation.projection_version)
+            .values(lifecycle_state="ABANDONED",terminal_at_ms=now,lease_owner=None,lease_expires_at_ms=None,
+                projection_version=generation.projection_version+1))
+        if updated.rowcount!=1:
+            raise SelectionJobConflict("Unfenced expiry CAS changed")
+        sequence=int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence))
+            .where(strategy_universe_materialization_events.c.materialization_generation_id==materialization_generation_id)) or 0)+1
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+            materialization_event_id=f"materialization-event:{materialization_generation_id}:{sequence}",
+            materialization_generation_id=materialization_generation_id,event_sequence=sequence,event_type="ABANDONED",
+            payload={"reason_code":"MATERIALIZATION_PERIOD_EXPIRED","pre_fence":True,"period_expires_at_ms":snapshot.expires_at_ms,
+                "selection_control_version_before":control.control_version,
+                "expired_selection_epoch_id":generation.selection_epoch_id,
+                "pending_authorization_id":control.pending_authorization_id,
+                "first_activation_pending_cleared":control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+                    and control.pending_effective_period_anchor_ms==generation.period_anchor_ms},occurred_at_ms=now))
+        if control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+            control.pending_effective_period_anchor_ms==generation.period_anchor_ms):
+            cleared=await self._connection.execute(sa.update(strategy_selection_control_current).where(
+                strategy_selection_control_current.c.strategy_group_id==generation.strategy_group_id,
+                strategy_selection_control_current.c.control_version==control.control_version,
+                strategy_selection_control_current.c.selection_epoch_id==generation.selection_epoch_id,
+            ).values(pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
+                selection_epoch_id=None,control_version=control.control_version+1,updated_at_ms=now))
+            if cleared.rowcount!=1:
+                raise SelectionJobConflict("Unfenced first activation expiry Control CAS changed")
+        result=await self.get_generic_materialization_generation(materialization_generation_id)
+        assert result is not None
+        return result
+
     async def add_generic_pending_materialization_generation(
         self, generation: GenericMaterializationGeneration,
     ) -> GenericMaterializationGeneration:

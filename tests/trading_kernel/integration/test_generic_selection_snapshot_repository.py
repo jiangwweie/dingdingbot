@@ -305,6 +305,92 @@ async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: Asyn
     assert result.disposition is MaterializationDisposition.NO_CHANGE,result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keep_live_lease",[False,True])
+async def test_restarted_materializer_retires_expired_unfenced_generation_without_vacuum(database: AsyncEngine,keep_live_lease) -> None:
+    group="MI-001"
+    source=inputs(group)
+    uid,_comparison_id=await _install_static_selection_source(database,group)
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="expired_unfenced",idempotency_key="expired:unfenced",owner_identity="owner",now_ms=CUTOFF-1),
+            authentication_strength="totp_step_up")
+        source=source.model_copy(update={"selection_epoch_id":control.selection_epoch_id})
+        snapshot=compute_generic_selection(source)
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="unfenced-before-crash")
+    for offset in (1,2):
+        now=CUTOFF+HOUR+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+            result=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda now=now:now)
+    assert result.disposition is MaterializationDisposition.GENERATION_DESIRED
+    if keep_live_lease:
+        leased_at=snapshot.expires_at_ms-10
+        async with PostgresKernelUnitOfWork(database) as uow:
+            claimed=await uow.instrument_selection.claim_generic_materialization_generation(result.materialization_generation_id,
+                worker_id="live-before-crash",now_ms=leased_at,lease_duration_ms=30_000)
+            assert claimed.generation is not None
+    await database.dispose()
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        SelectionRuntimeRequest,
+        run_materialization_runtime_once,
+    )
+    now=snapshot.expires_at_ms+1
+    if keep_live_lease:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+            waiting=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+                request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,worker_id="cannot-steal",now_ms=now),clock_ms=lambda:now)
+        assert waiting.status.value=="waiting" and waiting.reason_code=="GENERIC_GENERATION_LEASE_UNAVAILABLE"
+        now=claimed.generation.lease_expires_at_ms
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+        result=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+            request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,worker_id="restarted-after-expiry",now_ms=now),
+            clock_ms=lambda:now)
+    assert result.reason_code=="MATERIALIZATION_PERIOD_EXPIRED"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        generation=await uow.instrument_selection.get_generic_materialization_generation(GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id))
+        assert generation.lifecycle_state.value=="ABANDONED" and generation.fenced_at_ms is None
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+        expired_control=await uow.instrument_selection.get_selection_control(group)
+        assert expired_control.selection_mode.value=="static_baseline"
+        assert expired_control.pending_selection_mode is None and expired_control.selection_epoch_id is None
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+    async with database.connect() as connection:
+        scope_id=await connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid LIMIT 1"),{"uid":uid})
+    template=mi_flat_snapshot()
+    close=(now//HOUR+1)*HOUR
+    class StaticMarket:
+        async def fetch_closed_candles(self,request):
+            delta=close-template.trigger_candle_close_time_ms
+            candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)[-request.limit:]
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+        observed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),StaticMarket(),
+            ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
+    assert observed.status is ObservationStatus.NO_SIGNAL,observed
+    # A resident retry cannot silently restore the expired Owner intent.
+    with pytest.raises(OwnerControlConflict,match="selection_authorization_no_longer_current"):
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="expired_unfenced",idempotency_key="expired:unfenced",owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up")
+    next_anchor=(close//HOUR+1)*HOUR
+    async with PostgresKernelUnitOfWork(database) as uow:
+        reauthorized=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=next_anchor,
+            request=ControlMutationRequest(expected_version=expired_control.control_version,reason="explicit_retry_after_expiry",
+                idempotency_key="expired:new-owner-intent",owner_identity="owner",now_ms=close+1),authentication_strength="totp_step_up")
+        assert reauthorized.selection_epoch_id!=control.selection_epoch_id
+        assert reauthorized.pending_effective_period_anchor_ms==next_anchor
+        assert reauthorized.rollback_baseline_id==control.rollback_baseline_id
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+        assert (await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)).lifecycle_state.value=="ABANDONED"
+
+
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:
     role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
     grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]

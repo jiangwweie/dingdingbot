@@ -335,6 +335,50 @@ async def test_materialization_waits_for_current_facts_before_fencing_ready_snap
     assert result.reason_code=="WARM_READINESS_STALE"
 
 
+@pytest.mark.asyncio
+async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkeypatch):
+    from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        CurrentFactRefreshRuntimeRequest,
+        run_current_fact_refresh_runtime_once,
+    )
+    spec=generic_selection_spec("MI-001")
+    class Selection:
+        async def get_selection_control(self,*_): return SimpleNamespace(selection_mode=SelectionMode.DYNAMIC_SELECTION,pending_selection_mode=None)
+        async def get_current_entry_vacuum(self,**_): return None
+    class Owner:
+        async def get_strategy_control(self,*_): return SimpleNamespace(entry_state="enabled")
+    class Universes:
+        async def get_current(self,*_): return SimpleNamespace(universe_version_id="current:timeout")
+    class Signals:
+        async def list_current_fact_refresh_scopes(self,**_): return (SimpleNamespace(runtime_scope_id="scope:timeout"),)
+    class Uow:
+        instrument_selection=Selection()
+        owner_controls=Owner()
+        strategy_universes=Universes()
+        signals=Signals()
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): return None
+    async def hangs(*_): await asyncio.Event().wait()
+    monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.observe_strategy_scope",hangs)
+    request=CurrentFactRefreshRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="timeout",
+        now_ms=360000010,runtime_commit="test",schema_revision="test",timeout_seconds=0.01)
+    result=await asyncio.wait_for(run_current_fact_refresh_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),request=request),timeout=1)
+    assert result.status=="blocked" and result.reason_code=="CURRENT_FACT_SOURCE_TIMEOUT"
+
+
+@pytest.mark.parametrize("timeout",[0,-1,float("nan"),float("inf")])
+def test_current_facts_refresh_rejects_unbounded_timeout(timeout):
+    from pydantic import ValidationError
+
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        CurrentFactRefreshRuntimeRequest,
+    )
+    with pytest.raises(ValidationError):
+        CurrentFactRefreshRuntimeRequest(strategy_group_id="MI-001",selection_spec_id="test",worker_id="timeout",
+            now_ms=360000010,runtime_commit="test",schema_revision="test",timeout_seconds=timeout)
+
+
 def test_selection_period_is_not_due_before_the_0100_decision_boundary() -> None:
     session_start_ms = 1_800_057_600_000
 

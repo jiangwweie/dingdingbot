@@ -1064,6 +1064,16 @@ Observation进程内部独立facts loop每tick bounded1 scope，无第五service
 
 仍未完成：facts loop对first pending、无网络gap recovery/Vacuum期间及真实多scope并发的完整边界；resident进程重启/长时deadline与多period trace；queue expired头清理、lease/fairness完整矩阵；UI blocker/member rebase展示。不能把本段当GS-10 Done或GS-12 soak，也不能将结构化Review fixture称真实经济证据。
 
+#### 2026-10-10 unfenced expiry / facts timeout增量（基于d2d51194，未整卡签收）
+
+真实runtime入口在process/UoW重开后曾反复拒绝已过期DESIRED source，Generation无法终结。现正式repository边界只允许精确Owner/Control/epoch、PENDING或DESIRED、未fence、Snapshot已过期、无活lease、无Vacuum且无Universe target的Generation转ABANDONED；追加原expiry、Control/epoch/pending authorization和pre-fence原因。首次Static pending失败清除原pending/epoch并递增Control，保持原Static Universe/baseline，不伪造Dynamic Authority。不抢活lease，不将已fenced/Vacuum recovery改成这种快捷清理。
+
+Docker PG两分支实测：dispose原engine后新runtime tick不抢活lease，lease过期才终结；原Static在下一close实际Observation仍NO_SIGNAL；旧Owner intent重放拒绝，新的正式step-up授权生成独立epoch并保留原baseline，旧Generation不能复活。该scope涵盖runtime入口与重开连接，不冒称真实常驻OS process重启已认证。
+
+Current Facts refresh增加有限正数timeout（默认10秒，resident脚本使用既有timeout参数）；挂起source按CURRENT_FACT_SOURCE_TIMEOUT返回，不创建交易权限。NaN/Infinity参数RED复现后拒绝，取消不延长Generation deadline。末版相关PG expiry/lease/正常小时续期/Owner Pause/跨close/source-expiry组合10 passed（14.78s），Unit/Architecture1382 passed（13.62s），Ruff、Mypy161 files、diff PASS。没有最终release/R4或生产操作。
+
+GS-10仍IN_PROGRESS：真实resident多period/process restart、完整queue fairness与target release、Vacuum recovery freshness、first-pending多scope Facts闭环及完整status/rebase展示仍待完成；GS-11/12未签收。授权仍CAP-01→GS-10→GS-11→GS-12，GS-13及其准备子项前停止等待Owner确认。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

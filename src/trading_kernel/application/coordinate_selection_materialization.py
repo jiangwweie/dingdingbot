@@ -1867,6 +1867,15 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
                 selection_authority_id=committed.authority.selection_authority_id,selection_snapshot_id=initial.selection_snapshot_id,
                 materialization_generation_id=initial.materialization_generation_id)
+        if initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}:
+            spec=await uow.instrument_selection.get_generic_spec(initial.selection_spec_id)
+            if now_ms>=initial.period_anchor_ms+(1+spec.cadence_hours)*HOUR_MS:
+                if initial.lease_owner is not None and initial.lease_expires_at_ms is not None and now_ms<initial.lease_expires_at_ms:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_LEASE_HELD,
+                        materialization_generation_id=initial.materialization_generation_id,reason_code="GENERIC_GENERATION_LEASE_UNAVAILABLE")
+                await uow.instrument_selection.expire_unfenced_generic_generation(initial.materialization_generation_id)
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                    materialization_generation_id=initial.materialization_generation_id,reason_code="MATERIALIZATION_PERIOD_EXPIRED")
         claim = await uow.instrument_selection.claim_generic_materialization_generation(
             initial.materialization_generation_id,worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
         if claim.status is MaterializationGenerationClaimStatus.LEASE_HELD:

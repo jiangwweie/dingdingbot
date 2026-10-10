@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from enum import StrEnum
+from math import isfinite
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -120,6 +122,14 @@ class MaterializationRuntimeResult(BaseModel):
 class CurrentFactRefreshRuntimeRequest(SelectionRuntimeRequest):
     runtime_commit: str
     schema_revision: str
+    timeout_seconds: float = 10.0
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _positive_timeout(cls,value: float) -> float:
+        if not isfinite(value) or value<=0:
+            raise ValueError("current facts timeout must be finite and positive")
+        return value
 
 
 class CurrentFactRefreshRuntimeResult(BaseModel):
@@ -153,9 +163,12 @@ async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory
     if not scopes:
         return CurrentFactRefreshRuntimeResult(status="no_work")
     scope=scopes[0]
-    observed=await observe_strategy_scope(uow_factory,market_source,ObservationRequest(runtime_scope_id=scope.runtime_scope_id,
-        runtime_commit=request.runtime_commit,schema_revision=request.schema_revision,
-        trigger_candle_close_time_ms=request.now_ms//HOUR_MS*HOUR_MS,attempted_at_ms=request.now_ms,operation="refresh_current_facts"))
+    try:
+        observed=await asyncio.wait_for(observe_strategy_scope(uow_factory,market_source,ObservationRequest(runtime_scope_id=scope.runtime_scope_id,
+            runtime_commit=request.runtime_commit,schema_revision=request.schema_revision,
+            trigger_candle_close_time_ms=request.now_ms//HOUR_MS*HOUR_MS,attempted_at_ms=request.now_ms,operation="refresh_current_facts")),timeout=request.timeout_seconds)
+    except TimeoutError:
+        return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="CURRENT_FACT_SOURCE_TIMEOUT",runtime_scope_id=scope.runtime_scope_id)
     return CurrentFactRefreshRuntimeResult(status=observed.status.value,reason_code=observed.detector_reason,runtime_scope_id=scope.runtime_scope_id)
 
 
