@@ -23,7 +23,14 @@ from src.trading_kernel.application.drain_strategy_entry_vacuum import (
     VacuumDrainStatus,
     drain_strategy_entry_vacuum_once,
 )
-from src.trading_kernel.application.market_ports import InstrumentSelectionMarketSource
+from src.trading_kernel.application.market_ports import (
+    InstrumentSelectionMarketSource,
+    PublicMarketSource,
+)
+from src.trading_kernel.application.observe_strategy_scope import (
+    ObservationRequest,
+    observe_strategy_scope,
+)
 from src.trading_kernel.application.ports import UnitOfWorkFactory
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
@@ -108,6 +115,48 @@ class MaterializationRuntimeResult(BaseModel):
     entry_vacuum_id: str | None = None
     authority_gap_audit_id: str | None = None
     reason_code: str | None = None
+
+
+class CurrentFactRefreshRuntimeRequest(SelectionRuntimeRequest):
+    runtime_commit: str
+    schema_revision: str
+
+
+class CurrentFactRefreshRuntimeResult(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    status: str
+    reason_code: str | None = None
+    runtime_scope_id: str | None = None
+
+
+async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
+    request: CurrentFactRefreshRuntimeRequest) -> CurrentFactRefreshRuntimeResult:
+    family=generic_selection_spec(request.strategy_group_id)
+    if family.selection_spec_id!=request.selection_spec_id:
+        return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="SELECTION_SPEC_DRIFT")
+    async with uow_factory() as uow:
+        owner=await uow.owner_controls.get_strategy_control(request.strategy_group_id)
+        control=await uow.instrument_selection.get_selection_control(request.strategy_group_id)
+        eligible_pending=control is not None and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+            control.pending_effective_period_anchor_ms is not None and request.now_ms>=control.pending_effective_period_anchor_ms+HOUR_MS)
+        if owner is None or owner.entry_state!="enabled" or control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not eligible_pending):
+            return CurrentFactRefreshRuntimeResult(status="no_work")
+        vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id)
+        if vacuum is not None and vacuum.blocks_new_entry:
+            return CurrentFactRefreshRuntimeResult(status="no_work",reason_code="ENTRY_VACUUM")
+        current=await uow.strategy_universes.get_current(family.event_spec_id)
+        if current is None:
+            return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="CURRENT_UNIVERSE_MISSING")
+        scopes=await uow.signals.list_current_fact_refresh_scopes(event_spec_id=family.event_spec_id,
+            universe_version_id=current.universe_version_id,closed_at_ms=request.now_ms//HOUR_MS*HOUR_MS,
+            checked_at_ms=request.now_ms,limit=1)
+    if not scopes:
+        return CurrentFactRefreshRuntimeResult(status="no_work")
+    scope=scopes[0]
+    observed=await observe_strategy_scope(uow_factory,market_source,ObservationRequest(runtime_scope_id=scope.runtime_scope_id,
+        runtime_commit=request.runtime_commit,schema_revision=request.schema_revision,
+        trigger_candle_close_time_ms=request.now_ms//HOUR_MS*HOUR_MS,attempted_at_ms=request.now_ms,operation="refresh_current_facts"))
+    return CurrentFactRefreshRuntimeResult(status=observed.status.value,reason_code=observed.detector_reason,runtime_scope_id=scope.runtime_scope_id)
 
 
 def current_sor_selection_session_start_ms(now_ms: int) -> int | None:
@@ -386,9 +435,16 @@ async def _run_generic_materialization_runtime_once(
     elif job is not None and job.state=="SNAPSHOT_READY" and job.selection_snapshot_id is not None:
         # Continuity is independent of the Selector and precedes disposition.
         if control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
-            await coordinate_selection_materialization_once(uow_factory=uow_factory,
+            continuity=await coordinate_selection_materialization_once(uow_factory=uow_factory,
                 request=CoordinateGenericPeriodRequest(strategy_group_id=request.strategy_group_id,
                     selection_spec_id=request.selection_spec_id,period_anchor_ms=cutoff,worker_id=request.worker_id),clock_ms=clock_ms)
+            if continuity.reason_code in {"WARM_READINESS_STALE","WARM_READINESS_MISSING","CERTIFICATION_STALE",
+                "COMPARATIVE_PROJECTION_INCOMPLETE","CERTIFICATION_TEMPORARILY_UNAVAILABLE"}:
+                async with uow_factory() as uow:
+                    latest=await uow.instrument_selection.get_generic_snapshot(job.selection_snapshot_id)
+                if latest.selected_members:
+                    return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.WAITING,period_anchor_ms=cutoff,
+                        disposition=continuity.disposition,reason_code=continuity.reason_code)
         step=CoordinateGenericSnapshotRequest(selection_snapshot_id=job.selection_snapshot_id,worker_id=request.worker_id)
     elif generation is not None:
         step=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,worker_id=request.worker_id)

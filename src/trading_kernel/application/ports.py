@@ -1194,6 +1194,8 @@ class SignalRepository(Protocol):
         readiness: WarmReadiness,
     ) -> None: ...
 
+    async def save_current_fact_readiness(self,readiness: WarmReadiness) -> None: ...
+
     async def clear_warm_readiness(
         self,
         *,
@@ -1228,6 +1230,10 @@ class SignalRepository(Protocol):
         *,
         for_update: bool = False,
     ) -> RuntimeScopeSnapshot | None: ...
+
+    async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
+        universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
+        limit: int) -> tuple[RuntimeScopeSnapshot,...]: ...
 
     async def get_active_universe_member(
         self,

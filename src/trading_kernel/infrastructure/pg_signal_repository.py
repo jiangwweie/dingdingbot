@@ -1068,6 +1068,23 @@ class PostgresSignalRepository:
             updated_at_ms=updated_at_ms,
         )
 
+    async def save_current_fact_readiness(self,readiness: WarmReadiness) -> None:
+        result=await self._connection.execute(sa.update(runtime_scopes_current).where(
+            runtime_scopes_current.c.runtime_scope_id==readiness.runtime_scope_id,
+            runtime_scopes_current.c.scope_version==readiness.scope_version,
+            runtime_scopes_current.c.observation_generation==readiness.observation_generation,
+            runtime_scopes_current.c.event_spec_id==readiness.event_spec_id,
+            runtime_scopes_current.c.universe_version_id==readiness.universe_version_id,
+            runtime_scopes_current.c.universe_semantic_digest==readiness.universe_semantic_digest,
+            runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True),
+            sa.or_(runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),
+                runtime_scopes_current.c.warm_closed_bar_time_ms<=readiness.warm_closed_bar_time_ms),
+        ).values(warm_closed_bar_time_ms=readiness.warm_closed_bar_time_ms,
+            warm_completed_at_ms=readiness.warm_completed_at_ms,warm_valid_until_ms=readiness.warm_valid_until_ms,
+            warm_readiness_digest=readiness.readiness_digest))
+        if result.rowcount!=1:
+            raise RuntimeError("Current fact-readiness source changed")
+
     async def get_strategy_group(
         self,
         strategy_group_id: str,
@@ -1113,6 +1130,19 @@ class PostgresSignalRepository:
             if row is None
             else EventSpecSnapshot.model_validate(row, extra="ignore")
         )
+
+    async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
+        universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
+        limit: int) -> tuple[RuntimeScopeSnapshot,...]:
+        if not 1<=limit<=16:
+            raise ValueError("Current fact refresh bound invalid")
+        rows=(await self._connection.execute(sa.select(runtime_scopes_current).where(
+            runtime_scopes_current.c.event_spec_id==event_spec_id,runtime_scopes_current.c.universe_version_id==universe_version_id,
+            runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True),
+            sa.or_(runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),runtime_scopes_current.c.warm_closed_bar_time_ms<closed_at_ms,
+                runtime_scopes_current.c.warm_valid_until_ms<=checked_at_ms),
+        ).order_by(runtime_scopes_current.c.exchange_instrument_id).limit(limit))).mappings().all()
+        return tuple(RuntimeScopeSnapshot.model_validate(row,extra="ignore") for row in rows)
 
     async def get_runtime_scope(
         self,

@@ -220,6 +220,8 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(mon
     monkeypatch.setattr(script,"run_selection_runtime_once",selection)
     monkeypatch.setattr(script,"run_materialization_runtime_once",materialization)
     monkeypatch.setattr(script,"run_observation_worker_once",observe)
+    async def refresh(**_): return SimpleNamespace(status="no_work")
+    monkeypatch.setattr(script,"run_current_fact_refresh_runtime_once",refresh)
     monkeypatch.setattr(script,"run_worker_process_group",group)
     assert await script._run(args)==0
     expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001"}
@@ -259,6 +261,78 @@ async def test_generic_readonly_separates_latest_success_age_from_membership_sou
     assert view.membership_source_age_ms==4*3600000+10
     assert view.selection_mode is SelectionMode.DYNAMIC_SELECTION
     assert view.first_blocker=="SELECTION_STALE_PAUSED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect,expected",[("expired","AUTHORITY_EXPIRED"),("control","AUTHORITY_CONTROL_CHANGED"),("future","AUTHORITY_NOT_EFFECTIVE")])
+async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defect,expected):
+    from src.trading_kernel.domain.dynamic_selection_timing import (
+        build_dynamic_membership_freshness,
+        build_generic_selection_period,
+    )
+    from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+    from src.trading_kernel.interfaces.readonly_api import (
+        GenericSelectionRuntimeReadonlyRequest,
+        get_generic_selection_runtime_view,
+    )
+    spec=generic_selection_spec("MI-001")
+    now=(101 if defect=="expired" else 100)*3600000+10
+    fresh=build_dynamic_membership_freshness(source_snapshot_id="snapshot:status",source_member_set_digest="sha256:"+"a"*64,
+        period=build_generic_selection_period(feature_cutoff_at_ms=99*3600000,cadence_hours=1))
+    control=SelectionControl(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,control_version=2,
+        selection_epoch_id="epoch:status",rollback_baseline_id=None,updated_at_ms=1)
+    authority=SimpleNamespace(membership_freshness=fresh,selection_authority_id="authority:status",authority_outcome="ACTIVE_NEW",
+        selection_epoch_id="epoch:status",selection_control_version=1 if defect=="control" else 2,owner_control_version=1,
+        effective_from_ms=now+1 if defect=="future" else 100*3600000,expires_at_ms=101*3600000)
+    class Repo:
+        async def get_generic_spec(self,*_): return spec
+        async def get_selection_control(self,*_): return control
+        async def get_latest_generic_snapshot(self,*_,**__): return None
+        async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=authority)
+        async def get_current_entry_vacuum(self,**_): return None
+    class Owner:
+        async def get_strategy_control(self,*_): return SimpleNamespace(entry_state="enabled",control_version=1)
+    view=await get_generic_selection_runtime_view(SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner()),
+        GenericSelectionRuntimeReadonlyRequest(strategy_group_id="MI-001",now_ms=now))
+    assert view.first_blocker==expected
+    assert view.selection_mode is SelectionMode.DYNAMIC_SELECTION
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("valid_empty",[False,True])
+async def test_materialization_waits_for_current_facts_before_fencing_ready_snapshot(monkeypatch,valid_empty):
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateSelectionMaterializationResult,
+        MaterializationDisposition,
+    )
+    from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+    spec=generic_selection_spec("MI-001")
+    control=SelectionControl(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,control_version=1,
+        selection_epoch_id="epoch:current-facts",rollback_baseline_id=None,updated_at_ms=1)
+    class Repo:
+        async def get_generic_spec(self,*_): return spec
+        async def get_selection_control(self,*_): return control
+        async def get_latest_unfinished_generic_generation(self,**_): return None
+        async def get_current_entry_vacuum(self,**_): return None
+        async def get_selection_job(self,**_): return SimpleNamespace(state="SNAPSHOT_READY",selection_snapshot_id="ready:snapshot")
+        async def get_generic_snapshot(self,*_): return SimpleNamespace(selected_members=() if valid_empty else ("member",))
+    class Uow:
+        instrument_selection=Repo()
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): return None
+    calls=[]
+    async def coordinator(**kwargs):
+        calls.append(kwargs["request"])
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,reason_code="WARM_READINESS_STALE")
+    monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.coordinate_selection_materialization_once",coordinator)
+    result=await run_materialization_runtime_once(uow_factory=Uow,audit_source=SimpleNamespace(),
+        request=SelectionRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="waiting",
+            now_ms=100*3600000+8),clock_ms=lambda:100*3600000+8)
+    assert len(calls)==(2 if valid_empty else 1)
+    assert result.status is (MaterializationRuntimeStatus.BLOCKED if valid_empty else MaterializationRuntimeStatus.WAITING)
+    assert result.reason_code=="WARM_READINESS_STALE"
 
 
 def test_selection_period_is_not_due_before_the_0100_decision_boundary() -> None:

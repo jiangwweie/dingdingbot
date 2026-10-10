@@ -236,6 +236,75 @@ async def test_generic_runtime_status_is_bounded_readonly_for_static_install(dat
             assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh_fault",[None,"owner_pause","close_boundary"])
+async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: AsyncEngine,refresh_fault) -> None:
+    source,first,_,uid=await _exercise_generic_generation(database,"MPG-001",True,
+        durable=True,first_activation=True,natural_selection=True)
+    second_source=next_input(source).model_copy(update={"predecessor_snapshot":first})
+    class Market:
+        async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+            return tuple(window.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for window in second_source.member_windows)
+        async def fetch_generic_selection_klines(self,request):
+            return next(window.candles for window in second_source.member_windows if window.exchange_instrument_id==request.exchange_instrument_id)
+    selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=Market(),
+        request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=first.selection_epoch_id,
+            period_anchor_ms=second_source.feature_cutoff_at_ms,worker_id="renewal-without-fixture"),
+        clock_ms=lambda:second_source.feature_cutoff_at_ms+60_000)
+    assert selected.outcome=="SNAPSHOT_READY"
+    now=second_source.feature_cutoff_at_ms+HOUR+8
+    # Reconciliation refreshes exchange certifications independently. Do not
+    # rewrite the original one-time warm-readiness evidence to hide expiry.
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_instrument_certification_current SET observed_at_ms=:at,valid_until_ms=:until,next_check_at_ms=:until WHERE runtime_profile_id='tiny-live-v1'"),
+            {"at":now-1,"until":now+HOUR})
+    async with database.connect() as connection:
+        scope_id=await connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid LIMIT 1"),{"uid":uid})
+        before_episodes=(await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()
+    template=mpg_flat_snapshot()
+    close=now//HOUR*HOUR
+    class RefreshMarket:
+        paused=False
+        async def fetch_closed_candles(self,request):
+            if refresh_fault=="owner_pause" and not self.paused:
+                self.paused=True
+                from src.trading_kernel.application.owner_control import (
+                    set_strategy_entry_state,
+                )
+                from src.trading_kernel.domain.owner_control import StrategyEntryState
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    owner=await uow.owner_controls.get_strategy_control("MPG-001")
+                    await set_strategy_entry_state(uow,strategy_group_id="MPG-001",target_state=StrategyEntryState.PAUSED,
+                        request=ControlMutationRequest(expected_version=owner.control_version,reason="refresh_race_owner_pause",
+                            idempotency_key="refresh:owner-pause",owner_identity="owner",now_ms=now-1),authentication_strength="totp_step_up")
+            delta=close-template.trigger_candle_close_time_ms
+            candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(candle.model_copy(update={"open_time_ms":candle.open_time_ms+delta,"close_time_ms":candle.close_time_ms+delta}) for candle in candles)[-request.limit:]
+    refresh_clock=AsyncMock(return_value=now-1)
+    if refresh_fault=="close_boundary":
+        refresh_clock=AsyncMock(side_effect=[now-1,close+HOUR])
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=refresh_clock):
+        from src.trading_kernel.interfaces.selection_runtime_worker import (
+            CurrentFactRefreshRuntimeRequest,
+            run_current_fact_refresh_runtime_once,
+        )
+        refreshed=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=RefreshMarket(),
+            request=CurrentFactRefreshRuntimeRequest(strategy_group_id="MPG-001",selection_spec_id=source.spec.selection_spec_id,
+                worker_id="current-facts-renewal",runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now-1))
+    assert refreshed.status==("facts_refreshed" if refresh_fault is None else "invalid"),refreshed
+    async with database.connect() as connection:
+        assert (await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()==before_episodes
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+    if refresh_fault is not None:
+        async with database.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT warm_closed_bar_time_ms FROM brc_runtime_scopes_current WHERE runtime_scope_id=:scope"),{"scope":scope_id})<close
+        return
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+        result=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=CoordinateGenericSnapshotRequest(selection_snapshot_id=selected.selection_snapshot_id,worker_id="renewal-current"),clock_ms=lambda:now)
+    assert result.disposition is MaterializationDisposition.NO_CHANGE,result
+
+
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:
     role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
     grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]

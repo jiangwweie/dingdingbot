@@ -1050,6 +1050,20 @@ Hosting/CLI focused27 PASS；真实PG host handoff+age-order+readonly末版7项P
 
 剩余GS-10验收：所有策略真实resident进程restart/lease/rebase/stale边界、queue失效/取消/target-release完整fairness矩阵、status对authority expiry/rebase等blockers的完整展示、fault/healthy重复tick零意外持久化。不得按单测计数签收；GS-11/12仍未签收。
 
+#### 2026-10-10 当前Facts刷新闭环与readonly过期诊断（基于c5aab4e2，未整卡签收）
+
+readonly新RED证明旧Authority已expired但membership仍在两period预算内时first_blocker为空；现独立显示AUTHORITY_EXPIRED、AUTHORITY_NOT_EFFECTIVE、AUTHORITY_CONTROL_CHANGED，保留Dynamic mode，不拿成员age替代Authority合法性。其它rebase/member粒度与Global Policy状态仍需GS-10/11完整展示，不把View当Entry Gate。
+
+移除测试手工续长warm TTL后，真实小时NO_CHANGE最初CERTIFICATION_STALE，模拟独立Reconciliation刷新证书后仍WARM_READINESS_STALE：原warming证据仅一次写入，普通active Observation又被到期旧Authority拦住，无法刷新新close。这是真实closed-bar时钟闭环缺口，不通过放松certification/freshness修复。
+
+新增原observe_strategy_scope内的typed `refresh_current_facts` operation，仅对已安装Generic当前Active Universe做只读行情→同一Detector Facts→current readiness CAS；不推进Episode/rebase、不创建Signal/Ticket/Command/Authority。网络前后以frozen CurrentFactsRefreshSource核对Owner/Control/epoch/Spec semantic、current Universe/scope/observation generation及runtime capability commit/schema；数据库clock限定最新close，使用实际完成clock建readiness，最终跨close时回滚。Owner Pause、scope/control漂移、Vacuum/无安装等拒绝；普通observe分支保持原Authority验证。refresh不claim新的observation generation，避免抢占正常Signal生产者；新readiness只更新原Active scope的warm字段，不写第二readiness/authority链、不清旧Signal状态。
+
+Observation进程内部独立facts loop每tick bounded1 scope，无第五service；materializer遇WARM/CERTIFICATION/Comparison未就绪时等待，不提前fence正常非空结果，VALID_EMPTY仍按原负向语义处理。Dynamic与已到生效时间的first pending Dynamic可刷新；Static无pending短路。事实刷新不是trade authority，正常切换仍须precommitted Snapshot与latest-unconsumed-close proof；恢复仍future-close-only+rebase。本轮此operation从真实runtime facts入口到NO_CHANGE，未用fixture rewrite warm TTL。
+
+真实PG正常续期/行情IO中Owner Pause/IO跨close3项PASS，明确Episode/Signal不变，失败warm_close未更新；同Policy B MPG/MI自然链共focused5 PASS。普通Observation/market bounds/hosting相邻56 PASS对应最终clock/Spec细化前切片；末版Unit/Architecture/API **1412 passed，17.82s**，Mypy162与Ruff/diff PASS；所有verification已终态。无生产修改、GS-13未执行。
+
+仍未完成：facts loop对first pending、无网络gap recovery/Vacuum期间及真实多scope并发的完整边界；resident进程重启/长时deadline与多period trace；queue expired头清理、lease/fairness完整矩阵；UI blocker/member rebase展示。不能把本段当GS-10 Done或GS-12 soak，也不能将结构化Review fixture称真实经济证据。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

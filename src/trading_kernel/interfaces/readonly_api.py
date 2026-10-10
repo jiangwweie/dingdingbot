@@ -97,6 +97,8 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
     blocker=None
     if not installed:
         blocker="SPEC_NOT_INSTALLED"
+    elif control is None or control.selection_spec_id!=family.selection_spec_id:
+        blocker="SELECTION_CONTROL_MISSING_OR_DRIFTED"
     elif owner is None or owner.entry_state!="enabled":
         blocker="OWNER_PAUSED"
     elif vacuum is not None and vacuum.blocks_new_entry:
@@ -105,6 +107,14 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         blocker="VALID_EMPTY"
     elif freshness is not None and not freshness.allows_new_entry_at(request.now_ms):
         blocker="SELECTION_STALE_PAUSED"
+    elif authority is not None and request.now_ms>=authority.expires_at_ms:
+        blocker="AUTHORITY_EXPIRED"
+    elif authority is not None and request.now_ms<authority.effective_from_ms:
+        blocker="AUTHORITY_NOT_EFFECTIVE"
+    elif authority is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION and (
+        authority.selection_epoch_id!=control.selection_epoch_id or authority.selection_control_version!=control.control_version
+        or authority.owner_control_version!=owner.control_version):
+        blocker="AUTHORITY_CONTROL_CHANGED"
     elif authority is None and control is not None and control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
         blocker="AUTHORITY_MISSING"
     return GenericSelectionRuntimeReadonlyView(strategy_group_id=request.strategy_group_id,

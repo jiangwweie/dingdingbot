@@ -37,7 +37,9 @@ from src.trading_kernel.interfaces.observation_worker import (
     run_observation_worker_once,
 )
 from src.trading_kernel.interfaces.selection_runtime_worker import (
+    CurrentFactRefreshRuntimeRequest,
     SelectionRuntimeRequest,
+    run_current_fact_refresh_runtime_once,
     run_materialization_runtime_once,
     run_selection_runtime_once,
 )
@@ -180,11 +182,18 @@ async def _run(args: argparse.Namespace) -> int:
                 return await selection_tick(group,spec_id)
             async def generic_materialization_tick(group=group,spec_id=family.selection_spec_id):
                 return await materialization_tick(group,spec_id)
+            async def current_facts_tick(group=group,spec_id=family.selection_spec_id):
+                now_ms=args.now_ms or int(time.time()*1000)
+                return await run_current_fact_refresh_runtime_once(uow_factory=uow_factory,market_source=cast(PublicMarketSource,source),
+                    request=CurrentFactRefreshRuntimeRequest(strategy_group_id=group,selection_spec_id=spec_id,worker_id=f"{args.worker_id}:facts:{group}",
+                        now_ms=now_ms,runtime_commit=args.runtime_commit,schema_revision=args.schema_revision))
             generic_loops.extend((
                 WorkerProcessLoop(component_id=f"{selection_worker_id}:{group}",tick=generic_selection_tick,
                     poll_interval_ms=args.selection_poll_interval_ms,idle_statuses=frozenset({"not_due","not_installed","already_ready"})),
                 WorkerProcessLoop(component_id=f"{materialization_worker_id}:{group}",tick=generic_materialization_tick,
                     poll_interval_ms=args.materialization_poll_interval_ms,idle_statuses=frozenset({"not_due","waiting"})),
+                WorkerProcessLoop(component_id=f"{args.worker_id}:facts:{group}",tick=current_facts_tick,
+                    poll_interval_ms=args.poll_interval_ms,idle_statuses=frozenset({"no_work"})),
             ))
         return await run_worker_process_group(
             (
