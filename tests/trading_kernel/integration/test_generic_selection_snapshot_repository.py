@@ -10184,12 +10184,16 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             tick += 1
             return tick
 
-        selected = await run_instrument_selection_once(
+        from src.trading_kernel.interfaces.selection_runtime_worker import (
+            SelectionRuntimeRequest,
+            run_selection_runtime_once,
+        )
+        selected = await run_selection_runtime_once(
             uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectionMarket(),
-            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
-                selection_epoch_id=staged.selection_epoch_id,period_anchor_ms=CUTOFF,
+            request=SelectionRuntimeRequest(selection_spec_id=source.spec.selection_spec_id,
+                strategy_group_id=group,now_ms=CUTOFF,
                 worker_id=f"natural-{group}-selector"),clock_ms=selection_clock)
-        assert selected.outcome == "SNAPSHOT_READY"
+        assert selected.status.value == "snapshot_ready"
         async with PostgresKernelUnitOfWork(database) as selection_uow:
             snapshot = await selection_uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
             assert snapshot.selection_epoch_id == staged.selection_epoch_id

@@ -1030,6 +1030,12 @@ MPG/MI小时策略自然终态增量（基于`d28fe872`）：在上述三期正�
 
 ### GS-10 — Worker hosting / restart / bounded status
 
+#### 2026-10-10 首个hosting切片（未整卡签收）
+
+`run_selection_runtime_once`曾把Generic请求按SOR日边界和默认sor-v0 epoch调用Runner；CPM/MPG/MI/BRF2各实际RED证明错误。现按已安装Spec的冻结1h/4h cadence取feature cutoff，核对Control/epoch/pending period与Owner状态，才调用同一个Generic Runner。Static无pending/Owner Pause为零Job/零market短路，未安装/epoch不允许不触发计算；新结果使用period_anchor_ms，SOR Session字段不混用Generic identity。参数仍冻结，无Detector/Alpha修改。
+
+Hosting unit18 passed，真实Owner→Selection入口→Generic PG Snapshot→Materializer→Observation→Ticket→Review MPG/MI2 passed（不是仅mock下游Snapshot）。随后Unit/Architecture/API1399 passed、Mypy164与Ruff/diff PASS。该切片尚未接Observation常驻脚本的所有策略调度、Generic materialization tick、global aging/fairness、重启与bounded status，不代表GS-10 Done；CAP-01 local签收保持，GS-13 WAIT_OWNER_CONFIRMATION，无生产修改。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

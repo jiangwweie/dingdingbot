@@ -85,6 +85,69 @@ def test_observation_process_exposes_three_distinct_logical_component_identities
     assert len(set(observation_process_component_map().values())) == 3
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_generic_resident_selection_uses_its_cadence_and_epoch(monkeypatch,group):
+    from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+    spec=generic_selection_spec(group)
+    cutoff=100*3600000
+    control=SelectionControl(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,
+        selection_mode=SelectionMode.DYNAMIC_SELECTION,pending_selection_mode=None,pending_effective_period_anchor_ms=None,
+        pending_authorization_id=None,control_version=2,rollback_baseline_id=None,selection_epoch_id="epoch:resident",
+        updated_at_ms=cutoff-1)
+    class Repo:
+        async def get_selection_control(self,group_id):
+            assert group_id==group
+            return control
+        async def get_generic_spec(self,spec_id):
+            assert spec_id==spec.selection_spec_id
+            return spec
+    class Owner:
+        async def get_strategy_control(self,group_id):
+            return SimpleNamespace(entry_state="enabled")
+    class Uow:
+        instrument_selection=Repo()
+        owner_controls=Owner()
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): return None
+    calls=[]
+    async def runner(**kwargs):
+        calls.append(kwargs["request"])
+        return SimpleNamespace(outcome="SNAPSHOT_READY",selection_job_id="job:generic",selection_snapshot_id="snapshot:generic",reason_code=None)
+    monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.run_instrument_selection_once",runner)
+    result=await run_selection_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),
+        request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,worker_id="resident",
+            now_ms=cutoff+1234),clock_ms=lambda:cutoff+1234)
+    assert result.status is SelectionRuntimeStatus.SNAPSHOT_READY
+    assert len(calls)==1 and calls[0].selection_epoch_id=="epoch:resident"
+    assert calls[0].period_anchor_ms==cutoff
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,paused,expected",[("static_baseline",False,"not_due"),("dynamic_selection",True,"not_due")])
+async def test_generic_resident_short_circuit_has_no_job_or_market_call(mode,paused,expected):
+    from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+    spec=generic_selection_spec("MI-001")
+    control=SelectionControl(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,selection_mode=mode,
+        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
+        control_version=1,rollback_baseline_id=None,selection_epoch_id="epoch:short-circuit" if mode=="dynamic_selection" else None,
+        updated_at_ms=1)
+    class Repo:
+        async def get_selection_control(self,*_): return control
+        async def get_generic_spec(self,*_): raise AssertionError("inactive Selector must not load source or claim Job")
+    class Owner:
+        async def get_strategy_control(self,*_): return SimpleNamespace(entry_state="paused" if paused else "enabled")
+    class Uow:
+        instrument_selection=Repo()
+        owner_controls=Owner()
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): return None
+    result=await run_selection_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),
+        request=SelectionRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="inactive",
+            now_ms=100*3600000),clock_ms=lambda:100*3600000)
+    assert result.status.value==expected
+
+
 def test_selection_period_is_not_due_before_the_0100_decision_boundary() -> None:
     session_start_ms = 1_800_057_600_000
 

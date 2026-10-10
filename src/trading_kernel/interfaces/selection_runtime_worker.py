@@ -25,6 +25,7 @@ from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
 )
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS
 from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
@@ -39,6 +40,9 @@ class SelectionRuntimeStatus(StrEnum):
     ALREADY_READY = "already_ready"
     SOURCE_FAILED = "source_failed"
     COMPUTE_FAILED = "compute_failed"
+    NOT_INSTALLED = "not_installed"
+    EXPIRED = "expired"
+    SUPERSEDED = "superseded"
 
 
 class MaterializationRuntimeStatus(StrEnum):
@@ -82,6 +86,7 @@ class SelectionRuntimeResult(BaseModel):
 
     status: SelectionRuntimeStatus
     session_start_ms: int | None = None
+    period_anchor_ms: int | None = None
     selection_job_id: str | None = None
     selection_snapshot_id: str | None = None
     reason_code: str | None = None
@@ -118,6 +123,9 @@ async def run_selection_runtime_once(
     request: SelectionRuntimeRequest,
     clock_ms: Callable[[], int],
 ) -> SelectionRuntimeResult:
+    if request.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}:
+        return await _run_generic_selection_runtime_once(uow_factory=uow_factory,market_source=market_source,
+            request=request,clock_ms=clock_ms)
     session_start_ms = current_sor_selection_session_start_ms(request.now_ms)
     if session_start_ms is None:
         return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE)
@@ -171,6 +179,42 @@ async def run_selection_runtime_once(
         selection_snapshot_id=result.selection_snapshot_id,
         reason_code=result.reason_code,
     )
+
+
+async def _run_generic_selection_runtime_once(
+    *, uow_factory: UnitOfWorkFactory, market_source: InstrumentSelectionMarketSource,
+    request: SelectionRuntimeRequest, clock_ms: Callable[[], int],
+) -> SelectionRuntimeResult:
+    family=generic_selection_spec(request.strategy_group_id)
+    if request.selection_spec_id!=family.selection_spec_id:
+        return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="SELECTION_SPEC_DRIFT")
+    cadence_ms=family.cadence_hours*HOUR_MS
+    cutoff=request.now_ms//cadence_ms*cadence_ms
+    async with uow_factory() as uow:
+        control=await uow.instrument_selection.get_selection_control(request.strategy_group_id)
+        if control is None:
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_INSTALLED,reason_code="GENERIC_CONTROL_NOT_INSTALLED")
+        if control.selection_spec_id!=request.selection_spec_id:
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="SELECTION_CONTROL_SPEC_DRIFT")
+        if control.selection_mode is SelectionMode.DISABLED or (
+            control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is None):
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE,reason_code="STATIC_BASELINE_NO_PENDING_DYNAMIC")
+        if control.selection_epoch_id is None or not control.permits_dynamic_period(cutoff):
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE,reason_code="GENERIC_PENDING_PERIOD_NOT_DUE")
+        owner=await uow.owner_controls.get_strategy_control(request.strategy_group_id)
+        if owner is None or owner.entry_state!="enabled":
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE,reason_code="OWNER_PAUSED")
+        try:
+            installed=await uow.instrument_selection.get_generic_spec(request.selection_spec_id)
+        except LookupError:
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_INSTALLED,reason_code="GENERIC_SPEC_NOT_INSTALLED")
+        if installed!=family:
+            return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="GENERIC_INSTALLED_SPEC_DRIFT")
+    result=await run_instrument_selection_once(uow_factory=uow_factory,market_source=market_source,
+        request=RunInstrumentSelectionRequest(selection_spec_id=request.selection_spec_id,period_anchor_ms=cutoff,
+            selection_epoch_id=control.selection_epoch_id,worker_id=request.worker_id,max_concurrency=request.max_concurrency),clock_ms=clock_ms)
+    return SelectionRuntimeResult(status=SelectionRuntimeStatus(result.outcome.lower()),period_anchor_ms=cutoff,
+        selection_job_id=result.selection_job_id,selection_snapshot_id=result.selection_snapshot_id,reason_code=result.reason_code)
 
 
 async def run_materialization_runtime_once(
