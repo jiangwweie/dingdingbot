@@ -991,6 +991,42 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(i
                 strategy_group_id=ticket.identity.runtime.strategy_group_id,position_side="long")==1-index
 
 
+@pytest.mark.asyncio
+async def test_capacity_v0_brf2_family_one_overrides_strategy_side_two(issue_engine) -> None:
+    request=RuntimeAuthoritySeedRequest(account_id="subaccount-source-test",runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=NOW_MS-10_000_000)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await seed_runtime_authority(uow,request)
+        await set_strategy_entry_state(uow,strategy_group_id="SOR-001",target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor",idempotency_key="brf2-capacity:sor-pause",
+                owner_identity="owner",now_ms=NOW_MS-9_000_000),authentication_strength="totp_step_up")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await deploy_compatible_upgrade_identity(uow,request.model_copy(update={"seeded_at_ms":NOW_MS-8_000_000}))
+    market=RecordingReplayMarketSource()
+    template=brf2_short_snapshot()
+    market._base_responses[(SOL,"1h")]=template.candles_1h
+    market._base_responses[(SOL,"4h")]=template.candles_4h
+    await _install_and_activate(issue_engine,market,event_id="BRF2-SHORT",members=(ETH,SOL))
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await arm_acceptance_policy(uow,ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS-1))
+    venue=CertifiedVenue()
+    first=await _observe_and_admit(issue_engine,market,venue,runtime_scope_id=await _active_scope_id(issue_engine,ETH),offset_ms=0)
+    assert first[1] is EntryWorkerStatus.DISPATCHED,first
+    positions=await _release_entry_lane(issue_engine,venue,ticket_id=first[5],now_ms=NOW_MS+2000)
+    await _refresh_instrument_certification(issue_engine,positions,exchange_instrument_id=SOL,now_ms=NOW_MS+TWO_HOURS_MS-1)
+    second=await _observe_and_admit(issue_engine,market,venue,runtime_scope_id=await _active_scope_id(issue_engine,SOL),offset_ms=TWO_HOURS_MS)
+    assert second[1] is EntryWorkerStatus.ISSUE_REFUSED,second
+    assert second[4]=="exposure_family_capacity_exhausted",second
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        claim=await uow.capacity_claims.get_for_ticket(first[5])
+        assert claim.max_same_strategy_side==2 and claim.family_ticket_limit==1
+        rejected=await uow.admission_decisions.get_for_signal(second[2])
+        assert rejected.portfolio_usage.max_same_strategy_side==2
+        assert rejected.portfolio_usage.active_strategy_side_ticket_count==1
+        assert rejected.portfolio_usage.active_family_ticket_count==1
+        assert rejected.ticket_id is None
+
+
 async def _seed_replay_runtime(
     engine: AsyncEngine,
     source: RecordingReplayMarketSource,

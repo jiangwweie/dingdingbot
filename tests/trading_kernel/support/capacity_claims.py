@@ -24,6 +24,8 @@ def make_issue_request(
     claim_owner: str,
     stress_balance: Decimal | None = None,
     ticket_margin_budget: Decimal = Decimal(30),
+    max_same_strategy_side: int | None = None,
+    active_strategy_side_ticket_count_at_claim: int | None = None,
 ) -> IssueTicketRequest:
     configured_leverage = (
         ticket.selected_leverage - 1
@@ -77,6 +79,8 @@ def make_issue_request(
             exposure_family=ticket.exposure_family,
             active_family_ticket_count_at_claim=0,
             family_ticket_limit=ticket.family_ticket_limit,
+            max_same_strategy_side=max_same_strategy_side,
+            active_strategy_side_ticket_count_at_claim=active_strategy_side_ticket_count_at_claim,
             remaining_family_slots_at_claim=ticket.family_ticket_limit,
             gross_risk_at_stop_at_claim=Decimal(0),
             directional_risk_at_stop_at_claim=Decimal(0),

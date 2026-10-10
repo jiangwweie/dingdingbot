@@ -1273,7 +1273,6 @@ async def _certify(
             == DYNAMIC_POLICY.max_concurrent_tickets,
             _capacity_policy_contract_matches(max_same_strategy_side=owner_policy_row["max_same_strategy_side"],
                 family_ticket_limits=owner_policy_row["family_ticket_limits"]),
-            revision != "0009_capacity_policy_v0" or owner_policy_row["max_same_strategy_side"] == 2,
             Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
             == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
             Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))

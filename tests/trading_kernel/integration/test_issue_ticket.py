@@ -972,6 +972,73 @@ async def test_two_worker_race_has_exactly_one_global_entry_winner(
     assert sum(ticket is not None for ticket in persisted) == 1
 
 
+@pytest.mark.asyncio
+async def test_capacity_v0_distinct_claims_serialize_last_strategy_slot(issue_engine: AsyncEngine) -> None:
+    await _seed_policy(issue_engine,max_same_strategy_side=2)
+    tickets=tuple(_ticket_for_strategy_group(f"signal-cap-race-{index}",f"episode-cap-race-{index}",
+        strategy_group_id="MI-001",strategy_version_id="MI-001:v2",event_spec_id="mi-long-v2",
+        exchange_instrument_id=f"binance-usdm:{symbol}:perpetual",runtime_scope_id=f"scope-cap-race-{index}",
+        family_ticket_limit=2,risk_at_stop=Decimal(3),reserved_margin=Decimal(20))
+        for index,symbol in enumerate(("ETHUSDT","SOLUSDT","BNBUSDT")))
+    for ticket in tickets:
+        await _seed_ticket_runtime_scope(issue_engine,ticket)
+    first_request=_issue_request(ticket=tickets[0],now_ms=1001,claim_owner="initial",
+        max_same_strategy_side=2,active_strategy_side_ticket_count_at_claim=0)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        first=await issue_ticket(uow,first_request)
+    assert first.status is IssueTicketStatus.ISSUED
+    # Isolate the admission transaction from the already-tested venue lifecycle.
+    # The first Ticket and its Reservation/Netting Domain remain occupied.
+    async with issue_engine.begin() as connection:
+        await connection.execute(sa.update(entry_lane_current).values(status="idle",ticket_id=None,signal_event_id=None))
+    requests=tuple(_issue_request(ticket=ticket,now_ms=1002,claim_owner=f"contender-{index}",
+        max_same_strategy_side=2,active_strategy_side_ticket_count_at_claim=1)
+        for index,ticket in enumerate(tickets[1:]))
+    ready=asyncio.Event()
+    arrived=0
+    async def attempt(request):
+        nonlocal arrived
+        async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            arrived+=1
+            if arrived==2:
+                ready.set()
+            await asyncio.wait_for(ready.wait(),timeout=5)
+            return await issue_ticket(uow,request)
+    results=await asyncio.gather(*(attempt(request) for request in requests))
+    assert sorted(result.status for result in results)==sorted([IssueTicketStatus.ISSUED,IssueTicketStatus.ENTRY_LANE_OCCUPIED])
+    loser=requests[next(index for index,result in enumerate(results) if result.status is IssueTicketStatus.ENTRY_LANE_OCCUPIED)]
+    async with issue_engine.begin() as connection:
+        await connection.execute(sa.update(entry_lane_current).values(status="idle",ticket_id=None,signal_event_id=None))
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        refused=await issue_ticket(uow,loser)
+        assert refused.status is IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
+        assert await uow.tickets.get(loser.capacity_claim.ticket_identity.ticket_id) is None
+        assert await uow.entry_admission.count_active_strategy_side_tickets(venue_id="binance-usdm",account_id="experiment-1",
+            strategy_group_id="MI-001",position_side="long")==2
+    async with issue_engine.connect() as connection:
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(trade_tickets))==2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("drift", ["version","limit_same_version","paused"])
+async def test_capacity_v0_claim_cannot_cross_current_policy_change(issue_engine: AsyncEngine,drift: str) -> None:
+    await _seed_policy(issue_engine,max_same_strategy_side=2)
+    ticket=_ticket_for_strategy_group("signal-cap-drift","episode-cap-drift",strategy_group_id="MI-001",
+        strategy_version_id="MI-001:v2",event_spec_id="mi-long-v2",exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        runtime_scope_id="scope-cap-drift",family_ticket_limit=2)
+    await _seed_ticket_runtime_scope(issue_engine,ticket)
+    request=_issue_request(ticket=ticket,now_ms=1001,claim_owner="cap-drift",
+        max_same_strategy_side=1 if drift=="limit_same_version" else 2,active_strategy_side_ticket_count_at_claim=0)
+    if drift!="limit_same_version":
+        async with issue_engine.begin() as connection:
+            update={"policy_version":8} if drift=="version" else {"new_entry_submit_enabled":False}
+            await connection.execute(sa.update(owner_policy_current).values(**update))
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        result=await issue_ticket(uow,request)
+    assert result.status is (IssueTicketStatus.POLICY_DISABLED if drift=="paused" else IssueTicketStatus.POLICY_MISSING_OR_STALE)
+    await _assert_no_durable_entry_state(issue_engine,ticket.identity.ticket_id)
+
+
 async def _seed_policy(
     engine: AsyncEngine,
     *,
@@ -979,6 +1046,7 @@ async def _seed_policy(
     enabled: bool = True,
     new_entry_submit_enabled: bool = True,
     max_concurrent_tickets: int = 3,
+    max_same_strategy_side: int | None = None,
 ) -> None:
     async with engine.begin() as connection:
         await connection.execute(
@@ -989,9 +1057,10 @@ async def _seed_policy(
                 new_entry_submit_enabled=new_entry_submit_enabled,
                 priority_rank=1,
                 max_concurrent_tickets=max_concurrent_tickets,
+                max_same_strategy_side=max_same_strategy_side,
                 max_strategy_group_concurrent_tickets=2,
                 family_ticket_limits={
-                    "long_continuation": 1,
+                    "long_continuation": 2 if max_same_strategy_side==2 else 1,
                     "opening_range": 2,
                     "rally_failure_short": 1,
                 },

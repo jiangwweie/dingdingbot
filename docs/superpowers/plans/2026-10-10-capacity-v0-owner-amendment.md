@@ -2,7 +2,7 @@
 title: CAPACITY_V0_OWNER_AMENDMENT
 status: BUSINESS_SEMANTICS_FROZEN
 task_id: CAP-01
-implementation_status: IN_PROGRESS
+implementation_status: LOCAL_ACCEPTED
 authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
 gs13_authority: WAIT_OWNER_CONFIRMATION
 production_authority: NONE
@@ -137,3 +137,24 @@ Postflight新增必验B，缺max=2/family exact则fence；81项deploy unit PASS�
 末版focused capacity/Claim/Decision/portfolio模块60 passed（含sequential/concurrent终态）；MPG/MI额外正式Owner/Selector/Materializer/rebase/Observation→Ticket→Review Policy B自然链2 passed，Claim明确limit=2与family=2。Fast+architecture+interfaces最后1393 passed对应readonly target-B检查加入前源码；末版正在重验，不作为final R4。Mypy164 source/tools、Ruff/diff PASS；GS-13未执行、production_modified=NO。剩余CAP独立不同Claim并发、policy交叉与complete signed acceptance，随后GS-10/11/12；不把本段升级为整卡Done。
 
 末版追加：readonly 0009 target必须max_same_strategy_side=2（A仅作为源合同识别，不可在新目标冒充已默认启用），deployment postflight对应负向81项PASS；随后包含target-B检查的Unit/Architecture/API完整1393 passed、17.44s，Mypy164、Ruff/diff PASS。所有本轮verification进程均已终态，未进入GS-13。前端包安装未改package/lock、未修改主工作区依赖；生成d.ts只新增两个readonly Capacity字段。当前仍IN_PROGRESS，不能把测试数量当作缺项已完成证明。
+
+### CAP-01 本地行为签收（2026-10-10）
+
+**CAP-01 = LOCAL_ACCEPTED。** 本签收覆盖冻结容量行为及本地集成，不是GS-13 exact R4、东京部署或最终生产source/postflight授权。Scope仍CAP-01→GS-10→GS-11→GS-12，GS-13开始前等待Owner确认。
+
+| 合同 | 直接证据 |
+| --- | --- |
+| 同策略两个独立Instrument/Episode/Signal；第三个拒绝 | CPM sequential/concurrent自然Observation→Entry Worker→protected→退出/CANCEL→Reconciliation/Settlement/Review；冻结Ticket及2→1→0释放；新Claim/Decision绑定limit/count |
+| 独立不同Claim抢最后一槽 | real PG issue_ticket同时提交不同MI Claim（不是同head Signal），一ISSUED一ENTRY_LANE_OCCUPIED；保留原Ticket/Reservation/Netting占用后重试第三个仍family拒绝；lane reset是隔离inner-admission fixture，不冒充venue推进 |
+| Policy版本、限额身份、Pause交叉 | 三个inner issuance负向零Ticket/Claim/Reservation/Command；单位dispatch计数含自身使用>limit及Policy/Claim限额漂移拒绝；原Command/unknown全模块回归 |
+| Family更严格 | 自然BRF2 ETH SHORT protected后SOL SHORT独立Signal拒绝，policy strategy-side=2而family=1；拒绝Decision冻结count=1，不能以通用上限覆盖Family |
+| Universe/Authority与旧生命周期不变 | MPG/MI Policy B正式Selector/Materializer/rebase/Observation→Ticket→terminal两项自然链；旧Signal/Universe/Binding冻结、原Full-chain组合仍覆盖退出与未知/partial；未修改Selector/ExitProfile/Regime |
+| 默认B及source保全 | frozen0008 executable source→0009逐表旧列保全；仅identity事务切B，source/target/version/digest、rollback/retry/风险非法源/裸SQL拒绝；deployment postflight明确B，否则fence |
+| Owner只读、无启用按钮 | actual brc_owner_control四策略读字段/count无runtime UPDATE权限；API/OpenAPI、生成客户端、Controls与全前端测试/build；完整Generic浏览器交互继续属GS-11 |
+| 边界 | global3、single2%、gross6%、direction4%、Family2/2/1、Netting1；无rank调度/加仓/抢占；SOR需paused才可部署默认B，现有控制不被恢复 |
+
+Focused acceptance：`test_issue_ticket.py`27、`test_capacity_default_release.py`11、`test_capacity_claim_to_ticket.py`7、`test_command_dispatch.py`27、`test_unknown_outcome_reconciliation.py`15与完整Full-chain54，单次组合**141 passed，143.27s**；real Owner字段/count4 passed；最后Unit/Architecture/API**1393 passed，17.04s**；Mypy164 files、Ruff/diff PASS。Generic迁移25、Generic B自然链2及前端38/build证据见前段，不相加、不用测试数量替代合同。
+
+**Readonly与release Gate分层校正**：通用readonly诊断识别合法A或B，Schema安装未自动切B的合法阶段不得因此变成伪数据；原sole-0009-B readonly硬判把合法source/certification/warming回归误报fail，已移除，仅保留exact A/B组合检查。它不授予默认容量或交易权；本次正式release postflight仍硬要求B，未安装B不得发布成功。第一次141回归在该readonly耦合上101 passed/1 fail，不当PASS；解除错误耦合后完整141通过，未放松实际release B Gate。
+
+截至签收所有本轮验证终态，production_modified=NO；未执行R4 certifier、GS-13准备子项或Tokyo操作。下一卡GS-10 resident hosting独立leases/ticks、restart/bounded status与fairness，再GS-11/12。

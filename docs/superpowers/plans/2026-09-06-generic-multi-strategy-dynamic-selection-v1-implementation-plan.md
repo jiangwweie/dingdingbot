@@ -8,10 +8,11 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: CAP-01
+active_execution_scope: GS-10
 authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
 gs13_authority: WAIT_OWNER_CONFIRMATION
 completed_execution_scope: GS-04_TO_GS-09
+completed_amendment_scope: CAP-01_LOCAL_ACCEPTED
 local_acceptance_status: GS04_GS09_ACCEPTED
 production_authority: NONE
 further_feature_research: CLOSED
@@ -30,10 +31,11 @@ owner_amendments: ACCEPTED_2026-09-21
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = CAP-01
+active_execution_scope = GS-10
 authorized_execution_scope = CAP-01_GS-10_GS-11_GS-12
 gs13_authority = WAIT_OWNER_CONFIRMATION
 completed_execution_scope = GS-04_TO_GS-09
+completed_amendment_scope = CAP-01_LOCAL_ACCEPTED
 production_activation_authority = NONE
 further_feature_research = CLOSED
 ```

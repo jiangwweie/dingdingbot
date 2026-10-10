@@ -240,6 +240,10 @@ async def test_formal_generic_owner_role_can_capture_baseline_without_runtime_wr
         result=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
             request=ControlMutationRequest(expected_version=1,reason="formal_role_baseline_capture",idempotency_key=f"role:baseline:{group}",owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")
         assert result.rollback_baseline_id is not None and result.pending_selection_mode.value=="dynamic_selection"
+        policy=await uow.entry_admission.get_owner_policy("policy-main")
+        assert policy.max_same_strategy_side is None
+        assert await uow.entry_admission.count_active_strategy_side_tickets(venue_id="binance-usdm",account_id="generic-snapshot",
+            strategy_group_id=group,position_side=inputs(group).spec.position_side)==0
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_rollback_baselines WHERE strategy_group_id=:group"),{"group":group})==1
         for table in ("brc_strategy_universe_current","brc_comparison_binding_current","brc_strategy_universe_materialization_generations","brc_selection_authority_current"):
