@@ -1594,6 +1594,18 @@ def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
     }
 
 
+_CAPACITY_V0_ADDED_COLUMNS = {
+    "brc_owner_policy_current": ("max_same_strategy_side",),
+    "brc_capacity_claims": ("max_same_strategy_side", "active_strategy_side_ticket_count_at_claim"),
+}
+
+
+def _source_0008_table_columns() -> dict[str, tuple[str, ...]]:
+    return {table.name: tuple(column.name for column in table.c
+        if column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ()))
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)}
+
+
 def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
     return {
         table.name: _source_columns_before_dynamic_selection(table)
@@ -1627,6 +1639,7 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
             if column.name not in _DYNAMIC_SELECTION_ADDED_COLUMNS.get(table.name, ())
             and column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
             and column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ())
+            and column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ())
         )
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
         if table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
@@ -1660,6 +1673,7 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
             for column in table.c
             if column.name not in _EXIT_PROFILE_ADDED_COLUMNS.get(table.name, ())
             and column.name not in added.get(table.name, ())
+            and column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ())
         ), *removed.get(table.name, ()))
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
         if table.name not in _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
@@ -1717,6 +1731,7 @@ def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
                 renamed.get(column.name, column.name)
                 for column in table.c
                 if column.name not in added.get(table.name, ())
+                and column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ())
             ),
             *removed.get(table.name, ()),
         )
@@ -1727,7 +1742,8 @@ def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
 
 def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
     columns = tuple(column.name for column in table.c
-        if column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ()))
+        if column.name not in _GENERIC_PRE_DYNAMIC_ADDED_COLUMNS.get(table.name, ())
+        and column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ()))
     if table.name != "brc_shadow_outcomes_current":
         return columns
     return tuple(name for name in columns if name not in _TRADFI_SHADOW_COLUMNS)

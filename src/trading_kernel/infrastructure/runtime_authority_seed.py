@@ -147,6 +147,7 @@ class RuntimePolicyState(BaseModel):
     policy_version: int
     new_entry_submit_enabled: bool
     max_concurrent_tickets: int
+    max_same_strategy_side: int | None = None
     family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
@@ -256,7 +257,12 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
         include_tradfi=include_tradfi,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
+            if request.schema_revision
+            in {
+                "0007_exit_profile_authority_v1",
+                "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
+            }
             else None
         ),
     )
@@ -276,7 +282,12 @@ async def seed_runtime_authority(
         contracts=contracts,
         include_product_compatibility=include_tradfi,
         include_exit_profile_authority=(
-            request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
+            request.schema_revision
+            in {
+                "0007_exit_profile_authority_v1",
+                "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
+            }
         ),
     )
     connection = uow._require_connection()
@@ -287,6 +298,7 @@ async def seed_runtime_authority(
         "0006_sor_dynamic_selection_v0",
         "0007_exit_profile_authority_v1",
         "0008_generic_dynamic_selection_v1",
+        "0009_capacity_policy_v0",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -304,7 +316,12 @@ async def seed_runtime_authority(
         include_tradfi=include_tradfi,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
+            if request.schema_revision
+            in {
+                "0007_exit_profile_authority_v1",
+                "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
+            }
             else None
         ),
     )
@@ -342,9 +359,7 @@ async def seed_runtime_authority(
             _policy_event(
                 version=1,
                 operation=(
-                    "seed_entry_paused"
-                    if include_tradfi
-                    else "seed_observation_only"
+                    "seed_entry_paused" if include_tradfi else "seed_observation_only"
                 ),
                 policy=policy,
                 occurred_at_ms=request.seeded_at_ms,
@@ -507,18 +522,32 @@ async def deploy_compatible_upgrade_identity(
         ).mappings()
     }
     if metadata_rows.get("schema_revision") == request.schema_revision:
-        return await _deploy_runtime_identity(
+        if request.schema_revision == "0009_capacity_policy_v0":
+            await _require_capacity_release_source(connection, request)
+        result = await _deploy_runtime_identity(
             uow,
             request,
             allow_compatible_runtime_fence=True,
         )
+        if request.schema_revision == "0009_capacity_policy_v0":
+            await connection.execute(sa.update(schema_metadata)
+                .where(schema_metadata.c.metadata_key == "schema_revision",
+                    schema_metadata.c.metadata_value == request.schema_revision)
+                .values(updated_at_ms=request.seeded_at_ms))
+            await _install_capacity_release_revision(connection, request, source_identity=metadata_rows)
+        return result
     source_schema_revision = metadata_rows.get("schema_revision")
     if source_schema_revision == GENERIC_SELECTION_SOURCE_SCHEMA_REVISION:
-        if request.schema_revision != "0008_generic_dynamic_selection_v1":
+        if request.schema_revision not in {
+            "0008_generic_dynamic_selection_v1",
+            "0009_capacity_policy_v0",
+        }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
             )
-        alembic_revision = await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+        alembic_revision = await connection.scalar(
+            sa.text("SELECT version_num FROM alembic_version")
+        )
         if alembic_revision != request.schema_revision:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 schema"
@@ -527,6 +556,7 @@ async def deploy_compatible_upgrade_identity(
         DYNAMIC_SELECTION_SOURCE_SCHEMA_REVISION,
         EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
         GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
+        "0008_generic_dynamic_selection_v1",
     }:
         return await _deploy_capability_compatible_identity(
             uow,
@@ -626,14 +656,12 @@ async def deploy_compatible_upgrade_identity(
             runtime_commit=request.runtime_commit,
             operation=(
                 "tradfi_instrument_upgrade_pause_entry"
-                if source_schema_revision
-                == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
+                if source_schema_revision == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
                 else "owner_control_upgrade_pause_entry"
             ),
             event_namespace=(
                 "tradfi-instrument-upgrade"
-                if source_schema_revision
-                == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
+                if source_schema_revision == TRADFI_INSTRUMENT_SOURCE_SCHEMA_REVISION
                 else "owner-control-upgrade"
             ),
         )
@@ -668,10 +696,7 @@ async def deploy_compatible_upgrade_identity(
         connection,
         strategy_entry_controls_current,
         "strategy_group_id",
-        {
-            contract.strategy_group_id
-            for contract in registered_strategy_contracts()
-        },
+        {contract.strategy_group_id for contract in registered_strategy_contracts()},
     )
     seed_identity = _seed_identity(
         account_id=request.account_id,
@@ -681,7 +706,12 @@ async def deploy_compatible_upgrade_identity(
         include_tradfi=True,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
+            if request.schema_revision
+            in {
+                "0007_exit_profile_authority_v1",
+                "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
+            }
             else None
         ),
     )
@@ -696,12 +726,16 @@ async def deploy_compatible_upgrade_identity(
         )
 
     profile = (
-        await connection.execute(
-            sa.select(runtime_profiles)
-            .where(runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID)
-            .with_for_update(of=runtime_profiles)
+        (
+            await connection.execute(
+                sa.select(runtime_profiles)
+                .where(runtime_profiles.c.runtime_profile_id == RUNTIME_PROFILE_ID)
+                .with_for_update(of=runtime_profiles)
+            )
         )
-    ).mappings().one_or_none()
+        .mappings()
+        .one_or_none()
+    )
     if profile is None or any(
         (
             profile["venue_id"] != VENUE_ID,
@@ -716,12 +750,16 @@ async def deploy_compatible_upgrade_identity(
         )
 
     capabilities = (
-        await connection.execute(
-            sa.select(runtime_capabilities_current).with_for_update(
-                of=runtime_capabilities_current
+        (
+            await connection.execute(
+                sa.select(runtime_capabilities_current).with_for_update(
+                    of=runtime_capabilities_current
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if {str(row["capability_key"]) for row in capabilities} != {
         "exchange_commands",
         "strategy_signal_ingest",
@@ -819,6 +857,7 @@ async def _deploy_capability_compatible_identity(
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
     source_entry_enabled = bool(current_policy["new_entry_submit_enabled"])
+    source_policy_updated_at_ms = int(str(current_policy["updated_at_ms"]))
     current_policy_version = int(str(current_policy["policy_version"]))
     if not _policy_matches(
         current_policy,
@@ -851,13 +890,26 @@ async def _deploy_capability_compatible_identity(
     else:
         current_policy = dict(current_policy)
 
+    if request.schema_revision == "0009_capacity_policy_v0":
+        if source_schema_revision not in {
+            "0007_exit_profile_authority_v1",
+            "0008_generic_dynamic_selection_v1",
+        }:
+            raise RuntimeAuthorityTransitionRefused(
+                "Capacity release requires exact 0007 or 0008 source identity"
+            )
+        await _require_capacity_release_source(connection, request,
+            source_updated_at_ms=source_policy_updated_at_ms)
+
     registry = await seed_strategy_registry(
         uow,
         seeded_at_ms=request.seeded_at_ms,
         include_exit_profile_authority=(
-            source_schema_revision in {
+            source_schema_revision
+            in {
                 EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
                 GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
+                "0008_generic_dynamic_selection_v1",
             }
         ),
     )
@@ -881,18 +933,19 @@ async def _deploy_capability_compatible_identity(
         connection,
         strategy_entry_controls_current,
         "strategy_group_id",
-        {
-            contract.strategy_group_id
-            for contract in registered_strategy_contracts()
-        },
+        {contract.strategy_group_id for contract in registered_strategy_contracts()},
     )
     capabilities = (
-        await connection.execute(
-            sa.select(runtime_capabilities_current).with_for_update(
-                of=runtime_capabilities_current
+        (
+            await connection.execute(
+                sa.select(runtime_capabilities_current).with_for_update(
+                    of=runtime_capabilities_current
+                )
             )
         )
-    ).mappings().all()
+        .mappings()
+        .all()
+    )
     if {str(row["capability_key"]) for row in capabilities} != {
         "exchange_commands",
         "strategy_signal_ingest",
@@ -908,7 +961,12 @@ async def _deploy_capability_compatible_identity(
         include_tradfi=True,
         exit_profile_catalog_digest=(
             build_exit_profile_catalog_digest()
-            if request.schema_revision in {"0007_exit_profile_authority_v1", "0008_generic_dynamic_selection_v1"}
+            if request.schema_revision
+            in {
+                "0007_exit_profile_authority_v1",
+                "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
+            }
             else None
         ),
     )
@@ -967,6 +1025,8 @@ async def _deploy_capability_compatible_identity(
         connection,
         resolved_at_ms=request.seeded_at_ms,
     )
+    if request.schema_revision == "0009_capacity_policy_v0":
+        await _install_capacity_release_revision(connection, request, source_identity=metadata_rows)
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
@@ -1250,6 +1310,9 @@ async def _transition_policy(
         allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=occurred_at_ms,
     )
+    if current.get("max_same_strategy_side") == 2:
+        target["max_same_strategy_side"] = 2
+        target["family_ticket_limits"] = dict(current["family_ticket_limits"])
     await _insert_exact(
         connection,
         _ExactRow(
@@ -1319,6 +1382,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0006_sor_dynamic_selection_v0",
         "0007_exit_profile_authority_v1",
         "0008_generic_dynamic_selection_v1",
+        "0009_capacity_policy_v0",
     }
 
 
@@ -1488,6 +1552,12 @@ def _seed_identity(
     }
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
+    if schema_revision == "0009_capacity_policy_v0":
+        payload["capacity_release_contract"] = {
+            "max_same_strategy_side": 2,
+            "long_continuation": 2,
+            "activation": "stopped_flat_compatible_deployment",
+        }
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -1511,6 +1581,14 @@ def _policy_matches(
         allowed_event_spec_ids=allowed_event_spec_ids,
         updated_at_ms=int(str(row["updated_at_ms"])),
     )
+    if row.get("max_same_strategy_side") == 2:
+        expected["family_ticket_limits"] = {
+            "long_continuation": 2,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        }
+    elif row.get("max_same_strategy_side") is not None:
+        return False
     return all(row[key] == expected[key] for key in _POLICY_COMPARE_KEYS)
 
 
@@ -1539,6 +1617,11 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         policy_version=int(str(values["policy_version"])),
         new_entry_submit_enabled=bool(values["new_entry_submit_enabled"]),
         max_concurrent_tickets=int(str(values["max_concurrent_tickets"])),
+        max_same_strategy_side=(
+            None
+            if values.get("max_same_strategy_side") is None
+            else int(str(values["max_same_strategy_side"]))
+        ),
         family_ticket_limits=FamilyTicketLimits.model_validate(
             values["family_ticket_limits"]
         ),
@@ -1557,18 +1640,130 @@ def _policy_state(values: Mapping[str, object]) -> RuntimePolicyState:
         directional_stop_risk_limit_fraction=Decimal(
             str(values["directional_stop_risk_limit_fraction"])
         ),
-        min_materialization_ratio=Decimal(
-            str(values["min_materialization_ratio"])
-        ),
+        min_materialization_ratio=Decimal(str(values["min_materialization_ratio"])),
         max_leverage=int(str(values["max_leverage"])),
         supported_margin_mode=cast(Literal["cross"], supported_margin_mode),
-        post_stop_stress_multiple=Decimal(
-            str(values["post_stop_stress_multiple"])
-        ),
+        post_stop_stress_multiple=Decimal(str(values["post_stop_stress_multiple"])),
         max_post_fill_stop_risk_overrun_fraction=Decimal(
             str(values["max_post_fill_stop_risk_overrun_fraction"])
         ),
     )
+
+
+async def _require_capacity_release_source(
+    connection: AsyncConnection,
+    request: RuntimeAuthoritySeedRequest,
+    *, source_updated_at_ms: int | None = None,
+) -> None:
+    if (
+        await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))
+        != "0009_capacity_policy_v0"
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release requires exact 0009 schema"
+        )
+    await _require_flat_compatible_upgrade_activity(
+        connection, allow_compatible_runtime_fence=True
+    )
+    policy = dict(await _lock_policy(connection))
+    if policy["new_entry_submit_enabled"]:
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release requires Entry fenced"
+        )
+    if not _policy_matches(
+        policy,
+        version=int(policy["policy_version"]),
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=_allowed_event_spec_ids(registered_strategy_contracts()),
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release requires exact frozen source Policy"
+        )
+    if (
+        request.seeded_at_ms <= (policy["updated_at_ms"] if source_updated_at_ms is None else source_updated_at_ms)
+        and policy["max_same_strategy_side"] is None
+    ):
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release time must advance monotonically"
+        )
+    sor = (
+        (
+            await connection.execute(
+                sa.select(strategy_entry_controls_current)
+                .where(strategy_entry_controls_current.c.strategy_group_id == "SOR-001")
+                .with_for_update(of=strategy_entry_controls_current)
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if sor is None or sor["entry_state"] != "paused":
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release requires retired SOR Entry disabled"
+        )
+
+
+async def _install_capacity_release_revision(
+    connection: AsyncConnection,
+    request: RuntimeAuthoritySeedRequest,
+    *, source_identity: Mapping[str, str],
+) -> None:
+    """Called only by the stopped-flat compatible identity transaction."""
+    current = dict(await _lock_policy(connection))
+    if current["max_same_strategy_side"] == 2:
+        return
+    version = int(current["policy_version"]) + 1
+    target = {
+        **current,
+        "max_same_strategy_side": 2,
+        "family_ticket_limits": {
+            "long_continuation": 2,
+            "opening_range": 2,
+            "rally_failure_short": 1,
+        },
+        "policy_version": version,
+        "updated_at_ms": request.seeded_at_ms,
+    }
+    event = _policy_event(
+        version=version,
+        operation="compatible_capacity_policy_v0",
+        policy=target,
+        occurred_at_ms=request.seeded_at_ms,
+    )
+    payload = dict(cast(Mapping[str, object], event["payload"]))
+    payload.update(
+        source_commit=source_identity["runtime_commit"],
+        source_schema_revision=source_identity["schema_revision"],
+        source_seed_identity=source_identity["seed_identity"],
+        target_commit=request.runtime_commit,
+        target_schema_revision=request.schema_revision,
+        source_policy_version=current["policy_version"],
+        source_policy_digest="sha256:"
+        + sha256(
+            json.dumps(
+                current, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
+        ).hexdigest(),
+    )
+    event["payload"] = payload
+    await connection.execute(sa.insert(owner_policy_events).values(event))
+    updated = await connection.execute(
+        sa.update(owner_policy_current)
+        .where(
+            owner_policy_current.c.owner_policy_id == OWNER_POLICY_ID,
+            owner_policy_current.c.policy_version == current["policy_version"],
+        )
+        .values(
+            policy_version=version,
+            family_ticket_limits=target["family_ticket_limits"],
+            max_same_strategy_side=2,
+            updated_at_ms=request.seeded_at_ms,
+        )
+    )
+    if updated.rowcount != 1:
+        raise RuntimeAuthorityTransitionRefused(
+            "Capacity release lost source Policy CAS"
+        )
 
 
 async def _lock_policy(connection: AsyncConnection) -> RowMapping:

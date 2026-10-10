@@ -8,8 +8,9 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: NONE
-authorized_execution_scope: GS-04_TO_GS-13
+active_execution_scope: CAP-01
+authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
+gs13_authority: WAIT_OWNER_CONFIRMATION
 completed_execution_scope: GS-04_TO_GS-09
 local_acceptance_status: GS04_GS09_ACCEPTED
 production_authority: NONE
@@ -29,8 +30,9 @@ owner_amendments: ACCEPTED_2026-09-21
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = NONE
-authorized_execution_scope = GS-04_TO_GS-13
+active_execution_scope = CAP-01
+authorized_execution_scope = CAP-01_GS-10_GS-11_GS-12
+gs13_authority = WAIT_OWNER_CONFIRMATION
 completed_execution_scope = GS-04_TO_GS-09
 production_activation_authority = NONE
 further_feature_research = CLOSED
@@ -41,6 +43,12 @@ further_feature_research = CLOSED
 针对`4b2947e9f43fb3e2c4f165c91a957e0f20adb632`的独立复核已批准设计，并对Plan给出两项条件。strategy-scoped certification和Static migration neutrality已并入原卡，不新增Task、不修改已批准设计主体。Owner随后明确要求“按文档开始执行开发测试”，故本地实施范围正式开启；执行状态由本文件头和当前Task Card管理。
 
 ## 2. 工作区、基线与已知缺口
+
+### Owner Capacity补充冻结（2026-10-10）
+
+Owner最新执行授权覆盖顺序1～4：CAP-01→GS-10→GS-11→GS-12。本任务从CAP-01开始本地代码与测试；**GS-13开始前必须停止等待Owner确认**，该限制覆盖完整R4和GS-13准备子项，不仅是生产部署。下文早期GS-04_TO_GS-13授权说明为历史来源，当前以上述最新限制为准。GS-04～09原签收不变，production_authority=NONE保持。
+
+独立[CAP-01 Capacity V0 Amendment / Task Card](2026-10-10-capacity-v0-owner-amendment.md)记录Owner已确认的long_continuation 1→2、通用strategy-side上限2。本卡正在实施，不覆盖GS-04～09已签收证据；新容量是本次上线默认内容，由正式stopped-flat/fenced部署authority事务自动生成独立Policy B revision，无需Owner部署后额外操作；Schema migration/restart本身不切容量。新增行为必须进入最终GS-13 exact R4，GS-13仍须另行确认后执行。Owner明确SOR已停止且决定不再启用；兼容/保全测试不构成ENTRY授权。GS-10/11/12/13按本补充纳入hosting、Owner只读显示、并发/负载、preservation与发布验收，不自动新增经济研究Gate。
 
 ### Owner amendment（2026-09-21）
 

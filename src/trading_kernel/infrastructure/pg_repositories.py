@@ -176,6 +176,11 @@ def _owner_policy_from_row(row: RowMapping | dict[str, object]) -> OwnerPolicySn
         new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
         priority_rank=int(str(row["priority_rank"])),
         max_concurrent_tickets=int(str(row["max_concurrent_tickets"])),
+        max_same_strategy_side=(
+            None
+            if row["max_same_strategy_side"] is None
+            else int(str(row["max_same_strategy_side"]))
+        ),
         family_ticket_limits=FamilyTicketLimits.model_validate(
             row["family_ticket_limits"]
         ),
@@ -2035,6 +2040,7 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         )
         return _owner_policy_from_row(updated)
 
+
     async def get_global_entry_resume_blocker(
         self,
         *,
@@ -2379,6 +2385,7 @@ class PostgresEntryAdmissionRepository:
             new_entry_submit_enabled=bool(row["new_entry_submit_enabled"]),
             priority_rank=int(row["priority_rank"]),
             max_concurrent_tickets=int(row["max_concurrent_tickets"]),
+            max_same_strategy_side=row["max_same_strategy_side"],
             family_ticket_limits=FamilyTicketLimits.model_validate(
                 row["family_ticket_limits"]
             ),
@@ -2435,6 +2442,42 @@ class PostgresEntryAdmissionRepository:
                 trade_tickets.c.exposure_family == exposure_family,
                 trade_tickets.c.terminal_at_ms.is_(None),
             )
+        )
+        return int(result.scalar_one())
+
+    async def count_active_strategy_side_tickets(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        strategy_group_id: str,
+        position_side: Literal["long", "short"],
+    ) -> int:
+        scope = (
+            trade_tickets.c.venue_id == venue_id,
+            trade_tickets.c.account_id == account_id,
+            trade_tickets.c.strategy_group_id == strategy_group_id,
+            trade_tickets.c.position_side == position_side,
+        )
+        # Start from indexed current holds, not a correlated historical scan.
+        # UNION deduplicates a Ticket present in several hold categories.
+        held = sa.union(
+            sa.select(trade_tickets.c.ticket_id).where(
+                *scope, trade_tickets.c.terminal_at_ms.is_(None)),
+            sa.select(trade_tickets.c.ticket_id).where(
+                *scope, trade_tickets.c.active_netting_domain_key.is_not(None)),
+            sa.select(budget_reservations.c.ticket_id).where(
+                budget_reservations.c.venue_id == venue_id,
+                budget_reservations.c.account_id == account_id,
+                budget_reservations.c.status == "active"),
+            sa.select(exchange_commands.c.ticket_id).where(
+                exchange_commands.c.status.in_((
+                    "prepared", "claimed", "dispatch_started", "outcome_unknown"))),
+        ).subquery()
+        result = await self._connection.execute(
+            sa.select(sa.func.count()).select_from(
+                trade_tickets.join(held, held.c.ticket_id == trade_tickets.c.ticket_id)
+            ).where(*scope)
         )
         return int(result.scalar_one())
 
@@ -2982,6 +3025,8 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
             claim.active_family_ticket_count_at_claim
         ),
         "family_ticket_limit": claim.family_ticket_limit,
+        "max_same_strategy_side": claim.max_same_strategy_side,
+        "active_strategy_side_ticket_count_at_claim": claim.active_strategy_side_ticket_count_at_claim,
         "gross_risk_at_stop_at_claim": claim.gross_risk_at_stop_at_claim,
         "directional_risk_at_stop_at_claim": (claim.directional_risk_at_stop_at_claim),
         "current_reserved_margin_at_claim": (claim.current_reserved_margin_at_claim),
@@ -3114,6 +3159,10 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
             - int(row["active_family_ticket_count_at_claim"])
         ),
         gross_risk_at_stop_at_claim=Decimal(row["gross_risk_at_stop_at_claim"]),
+        max_same_strategy_side=row["max_same_strategy_side"],
+        active_strategy_side_ticket_count_at_claim=row[
+            "active_strategy_side_ticket_count_at_claim"
+        ],
         directional_risk_at_stop_at_claim=Decimal(
             row["directional_risk_at_stop_at_claim"]
         ),

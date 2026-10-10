@@ -1585,6 +1585,11 @@ owner_policy_current = sa.Table(
         nullable=True,
     ),
     _json("family_ticket_limits"),
+    sa.Column("max_same_strategy_side", sa.Integer, nullable=True),
+    sa.CheckConstraint(
+        "max_same_strategy_side IS NULL OR max_same_strategy_side > 0",
+        name="strategy_side_limit_positive",
+    ),
     sa.Column("max_ticket_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_gross_stop_risk_fraction", MONEY, nullable=False),
     sa.Column("max_ticket_initial_margin_fraction", MONEY, nullable=False),
@@ -1603,8 +1608,7 @@ owner_policy_current = sa.Table(
         name="max_concurrent_tickets_positive",
     ),
     sa.CheckConstraint(
-        "max_ticket_stop_risk_fraction > 0 "
-        "AND max_ticket_stop_risk_fraction < 1",
+        "max_ticket_stop_risk_fraction > 0 AND max_ticket_stop_risk_fraction < 1",
         name="ticket_stop_risk_fraction_valid",
     ),
     sa.CheckConstraint(
@@ -2350,6 +2354,15 @@ capacity_claims = sa.Table(
     sa.Column("exposure_family", SHORT_TEXT, nullable=False),
     sa.Column("active_family_ticket_count_at_claim", sa.Integer, nullable=False),
     sa.Column("family_ticket_limit", sa.Integer, nullable=False),
+    sa.Column("max_same_strategy_side", sa.Integer, nullable=True),
+    sa.Column("active_strategy_side_ticket_count_at_claim", sa.Integer, nullable=True),
+    sa.CheckConstraint(
+        "(max_same_strategy_side IS NULL AND active_strategy_side_ticket_count_at_claim IS NULL) OR "
+        "(max_same_strategy_side IS NOT NULL AND active_strategy_side_ticket_count_at_claim IS NOT NULL "
+        "AND max_same_strategy_side > 0 AND active_strategy_side_ticket_count_at_claim >= 0 "
+        "AND active_strategy_side_ticket_count_at_claim < max_same_strategy_side)",
+        name="strategy_side_evidence_valid",
+    ),
     sa.Column("gross_risk_at_stop_at_claim", MONEY, nullable=False),
     sa.Column("directional_risk_at_stop_at_claim", MONEY, nullable=False),
     sa.Column("current_reserved_margin_at_claim", MONEY, nullable=False),
@@ -2569,6 +2582,14 @@ sa.Index(
     trade_tickets.c.terminal_at_ms,
 )
 sa.Index(
+    "ix_brc_trade_tickets_active_strategy_side",
+    trade_tickets.c.venue_id,
+    trade_tickets.c.account_id,
+    trade_tickets.c.strategy_group_id,
+    trade_tickets.c.position_side,
+    postgresql_where=trade_tickets.c.terminal_at_ms.is_(None),
+)
+sa.Index(
     "ix_brc_trade_tickets_active_family",
     trade_tickets.c.venue_id,
     trade_tickets.c.account_id,
@@ -2735,6 +2756,12 @@ budget_reservations = sa.Table(
     sa.CheckConstraint("reserved_risk >= 0", name="risk_nonnegative"),
     sa.CheckConstraint("reserved_margin > 0", name="margin_positive"),
 )
+
+sa.Index("ix_brc_budget_reservations_active_account",
+    budget_reservations.c.venue_id, budget_reservations.c.account_id, budget_reservations.c.ticket_id,
+    postgresql_where=budget_reservations.c.status == "active")
+sa.Index("ix_brc_exchange_commands_unresolved_ticket", exchange_commands.c.ticket_id,
+    postgresql_where=exchange_commands.c.status.in_(("prepared", "claimed", "dispatch_started", "outcome_unknown")))
 
 account_exposure_current = sa.Table(
     "brc_account_exposure_current",

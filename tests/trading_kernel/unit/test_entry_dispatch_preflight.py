@@ -64,6 +64,22 @@ from tests.trading_kernel.support.capacity import (
 )
 
 
+def test_dispatch_strategy_side_count_includes_own_ticket() -> None:
+    base = _preflight_request(snapshot=_snapshot(), max_same_strategy_side=2)
+    for count, expected in (
+        (1, "allowed"),
+        (2, "allowed"),
+        (3, "strategy_side_capacity_exhausted"),
+    ):
+        request = EntryDispatchPreflightRequest.model_validate(
+            {
+                **base.model_dump(),
+                "active_strategy_side_ticket_count": count,
+            }
+        )
+        assert revalidate_entry_dispatch(request).status.value == expected
+
+
 def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
     snapshot = _snapshot()
     request = _preflight_request(
@@ -342,7 +358,7 @@ def test_entry_preflight_refuses_set_leverage_command_under_fixed_profile() -> N
     assert decision.status is EntryDispatchPreflightStatus.LEVERAGE_MISMATCH
 
 
-def _preflight_request(*, snapshot):
+def _preflight_request(*, snapshot, max_same_strategy_side: int | None = None):
     signal = _long_signal()
     binding = next(
         item
@@ -360,8 +376,11 @@ def _preflight_request(*, snapshot):
         venue_id="binance-usdm",
         account_id="experiment-1",
         position_mode="independent_sides",
-        policy=_policy(),
+        policy=_policy().model_copy(
+            update={"max_same_strategy_side": max_same_strategy_side}
+        ),
         usage=CapacityUsage(
+            active_strategy_side_ticket_count=0,
             gross_notional=Decimal(0),
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
@@ -426,6 +445,7 @@ def _preflight_request(*, snapshot):
         ticket=ticket,
         capacity_claim=claim,
         owner_policy=OwnerPolicySnapshot(
+            max_same_strategy_side=max_same_strategy_side,
             owner_policy_id="policy-main",
             policy_version=7,
             enabled=True,
@@ -537,6 +557,7 @@ def _preflight_request(*, snapshot):
             requested_position_side=ticket.identity.netting_domain.position_side,
         ),
         active_family_ticket_count=1,
+        active_strategy_side_ticket_count=1,
         active_directional_risk_at_stop=ticket.risk_at_stop,
         now_ms=1_010,
     )

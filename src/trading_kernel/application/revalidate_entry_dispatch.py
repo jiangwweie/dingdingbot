@@ -70,6 +70,7 @@ class EntryDispatchPreflightStatus(StrEnum):
     EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = (
         "exposure_family_capacity_exhausted"
     )
+    STRATEGY_SIDE_CAPACITY_EXHAUSTED = "strategy_side_capacity_exhausted"
     QUOTE_RISK = "quote_risk"
     PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
     STRESS_FAILED = "stress_failed"
@@ -98,6 +99,7 @@ class EntryDispatchPreflightRequest(BaseModel):
     account_entry_health: AccountEntryHealth
     instrument_entry_health: InstrumentEntryHealth
     active_family_ticket_count: int
+    active_strategy_side_ticket_count: int
     active_directional_risk_at_stop: Decimal
     now_ms: int
     product_entry_decision: ProductEntryDecision | None = None
@@ -113,7 +115,7 @@ class EntryDispatchPreflightRequest(BaseModel):
             raise ValueError("dispatch runtime identity must be non-blank")
         return normalized
 
-    @field_validator("active_family_ticket_count")
+    @field_validator("active_family_ticket_count", "active_strategy_side_ticket_count")
     @classmethod
     def _require_nonnegative_family_count(cls, value: int) -> int:
         if value < 0:
@@ -159,15 +161,16 @@ def revalidate_entry_dispatch(
 
     if (
         ticket.selected_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
-        or claim.configured_leverage_at_claim
-        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
-        or account_risk.configured_leverage
-        != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or claim.configured_leverage_at_claim != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
+        or account_risk.configured_leverage != FIXED_EXCHANGE_CONFIGURED_LEVERAGE
     ):
         return _refused(EntryDispatchPreflightStatus.LEVERAGE_MISMATCH)
     if not _command_matches_ticket_and_claim(command, ticket, claim):
         return _refused(EntryDispatchPreflightStatus.COMMAND_MISMATCH)
-    if request.now_ms >= command.deadline_at_ms or request.now_ms >= claim.expires_at_ms:
+    if (
+        request.now_ms >= command.deadline_at_ms
+        or request.now_ms >= claim.expires_at_ms
+    ):
         return _refused(EntryDispatchPreflightStatus.DEADLINE_EXPIRED)
     if not _policy_matches(request.owner_policy, ticket, claim):
         return _refused(EntryDispatchPreflightStatus.POLICY_DRIFT)
@@ -185,13 +188,14 @@ def revalidate_entry_dispatch(
         return _refused(EntryDispatchPreflightStatus.SELECTION_ENTRY_VACUUM)
     if not request.selection_authority_valid:
         return _refused(EntryDispatchPreflightStatus.SELECTION_AUTHORITY_INVALID)
+    if request.active_family_ticket_count > ticket.family_ticket_limit:
+        return _refused(EntryDispatchPreflightStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED)
     if (
-        request.active_family_ticket_count
-        > ticket.family_ticket_limit
+        request.owner_policy.max_same_strategy_side is not None
+        and request.active_strategy_side_ticket_count
+        > request.owner_policy.max_same_strategy_side
     ):
-        return _refused(
-            EntryDispatchPreflightStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
-        )
+        return _refused(EntryDispatchPreflightStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED)
     if not _scope_matches(request.runtime_scope, ticket):
         return _refused(EntryDispatchPreflightStatus.SCOPE_DRIFT)
     if not _active_universe_matches(request.active_universe, ticket):
@@ -345,10 +349,9 @@ def _policy_matches(
         and ticket.margin_mode == policy.supported_margin_mode
         and claim.family_ticket_limit
         == policy.family_ticket_limits.for_family(ticket.exposure_family)
-        and claim.max_ticket_stop_risk_fraction
-        == policy.max_ticket_stop_risk_fraction
-        and claim.max_gross_stop_risk_fraction
-        == policy.max_gross_stop_risk_fraction
+        and claim.max_same_strategy_side == policy.max_same_strategy_side
+        and claim.max_ticket_stop_risk_fraction == policy.max_ticket_stop_risk_fraction
+        and claim.max_gross_stop_risk_fraction == policy.max_gross_stop_risk_fraction
         and claim.max_ticket_initial_margin_fraction
         == policy.max_ticket_initial_margin_fraction
         and claim.max_gross_initial_margin_utilization

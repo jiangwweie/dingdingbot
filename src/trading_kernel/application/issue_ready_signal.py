@@ -296,6 +296,14 @@ async def issue_ready_signal(
             position_side=signal.position_side,
         )
     )
+    active_strategy_side_ticket_count = (
+        await uow.entry_admission.count_active_strategy_side_tickets(
+            venue_id=profile.venue_id,
+            account_id=profile.account_id,
+            strategy_group_id=signal.strategy_group_id,
+            position_side=signal.position_side,
+        )
+    )
     usage = CapacityUsage(
         gross_notional=(exposure.gross_notional if exposure else Decimal(0)),
         gross_risk_at_stop=(exposure.gross_risk_at_stop if exposure else Decimal(0)),
@@ -304,6 +312,7 @@ async def issue_ready_signal(
         ),
         active_ticket_count=(exposure.active_ticket_count if exposure else 0),
         active_family_ticket_count=active_family_ticket_count,
+        active_strategy_side_ticket_count=active_strategy_side_ticket_count,
         directional_risk_at_stop=directional_risk_at_stop,
     )
     admission_context = _AdmissionDecisionContext(
@@ -404,6 +413,7 @@ async def issue_ready_signal(
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,
+            max_same_strategy_side=policy.max_same_strategy_side,
             family_ticket_limits=policy.family_ticket_limits,
             max_ticket_stop_risk_fraction=(policy.max_ticket_stop_risk_fraction),
             max_gross_stop_risk_fraction=(policy.max_gross_stop_risk_fraction),
@@ -613,6 +623,9 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
         CapacityClaimStatus.BUDGET_EXHAUSTED: IssueTicketStatus.BUDGET_EXHAUSTED,
         CapacityClaimStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED: (
             IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED
+        ),
+        CapacityClaimStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED: (
+            IssueTicketStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED
         ),
         CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED: (
             IssueTicketStatus.BUDGET_EXHAUSTED

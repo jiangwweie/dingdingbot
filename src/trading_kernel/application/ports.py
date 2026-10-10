@@ -301,6 +301,7 @@ class OwnerPolicySnapshot(BaseModel):
     new_entry_submit_enabled: bool
     priority_rank: int
     max_concurrent_tickets: int
+    max_same_strategy_side: int | None = None
     family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
@@ -932,6 +933,7 @@ class OwnerControlRepository(Protocol):
         updated_at_ms: int,
     ) -> OwnerPolicySnapshot: ...
 
+
     async def get_global_entry_resume_blocker(
         self,
         *,
@@ -1006,6 +1008,15 @@ class EntryAdmissionRepository(Protocol):
         venue_id: str,
         account_id: str,
         exposure_family: str,
+    ) -> int: ...
+
+    async def count_active_strategy_side_tickets(
+        self,
+        *,
+        venue_id: str,
+        account_id: str,
+        strategy_group_id: str,
+        position_side: Literal["long", "short"],
     ) -> int: ...
 
     async def sum_active_directional_stop_risk(
@@ -1401,6 +1412,7 @@ class StrategyRegistryRepository(Protocol):
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
+
 
 class StrategyUniverseRepository(Protocol):
     async def materialization_slot_available(self, materialization_generation_id: str, *, replacing_generation_id: str | None = None) -> bool: ...

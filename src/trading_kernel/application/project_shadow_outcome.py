@@ -31,6 +31,7 @@ _ELIGIBLE_REJECTION_BLOCKERS = frozenset(
     {
         "budget_exhausted",
         "exposure_family_capacity_exhausted",
+        "strategy_side_capacity_exhausted",
         "directional_risk_exhausted",
         "active_netting_domain",
     }

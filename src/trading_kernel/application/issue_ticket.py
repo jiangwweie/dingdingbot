@@ -46,6 +46,7 @@ class IssueTicketStatus(StrEnum):
     STRATEGY_PAUSED = "strategy_paused"
     BUDGET_EXHAUSTED = "budget_exhausted"
     EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = "exposure_family_capacity_exhausted"
+    STRATEGY_SIDE_CAPACITY_EXHAUSTED = "strategy_side_capacity_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
     CAPACITY_CLAIM_MISSING = "capacity_claim_missing"
     ADMISSION_INCIDENT_OPEN = "admission_incident_open"
@@ -159,6 +160,7 @@ async def issue_ticket(
     if (
         policy.family_ticket_limits.for_family(ticket.exposure_family)
         != claim.family_ticket_limit
+        or policy.max_same_strategy_side != claim.max_same_strategy_side
         or policy.directional_stop_risk_limit_fraction
         != claim.directional_stop_risk_limit_fraction
         or policy.min_materialization_ratio != claim.min_materialization_ratio
@@ -299,6 +301,21 @@ async def issue_ticket(
         return IssueTicketResult(
             status=IssueTicketStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED,
             ticket_id=None,
+        )
+    active_strategy_side_ticket_count = (
+        await uow.entry_admission.count_active_strategy_side_tickets(
+            venue_id=ticket.identity.netting_domain.venue_id,
+            account_id=ticket.identity.netting_domain.account_id,
+            strategy_group_id=ticket.identity.runtime.strategy_group_id,
+            position_side=ticket.identity.netting_domain.position_side,
+        )
+    )
+    if (
+        policy.max_same_strategy_side is not None
+        and active_strategy_side_ticket_count >= policy.max_same_strategy_side
+    ):
+        return IssueTicketResult(
+            status=IssueTicketStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED, ticket_id=None
         )
     directional_risk_at_stop = (
         await uow.entry_admission.sum_active_directional_stop_risk(

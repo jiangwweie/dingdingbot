@@ -34,6 +34,7 @@ class CapacityClaimStatus(StrEnum):
     NETTING_DOMAIN_OCCUPIED = "netting_domain_occupied"
     BUDGET_EXHAUSTED = "budget_exhausted"
     EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = "exposure_family_capacity_exhausted"
+    STRATEGY_SIDE_CAPACITY_EXHAUSTED = "strategy_side_capacity_exhausted"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     PROTECTION_UNAVAILABLE = "protection_unavailable"
     EXIT_LEG_MATERIALIZATION_UNMET = "exit_leg_materialization_unmet"
@@ -71,6 +72,10 @@ class CapacityPolicy(BaseModel):
     owner_policy_id: str
     policy_version: int
     max_concurrent_tickets: int
+    # None is an explicit policy value: no additional strategy-side gate.
+    # It preserves Policy A; this release's authorized deployment revision
+    # sets the V0 limit of 2 without changing any other risk boundary.
+    max_same_strategy_side: int | None = None
     family_ticket_limits: FamilyTicketLimits
     max_ticket_stop_risk_fraction: Decimal
     max_gross_stop_risk_fraction: Decimal
@@ -125,6 +130,15 @@ class CapacityPolicy(BaseModel):
             raise ValueError("capacity policy safety values must be positive")
         return value
 
+    @field_validator("max_same_strategy_side", mode="before")
+    @classmethod
+    def _require_strategy_side_limit(cls, value: object) -> object:
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+        ):
+            raise ValueError("strategy-side limit must be a positive integer or None")
+        return value
+
     @field_validator("max_post_fill_stop_risk_overrun_fraction")
     @classmethod
     def _require_overrun_fraction(cls, value: Decimal) -> Decimal:
@@ -141,6 +155,7 @@ class CapacityUsage(BaseModel):
     current_reserved_margin: Decimal
     active_ticket_count: int
     active_family_ticket_count: int
+    active_strategy_side_ticket_count: int
     directional_risk_at_stop: Decimal
 
     @field_validator(
@@ -158,6 +173,7 @@ class CapacityUsage(BaseModel):
     @field_validator(
         "active_ticket_count",
         "active_family_ticket_count",
+        "active_strategy_side_ticket_count",
     )
     @classmethod
     def _require_nonnegative_count(cls, value: int) -> int:
@@ -250,6 +266,8 @@ class CapacityClaim(BaseModel):
     exposure_family: ExposureFamily
     active_family_ticket_count_at_claim: int
     family_ticket_limit: int
+    max_same_strategy_side: int | None = None
+    active_strategy_side_ticket_count_at_claim: int | None = None
     remaining_family_slots_at_claim: int
     gross_risk_at_stop_at_claim: Decimal
     directional_risk_at_stop_at_claim: Decimal
@@ -429,6 +447,24 @@ class CapacityClaim(BaseModel):
 
     @model_validator(mode="after")
     def _validate_claim(self) -> CapacityClaim:
+        limit = self.max_same_strategy_side
+        count = self.active_strategy_side_ticket_count_at_claim
+        if (limit is None) != (count is None):
+            raise ValueError(
+                "strategy-side Claim evidence must be all-null or all-present"
+            )
+        if (
+            limit is not None
+            and count is not None
+            and (
+                isinstance(limit, bool)
+                or isinstance(count, bool)
+                or limit <= 0
+                or count < 0
+                or count >= limit
+            )
+        ):
+            raise ValueError("strategy-side Claim count must fit its frozen limit")
         binding_lineage = (
             self.exit_binding_id,
             self.exit_binding_semantic_hash,
@@ -728,6 +764,8 @@ def freeze_capacity_claim(
     take_profit_prices: tuple[Decimal, ...],
     take_profit_quantities: tuple[Decimal, ...],
     selection_authority_id: str | None = None,
+    max_same_strategy_side: int | None = None,
+    active_strategy_side_ticket_count_at_claim: int | None = None,
 ) -> CapacityClaim:
     payload: dict[str, Any] = {
         "capacity_claim_id": "claim:pending",
@@ -764,6 +802,8 @@ def freeze_capacity_claim(
         "exposure_family": exposure_family,
         "active_family_ticket_count_at_claim": (active_family_ticket_count_at_claim),
         "family_ticket_limit": family_ticket_limit,
+        "max_same_strategy_side": max_same_strategy_side,
+        "active_strategy_side_ticket_count_at_claim": active_strategy_side_ticket_count_at_claim,
         "remaining_family_slots_at_claim": remaining_family_slots_at_claim,
         "gross_risk_at_stop_at_claim": gross_risk_at_stop_at_claim,
         "directional_risk_at_stop_at_claim": (directional_risk_at_stop_at_claim),
@@ -825,6 +865,12 @@ def build_capacity_claim_digest(claim: CapacityClaim) -> str:
     )
     if payload["selection_authority_id"] is None:
         payload.pop("selection_authority_id")
+    if (
+        payload["max_same_strategy_side"] is None
+        and payload["active_strategy_side_ticket_count_at_claim"] is None
+    ):
+        payload.pop("max_same_strategy_side")
+        payload.pop("active_strategy_side_ticket_count_at_claim")
     if payload["exit_binding_id"] is None:
         payload.pop("exit_binding_id")
         payload.pop("exit_binding_semantic_hash")

@@ -121,6 +121,11 @@ def build_capacity_claim(
     )
     if usage.active_family_ticket_count >= family_ticket_limit:
         return _refused(CapacityClaimStatus.EXPOSURE_FAMILY_CAPACITY_EXHAUSTED)
+    if (
+        policy.max_same_strategy_side is not None
+        and usage.active_strategy_side_ticket_count >= policy.max_same_strategy_side
+    ):
+        return _refused(CapacityClaimStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED)
     if usage.directional_risk_at_stop >= (
         account_risk.total_wallet_balance * policy.directional_stop_risk_limit_fraction
     ):
@@ -333,6 +338,12 @@ def build_capacity_claim(
         exposure_family=contract.exposure_family,
         active_family_ticket_count_at_claim=(usage.active_family_ticket_count),
         family_ticket_limit=family_ticket_limit,
+        max_same_strategy_side=policy.max_same_strategy_side,
+        active_strategy_side_ticket_count_at_claim=(
+            usage.active_strategy_side_ticket_count
+            if policy.max_same_strategy_side is not None
+            else None
+        ),
         remaining_family_slots_at_claim=(
             family_ticket_limit - usage.active_family_ticket_count
         ),

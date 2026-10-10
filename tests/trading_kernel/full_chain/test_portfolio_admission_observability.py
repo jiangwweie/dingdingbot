@@ -33,6 +33,10 @@ from src.trading_kernel.application.observe_strategy_scope import (
     ObservationStatus,
     observe_strategy_scope,
 )
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    set_strategy_entry_state,
+)
 from src.trading_kernel.application.runtime_facts import (
     AccountRiskSnapshotRequest,
     EntryAdmissionSnapshotRequest,
@@ -42,6 +46,7 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.infrastructure.pg_models import (
@@ -67,6 +72,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     arm_acceptance_policy,
     deploy_compatible_upgrade_identity,
+    seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.entry_worker import (
@@ -115,6 +121,7 @@ from tests.trading_kernel.unit.detectors.fixtures import (
     BTC,
     ETH,
     NOW_MS,
+    SOL,
     brf2_short_snapshot,
     cpm_long_snapshot,
     sor_snapshot,
@@ -831,6 +838,53 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
             )
             == 1
         )
+
+
+@pytest.mark.asyncio
+async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(issue_engine) -> None:
+    source_request = RuntimeAuthoritySeedRequest(account_id="subaccount-source-test", runtime_commit="kernel-test-head",
+        schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=NOW_MS-10_000_000)
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await seed_runtime_authority(uow, source_request)
+        await set_strategy_entry_state(uow, strategy_group_id="SOR-001", target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor", idempotency_key="capacity-natural:sor-pause",
+                owner_identity="owner",now_ms=NOW_MS-9_000_000), authentication_strength="totp_step_up")
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await deploy_compatible_upgrade_identity(uow, source_request.model_copy(update={"seeded_at_ms": NOW_MS-8_000_000}))
+    market = RecordingReplayMarketSource()
+    template = cpm_long_snapshot()
+    market._base_responses[(SOL,"1h")] = template.candles_1h
+    market._base_responses[(SOL,"4h")] = template.candles_4h
+    await _install_and_activate(issue_engine, market, event_id="CPM-LONG", members=(BNB,DOGE,SOL))
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await arm_acceptance_policy(uow, ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS-1))
+    venue = CertifiedVenue()
+    issued = []
+    positions = None
+    for index, member in enumerate((BNB,DOGE,SOL)):
+        offset = index*2*3_600_000
+        if positions is not None:
+            await _refresh_instrument_certification(issue_engine, positions,exchange_instrument_id=member,now_ms=NOW_MS+offset-1)
+        result = await _observe_and_admit(issue_engine, market, venue,
+            runtime_scope_id=await _active_scope_id(issue_engine,member), offset_ms=offset)
+        if index<2:
+            assert result[1] is EntryWorkerStatus.DISPATCHED, result
+            issued.append(result[5])
+            positions = await _release_entry_lane(issue_engine, venue,ticket_id=result[5],now_ms=NOW_MS+offset+2000)
+        else:
+            assert result[1] is EntryWorkerStatus.ISSUE_REFUSED, result
+            assert result[4] in {"exposure_family_capacity_exhausted", "directional_risk_exhausted"}, result
+    async with issue_engine.connect() as connection:
+        tickets = (await connection.execute(sa.select(trade_tickets))).mappings().all()
+    assert len(tickets)==2
+    assert {row["exchange_instrument_id"] for row in tickets}=={BNB,DOGE}
+    assert len({row["signal_event_id"] for row in tickets})==2
+    assert len({row["exposure_episode_id"] for row in tickets})==2
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        for ticket_id in issued:
+            claim = await uow.capacity_claims.get_for_ticket(ticket_id)
+            assert claim.max_same_strategy_side==2
+            assert claim.family_ticket_limit==2
 
 
 async def _seed_replay_runtime(

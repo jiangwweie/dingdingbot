@@ -33,6 +33,9 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_entry_controls_current,
     strategy_selection_control_current,
 )
+from src.trading_kernel.infrastructure.pg_repositories import (
+    PostgresEntryAdmissionRepository,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
@@ -113,14 +116,70 @@ async def test_claim_ticket_budget_domain_and_entry_command_commit_atomically(
         commands = await uow.exchange_commands.list_for_ticket(result.ticket_id)
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
         persisted_signal = await uow.signals.get(signal.signal_event_id)
-        admission = await uow.admission_decisions.get_for_signal(
-            signal.signal_event_id
-        )
+        admission = await uow.admission_decisions.get_for_signal(signal.signal_event_id)
 
     assert claim is not None
+    assert claim.max_same_strategy_side is None
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        policy = await uow.entry_admission.get_owner_policy(claim.owner_policy_id)
+    assert policy is not None
+    assert policy.max_same_strategy_side is None
+    async with issue_engine.connect() as connection:
+        columns = await connection.execute(
+            sa.text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='brc_capacity_claims' "
+                "AND column_name IN ('max_same_strategy_side','active_strategy_side_ticket_count_at_claim')"
+            )
+        )
+        assert set(columns.scalars()) == {
+            "max_same_strategy_side",
+            "active_strategy_side_ticket_count_at_claim",
+        }
     assert ticket == claim.to_ticket()
     assert ticket is not None
+    # Capacity counts the exact account/strategy/side, independent of the
+    # selected membership or which instrument owns the existing Ticket.
+    async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        domain = ticket.identity.netting_domain
+        ticket_strategy = ticket.identity.runtime.strategy_group_id
+        for account_id, strategy_group_id, position_side, expected in (
+            (domain.account_id, ticket_strategy, domain.position_side, 1),
+            ("other-account", ticket_strategy, domain.position_side, 0),
+            (domain.account_id, "other-strategy", domain.position_side, 0),
+            (
+                domain.account_id,
+                ticket_strategy,
+                "short" if domain.position_side == "long" else "long",
+                0,
+            ),
+        ):
+            assert (
+                await uow.entry_admission.count_active_strategy_side_tickets(
+                    venue_id=domain.venue_id,
+                    account_id=account_id,
+                    strategy_group_id=strategy_group_id,
+                    position_side=position_side,
+                )
+                == expected
+            )
     assert ticket.take_profit_quantities == claim.take_profit_quantities
+    # An unresolved reservation must not release strategy capacity solely
+    # because a contradictory terminal marker appeared. Deliberate corruption
+    # stays in one rolled-back diagnostic transaction.
+    async with issue_engine.connect() as connection:
+        transaction = await connection.begin()
+        try:
+            await connection.execute(sa.text(
+                "UPDATE brc_trade_tickets SET terminal_at_ms=:time, active_netting_domain_key=NULL WHERE ticket_id=:ticket"
+            ), {"time": FIRST_ELIGIBLE_CLOSE_MS + 5, "ticket": ticket.identity.ticket_id})
+            repository = PostgresEntryAdmissionRepository(connection)
+            assert await repository.count_active_strategy_side_tickets(
+                venue_id=domain.venue_id, account_id=domain.account_id,
+                strategy_group_id=ticket_strategy, position_side=domain.position_side,
+            ) == 1
+        finally:
+            await transaction.rollback()
     assert sum(ticket.take_profit_quantities, Decimal(0)) < ticket.quantity
     assert reservation is not None
     assert reservation.reserved_notional == claim.notional
@@ -285,9 +344,7 @@ async def test_open_selection_vacuum_rejects_admission_before_claim_or_ticket(
     assert result.status is IssueTicketStatus.SELECTION_ENTRY_VACUUM
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         claim = await uow.capacity_claims.get_for_signal(signal.signal_event_id)
-        admission = await uow.admission_decisions.get_for_signal(
-            signal.signal_event_id
-        )
+        admission = await uow.admission_decisions.get_for_signal(signal.signal_event_id)
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
         has_ticket = await uow.entry_admission.has_ticket_for_signal(
             signal.signal_event_id
@@ -345,9 +402,7 @@ async def test_dispatch_authority_drift_rejects_before_any_venue_mutation(
     async with issue_engine.begin() as connection:
         await connection.execute(
             sa.update(strategy_selection_control_current)
-            .where(
-                strategy_selection_control_current.c.strategy_group_id == "SOR-001"
-            )
+            .where(strategy_selection_control_current.c.strategy_group_id == "SOR-001")
             .values(
                 selection_mode="disabled",
                 control_version=2,
@@ -376,12 +431,16 @@ async def test_dispatch_authority_drift_rejects_before_any_venue_mutation(
     assert venue.calls == 0
     async with issue_engine.connect() as connection:
         command = (
-            await connection.execute(
-                sa.select(exchange_commands).where(
-                    exchange_commands.c.ticket_id == issued.ticket_id
+            (
+                await connection.execute(
+                    sa.select(exchange_commands).where(
+                        exchange_commands.c.ticket_id == issued.ticket_id
+                    )
                 )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert command["status"] == "rejected"
     assert command["result_payload"]["reason"] == (
         "dispatch_preflight:selection_authority_invalid"

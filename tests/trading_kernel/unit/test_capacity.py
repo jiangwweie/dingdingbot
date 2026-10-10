@@ -190,9 +190,53 @@ def test_capacity_claim_reports_exact_exit_leg_materialization_blocker() -> None
     assert decision.claim is None
 
 
+@pytest.mark.parametrize(
+    "count,expected",
+    [(0, "claimed"), (1, "claimed"), (2, "strategy_side_capacity_exhausted")],
+)
+def test_strategy_side_capacity_is_an_independent_policy_gate(count, expected) -> None:
+    _, decision = _build_decision(
+        active_strategy_side_ticket_count=count,
+        max_same_strategy_side=2,
+    )
+    assert decision.status.value == expected
+    assert (decision.claim is not None) == (expected == "claimed")
+    if decision.claim is not None:
+        assert decision.claim.max_same_strategy_side == 2
+        assert decision.claim.active_strategy_side_ticket_count_at_claim == count
+        assert decision.claim.decision_digest == build_capacity_claim_digest(
+            decision.claim
+        )
+
+
+def test_old_policy_has_no_invented_strategy_side_limit() -> None:
+    _, decision = _build_decision(active_strategy_side_ticket_count=2)
+    assert decision.status is CapacityClaimStatus.CLAIMED
+    assert decision.claim is not None
+    assert decision.claim.max_same_strategy_side is None
+    assert decision.claim.active_strategy_side_ticket_count_at_claim is None
+    original = decision.claim.model_dump(
+        exclude={"max_same_strategy_side", "active_strategy_side_ticket_count_at_claim"}
+    )
+    assert (
+        CapacityClaim.model_validate(original).decision_digest
+        == decision.claim.decision_digest
+    )
+
+
+@pytest.mark.parametrize("invalid", [0, -1, True])
+def test_strategy_side_limit_rejects_invalid_values(invalid) -> None:
+    with pytest.raises(ValidationError):
+        CapacityPolicy.model_validate(
+            {**_policy().model_dump(), "max_same_strategy_side": invalid}
+        )
+
+
 def _build_decision(
     *,
     active_family_ticket_count: int = 0,
+    active_strategy_side_ticket_count: int = 0,
+    max_same_strategy_side: int | None = None,
     directional_risk_at_stop: Decimal = Decimal(0),
     configured_leverage: int = 5,
     selection_authority_id: str | None = None,
@@ -238,12 +282,15 @@ def _build_decision(
         venue_id="binance-usdm",
         account_id="experiment-1",
         position_mode="independent_sides",
-        policy=_policy(),
+        policy=CapacityPolicy.model_validate(
+            {**_policy().model_dump(), "max_same_strategy_side": max_same_strategy_side}
+        ),
         usage=CapacityUsage(
             gross_notional=Decimal(0),
             gross_risk_at_stop=Decimal(0),
             current_reserved_margin=Decimal(0),
             active_ticket_count=0,
+            active_strategy_side_ticket_count=active_strategy_side_ticket_count,
             active_family_ticket_count=active_family_ticket_count,
             directional_risk_at_stop=directional_risk_at_stop,
         ),

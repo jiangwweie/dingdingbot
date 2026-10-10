@@ -477,8 +477,7 @@ async def _preflight_new_entry_mutation(
                         entry_facts_source,
                         product_request,
                     )
-                    if product_compatibility.product_family
-                    == "tradfi_equity_perpetual"
+                    if product_compatibility.product_family == "tradfi_equity_perpetual"
                     else _no_product_session()
                 ),
             ),
@@ -530,9 +529,7 @@ async def _preflight_new_entry_mutation(
             None
             if selection_control is None
             else await uow.instrument_selection.get_current_entry_vacuum(
-                strategy_group_id=(
-                    aggregate.ticket.identity.runtime.strategy_group_id
-                ),
+                strategy_group_id=(aggregate.ticket.identity.runtime.strategy_group_id),
                 selection_spec_id=selection_control.selection_spec_id,
             )
         )
@@ -545,17 +542,14 @@ async def _preflight_new_entry_mutation(
                 source_signal is None
                 or source_signal.selection_authority_id
                 != aggregate.ticket.selection_authority_id
-                or source_signal.selection_authority_id
-                != claim.selection_authority_id
+                or source_signal.selection_authority_id != claim.selection_authority_id
             ) or scope is None:
                 selection_authority_valid = False
             else:
                 selection = await resolve_selection_entry_authority(
                     uow,
                     runtime_scope=scope,
-                    birth_selection_authority_id=(
-                        source_signal.selection_authority_id
-                    ),
+                    birth_selection_authority_id=(source_signal.selection_authority_id),
                     observed_close_time_ms=source_signal.occurred_at_ms,
                     now_ms=request.now_ms,
                     allow_current_as_birth=False,
@@ -584,6 +578,14 @@ async def _preflight_new_entry_mutation(
                 venue_id=domain.venue_id,
                 account_id=domain.account_id,
                 exposure_family=aggregate.ticket.exposure_family,
+            )
+        )
+        active_strategy_side_ticket_count = (
+            await uow.entry_admission.count_active_strategy_side_tickets(
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                strategy_group_id=aggregate.ticket.identity.runtime.strategy_group_id,
+                position_side=domain.position_side,
             )
         )
         active_directional_risk_at_stop = (
@@ -623,6 +625,7 @@ async def _preflight_new_entry_mutation(
                 requested_position_side=domain.position_side,
             ),
             active_family_ticket_count=active_family_ticket_count,
+            active_strategy_side_ticket_count=active_strategy_side_ticket_count,
             active_directional_risk_at_stop=active_directional_risk_at_stop,
             now_ms=request.now_ms,
             product_entry_decision=product_entry_decision,

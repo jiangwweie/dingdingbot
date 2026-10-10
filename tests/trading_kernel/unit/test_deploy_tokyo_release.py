@@ -24,6 +24,7 @@ from src.trading_kernel.application.runtime import (
     RuntimeReleaseCompatibilityFact,
 )
 from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 
 TARGET_COMMIT = "a" * 40
 CURRENT_COMMIT = "b" * 40
@@ -31,7 +32,7 @@ CURRENT_RELEASE = "/opt/brc/releases/brc-trading-kernel-bbbbbbbbbbbb"
 TARGET_RELEASE = "/opt/brc/releases/brc-trading-kernel-aaaaaaaaaaaa"
 RECOVERY_RELEASE = "/opt/brc/releases/brc-trading-kernel-cccccccccccc"
 SOURCE_SCHEMA_REVISION = "0007_exit_profile_authority_v1"
-TARGET_SCHEMA_REVISION = "0008_generic_dynamic_selection_v1"
+TARGET_SCHEMA_REVISION = CURRENT_SCHEMA_REVISION
 RELEASE_COMPATIBILITY_ID = (
     f"release-compatibility:{CURRENT_COMMIT}:{TARGET_COMMIT}"
 )
