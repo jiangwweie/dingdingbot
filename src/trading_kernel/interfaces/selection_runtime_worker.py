@@ -31,6 +31,7 @@ from src.trading_kernel.application.market_ports import (
 )
 from src.trading_kernel.application.observe_strategy_scope import (
     ObservationRequest,
+    current_facts_refresh_vacuum_allowed,
     observe_strategy_scope,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory
@@ -153,7 +154,7 @@ async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory
         if owner is None or owner.entry_state!="enabled" or control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not eligible_pending):
             return CurrentFactRefreshRuntimeResult(status="no_work")
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id)
-        if vacuum is not None and vacuum.blocks_new_entry:
+        if vacuum is not None and vacuum.blocks_new_entry and not await current_facts_refresh_vacuum_allowed(uow,vacuum=vacuum,control=control):
             return CurrentFactRefreshRuntimeResult(status="no_work",reason_code="ENTRY_VACUUM")
         current=await uow.strategy_universes.get_current(family.event_spec_id)
         if current is None:

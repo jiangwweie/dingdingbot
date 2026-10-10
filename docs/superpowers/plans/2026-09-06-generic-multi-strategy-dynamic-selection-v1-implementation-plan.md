@@ -1094,6 +1094,16 @@ Readonly status原先只显示Selection Authority层，Global ENTRY关闭、成�
 
 GS-10仍需真实resident进程多period/restart、queue完整fairness/target-release、Vacuum recovery freshness，以及更完整的member recovery/市场证书/运行fence展示；GS-11/12未签收。production_modified=NO，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-10 FAILED_CLOSED Vacuum readiness deadlock修复（基于13c9f5f0，未整卡签收）
+
+新真实PG RED去掉failure之后的手工warm TTL刷新：首次Static→Dynamic warming timeout，旧Static readiness已自然过期，recovery proof要求CERTIFY_CURRENT fresh，但Facts runtime因ENTRY_VACUUM直接NO_WORK，形成循环等待。现只允许RECONFIGURING且已drain、无ENTRY drain blocker、exact source Generation FAILED_CLOSED、Owner/Control/Spec/epoch/version匹配的旧current Universe进行readiness-only Facts刷新；OPEN/DRAINING、仍warming、未知Command、无source和错误Universe不得使用此路径。正常ENTRY/Observation权限不放松，Facts operation不推进Episode或创建Signal/Authority。
+
+网络前后冻结并重验Vacuum identity/projection version（与既有Owner/Control/current Universe/scope/runtime/close proof共同检查），故Pause或Vacuum handoff可使结果invalid；不会resolve Vacuum，不延长Generation deadline，不改变Static pending或current指针。认证facts仍由独立Reconciliation刷新，测试不以market Facts替代Binance certification。
+
+四策略Static source预先有warm证据，失败期间自然过期；失败之后仅更新独立certification，通过正式Facts runtime重新计算市场Facts/比较projection，再prepare/commit正式Static recovery proof，保持future-close-only+rebase。检查刷新前后Vacuum/FAILED_CLOSED Generation/Episode/entry flag/observation generation不变，零Signal/Ticket/Command；四策略I/O中正式Owner Pause则invalid、warm TTL不变且零Authority。单测拒绝非exact/undrained/warming/错误epoch/version/错误Universe/未知drain等分支。末版相关PG恢复/Pause+正常续期+first-pending矩阵16 passed（57.27s）；Unit/Architecture/API1434 passed（20.11s），末版hosting/Observation/docs专项82 passed，Ruff、Mypy161 files、diff PASS；不是完整R4或soak。
+
+本段覆盖FAILED_CLOSED首次Static恢复freshness死锁；其他Vacuum来源、Dynamic previous恢复/Static rollback的resident freshness边界、真实process多period/restart及完整global fairness仍待整卡验证，GS-10保持IN_PROGRESS。GS-11/12未签收，GS-13及准备子项WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

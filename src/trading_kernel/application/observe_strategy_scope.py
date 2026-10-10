@@ -54,9 +54,17 @@ from src.trading_kernel.domain.market import (
     Timeframe,
 )
 from src.trading_kernel.domain.product import ProductSessionSnapshot
+from src.trading_kernel.domain.selection_authority import (
+    MaterializationGenerationState,
+    SelectionControl,
+)
 from src.trading_kernel.domain.signal import (
     SignalFactSnapshot,
     build_signal_fact_digest,
+)
+from src.trading_kernel.domain.strategy_entry_vacuum import (
+    StrategyEntryVacuum,
+    StrategyEntryVacuumState,
 )
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -136,6 +144,22 @@ class CurrentFactsRefreshSource(BaseModel):
     universe_version_id: str
     scope_version: int
     observation_generation: int
+    entry_vacuum_id: str | None
+    entry_vacuum_version: int | None
+
+
+async def current_facts_refresh_vacuum_allowed(uow: KernelUnitOfWork, *, vacuum: StrategyEntryVacuum,
+    control: SelectionControl,universe_version_id: str | None=None) -> bool:
+    """Readiness-only recovery: never relax the unresolved ENTRY fence."""
+    if vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None or vacuum.source_generation_id is None:
+        return False
+    generation=await uow.instrument_selection.get_generic_materialization_generation(vacuum.source_generation_id)
+    exact=generation is not None and generation.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED and (
+        generation.strategy_group_id==control.strategy_group_id and generation.selection_spec_id==control.selection_spec_id
+        and generation.selection_epoch_id==control.selection_epoch_id and generation.selection_control_version==control.control_version
+        and generation.fenced_at_ms is not None and generation.terminal_at_ms is not None
+        and (universe_version_id is None or any(previous.universe_version_id==universe_version_id for previous in generation.previous_events)))
+    return exact and not await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=control.strategy_group_id)
 
 
 def build_warm_readiness(
@@ -812,7 +836,8 @@ async def _capture_current_facts_refresh_source(uow: KernelUnitOfWork,scope: Run
         return None
     vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=scope.strategy_group_id,
         selection_spec_id=control.selection_spec_id,for_update=for_update)
-    if vacuum is not None and vacuum.blocks_new_entry:
+    if vacuum is not None and vacuum.blocks_new_entry and not await current_facts_refresh_vacuum_allowed(uow,
+        vacuum=vacuum,control=control,universe_version_id=scope.universe_version_id):
         return None
     active=await uow.signals.get_active_universe_member(event_spec_id=scope.event_spec_id,
         exchange_instrument_id=scope.exchange_instrument_id,for_update=for_update)
@@ -830,7 +855,9 @@ async def _capture_current_facts_refresh_source(uow: KernelUnitOfWork,scope: Run
     return CurrentFactsRefreshSource(owner_control_version=owner.control_version,selection_control_version=control.control_version,
         selection_spec_id=installed.selection_spec_id,algorithm_semantic_digest=installed.algorithm_semantic_digest,
         selection_epoch_id=control.selection_epoch_id,universe_version_id=active.universe_version_id,
-        scope_version=actual.scope_version,observation_generation=actual.observation_generation)
+        scope_version=actual.scope_version,observation_generation=actual.observation_generation,
+        entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
+        entry_vacuum_version=None if vacuum is None else vacuum.projection_version)
 
 
 def _scope_observation_permissions_are_valid(

@@ -10253,6 +10253,14 @@ async def test_static_recovery_proposal_is_built_from_database_without_grant(dat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+@pytest.mark.parametrize("pause_during_io",[False,True])
+async def test_failed_first_activation_refreshes_previous_facts_through_runtime_before_recovery(database,group,pause_during_io):
+    await _exercise_generic_generation(database,group,False,
+        failure_case="timeout_then_prepare_runtime_refresh_pause" if pause_during_io else "timeout_then_prepare_runtime_refresh",first_activation=True)
+
+
+@pytest.mark.asyncio
 async def test_recovered_entry_dispatch_rejects_changed_rebase_before_venue_call(database):
     await _exercise_generic_generation(database,"CPM-RO-001",False,failure_case="timeout_then_prepare_dispatch_refusal",first_activation=True)
 
@@ -10471,6 +10479,12 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             w.model_copy(update={"candles":source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0])
             for w in source.member_windows)})
     uid,comparison_id = await _install_static_selection_source(database,group)
+    if failure_case is not None and failure_case.startswith("timeout_then_prepare_runtime_refresh"):
+        # The previous Static source was genuinely warmed before the attempt;
+        # its readiness expires naturally while the failed target owns Vacuum.
+        await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=CUTOFF-1,valid_until_ms=CUTOFF+HOUR)
+        async with database.begin() as connection:
+            await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),{"uid":uid})
     if first_activation and not natural_selection:
         async with PostgresKernelUnitOfWork(database) as uow:
             first_control = await stage_generic_dynamic_selection_mode(
@@ -11095,10 +11109,69 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         previous_uid = persisted.previous_events[0].universe_version_id
         now = at+1
         close = now//HOUR*HOUR
-        await make_warming_ready(database,universe_version_id=previous_uid,warm_closed_bar_time_ms=close,valid_until_ms=now+HOUR)
+        if failure_case.startswith("timeout_then_prepare_runtime_refresh"):
+            from src.trading_kernel.interfaces.selection_runtime_worker import (
+                CurrentFactRefreshRuntimeRequest,
+                run_current_fact_refresh_runtime_once,
+            )
+            # Certification is an independent Reconciliation prerequisite;
+            # never manually renew market Facts / warm TTL after the failure.
+            async with database.begin() as connection:
+                await connection.execute(sa.text("UPDATE brc_instrument_certification_current SET status='eligible',blocker_code=NULL,observed_at_ms=:at,valid_until_ms=:until,next_check_at_ms=:until WHERE exchange_instrument_id IN (SELECT exchange_instrument_id FROM brc_strategy_universe_members WHERE universe_version_id=:uid)"),
+                    {"at":now-1,"until":now+HOUR,"uid":previous_uid})
+            async with database.connect() as connection:
+                before_episodes=(await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()
+                before_scopes=(await connection.execute(sa.text("SELECT runtime_scope_id,warm_valid_until_ms,entry_enabled,observation_generation FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":previous_uid})).mappings().all()
+                assert all(row["warm_valid_until_ms"]<=now for row in before_scopes)
+            template={"CPM-RO-001":cpm_flat_snapshot,"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"BRF2-001":brf2_short_snapshot}[source.spec.strategy_group_id]()
+            class RefreshMarket:
+                paused=False
+                async def fetch_closed_candles(self,request):
+                    if failure_case.endswith("_pause") and not self.paused:
+                        self.paused=True
+                        from src.trading_kernel.application.owner_control import (
+                            set_strategy_entry_state,
+                        )
+                        from src.trading_kernel.domain.owner_control import (
+                            StrategyEntryState,
+                        )
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            owner=await uow.owner_controls.get_strategy_control(source.spec.strategy_group_id)
+                            await set_strategy_entry_state(uow,strategy_group_id=source.spec.strategy_group_id,target_state=StrategyEntryState.PAUSED,
+                                request=ControlMutationRequest(expected_version=owner.control_version,reason="pause_during_recovery_facts",
+                                    idempotency_key="recovery:facts:pause",owner_identity="owner",now_ms=now),authentication_strength="totp_step_up")
+                    delta=close-template.trigger_candle_close_time_ms
+                    candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+                    return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)[-request.limit:]
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                refreshed=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=RefreshMarket(),
+                    request=CurrentFactRefreshRuntimeRequest(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id,
+                        worker_id="failed-previous-facts",now_ms=now,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION))
+            if failure_case.endswith("_pause"):
+                assert refreshed.status=="invalid",refreshed
+                async with database.connect() as connection:
+                    assert (await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()==before_episodes
+                    assert (await connection.execute(sa.text("SELECT runtime_scope_id,warm_valid_until_ms,entry_enabled,observation_generation FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":previous_uid})).mappings().all()==before_scopes
+                    for table in ("brc_signal_events","brc_trade_tickets","brc_exchange_commands","brc_selection_session_authorities"):
+                        assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+                return
+            assert refreshed.status=="facts_refreshed",refreshed
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)==vacuum
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert await uow.instrument_selection.get_generic_materialization_generation(persisted.materialization_generation_id)==persisted
+            async with database.connect() as connection:
+                assert (await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()==before_episodes
+                after_scopes=(await connection.execute(sa.text("SELECT runtime_scope_id,warm_valid_until_ms,entry_enabled,observation_generation FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":previous_uid})).mappings().all()
+                assert all(row["warm_valid_until_ms"]>now for row in after_scopes)
+                assert [(r["runtime_scope_id"],r["entry_enabled"],r["observation_generation"]) for r in after_scopes]==[(r["runtime_scope_id"],r["entry_enabled"],r["observation_generation"]) for r in before_scopes]
+                for table in ("brc_signal_events","brc_trade_tickets","brc_exchange_commands"):
+                    assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+        else:
+            await make_warming_ready(database,universe_version_id=previous_uid,warm_closed_bar_time_ms=close,valid_until_ms=now+HOUR)
         async with database.begin() as conn:
             await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
-        if source.spec.strategy_group_id in {"MPG-001","MI-001"}:
+        if source.spec.strategy_group_id in {"MPG-001","MI-001"} and not failure_case.startswith("timeout_then_prepare_runtime_refresh"):
             template = mpg_long_snapshot() if source.spec.strategy_group_id=="MPG-001" else mi_long_snapshot()
             delta = close-template.trigger_candle_close_time_ms
             candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
