@@ -1104,6 +1104,16 @@ GS-10仍需真实resident进程多period/restart、queue完整fairness/target-re
 
 本段覆盖FAILED_CLOSED首次Static恢复freshness死锁；其他Vacuum来源、Dynamic previous恢复/Static rollback的resident freshness边界、真实process多period/restart及完整global fairness仍待整卡验证，GS-10保持IN_PROGRESS。GS-11/12未签收，GS-13及准备子项WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-10 actual resident SIGTERM / Static restart增量（基于6d2438cc，未整卡签收）
+
+真实OS child process RED证明共享process group即使收到SIGTERM，永久等待中的Selection component仍使gather不退出。现group在shutdown event到达后取消所有component Task并等待finally/UoW清理，不记录CancelledError为tick_failed，不发送任何新增Command。两个真实process连续启动/停止，slow component等待期间另一独立heartbeat至少推进三tick；SIGTERM后正常code0并执行slow finally，隔离工作目录零文件。该heartbeat是hosting测试loop，不冒称真实Lifecycle/Reconciliation持仓链。
+
+正式run_observation_worker_once.py --run-forever连接Docker PG的Static无pending安装场景，两次独立OS process实际调用四Generic Selector/Materializer/Facts、Observation和SOR兼容组件，然后SIGTERM正常退出；fail-on-network test source、零Job/Attempt/Snapshot/Generation/Vacuum/Authority/Signal/Ticket/Command及零工作目录文件。SOR source未安装分支另RED暴露materializer反复get_active_spec LookupError，现在原Vacuum drain之后明确NOT_DUE/SELECTION_SPEC_NOT_INSTALLED，不能借“不安装”略去已存在的安全drain。缺SOR Control的Selector仍明确blocked，不伪装已经安装/可交易。
+
+另一真实process在PostgresKernelUnitOfWork中修改本地Policy priority（仅未提交事务）后挂起，SIGTERM→rollback→engine disposal；原完整Policy row逐字段保持，父process FOR UPDATE NOWAIT成功，证明没有残留transaction/row lock。它证明通用取消事务边界，不替代Dynamic Job/Generation durable lease/cursor多period restart验收。
+
+末版Unit/Architecture/API1436 passed（19.94s），focused actual process+hosting53 passed、Docker PG actual CLI/transaction2 passed（4.65s），共享SOR materialization/Vacuum142 passed（91.56s），Ruff、Mypy161 files、diff PASS；所有verification进程终态。GS-10仍IN_PROGRESS，Dynamic resident多period/restart、queue完整fairness/target release等继续待验收；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

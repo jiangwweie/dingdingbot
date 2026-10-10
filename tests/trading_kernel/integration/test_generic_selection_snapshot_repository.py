@@ -273,6 +273,100 @@ async def test_generic_member_status_reads_current_policy_without_materializatio
 
 
 @pytest.mark.asyncio
+async def test_real_static_resident_process_restarts_without_network_or_dynamic_facts(database: AsyncEngine,tmp_path: Path) -> None:
+    import os
+    import sys
+
+    script=Path(__file__).resolve().parents[3]/"scripts/trading_kernel/run_observation_worker_once.py"
+    expected={"resident" ,"resident:selection","resident:materialization"}
+    for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
+        expected.update(f"resident:{plane}:{group}" for plane in ("selection","materialization","facts"))
+    for _ in range(2):
+        process=await asyncio.create_subprocess_exec(sys.executable,str(script),
+            "--market-source-factory","tests.trading_kernel.support.resident_no_network:NoNetworkMarket",
+            "--worker-id","resident","--run-forever","--runtime-commit","a"*40,"--schema-revision",CURRENT_SCHEMA_REVISION,
+            "--poll-interval-ms","50","--selection-poll-interval-ms","50","--materialization-poll-interval-ms","50",
+            cwd=tmp_path,env={**os.environ,"TRADING_KERNEL_DATABASE_URL":database.url.render_as_string(hide_password=False),
+                "PYTHONDONTWRITEBYTECODE":"1"},stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        try:
+            assert process.stdout is not None
+            seen=set()
+            async with asyncio.timeout(15):
+                while seen!=expected:
+                    line=await process.stdout.readline()
+                    assert line,"Resident process exited before all components ticked"
+                    result=json.loads(line)
+                    if result["component_id"]=="resident:selection" and result["status"]=="blocked":
+                        assert result["reason_code"]=="SELECTION_CONTROL_MISSING_OR_DRIFTED",result
+                    else:
+                        assert result["status"] in {"not_due","no_work"},result
+                    seen.add(result["component_id"])
+            process.terminate()
+            output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+            assert process.returncode==0,error.decode()
+            assert b"tick_failed" not in output
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.communicate()
+    assert tuple(tmp_path.rglob("*"))==()
+    async with database.connect() as connection:
+        for table in ("brc_exposure_episode_current","brc_signal_events","brc_trade_tickets","brc_exchange_commands",
+            "brc_instrument_selection_jobs_current","brc_instrument_selection_attempts","brc_instrument_selection_snapshots",
+            "brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
+@pytest.mark.asyncio
+async def test_real_resident_sigterm_rolls_back_inflight_postgres_transaction(database: AsyncEngine,tmp_path: Path) -> None:
+    import os
+    import sys
+
+    repo=Path(__file__).resolve().parents[3]
+    program="""
+import asyncio,os
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import create_async_engine
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.interfaces.worker_process import WorkerProcessLoop,run_worker_process_group
+async def main():
+    engine=create_async_engine(os.environ['BRC_RESIDENT_TEST_DATABASE_URL'])
+    async def tick():
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await uow._connection.execute(sa.text("UPDATE brc_owner_policy_current SET priority_rank=priority_rank+1 WHERE owner_policy_id='policy-main'"))
+            print('transaction_open',flush=True)
+            await asyncio.Event().wait()
+    try:
+        await run_worker_process_group((WorkerProcessLoop('transaction',tick,10,frozenset()),),run_forever=True,idle_log_interval_ms=1000)
+    finally:
+        await engine.dispose()
+asyncio.run(main())
+"""
+    async with database.connect() as connection:
+        before=(await connection.execute(sa.text("SELECT * FROM brc_owner_policy_current"))).mappings().all()
+    process=await asyncio.create_subprocess_exec(sys.executable,"-c",program,cwd=tmp_path,
+        env={**os.environ,"PYTHONPATH":str(repo),"PYTHONDONTWRITEBYTECODE":"1",
+            "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+        stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    try:
+        assert process.stdout is not None
+        assert (await asyncio.wait_for(process.stdout.readline(),timeout=10)).decode().strip()=="transaction_open"
+        process.terminate()
+        output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+        assert process.returncode==0,error.decode()
+        assert b"tick_failed" not in output
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    async with database.connect() as connection:
+        assert (await connection.execute(sa.text("SELECT * FROM brc_owner_policy_current"))).mappings().all()==before
+        async with connection.begin_nested():
+            await connection.execute(sa.text("SELECT owner_policy_id FROM brc_owner_policy_current WHERE owner_policy_id='policy-main' FOR UPDATE NOWAIT"))
+    assert tuple(tmp_path.rglob("*"))==()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("group",["MPG-001","MI-001"])
 async def test_generic_member_status_tracks_persisted_comparison_rebase(database: AsyncEngine,group: str) -> None:
     from src.trading_kernel.interfaces.readonly_api import (

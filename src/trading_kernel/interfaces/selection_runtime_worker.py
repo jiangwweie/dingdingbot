@@ -330,6 +330,11 @@ async def run_materialization_runtime_once(
             reason_code=drain.reason_code,
         )
     async with uow_factory() as uow:
+        try:
+            await uow.instrument_selection.get_active_spec(request.selection_spec_id)
+        except LookupError:
+            return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.NOT_DUE,
+                session_start_ms=session_start_ms,reason_code="SELECTION_SPEC_NOT_INSTALLED")
         generation_claim = (
             await uow.instrument_selection.claim_materialization_generation(
                 selection_spec_id=request.selection_spec_id,

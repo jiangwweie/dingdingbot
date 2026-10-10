@@ -726,6 +726,23 @@ async def test_public_gap_audit_rejects_duplicate_or_future_session_bar(
 
 
 @pytest.mark.asyncio
+async def test_uninstalled_sor_materializer_never_claims_or_coordinates():
+    class Repository:
+        async def get_current_entry_vacuum(self,**_): return None
+        async def get_active_spec(self,*_): raise LookupError("not installed")
+        async def claim_materialization_generation(self,**_): raise AssertionError("uninstalled source must not claim")
+    class Uow:
+        instrument_selection=Repository()
+        async def __aenter__(self): return self
+        async def __aexit__(self,*_): return None
+    now=1_800_057_600_000+3600000
+    result=await run_materialization_runtime_once(uow_factory=Uow,audit_source=None,
+        request=SelectionRuntimeRequest(strategy_group_id="SOR-001",selection_spec_id="sor-dynamic-selection-v0",worker_id="uninstalled",now_ms=now),clock_ms=lambda:now)
+    assert result.status is MaterializationRuntimeStatus.NOT_DUE
+    assert result.reason_code=="SELECTION_SPEC_NOT_INSTALLED"
+
+
+@pytest.mark.asyncio
 async def test_materialization_runtime_does_not_advance_a_generation_with_another_live_lease() -> None:
     session_start_ms = 1_800_057_600_000
     generation = MaterializationGeneration(
@@ -887,6 +904,9 @@ class _MaterializationLeaseRepository:
     def __init__(self, claim: MaterializationGenerationLeaseClaim) -> None:
         self._claim = claim
         self.releases: list[tuple[str, str]] = []
+
+    async def get_active_spec(self,*_):
+        return SimpleNamespace()
 
     async def claim_materialization_generation(self, **_kwargs):
         return self._claim

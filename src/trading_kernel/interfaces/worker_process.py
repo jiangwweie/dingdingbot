@@ -169,5 +169,11 @@ async def run_worker_process_group(
             except TimeoutError:
                 continue
 
-    await asyncio.gather(*(run_component(item) for item in loops))
+    tasks=tuple(asyncio.create_task(run_component(item)) for item in loops)
+    try:
+        await stop.wait()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
     return 0
