@@ -1403,6 +1403,8 @@ class StrategyRegistryRepository(Protocol):
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
 
 class StrategyUniverseRepository(Protocol):
+    async def materialization_slot_available(self, materialization_generation_id: str, *, replacing_generation_id: str | None = None) -> bool: ...
+
     async def resolve_install_context(
         self,
         *,

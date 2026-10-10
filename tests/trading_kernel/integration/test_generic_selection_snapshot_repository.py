@@ -42,6 +42,7 @@ from src.trading_kernel.application.ingest_signal import (
 )
 from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallRequest,
+    UniverseInstallStatus,
     install_strategy_universe,
 )
 from src.trading_kernel.application.observe_strategy_scope import (
@@ -1840,6 +1841,72 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
         assert await uow.instrument_selection.get_generic_static_materialization_generation(created.materialization_generation_id) == active_static_generation
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == rotated_authority
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == rotated_uid
+
+
+@pytest.mark.asyncio
+async def test_two_materializers_serialize_before_fence_and_pause_releases_durable_slot(database: AsyncEngine) -> None:
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    groups=("CPM-RO-001","BRF2-001")
+    requests={}
+    sources={}
+    for group in groups:
+        sources[group]=inputs(group)
+        await _install_static_selection_source(database,group)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            pending=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="concurrent_slot",idempotency_key=f"slot:{group}",owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")
+            source=sources[group].model_copy(update={"selection_epoch_id":pending.selection_epoch_id})
+            snapshot=compute_generic_selection(source)
+            await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
+        requests[group]=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id=f"slot:{group}")
+        for offset in (1,2):
+            at=CUTOFF+HOUR+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+                prepared=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=requests[group],clock_ms=lambda at=at:at)
+        assert prepared.disposition is MaterializationDisposition.GENERATION_DESIRED
+    at=CUTOFF+HOUR+3
+    entered=set()
+    both_entered=asyncio.Event()
+    actual_slot=PostgresStrategyUniverseRepository.materialization_slot_available
+    async def barrier_slot(repository,gid):
+        entered.add(gid)
+        if len(entered)==2:
+            both_entered.set()
+        await asyncio.wait_for(both_entered.wait(),timeout=10)
+        return await actual_slot(repository,gid)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), patch.object(
+        PostgresStrategyUniverseRepository,"materialization_slot_available",new=barrier_slot):
+        results=await asyncio.wait_for(asyncio.gather(*(coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=requests[group],clock_ms=lambda:at) for group in groups)),timeout=20)
+    assert sorted(r.disposition.value for r in results)==["GENERATION_DESIRED","WAITING_VACUUM"]
+    winner=groups[next(i for i,result in enumerate(results) if result.disposition is MaterializationDisposition.WAITING_VACUUM)]
+    loser=groups[1-groups.index(winner)]
+    await database.dispose()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        for group in groups:
+            generation=await uow.instrument_selection.get_generic_materialization_generation(results[groups.index(group)].materialization_generation_id)
+            assert generation.lifecycle_state.value==("DRAINING_ENTRY" if group==winner else "DESIRED")
+            assert generation.fenced_at_ms==(at if group==winner else None)
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=loser,selection_spec_id=sources[loser].spec.selection_spec_id) is None
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+1)):
+        blocked=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=requests[loser],clock_ms=lambda:at+1)
+    assert blocked.reason_code=="GLOBAL_WARMING_SLOT_BUSY"
+    async with PostgresKernelUnitOfWork(database) as uow:
+        owner=await uow.owner_controls.get_strategy_control(winner)
+        await set_strategy_entry_state(uow,strategy_group_id=winner,target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=owner.control_version,reason="release_slot_on_pause",idempotency_key="slot:pause-winner",owner_identity="owner",now_ms=at+2),authentication_strength="totp_step_up")
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+3)):
+        paused=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=requests[winner],clock_ms=lambda:at+3)
+    assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+4)):
+        fenced=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=requests[loser],clock_ms=lambda:at+4)
+    assert fenced.disposition is MaterializationDisposition.WAITING_VACUUM
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert (await uow.instrument_selection.get_generic_materialization_generation(results[groups.index(winner)].materialization_generation_id)).lifecycle_state.value=="ABANDONED"
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING','STAGED')"))==1
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
 
 
 @pytest.mark.asyncio
@@ -5483,6 +5550,20 @@ async def test_new_nonempty_snapshot_takes_over_generation_free_gap_without_norm
             assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==previous
             assert await uow.instrument_selection.get_generic_materialization_generation(GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)) is None
         return
+    occupied_spec=inputs("MI-001" if group=="CPM-RO-001" else "CPM-RO-001").spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        occupying=await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=occupied_spec.event_spec_id,
+            runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",exchange_instrument_ids=occupied_spec.candidate_ids[:1],installed_at_ms=now))
+        assert occupying.status is UniverseInstallStatus.INSTALLED
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+        queued=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now)
+    assert queued.disposition is MaterializationDisposition.GENERATION_DESIRED and queued.reason_code=="GLOBAL_WARMING_SLOT_BUSY",queued
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)==gap
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==previous
+        assert await uow.instrument_selection.get_generic_materialization_generation(GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)) is None
+        await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(universe_version_id=occupying.universe.universe_version_id,
+            reason_code="test_release_recovery_queue_slot",attempted_at_ms=now))
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
         new=AsyncMock(return_value=now)):
         result = await coordinate_selection_materialization_once(
@@ -10228,9 +10309,30 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
         assert await uow.instrument_selection.release_generic_materialization_generation_lease(
             generation.materialization_generation_id,worker_id="prepare-worker",lease_epoch=preparation.generation.lease_epoch)
+    other_spec = inputs("MI-001" if group == "CPM-RO-001" else "CPM-RO-001").spec
+    async with PostgresKernelUnitOfWork(database) as uow:
+        occupying = await install_strategy_universe(uow,UniverseInstallRequest(
+            event_spec_id=other_spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
+            exchange_instrument_ids=other_spec.candidate_ids[:1],installed_at_ms=generation.created_at_ms+3))
+    assert occupying.universe is not None
+    queued = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+3)
+    assert queued.disposition is MaterializationDisposition.GENERATION_DESIRED and queued.reason_code=="GLOBAL_WARMING_SLOT_BUSY",queued
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=generation.created_at_ms+3)):
+        queued_again=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=coordinator_request,clock_ms=lambda:generation.created_at_ms+3)
+    assert queued_again.disposition is MaterializationDisposition.GENERATION_DESIRED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        waiting=await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)
+        assert waiting.lifecycle_state.value=="DESIRED" and waiting.fenced_at_ms is None
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+        await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(universe_version_id=occupying.universe.universe_version_id,
+            reason_code="test_release_queue_slot",attempted_at_ms=generation.created_at_ms+3))
     fenced = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
         request=coordinator_request,clock_ms=lambda:generation.created_at_ms+3)
     assert fenced.disposition == MaterializationDisposition.WAITING_VACUUM
+    await database.dispose()  # New process/UoW must see durable slot ownership.
     async with PostgresKernelUnitOfWork(database) as uow:
         assert await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) == fence
@@ -10246,20 +10348,15 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     drained = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
         request=coordinator_request,clock_ms=lambda:generation.created_at_ms+4)
     assert drained.disposition == MaterializationDisposition.GENERATION_MATERIALIZING
-    other_spec = inputs("MI-001" if group == "CPM-RO-001" else "CPM-RO-001").spec
     async with PostgresKernelUnitOfWork(database) as uow:
         occupying = await install_strategy_universe(uow,UniverseInstallRequest(
             event_spec_id=other_spec.event_spec_id,runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",
             exchange_instrument_ids=other_spec.candidate_ids[:1],installed_at_ms=generation.created_at_ms+4))
-    assert occupying.universe is not None
-    busy = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
-        request=coordinator_request,clock_ms=lambda:generation.created_at_ms+5)
-    assert busy.disposition == MaterializationDisposition.TARGET_WARMING
-    assert busy.reason_code == "GLOBAL_WARMING_SLOT_BUSY"
-    async with PostgresKernelUnitOfWork(database) as uow:
-        await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(
-            universe_version_id=occupying.universe.universe_version_id,reason_code="test_release_warming_slot",
-            attempted_at_ms=generation.created_at_ms+5))
+    assert occupying.universe is None and occupying.status.value=="WARMING_UNIVERSE_ALREADY_EXISTS"
+    with pytest.raises(sa.exc.DBAPIError,match="cannot steal reserved materialization slot"):
+        async with database.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_strategy_universe_versions(universe_version_id,event_spec_id,strategy_group_id,universe_version,semantic_digest,lifecycle_state,source_kind,materialization_generation_id,installed_at_ms,activated_at_ms,retired_at_ms) SELECT :id,:event,:group,1,semantic_digest,'warming','manual',NULL,:at,NULL,NULL FROM brc_strategy_universe_versions WHERE universe_version_id=:source"),
+                {"id":"universe:slot-steal","event":other_spec.event_spec_id,"group":other_spec.strategy_group_id,"at":generation.created_at_ms+4,"source":uid})
     if comparison_only:
         async with database.begin() as conn:
             await conn.execute(sa.text("CREATE FUNCTION reject_target_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected target failure'; END; $$"))
@@ -10502,6 +10599,14 @@ async def _assert_generic_target_stages(database, source, generation, uid, *, du
     async with PostgresKernelUnitOfWork(database) as uow:
         staged = await advance_strategy_universe(uow, request)
     assert staged.status == UniverseActivationStatus.STAGED
+    if failure_case is None and not durable:
+        other_spec=inputs("MI-001" if source.spec.strategy_group_id=="CPM-RO-001" else "CPM-RO-001").spec
+        async with PostgresKernelUnitOfWork(database) as uow:
+            released_slot=await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=other_spec.event_spec_id,
+                runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",exchange_instrument_ids=other_spec.candidate_ids[:1],installed_at_ms=close+30_004))
+            assert released_slot.status is UniverseInstallStatus.INSTALLED
+            await abandon_strategy_universe(uow,AbandonStrategyUniverseRequest(universe_version_id=released_slot.universe.universe_version_id,
+                reason_code="test_staged_releases_slot",attempted_at_ms=close+30_004))
     certification = request.model_copy(update={"operation":UniverseActivationOperation.CERTIFY_STAGED})
     async with PostgresKernelUnitOfWork(database) as uow:
         assert (await advance_strategy_universe(uow,certification)).status == UniverseActivationStatus.STAGED

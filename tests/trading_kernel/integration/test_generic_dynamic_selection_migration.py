@@ -99,6 +99,66 @@ NEW_OWNER_READ_TABLES = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["pending","claimed","review_pending","needs_intervention"])
+async def test_0007_nonterminal_owner_operation_stops_upgrade_before_target_ddl(state: str) -> None:
+    from scripts.trading_kernel.verify_schema import _verify_compatible_source
+    name,url=await create_empty_database()
+    engine=create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic,url,"upgrade","0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="quiescent-source",runtime_commit="a"*40,
+                schema_revision="0007_exit_profile_authority_v1",seeded_at_ms=NOW_MS))
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_owner_control_operations_current VALUES('owner:pending-source','flatten_all',:state,1,'account-wide','binance-usdm','quiescent-source','[]'::jsonb,:digest,NULL,NULL,NULL,:at,:at)"),
+                {"state":state,"digest":"sha256:"+"b"*64,"at":NOW_MS})
+        source=await _verify_compatible_source(url,"0007_exit_profile_authority_v1")
+        with pytest.raises(AssertionError,match="flat quiescent source: brc_owner_control_operations_current"):
+            await asyncio.to_thread(run_alembic,url,"upgrade",TARGET_REVISION)
+        assert source["status"]=="fail" and source["migration_gate"].get("nonterminal_owner_operations")==1
+        await engine.dispose()
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version"))=="0007_exit_profile_authority_v1"
+            assert await conn.scalar(sa.text("SELECT to_regclass('public.brc_generic_dynamic_selection_specs_v1')")) is None
+            assert await conn.scalar(sa.text("SELECT state FROM brc_owner_control_operations_current WHERE authorization_id='owner:pending-source'"))==state
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["completed","blocked"])
+async def test_0007_terminal_owner_operation_is_preserved_without_blocking_upgrade(state: str) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+        _verify_compatible_source,
+    )
+    name,url=await create_empty_database()
+    engine=create_async_engine(url)
+    try:
+        await asyncio.to_thread(run_alembic,url,"upgrade","0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id="quiescent-source",runtime_commit="a"*40,
+                schema_revision="0007_exit_profile_authority_v1",seeded_at_ms=NOW_MS))
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("INSERT INTO brc_owner_control_operations_current VALUES('owner:terminal-source','flatten_all',:state,1,'account-wide','binance-usdm','quiescent-source','[]'::jsonb,:digest,NULL,NULL,NULL,:at,:at)"),
+                {"state":state,"digest":"sha256:"+"b"*64,"at":NOW_MS})
+        source=await _verify_compatible_source(url,"0007_exit_profile_authority_v1")
+        assert source["migration_gate"]["nonterminal_owner_operations"]==0
+        async with engine.connect() as conn:
+            before=await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic,url,"upgrade",TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            after=await _generic_source_preservation_manifest(conn)
+            assert before["digest"]==after["digest"]
+            assert await conn.scalar(sa.text("SELECT state FROM brc_owner_control_operations_current WHERE authorization_id='owner:terminal-source'"))==state
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
 async def test_0008_grants_owner_fact_inserts_without_runtime_mutation_permissions() -> None:
     admin = await asyncpg.connect(TEST_POSTGRES_ADMIN_DSN)
     name: str | None = None

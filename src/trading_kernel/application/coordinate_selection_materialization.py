@@ -510,6 +510,12 @@ async def coordinate_selection_materialization_once(
             gid = GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id)
             existing_static = await uow.instrument_selection.get_generic_static_materialization_generation(gid)
             if existing_static is None:
+                waiting_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=request.strategy_group_id,
+                    selection_spec_id=control.selection_spec_id,for_update=True)
+                if waiting_vacuum is not None and not await uow.strategy_universes.materialization_slot_available(gid,
+                    replacing_generation_id=waiting_vacuum.source_generation_id):
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        materialization_generation_id=gid,entry_vacuum_id=waiting_vacuum.entry_vacuum_id,reason_code="GLOBAL_WARMING_SLOT_BUSY")
                 created_static = await uow.instrument_selection.create_generic_static_materialization_generation(
                     strategy_group_id=request.strategy_group_id,created_at_ms=now_ms)
                 return CoordinateSelectionMaterializationResult(disposition=(MaterializationDisposition.GENERATION_MATERIALIZING
@@ -580,6 +586,9 @@ async def coordinate_selection_materialization_once(
                         if static_activated.status is UniverseActivationStatus.ACTIVATED else MaterializationDisposition.BLOCKED),
                         materialization_generation_id=gid,reason_code=static_activated.reason_code)
                 if claimed_static.lifecycle_state is MaterializationGenerationState.DESIRED:
+                    if not await uow.strategy_universes.materialization_slot_available(gid):
+                        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                            materialization_generation_id=gid,reason_code="GLOBAL_WARMING_SLOT_BUSY")
                     static_vacuum = StrategyEntryVacuum(entry_vacuum_id="vacuum:"+gid,
                         strategy_group_id=request.strategy_group_id,selection_spec_id=claimed_static.selection_spec_id,
                         period_anchor_ms=claimed_static.effective_period_anchor_ms,source_generation_id=gid,
@@ -1299,6 +1308,10 @@ async def coordinate_selection_materialization_once(
                     reason_code=f"GENERATION_{existing.lifecycle_state.value}",
                 )
             if existing.lifecycle_state is MaterializationGenerationState.DESIRED:
+                if not await uow.strategy_universes.materialization_slot_available(existing.materialization_generation_id):
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        selection_snapshot_id=snapshot.snapshot.selection_snapshot_id,
+                        materialization_generation_id=existing.materialization_generation_id,reason_code="GLOBAL_WARMING_SLOT_BUSY")
                 generation_vacuum = StrategyEntryVacuum(
                     entry_vacuum_id=(
                         f"vacuum:{request.strategy_group_id}:"
@@ -1614,6 +1627,11 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     comparison_universe_id=None if comparison is None else comparison.comparison_universe_id,
                     comparison_transition_revision=None if comparison is None else comparison.comparison_transition_revision),))
             if prior_vacuum is not None:
+                if not await uow.strategy_universes.materialization_slot_available(generation_id,
+                    replacing_generation_id=prior_vacuum.source_generation_id):
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        selection_snapshot_id=snapshot.selection_snapshot_id,entry_vacuum_id=prior_vacuum.entry_vacuum_id,
+                        reason_code="GLOBAL_WARMING_SLOT_BUSY")
                 if gap_handoff:
                     await uow.instrument_selection.retarget_generic_gap_vacuum_with_generation(generation,
                         entry_vacuum_id=prior_vacuum.entry_vacuum_id)
@@ -1876,6 +1894,9 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     desired_at_ms=now_ms)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,**identity)
             if generation.lifecycle_state is MaterializationGenerationState.DESIRED:
+                if not await uow.strategy_universes.materialization_slot_available(generation.materialization_generation_id):
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        reason_code="GLOBAL_WARMING_SLOT_BUSY",**identity)
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=generation.strategy_group_id,selection_spec_id=generation.selection_spec_id,for_update=True)
                 if vacuum is None:

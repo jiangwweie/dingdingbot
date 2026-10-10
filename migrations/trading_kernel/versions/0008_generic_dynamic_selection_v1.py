@@ -83,8 +83,43 @@ def upgrade() -> None:
     _generic_recovered_activation_commit_guard()
     _generic_gap_continuity_commit_guard()
     _generic_gap_empty_resolution_guard()
+    _generic_durable_materialization_slot()
     _owner_static_source_lock()
     _grant_existing_owner_read_roles(bind)
+
+
+def _generic_durable_materialization_slot() -> None:
+    op.execute(sa.text("CREATE UNIQUE INDEX uq_brc_generation_materialization_slot ON brc_strategy_universe_materialization_generations((true)) WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING')"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_guard_generic_materialization_slot_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING')
+          AND (TG_OP='INSERT' OR OLD.lifecycle_state NOT IN ('DRAINING_ENTRY','MATERIALIZING')) THEN
+          IF NOT pg_try_advisory_xact_lock(hashtext('brc-strategy-universe-install')) THEN
+            RAISE EXCEPTION 'Generic materialization global slot lock busy'; END IF;
+          IF EXISTS(SELECT 1 FROM brc_strategy_universe_versions u WHERE u.lifecycle_state='warming'
+            AND u.materialization_generation_id IS DISTINCT FROM NEW.materialization_generation_id) THEN
+            RAISE EXCEPTION 'Generic materialization must own global slot before fence'; END IF;
+        END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_generic_generation_slot_v1 BEFORE INSERT OR UPDATE ON brc_strategy_universe_materialization_generations FOR EACH ROW EXECUTE FUNCTION brc_guard_generic_materialization_slot_v1()"))
+    op.execute(sa.text("""
+      CREATE FUNCTION brc_guard_reserved_materialization_installs_v1() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.lifecycle_state='warming' THEN
+          IF NOT pg_try_advisory_xact_lock(hashtext('brc-strategy-universe-install')) THEN
+            RAISE EXCEPTION 'Warming installation global slot lock busy'; END IF;
+          IF EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations g
+            WHERE g.lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING')
+              AND g.materialization_generation_id IS DISTINCT FROM NEW.materialization_generation_id) THEN
+            RAISE EXCEPTION 'Warming installation cannot steal reserved materialization slot'; END IF;
+        END IF;
+        RETURN NEW;
+      END; $$
+    """))
+    op.execute(sa.text("CREATE TRIGGER trg_reserved_materialization_install_v1 BEFORE INSERT OR UPDATE ON brc_strategy_universe_versions FOR EACH ROW EXECUTE FUNCTION brc_guard_reserved_materialization_installs_v1()"))
 
 
 def _owner_static_source_lock() -> None:
@@ -3249,7 +3284,7 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
         "brc_runtime_scopes_current, brc_exposure_episode_current, "
         "brc_comparative_projection_current, brc_facts_current, brc_readiness_current, "
         "brc_strategy_selection_control_current, brc_strategy_universe_materialization_generations, brc_strategy_selection_rollback_baselines, "
-        "brc_strategy_entry_vacuums_current IN SHARE ROW EXCLUSIVE MODE"
+        "brc_strategy_entry_vacuums_current, brc_owner_control_operations_current IN SHARE ROW EXCLUSIVE MODE"
     ))
     predicates = {
         "brc_trade_aggregates": "status NOT IN ('terminal','leverage_rejected','entry_rejected','entry_reconciled_absent')",
@@ -3261,6 +3296,7 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
         "brc_strategy_universe_versions": "lifecycle_state IN ('warming','staged')",
         "brc_strategy_universe_materialization_generations": "lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')",
         "brc_strategy_entry_vacuums_current": "resolved_at_ms IS NULL",
+        "brc_owner_control_operations_current": "state NOT IN ('completed','blocked')",
     }
     for table, predicate in predicates.items():
         if bind.scalar(sa.text(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {predicate})")):

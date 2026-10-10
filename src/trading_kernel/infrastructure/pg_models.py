@@ -899,6 +899,9 @@ sa.Index(
     ),
 )
 
+sa.Index("uq_brc_generation_materialization_slot",sa.literal_column("(true)"),unique=True,_table=strategy_universe_materialization_generations,
+    postgresql_where=strategy_universe_materialization_generations.c.lifecycle_state.in_(("DRAINING_ENTRY","MATERIALIZING")))
+
 sa.Index("uq_brc_generic_generation_actionable_group",
     strategy_universe_materialization_generations.c.strategy_group_id, unique=True,
     postgresql_where=sa.and_(strategy_universe_materialization_generations.c.selection_epoch_id!="sor-v0",

@@ -256,7 +256,11 @@ class PostgresStrategyUniverseRepository:
         request: UniverseInstallRequest,
     ) -> UniverseInstallResult:
         request = UniverseInstallRequest.model_validate(request.model_dump())
-        await self._lock_installs()
+        if request.materialization_generation_id is not None:
+            if not await self._try_lock_installs():
+                return _result(status=UniverseInstallStatus.WARMING_UNIVERSE_ALREADY_EXISTS,universe=None,lifecycle_state=None)
+        else:
+            await self._lock_installs()
         authority = await self._load_authority(request)
         requested = build_strategy_universe(
             universe_version_id="universe:pending",
@@ -306,7 +310,8 @@ class PostgresStrategyUniverseRepository:
                 lifecycle_state=lifecycle_state,
             )
 
-        if await self._warming_exists():
+        reserved = await self._connection.scalar(sa.text("SELECT materialization_generation_id FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING') LIMIT 1"))
+        if (reserved is not None and reserved!=request.materialization_generation_id) or await self._warming_exists():
             return _result(
                 status=UniverseInstallStatus.WARMING_UNIVERSE_ALREADY_EXISTS,
                 universe=None,
@@ -3818,6 +3823,16 @@ class PostgresStrategyUniverseRepository:
                 None if row["blocker_code"] is None else str(row["blocker_code"])
             ),
         )
+
+    async def materialization_slot_available(self, materialization_generation_id: str, *, replacing_generation_id: str | None = None) -> bool:
+        # Same transaction lock as installers; the Generation transition below
+        # records durable ownership before releasing this lock at commit.
+        if not await self._try_lock_installs():
+            return False
+        return not bool(await self._connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING') AND materialization_generation_id<>:gid AND materialization_generation_id IS DISTINCT FROM :replace) OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE lifecycle_state='warming' AND materialization_generation_id IS DISTINCT FROM :gid AND (:replace IS NULL OR materialization_generation_id IS DISTINCT FROM :replace))"),{"gid":materialization_generation_id,"replace":replacing_generation_id}))
+
+    async def _try_lock_installs(self) -> bool:
+        return bool(await self._connection.scalar(sa.select(sa.func.pg_try_advisory_xact_lock(sa.func.hashtext(_INSTALL_LOCK_KEY)))))
 
     async def _lock_installs(self) -> None:
         await self._connection.execute(

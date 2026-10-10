@@ -928,6 +928,9 @@ async def _verify_generic_selection_source(
                     "SELECT count(*) FROM brc_strategy_universe_materialization_generations "
                     "WHERE lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')"
                 ))) or 0),
+                "nonterminal_owner_operations": int((await connection.scalar(text(
+                    "SELECT count(*) FROM brc_owner_control_operations_current WHERE state NOT IN ('completed','blocked')"
+                ))) or 0),
                 "open_selection_vacuums": int((await connection.scalar(text(
                     "SELECT count(*) FROM brc_strategy_entry_vacuums_current WHERE resolved_at_ms IS NULL"
                 ))) or 0),
