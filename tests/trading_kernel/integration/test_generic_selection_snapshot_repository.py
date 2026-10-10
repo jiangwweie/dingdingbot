@@ -2344,6 +2344,114 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("head_condition",["expired","expired_live_lease","owner_paused","control_drift"])
+@pytest.mark.parametrize("groups",[("MI-001","CPM-RO-001"),("MPG-001","BRF2-001")])
+async def test_generic_global_queue_skips_ineligible_head_before_cleanup(database: AsyncEngine,tmp_path: Path,head_condition: str,groups: tuple[str,str]) -> None:
+    import os
+    import sys
+
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        SelectionRuntimeRequest,
+        run_materialization_runtime_once,
+    )
+    snapshots={}
+    generations={}
+    for index,group in enumerate(groups):
+        source=inputs(group)
+        await _install_static_selection_source(database,group)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            pending=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="ineligible_queue_head",idempotency_key=f"queue:head:{group}",owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up")
+            source=source.model_copy(update={"selection_epoch_id":pending.selection_epoch_id})
+        class Market:
+            def __init__(self,source): self.source=source
+            async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in self.source.member_windows)
+            async def fetch_generic_selection_klines(self,request):
+                return next(w.candles for w in self.source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+        selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=Market(source),
+            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=pending.selection_epoch_id,
+                period_anchor_ms=CUTOFF,worker_id="queue-selector"),clock_ms=lambda:CUTOFF+20)
+        assert selected.outcome=="SNAPSHOT_READY",selected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            snapshot=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+        snapshots[group]=snapshot
+        for offset in (1,2):
+            now=CUTOFF+HOUR+10*index+offset
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now)):
+                result=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+                    request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,worker_id="queue-prepare",now_ms=now),clock_ms=lambda now=now:now)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            generations[group]=await uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id)
+        assert generations[group].lifecycle_state.value=="DESIRED"
+    head=generations[groups[0]]
+    assert head.desired_at_ms<generations[groups[1]].desired_at_ms
+    now=CUTOFF+HOUR+20
+    if head_condition.startswith("expired"):
+        now=snapshots[groups[0]].expires_at_ms+1
+        if head_condition=="expired_live_lease":
+            async with PostgresKernelUnitOfWork(database) as uow:
+                lease=await uow.instrument_selection.claim_generic_materialization_generation(head.materialization_generation_id,
+                    worker_id="crashed-head",now_ms=now-2,lease_duration_ms=30_000)
+                assert lease.generation is not None
+    elif head_condition=="control_drift":
+        # Negative source drift fixture; no runtime/Owner repair by SQL.
+        async with database.begin() as connection:
+            await connection.execute(sa.text("UPDATE brc_strategy_selection_control_current SET control_version=control_version+1 WHERE strategy_group_id=:group"),{"group":groups[0]})
+    else:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control(groups[0])
+            await set_strategy_entry_state(uow,strategy_group_id=groups[0],target_state=StrategyEntryState.PAUSED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="queue_head_pause",idempotency_key="queue:pause:head",owner_identity="owner",now_ms=now-1),
+                authentication_strength="totp_step_up")
+    # No head cleanup tick has run: the live next strategy must still advance.
+    process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_materialization_probe",
+        groups[1],str(now),"queue-next",cwd=tmp_path,
+        env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
+            "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+        stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    try:
+        output,error=await asyncio.wait_for(process.communicate(),timeout=15)
+        assert process.returncode==0,error.decode()
+        result=json.loads(output)
+        assert result["reason_code"]!="GLOBAL_WARMING_SLOT_BUSY",result
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    assert tuple(tmp_path.rglob("*"))==()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        advanced=await uow.instrument_selection.get_generic_materialization_generation(generations[groups[1]].materialization_generation_id)
+        assert advanced.lifecycle_state.value=="DRAINING_ENTRY" and advanced.fenced_at_ms==now
+        unchanged=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
+        assert unchanged.lifecycle_state.value=="DESIRED" and unchanged.fenced_at_ms is None
+        if head_condition=="expired_live_lease":
+            assert unchanged.lease_owner=="crashed-head" and unchanged.lease_expires_at_ms>now
+        assert await uow.instrument_selection.get_current_generic_authority(snapshots[groups[0]].selection_spec_id) is None
+    async with database.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+    if head_condition.startswith("expired"):
+        cleanup_at=now
+        if head_condition=="expired_live_lease":
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=cleanup_at)):
+                waiting=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+                    request=SelectionRuntimeRequest(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id,worker_id="cannot-steal-head",now_ms=cleanup_at),clock_ms=lambda:cleanup_at)
+            assert waiting.reason_code=="GENERIC_GENERATION_LEASE_UNAVAILABLE"
+            cleanup_at=unchanged.lease_expires_at_ms
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=cleanup_at)):
+            cleaned=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+                request=SelectionRuntimeRequest(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id,worker_id="head-cleanup",now_ms=cleanup_at),clock_ms=lambda:cleanup_at)
+        assert cleaned.reason_code=="MATERIALIZATION_PERIOD_EXPIRED"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert (await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)).lifecycle_state.value=="ABANDONED"
+            assert await uow.instrument_selection.get_generic_materialization_generation(advanced.materialization_generation_id)==advanced
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id) is None
+
+
+@pytest.mark.asyncio
 async def test_two_materializers_serialize_before_fence_and_pause_releases_durable_slot(database: AsyncEngine) -> None:
     from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.domain.owner_control import StrategyEntryState

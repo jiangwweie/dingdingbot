@@ -1124,6 +1124,14 @@ runtime请求lease_duration_ms现在实际传给Generic Runner，不再由Runner
 
 Selector Plane真实跨进程与多cutoff已有上述证据；Materialization/Observation三个plane同时resident下的多period/crash recovery、global queue完整fairness/target release、完整status仍待整卡验收。不能据Selector-only签GS-10或GS-12，GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-10 ineligible global queue head跨进程验收（基于1ab1083e，未整卡签收）
+
+新增四策略两组配对MI→CPM、MPG→BRF2，以正式Owner pending→真实Runner Job/Snapshot→runtime Materializer创建不同desired_at的DESIRED queue。队头分别过期、过期但仍有crashed live lease、Owner正式Pause、Control source漂移（仅负向夹具）；不先运行队头cleanup，独立OS child process调用正式run_materialization_runtime_once，下一可执行策略仍取得durable global slot并进入DRAINING_ENTRY，原队头保持未fence/不被抢lease。child冻结工程市场clock，仅替换clock输入；没有替换slot/Coordinator状态机，隔离目录零文件。
+
+下一策略持槽后，旧过期head由正式runtime清理：live lease未过期仍waiting，过期后ABANDONED；下一策略完整Generation逐字段不变，旧策略未打开Vacuum，零Command。原并发materializer barrier/age排序/持槽/Pause release回归同时重验。这证明已实现过滤和cleanup在新OS process下工作，不新增Queue表、租约副本或并行warming。Control drift分支不使用SQL作为Owner恢复方案。
+
+末版上述八分支+原slot并发1共9 passed（18.65s）；Unit/Architecture/API1444 passed（19.94s）；Ruff、Mypy161 files、diff PASS。所有进程终态，本轮仅tests/support/docs变更，无生产源码修改、无生产操作。target warming/STAGED/timeout/SUPERSEDED后跨进程release及三个Plane同时resident多period/restart仍需整卡验证，不以这一队列切片签GS-10/GS-12；GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。
