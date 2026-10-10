@@ -8,7 +8,10 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-04_TO_GS-13
+active_execution_scope: NONE
+authorized_execution_scope: GS-04_TO_GS-13
+completed_execution_scope: GS-04_TO_GS-09
+local_acceptance_status: GS04_GS09_ACCEPTED
 production_authority: NONE
 further_feature_research: CLOSED
 owner_amendments: ACCEPTED_2026-09-21
@@ -26,7 +29,9 @@ owner_amendments: ACCEPTED_2026-09-21
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = GS-04_TO_GS-13
+active_execution_scope = NONE
+authorized_execution_scope = GS-04_TO_GS-13
+completed_execution_scope = GS-04_TO_GS-09
 production_activation_authority = NONE
 further_feature_research = CLOSED
 ```
@@ -66,6 +71,32 @@ GS-09-LIVE-EVIDENCE-01补充：immutable链明确包括`Comparison revision（�
 **GS-04～GS-09仍在实施中，未完成、未通过release certification。** 先前对GS-00～03的完成摘要仅对应首版component测试，不足以证明全部Task Done。本轮在继续GS-04时补齐并修复数值来源认证、Decimal排序精度、重复miss/absolute有效期、current-close时点、comparison revision回退与重试幂等问题；不能以旧摘要跳过这些前置。
 
 #### 2026-10-09逐卡验收审计（替代下方早期表格的当前缺口解释）
+
+#### GS-04～GS-09 本地签收（2026-10-10）
+
+**GS-04～GS-09 = LOCAL_ACCEPTED / DONE。** Exact代码与测试候选为`787fc3c182a6c4a966426fa1958c5ad664c69db6`，以下命令全部从主实施worktree执行，运行期间源码与HEAD不变、工作区干净。后续签收仅修改本Plan，不将文档提交冒充另一个通过R4的代码候选。下方按日期排列的未完成/运行中说明均是当时证据，不覆盖本次最终签收；它们保留RED和增量来源，不改写历史。
+
+| 验收 | 完整实际范围 | 终态结果 |
+| --- | --- | --- |
+| Generic PG | `.venv/bin/python -m pytest tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py -q --tb=short --maxfail=1` | **805 passed，0 failed/skip；3122.10s** |
+| 共享PG与Full-chain | 同上pytest参数；`test_generic_dynamic_selection_migration.py`、`test_selection_materialization_repository.py`、`test_entry_vacuum_drain.py`、`test_comparative_universe_projection.py`、`test_observation_to_signal.py`、`test_universe_market_call_bounds.py`及完整`tests/trading_kernel/full_chain` | **252 passed，323.97s** |
+| 相邻权限/执行安全 | 同上pytest参数；`test_instrument_selection_repository.py`、`test_instrument_selection_runner.py`、`test_selection_authority_repository.py`、`test_selection_entry_authority_repository.py`、`test_strategy_universe_repository.py`、`test_strategy_universe_activation.py`、`test_strategy_universe_activation_faults.py`、`test_command_dispatch.py`、`test_unknown_outcome_reconciliation.py` | **91 passed，80.37s** |
+| Fast | `.venv/bin/python -m pytest tests/trading_kernel/unit tests/trading_kernel/architecture -q --tb=short --maxfail=1` | **1343 passed，16.01s** |
+| 类型与静态 | `.venv/bin/python -m mypy src/trading_kernel scripts/trading_kernel/verify_schema.py migrations/trading_kernel/versions/0008_generic_dynamic_selection_v1.py`；`ruff check src/trading_kernel scripts/trading_kernel migrations/trading_kernel/versions/0008_generic_dynamic_selection_v1.py tests/trading_kernel`；`git diff --check` | **163 source files / Ruff / diff PASS** |
+| 数值与冻结源 | `.venv/bin/python scripts/trading_kernel/verify_generic_selection_numeric_parity.py --sor-cache-dir /Users/jiangwei/research/sor-instrument-effect-v1/sor_instrument_effect_study/research_cache/binance_15m --cache-dir /Users/jiangwei/research/stage2-full-replay-v2/cache --artifact-dir /Users/jiangwei/research/stage3-1-final-semantic-revision/output` | **Common/SOR/四Spec全部PASS；96 archives，CPM/BRF2各463、MPG/MI各1852 cutoff，0 mismatch** |
+
+上述测试集合不求和：805包含自然链/故障组件，252包含Full-chain，Fast包含architecture；数值认证与PG安装资格也不是经济收益证明。SOR完整961×24 Production Core parity与artifact/input/source integrity PASS，artifact digest仍`sha256:5d8c701d2738daebc506921038b2afb5a8feeda4a25d9652866c9b41743d4e45`，numeric source digest`sha256:a1a39a26964e00d47786186acbf925bd23fbc93af1ea0c961d69983965aedba9`，冻结reference仍`f65d72fa92580de4b8c0323f4106d5975b97f4eb`。未改写历史Replay/Outcome，不重新下载源，不做新的参数/经济研究。
+
+| Task | 逐条签收范围 | Authoritative测试入口与证据 |
+| --- | --- | --- |
+| **GS-04 DONE** | exact0007空/交易/非交易/terminal/fallback/Owner Operation来源逐record保全、原hash不重写；period/Event归一化；Spec/Event/side/digest/deferred约束与trusted limits；Epoch/Job/Snapshot/Comparison FK与唯一Vacuum/slot；real Owner least privilege；failed BRF2不安装；初始Static零运行副作用；缺provenance/非终态Operation pre-DDL STOP | `test_generic_dynamic_selection_migration.py`全27；Generic baseline/SQL/epoch/role/slot矩阵；Static MPG/MI ARMED/TRIGGERED四种exact0007 source进程→0008 producer的Detector/Episode/Signal三类parity；Actual ACL与空槽/争槽攻击 |
+| **GS-05 DONE** | point-in-time Candidate24/完整OHLCV与资格、缺源/future/gap/duplicate/undefined失败不当EMPTY；Static/未安装零network/Job/Snapshot；Desired hysteresis同epoch前驱CAS；unique Snapshot/24 member/digest/Decimal确定性；source I/O全在UoW外、四Selector独立；lease/reclaim/expiry/响应丢失幂等及retry预算；Selector不读写runtime面 | Generic `runner_uses_full_source`、`four_generic_selectors`、short-circuit、predecessor/epoch/job/lease/source retry/response loss矩阵；禁止Universe/Ticket/Claim/Command访问的代理；SOR旧仓储/Runner及Golden/Core认证 |
+| **GS-06 DONE** | MPG8h/MI12h固定24比较、cache Event/member/revision/close身份独立于tradable N；Static原集合保全；真实producer首TRIGGERED抑制→合法未来NOT_TRIGGERED→later TRIGGERED唯一Signal；旧cache/warming/同close/ABA/惰性重入/restart/CAS屏障；缺任一比较成员失败、不缩分母提升rank；旧Ticket身份/生命周期不受新comparison影响 | `test_observation_to_signal.py`、`test_comparative_universe_projection.py`、`test_universe_market_call_bounds.py`；Generic natural hourly/rebase、Static rollback/第二epoch、recovery与inflight Observation/current-close并发矩阵；immutable Ticket/SelectionReadsForbidden full-chain |
+| **GS-07 DONE** | Spec exact single Event含SHORT/SOR pair，manual10/SOR7/Generic16不越权；全部facts/cert满足才STAGED、无提前grant/Signal/Ticket/Command；shared slot先于fence、Generation DRAINING/MATERIALIZING持有、防其他installer/直接SQL抢占、全部STAGED/终态释放；temporary outage重试不刷新原1800s deadline；abandon/reclaim/重复和过期callback安全 | Generic schema/install/stage/materialization/lease/failure及`two_materializers_serialize_before_fence...`；独立PG slot index/trigger攻击、重开连接持有与Pause释放；SOR serial LONG/SHORT、partial staged/temporary outage/原deadline全模块 |
+| **GS-08 DONE** | Selection outcome前continuity、一次miss绝对stale预算；slot前排队保留权限、fence/drain/warm/proof先后；atomic Event/comparison/Authority/mode；NO_CHANGE不跳rebase/stale/Vacuum；VALID_EMPTY零成员负向且不fallback/不追溯Ticket；首次Static failure/retry failure保持Static与原comparison；Owner Pause最高；latest supersession/原Vacuum times/终态不复活；各commit故障rollback与幂等；NORMAL precommit/latest unconsumed close，RECOVERY future-close/rebase与真实miss | Generic continuity/gap/EMPTY/Pause/early/deferred Resume、Static rollback/retry、supersession/clock/并发完整矩阵；独立SQL proof/Owner/Policy/lease/Vacuum/cursor攻击；SOR atomic pair、pre-first-close replay零调用、expired/failed Audit正式跨Session接管、fallback四类事故回归 |
+| **GS-09 DONE** | 四ENTRY边界统一权限并拒绝switch/Pause/stale/Comparison rebase/EMPTY；四策略正式Owner/Selection/Observation→Claim/Ticket/durable ENTRY→terminal自然链；prepared/sent cancel、ENTRY/cancel unknown不重发、partial合法保护或原Incident flatten；现有Initial Stop/TP1/Runner/Exit/Reconciliation/Settlement/Review不中断；一Episode一Ticket、一ENTRY generation、Netting独立、late-fill安全围栏；Spec/Snapshot/features/Comparison/Signal/Claim/Ticket/fill/Stop/Binding/terminal最小不可变证据 | Generic natural四策略、第二epoch五异常、四边界真实positive替换拒绝、Pause/unknown/partial矩阵；`test_entry_vacuum_drain.py`及完整Full-chain/unknown/dispatch；`test_live_trade_evidence.py`与actual Binance-shaped Review归因。缺fill/来源明示EVIDENCE_INCOMPLETE、不捏造时间价格；离线MAE/MFE projector仍属GS-13 |
+
+**权限与后续边界**：`implementation_authority=CODE_AND_TEST_ONLY`、`production_authority=NONE`、`production_modified=NO`。当前GS-04～09目标已完成，active scope NONE是此目标签收，不撤销此前获授权的本地GS-10～13。GS-10 hosting、GS-11 Owner API/UI、GS-12 24h-equivalent soak、GS-13 projector/完整release R4/runbook仍未由本签收执行/认证；这里只是前置卡本地接受，不是R4 PASS或可直接部署。没有Tokyo/production migration、exchange write、自动resume/activation、资金/ExitProfile扩张。任何部署仍在Owner确认之前等待。
 
 本轮slot/source-quiescence末版收口：168 Static/activation/latest supersession/gap矩阵全部passed（1058.13s），末版28 recovery-queue矩阵与其重叠不合计；7 slot竞争/持有/释放、214 SOR/Vacuum/Full-chain及Unit/Architecture1343、Mypy163（含verify_schema）、Ruff/diff通过。GS-04明确要求的nonterminal Owner Operation另RED复现：pending operation仍可执行0008 DDL，readonly gate无该counter。现0007 source verifier增加nonterminal_owner_operations，0008首步锁住原Operation表并拒绝state非completed/blocked，不能删Operation放行；四状态pending/claimed/review_pending/needs_intervention在目标DDL前拒绝、原0007 revision/表/Operation保持，completed/blocked逐record logical digest保全。整个Generic migration27 passed（78.32s），末版Unit/Architecture1343与Ruff/diff重验通过；该迁移counter后其他runtime源码未变化。Owner slot修复与source-quiescence可提交合回，但仍须统一clean candidate完整Generic/相关组件/逐卡要求复核；不据分批绿灯标GS-04～09 Done或exact R4，production_modified=NO。最后candidate验收不扩大至GS-10～13 UI/hosting/soak/projector，也不构成部署授权。
 
@@ -1093,10 +1124,10 @@ GS-12 soak若不是C运行，必须证明测试生产面与依赖未变，并由
 
 ## 6. 计划审阅与执行终止条件
 
-本轮交付仅为文档，未实际执行GS-00 numeric translation、domain测试开发、migration或soak。独立复核已接受设计、14卡结构与既定soak方向；两项Plan amendment已并入§3.3、GS-00/04/13，非阻塞SOR子集建议并入§3.4及对应Done条件。已批准设计主体不改。
+初始Plan审阅阶段只交付文档，当时尚未执行GS-00 numeric translation、domain测试开发、migration或soak。随后本任务已获代码/测试授权；当前完成度以§2.1最终签收为准，不再把初始审阅状态当作当前事实。独立复核接受的14卡结构与soak方向、两项Plan amendment及SOR子集合同保持不变。
 
 实现后每个策略可以独立STATIC/DYNAMIC，但不能用“独立”绕过未通过该策略numeric、rebase、freshness或runtime Gate。BRF2 mismatch只阻塞其安装/activation分支；common/SOR失败、Static provenance/neutrality失败、preservation失败、shared unknown盲重发、Owner pause被恢复等仍阻塞整体core/source发布。某安装策略hourly无合法close不能被“common PASS”掩盖。
 
 common任务及candidate安装策略的相关分支全部DONE后才能冻结本地release candidate；失败未安装分支须显式列出，不伪造四策略全完成。R4通过也不自动授权生产。
 
-当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / owner_confirmation=GRANTED_2026-09-07 / implementation_authority=CODE_AND_TEST_ONLY / active_execution_scope=GS-04_TO_GS-13**。当前执行目标为GS-04至GS-09；各卡完成度以§2.1及卡内Done验收为准，不以初始组件摘要宣称全卡完成。生产部署、Tokyo migration和任何策略 activation继续无授权。
+当前 **PLAN_APPROVED / required_plan_amendments=COMPLETE / Owner confirmation=GRANTED / implementation_authority=CODE_AND_TEST_ONLY / completed_execution_scope=GS-04_TO_GS-09 / active_execution_scope=NONE**。本次GS-04～09目标签收完成；此前获授权的本地GS-10～13范围未撤销，但不由本签收冒称已完成。Exact代码候选与逐卡证据见§2.1；本Plan签收提交仅改文档。生产部署、Tokyo migration和任何策略activation继续无授权。
