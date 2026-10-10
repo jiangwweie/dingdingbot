@@ -175,9 +175,9 @@ async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngi
     yield head_template_engine
 
 
-async def _install_static_selection_source(database: AsyncEngine, group: str):
+async def _install_static_selection_source(database: AsyncEngine, group: str, *, member_count: int = 1):
     spec = inputs(group).spec
-    members = spec.candidate_ids[:1]
+    members = spec.candidate_ids[:member_count]
     async with PostgresKernelUnitOfWork(database) as uow:
         installed = await install_strategy_universe(uow,UniverseInstallRequest(
             event_spec_id=spec.event_spec_id,runtime_profile_id="tiny-live-v1",
@@ -206,11 +206,12 @@ async def _install_static_selection_source(database: AsyncEngine, group: str):
             digest = canonical_digest({"exchange_instrument_ids":members})
             comparison_id = "comparison:"+digest[7:]
             await conn.execute(sa.text(
-                "INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,1) ON CONFLICT DO NOTHING"
-            ),{"id":comparison_id,"digest":digest})
-            await conn.execute(sa.text(
-                "INSERT INTO brc_comparison_universe_members VALUES(:id,:member) ON CONFLICT DO NOTHING"
-            ),{"id":comparison_id,"member":members[0]})
+                "INSERT INTO brc_comparison_universe_definitions VALUES(:id,:digest,:count) ON CONFLICT DO NOTHING"
+            ),{"id":comparison_id,"digest":digest,"count":len(members)})
+            for member in members:
+                await conn.execute(sa.text(
+                    "INSERT INTO brc_comparison_universe_members VALUES(:id,:member) ON CONFLICT DO NOTHING"
+                ),{"id":comparison_id,"member":member})
             await conn.execute(sa.text(
                 "INSERT INTO brc_comparison_binding_current VALUES(:event,:id,0,:uid)"
             ),{"event":spec.event_spec_id,"id":comparison_id,"uid":uid})
@@ -303,6 +304,73 @@ async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: Asyn
         result=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
             request=CoordinateGenericSnapshotRequest(selection_snapshot_id=selected.selection_snapshot_id,worker_id="renewal-current"),clock_ms=lambda:now)
     assert result.disposition is MaterializationDisposition.NO_CHANGE,result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group,stall_member",[("MPG-001",False),("MI-001",False),("CPM-RO-001",False),("BRF2-001",False),("CPM-RO-001",True)])
+async def test_first_pending_facts_refresh_rotates_all_scopes_without_signal_authority(database: AsyncEngine,group: str,stall_member: bool) -> None:
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        CurrentFactRefreshRuntimeRequest,
+        run_current_fact_refresh_runtime_once,
+    )
+    source=inputs(group)
+    uid,_=await _install_static_selection_source(database,group,member_count=2)
+    # Existing certified Static members must be instrument-active; installing
+    # a fixture Universe alone does not certify candidate instruments.
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_instruments SET status='active' WHERE exchange_instrument_id IN (:a,:b)"),
+            {"a":source.spec.candidate_ids[0],"b":source.spec.candidate_ids[1]})
+        await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),{"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="pending_facts",idempotency_key=f"pending:facts:{group}",owner_identity="owner",now_ms=CUTOFF-1),
+            authentication_strength="totp_step_up")
+    template={"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"CPM-RO-001":cpm_flat_snapshot,"BRF2-001":brf2_short_snapshot}[group]()
+    close=CUTOFF+HOUR
+    class Market:
+        calls=0
+        async def fetch_closed_candles(self,request):
+            self.calls+=1
+            if stall_member and request.exchange_instrument_id==source.spec.candidate_ids[0]:
+                await asyncio.Event().wait()
+            delta=close-template.trigger_candle_close_time_ms
+            candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)[-request.limit:]
+    market=Market()
+    def request(now,after_scope=None):
+        return CurrentFactRefreshRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+            worker_id="first-pending-facts",now_ms=now,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+            after_runtime_scope_id=after_scope,timeout_seconds=0.5 if stall_member else 10)
+    early=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,request=request(close-1))
+    assert early.status=="no_work" and market.calls==0
+    scopes=[]
+    results=[]
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+        for _ in range(2):
+            refreshed=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,
+                request=request(close+1,scopes[-1] if scopes else None))
+            assert refreshed.status in {"facts_refreshed","blocked"},refreshed
+            results.append(refreshed)
+            scopes.append(refreshed.runtime_scope_id)
+        calls=market.calls
+        idle=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=market,request=request(close+1))
+        if stall_member:
+            assert idle.reason_code=="CURRENT_FACT_SOURCE_TIMEOUT"
+        else:
+            assert idle.status=="no_work" and market.calls==calls
+    assert len(set(scopes))==2
+    assert sum(r.status=="facts_refreshed" for r in results)==(1 if stall_member else 2)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert await uow.instrument_selection.get_selection_control(group)==control
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+    async with database.connect() as connection:
+        rows=(await connection.execute(sa.text("SELECT warm_closed_bar_time_ms,observation_generation FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":uid})).all()
+        assert sum(row[0]==close for row in rows)==(1 if stall_member else 2)
+        assert all(row[1]==1 for row in rows)
+        for table in ("brc_exposure_episode_current","brc_signal_events","brc_trade_tickets","brc_exchange_commands",
+            "brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
+            "brc_strategy_entry_vacuums_current","brc_selection_session_authorities"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
 
 
 @pytest.mark.asyncio

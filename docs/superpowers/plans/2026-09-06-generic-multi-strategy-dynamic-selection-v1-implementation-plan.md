@@ -1074,6 +1074,16 @@ Current Facts refresh增加有限正数timeout（默认10秒，resident脚本使
 
 GS-10仍IN_PROGRESS：真实resident多period/process restart、完整queue fairness与target release、Vacuum recovery freshness、first-pending多scope Facts闭环及完整status/rebase展示仍待完成；GS-11/12未签收。授权仍CAP-01→GS-10→GS-11→GS-12，GS-13及其准备子项前停止等待Owner确认。
 
+#### 2026-10-10 first pending / bounded Facts fairness增量（基于cf1c7acd，未整卡签收）
+
+原facts入口LIMIT1且固定instrument排序，首member持续超时会使其它member无法取得新close readiness。现bounded最多16个当前eligible scopes（已安装Universe本身有上限），每tick仍仅一个market operation；resident每策略保留process-local轮转cursor，成功/invalid/timeout结果均推进，wrap后重新读取PG当前集合。cursor只调度，不作为Authority/Facts来源、不落文件；restart可重置而不能绕过Owner/Control/current Universe/close revalidation。不加入新queue、readiness表或第四logical authority lease。
+
+四策略CPM/MPG/MI/BRF2真实Static两个成员→正式Owner pending→Facts runtime入口实测：生效前零market调用，生效后逐scope刷新且完成后重复tick零market；Control/Static current未变，Episode/Signal/Job/Snapshot/Generation/Vacuum/Authority/Ticket/Command均零。CPM额外持续挂起一member，其timeout后另member仍完成，失败member未伪造readiness。resident脚本测试真实调用连续两轮facts closure，验证各策略独立保存cursor，timeout不会丢调度推进；该测试使用typed结果替身，不冒称OS process重启认证。
+
+末版Docker PG首次pending/fairness+正常小时续期/Owner Pause/跨close+unfenced restart组合10 passed（17.70s）；Unit/Architecture1384 passed（13.72s）；hosting37 passed；Ruff、Mypy162 files（含resident脚本）、diff PASS。测试Static源增加合法multi-member comparison count及原Static有效instrument/Observation generation前置身份，未弱化任何runtime Gate。无生产操作，非R4/soak。
+
+first pending正常/单member timeout轮转边界已有证据；真实并发进程/多period restart、queue完整fairness/target release、Vacuum恢复freshness及完整status/rebase仍待验收，GS-10仍IN_PROGRESS；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

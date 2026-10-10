@@ -123,6 +123,7 @@ class CurrentFactRefreshRuntimeRequest(SelectionRuntimeRequest):
     runtime_commit: str
     schema_revision: str
     timeout_seconds: float = 10.0
+    after_runtime_scope_id: str | None = None
 
     @field_validator("timeout_seconds")
     @classmethod
@@ -159,10 +160,11 @@ async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory
             return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="CURRENT_UNIVERSE_MISSING")
         scopes=await uow.signals.list_current_fact_refresh_scopes(event_spec_id=family.event_spec_id,
             universe_version_id=current.universe_version_id,closed_at_ms=request.now_ms//HOUR_MS*HOUR_MS,
-            checked_at_ms=request.now_ms,limit=1)
+            checked_at_ms=request.now_ms,limit=16)
     if not scopes:
         return CurrentFactRefreshRuntimeResult(status="no_work")
-    scope=scopes[0]
+    ordered=sorted(scopes,key=lambda item:item.runtime_scope_id)
+    scope=next((item for item in ordered if request.after_runtime_scope_id is None or item.runtime_scope_id>request.after_runtime_scope_id),ordered[0])
     try:
         observed=await asyncio.wait_for(observe_strategy_scope(uow_factory,market_source,ObservationRequest(runtime_scope_id=scope.runtime_scope_id,
             runtime_commit=request.runtime_commit,schema_revision=request.schema_revision,

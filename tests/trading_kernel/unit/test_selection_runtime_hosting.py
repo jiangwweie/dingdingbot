@@ -216,17 +216,27 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(mon
     async def group(loops,**kwargs):
         assert len({loop.component_id for loop in loops})==len(loops)
         await asyncio.gather(*(loop.tick() for loop in loops))
+        await asyncio.gather(*(loop.tick() for loop in loops if ":facts:" in loop.component_id))
         return 0
     monkeypatch.setattr(script,"run_selection_runtime_once",selection)
     monkeypatch.setattr(script,"run_materialization_runtime_once",materialization)
     monkeypatch.setattr(script,"run_observation_worker_once",observe)
-    async def refresh(**_): return SimpleNamespace(status="no_work")
+    facts_requests=[]
+    async def refresh(**kwargs):
+        request=kwargs["request"]
+        facts_requests.append(request)
+        return SimpleNamespace(status="blocked",runtime_scope_id=f"scope:timeout:{request.strategy_group_id}")
     monkeypatch.setattr(script,"run_current_fact_refresh_runtime_once",refresh)
     monkeypatch.setattr(script,"run_worker_process_group",group)
     assert await script._run(args)==0
     expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001"}
     assert {item[1] for item in calls if item[0]=="selection"}==expected
     assert {item[1] for item in calls if item[0]=="materialization"}==expected
+    for strategy in expected-{"SOR-001"}:
+        requests=[r for r in facts_requests if r.strategy_group_id==strategy]
+        assert len(requests)==2
+        assert requests[0].after_runtime_scope_id is None
+        assert requests[1].after_runtime_scope_id==f"scope:timeout:{strategy}"
 
 
 @pytest.mark.asyncio
@@ -336,7 +346,8 @@ async def test_materialization_waits_for_current_facts_before_fencing_ready_snap
 
 
 @pytest.mark.asyncio
-async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkeypatch):
+@pytest.mark.parametrize("after_scope,expected_scope",[(None,"scope:a"),("scope:a","scope:b"),("scope:b","scope:a")])
+async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkeypatch,after_scope,expected_scope):
     from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
     from src.trading_kernel.interfaces.selection_runtime_worker import (
         CurrentFactRefreshRuntimeRequest,
@@ -351,7 +362,8 @@ async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkey
     class Universes:
         async def get_current(self,*_): return SimpleNamespace(universe_version_id="current:timeout")
     class Signals:
-        async def list_current_fact_refresh_scopes(self,**_): return (SimpleNamespace(runtime_scope_id="scope:timeout"),)
+        async def list_current_fact_refresh_scopes(self,**_):
+            return tuple(SimpleNamespace(runtime_scope_id=f"scope:{name}") for name in ("a","b"))
     class Uow:
         instrument_selection=Selection()
         owner_controls=Owner()
@@ -362,9 +374,10 @@ async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkey
     async def hangs(*_): await asyncio.Event().wait()
     monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.observe_strategy_scope",hangs)
     request=CurrentFactRefreshRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="timeout",
-        now_ms=360000010,runtime_commit="test",schema_revision="test",timeout_seconds=0.01)
+        now_ms=360000010,runtime_commit="test",schema_revision="test",timeout_seconds=0.01,after_runtime_scope_id=after_scope)
     result=await asyncio.wait_for(run_current_fact_refresh_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),request=request),timeout=1)
     assert result.status=="blocked" and result.reason_code=="CURRENT_FACT_SOURCE_TIMEOUT"
+    assert result.runtime_scope_id==expected_scope
 
 
 @pytest.mark.parametrize("timeout",[0,-1,float("nan"),float("inf")])

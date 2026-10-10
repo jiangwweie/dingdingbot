@@ -176,6 +176,7 @@ async def _run(args: argparse.Namespace) -> int:
                 idle_statuses={"no_work"},
             )
         generic_loops: list[WorkerProcessLoop]=[]
+        facts_cursors: dict[str,str]={}
         for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
             family=generic_selection_spec(group)
             async def generic_selection_tick(group=group,spec_id=family.selection_spec_id):
@@ -184,9 +185,13 @@ async def _run(args: argparse.Namespace) -> int:
                 return await materialization_tick(group,spec_id)
             async def current_facts_tick(group=group,spec_id=family.selection_spec_id):
                 now_ms=args.now_ms or int(time.time()*1000)
-                return await run_current_fact_refresh_runtime_once(uow_factory=uow_factory,market_source=cast(PublicMarketSource,source),
+                result=await run_current_fact_refresh_runtime_once(uow_factory=uow_factory,market_source=cast(PublicMarketSource,source),
                     request=CurrentFactRefreshRuntimeRequest(strategy_group_id=group,selection_spec_id=spec_id,worker_id=f"{args.worker_id}:facts:{group}",
-                        now_ms=now_ms,runtime_commit=args.runtime_commit,schema_revision=args.schema_revision,timeout_seconds=args.timeout_seconds))
+                        now_ms=now_ms,runtime_commit=args.runtime_commit,schema_revision=args.schema_revision,timeout_seconds=args.timeout_seconds,
+                        after_runtime_scope_id=facts_cursors.get(group)))
+                if result.runtime_scope_id is not None:
+                    facts_cursors[group]=result.runtime_scope_id
+                return result
             generic_loops.extend((
                 WorkerProcessLoop(component_id=f"{selection_worker_id}:{group}",tick=generic_selection_tick,
                     poll_interval_ms=args.selection_poll_interval_ms,idle_statuses=frozenset({"not_due","not_installed","already_ready"})),
