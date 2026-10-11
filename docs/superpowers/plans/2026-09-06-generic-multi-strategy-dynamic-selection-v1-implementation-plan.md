@@ -8,12 +8,12 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-11
+active_execution_scope: GS-12
 authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
 gs13_authority: WAIT_OWNER_CONFIRMATION
-completed_execution_scope: GS-04_TO_GS-10
+completed_execution_scope: GS-04_TO_GS-11
 completed_amendment_scope: CAP-01_LOCAL_ACCEPTED
-local_acceptance_status: GS04_GS10_ACCEPTED
+local_acceptance_status: GS04_GS11_ACCEPTED
 production_authority: NONE
 further_feature_research: CLOSED
 owner_amendments: ACCEPTED_2026-09-21
@@ -31,10 +31,10 @@ owner_amendments: ACCEPTED_2026-09-21
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = GS-11
+active_execution_scope = GS-12
 authorized_execution_scope = CAP-01_GS-10_GS-11_GS-12
 gs13_authority = WAIT_OWNER_CONFIRMATION
-completed_execution_scope = GS-04_TO_GS-10
+completed_execution_scope = GS-04_TO_GS-11
 completed_amendment_scope = CAP-01_LOCAL_ACCEPTED
 production_activation_authority = NONE
 further_feature_research = CLOSED
@@ -1298,7 +1298,7 @@ UI Static pending只有FAILED_CLOSED/ABANDONED时提供重新授权入口，使�
 
 末版HTTP+Static+readonly role+resident normal/crash/timeout+锁序组合29 passed（178.86s）；锁序专项1 passed（4.33s，与组合重叠不合计）；共享Observation19 passed（49.43s，锁序owner位置细化前切片），Fast Unit/Architecture/API1559 passed（20.85s），Frontend47 passed（5.60s）、TypeScript/Vite PASS（大chunk warning保留）、Ruff/Mypy161 files/diff PASS，所有verification终态。GS-11仍需完整界面状态/实际读链及逐项审计，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
-### GS-11 2026-10-11 整页SOR去耦 / actual Dynamic生效 / 输入脱敏增量（基于b2028f7a，未整卡签收）
+#### 2026-10-11 整页SOR去耦 / actual Dynamic生效 / 输入脱敏增量（基于b2028f7a，未整卡签收）
 
 actual brc_owner_console HTTP GET /controls RED证明没有legacy SOR Selection Control时整页RuntimeError，Generic表单无法呈现。现历史dynamic_selection字段可null，不造SOR Control；整页统一read engine + REPEATABLE READ/READ ONLY，组合预算/策略/Operation只读快照同源。SOR历史mode使用原SelectionMode enum，兼容disabled/Static/Dynamic事实不意味着Resume授权。生成schema同步，无old-table reader/第二控制链。
 
@@ -1317,6 +1317,24 @@ actual Dynamic生效后HTTP核对membership source是实际已激活Snapshot；r
 UI组件六状态矩阵ACTIVE_NEW/FALLBACK_PREVIOUS/PRE_FENCE_CONTINUITY/VALID_EMPTY/OWNER_PAUSED/comparison rebase都保留DYNAMIC mode事实与明确blocker/outcome，blocked用attention、unblocked也只neutral而非无条件交易-green；latest completion与membership age分别显示。相同role旧Instrument Control路径另RED暴露Origin/TOTP失败仍401，统一映射既有ForbiddenOwnerRequest/StepUpInvalid403并保持session，未改变配置Universe准入/校验，不提供新的权限。
 
 末版HTTP+EMPTY+independent Pause24 passed（59.76s），四策略Pause专项4 passed（9.45s，与组合重叠不合计）；Frontend53 passed（5.69s）、TypeScript/Vite build PASS（大chunk warning保留），Fast Unit/Architecture/API1563 passed（19.13s）、Ruff/Mypy161 files/diff PASS，全部进程终态。Browser403/409真实Chrome证据已在前切片，不把本组件六状态当actual DB浏览器回放。GS-11仍待最后状态浏览器/逐项签收，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
+#### 2026-10-11 GS-11 local acceptance（基于634ebaa5）
+
+GS11_LOCAL_ACCEPTED。逐项证据如下；先前IN_PROGRESS切片保留其历史时间点，不覆盖本次签收。
+
+| 当前要求 | 直接证据与边界 | 结果 |
+| --- | --- | --- |
+| 每策略typed预览、Dynamic/Static操作及独立性 | 四策略real Owner/read-only角色HTTP矩阵，正式Runner→resident warming→actual current；其他Selection Control不变 | PASS |
+| version/idempotency/双击/409与step-up | 实际HTTP同key/并发/冲突；组件冻结服务器version/period/baseline/epoch/key；错误TOTP403保持session，Origin403与真实session401分离 | PASS |
+| Owner Pause高于pending Dynamic | 正式HTTP Pause四策略矩阵，Selector fail-on-source/NOT_DUE；runtime既有Pause/drain/恢复矩阵与GS-10签收保持 | PASS |
+| 未安装与EMPTY边界 | genuine未安装Spec HTTP拒绝且零runtime side effect；EMPTY Coordinator+readonly，UI不追溯已有Ticket且区分Desired/actual Authority | PASS |
+| fresh source、deadline、stale、fallback、pause、comparison rebase可读 | bounded readonly真实PG；六状态组件矩阵及七状态真实Chrome显示fixture（含NOT_INSTALLED），无无条件绿色DYNAMIC；completion2s/cutoff4s/membership7200s独立呈现 | PASS |
+| 无需curl/手填内部identity与Static回退交互 | Playwright CLI真实Chrome按snapshot refs打开CPM Static、填原因/测试code、提交；fixture校验exact frozen baseline/epoch/version，显示pending并禁用重复回退；原Dynamic403/409交互证据保持 | PASS |
+| retired SOR与容量 | SOR无Resume/Dynamic入口且HTTP拒绝；Policy B只读、无容量启用按钮，正式部署默认切换合同保持 | PASS |
+
+浏览器是localhost Vite+拦截fixture，不是实际API/DB浏览器全链；实际HTTP/角色/DB/runtime是另一组独立证据，不混编。Chrome首次打开未拦截之前的session/favicon404是本地setup错误，不冒称生产错误。生成截图/snapshot留在忽略output/playwright/gs11，未commit，浏览器与Vite已正常停止。
+
+末版实际HTTP+EMPTY/Pause24 passed（59.44s），Fast Unit/Architecture/API1563 passed（24.23s），Frontend53 passed（6.61s），TypeScript/Vite build PASS（603.59kB chunk warning保留），Ruff/Mypy161 files/diff PASS。不是GS-13 lifespan/source preservation/完整R4；这些仍须另行确认。当前active=GS-12，completed=GS-04_TO_GS-11，CAP-01_LOCAL_ACCEPTED保持，production_modified=NO。
 
 ### GS-12 — Hourly churn production-shaped soak
 
