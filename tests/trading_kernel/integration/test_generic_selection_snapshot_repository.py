@@ -179,14 +179,127 @@ async def database(head_template_engine: AsyncEngine, request: pytest.FixtureReq
     yield head_template_engine
 
 
-async def _install_static_selection_source(database: AsyncEngine, group: str, *, member_count: int = 1):
+@pytest.mark.asyncio
+async def test_resource_constrained_resident_reports_consumed_close_without_crash(database: AsyncEngine, tmp_path: Path) -> None:
+    """A legal Static close during queue wait cannot become a second grant."""
+    import os
+    import time
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from src.trading_kernel.infrastructure.pg_models import (
+        instrument_certification_current,
+        instruments,
+    )
+    from tests.trading_kernel.support.generic_selection_soak import (
+        SOAK_CUTOFF,
+        SOAK_GROUPS,
+        SoakWorkload,
+    )
+
+    cutoff = SOAK_CUTOFF
+    tape = SoakWorkload()
+    baselines = {}
+    for group in SOAK_GROUPS:
+        baseline_uid, _ = await _install_static_selection_source(database, group, cutoff_ms=cutoff)
+        baselines[group] = baseline_uid
+        async with database.begin() as connection:
+            # This old Static fixture represents a previously observed source.
+            # Newly materialized targets are never given synthetic generations.
+            await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),
+                {"uid":baseline_uid})
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(uow, strategy_group_id=group, effective_period_anchor_ms=cutoff,
+                request=ControlMutationRequest(expected_version=1, reason="gs12_resident_setup", idempotency_key=f"gs12:first:{group}",
+                    owner_identity="owner", now_ms=cutoff-1), authentication_strength="totp_step_up")
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+        for member in tape.spec(SOAK_GROUPS[0]).candidate_ids:
+            # Explicit independently certified local account facts, not target warming.
+            await connection.execute(pg_insert(instruments).values(exchange_instrument_id=member, venue_id="binance-usdm", asset_class="crypto",
+                venue_symbol=member.split(":")[1], contract_kind="perpetual", status="active").on_conflict_do_update(
+                    index_elements=[instruments.c.exchange_instrument_id], set_={"status": "active"}))
+            await connection.execute(pg_insert(instrument_certification_current).values(runtime_profile_id="tiny-live-v1", exchange_instrument_id=member,
+                status="eligible", blocker_code=None, facts_digest="sha256:"+"b"*64, product_rules_digest="sha256:"+"c"*64,
+                configured_leverage=5, margin_mode="cross", position_mode="independent_sides", observed_at_ms=cutoff-1,
+                valid_until_ms=cutoff+28*HOUR, next_check_at_ms=cutoff+28*HOUR, projection_version=1).on_conflict_do_nothing())
+    container = "brc-gs12-first-"+database.url.database.rsplit("_", 1)[-1]
+    repo = str(Path(__file__).resolve().parents[3])
+    url = database.url.set(host="host.docker.internal").render_as_string(hide_password=False)
+    process = await asyncio.create_subprocess_exec("docker", "run", "--rm", "--name", container, "--cpus=1", "--memory=1g",
+        "--memory-swap=1g", "--pids-limit=128", "--mount", f"type=bind,source={repo},target=/workspace,readonly", "--tmpfs", "/tmp",
+        "--workdir", "/tmp", "--env", "PYTHONPATH=/workspace", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "BRC_RESIDENT_TEST_DATABASE_URL",
+        "--entrypoint", "/opt/gs12-venv/bin/python", "-i", "brc-gs12-python:source-20261011", "-m",
+        "tests.trading_kernel.support.resident_soak_probe", str(cutoff+10),
+        env={**os.environ, "BRC_RESIDENT_TEST_DATABASE_URL":url}, stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    seen = []
+    async def consume():
+        while line := await process.stdout.readline():
+            row = json.loads(line)
+            seen.append(row)
+    reader = asyncio.create_task(consume())
+    async def until(predicate, timeout=420):
+        began = time.monotonic()
+        while time.monotonic()-began < timeout:
+            if any(r["status"]=="tick_failed" for r in seen):
+                pytest.fail(json.dumps([r for r in seen if r["status"] in {"tick_failed", "validation_error"}]))
+            assert process.returncode is None, "resource Worker exited unexpectedly"
+            if await predicate():
+                return
+            await asyncio.sleep(0.2)
+        pytest.fail(f"resource Worker did not advance; last={seen[-10:]}")
+    async def all_snapshots():
+        return len({r["component_id"] for r in seen if r["status"]=="snapshot_ready"})==4
+    async def consumed_close_reported():
+        return any(r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED" for r in seen)
+    try:
+        await until(all_snapshots)
+        assert process.stdin is not None
+        process.stdin.write(f"{cutoff+HOUR+8}\n".encode())
+        await process.stdin.drain()
+        await until(consumed_close_reported)
+        assert seen[0]["cpu_cores"]=="1" and seen[0]["memory_limit_bytes"]==1024**3
+        assert seen[0]["workload_digest"]==tape.semantic_digest
+        rejected = next(r for r in seen if r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED")
+        rejected_group = rejected["component_id"].split(":",1)[1]
+        rejected_spec = tape.spec(rejected_group)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current = await uow.strategy_universes.get_current(rejected_spec.event_spec_id)
+            control = await uow.instrument_selection.get_selection_control(rejected_group)
+            assert current.universe_version_id==baselines[rejected_group]
+            assert control.selection_mode.value=="static_baseline" and control.pending_selection_mode.value=="dynamic_selection"
+            assert await uow.instrument_selection.get_current_generic_authority(rejected_spec.selection_spec_id) is None
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=rejected_group, selection_spec_id=rejected_spec.selection_spec_id)
+            assert vacuum.blocks_new_entry
+            generation = await uow.instrument_selection.get_generic_materialization_generation(vacuum.source_generation_id)
+            targets = await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id)
+            assert generation.lifecycle_state.value=="STAGED" and targets[0].lifecycle_state.value=="staged"
+            assert len(await uow.strategy_universes.get_members(targets[0].universe_version_id))>=12
+            assert generation.fenced_at_ms==vacuum.fenced_at_ms
+            assert rejected["clock_ms"]<generation.fenced_at_ms+rejected_spec.materialization_timeout_ms
+        async with database.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+            assert await connection.scalar(sa.text("SELECT last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+                {"event":rejected_spec.event_spec_id,"member":rejected_spec.candidate_ids[0]})==cutoff+HOUR
+    finally:
+        stop = await asyncio.create_subprocess_exec("docker", "stop", "--time", "5", container,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await stop.communicate()
+        await reader
+        _output, error = await asyncio.wait_for(process.communicate(), timeout=10)
+        assert process.returncode==0, error.decode()[-2000:]
+    assert tuple(tmp_path.rglob("*"))==()
+
+
+async def _install_static_selection_source(database: AsyncEngine, group: str, *, member_count: int = 1, cutoff_ms: int = CUTOFF):
     spec = inputs(group).spec
     members = spec.candidate_ids[:member_count]
     async with PostgresKernelUnitOfWork(database) as uow:
         installed = await install_strategy_universe(uow,UniverseInstallRequest(
             event_spec_id=spec.event_spec_id,runtime_profile_id="tiny-live-v1",
             owner_policy_id="policy-main",exchange_instrument_ids=members,
-            installed_at_ms=CUTOFF-1,
+            installed_at_ms=cutoff_ms-1,
         ))
     assert installed.universe is not None
     uid = installed.universe.universe_version_id
@@ -195,17 +308,17 @@ async def _install_static_selection_source(database: AsyncEngine, group: str, *,
         await conn.execute(sa.text(
             "UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:at "
             "WHERE universe_version_id=:uid"
-        ),{"uid":uid,"at":CUTOFF-1})
+        ),{"uid":uid,"at":cutoff_ms-1})
         await conn.execute(sa.text(
             "UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,"
             "observation_enabled=true,warm_closed_bar_time_ms=:closed,warm_completed_at_ms=:at,"
             "warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"
-        ),{"uid":uid,"closed":CUTOFF-HOUR,"at":CUTOFF-1,
-            "digest":"sha256:"+"1"*64,"valid":CUTOFF+2*HOUR})
+        ),{"uid":uid,"closed":cutoff_ms-HOUR,"at":cutoff_ms-1,
+            "digest":"sha256:"+"1"*64,"valid":cutoff_ms+2*HOUR})
         await conn.execute(sa.text(
             "INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:at)"
         ),{"event":spec.event_spec_id,"uid":uid,
-            "digest":installed.universe.semantic_digest,"at":CUTOFF-1})
+            "digest":installed.universe.semantic_digest,"at":cutoff_ms-1})
         if group in {"MPG-001","MI-001"}:
             digest = canonical_digest({"exchange_instrument_ids":members})
             comparison_id = "comparison:"+digest[7:]
@@ -6078,7 +6191,8 @@ async def test_generic_same_close_observation_and_no_change_grant_serialize(
     observed,granted = results if consume_first else results[::-1]
     assert observed.status is ObservationStatus.SIGNAL_CREATED, observed
     if consume_first:
-        assert isinstance(granted,RuntimeError) and str(granted)=="Generic grant close was already consumed", granted
+        assert granted.disposition is MaterializationDisposition.BLOCKED, granted
+        assert granted.reason_code=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED", granted
     else:
         assert granted.disposition is MaterializationDisposition.NO_CHANGE, granted
     async with PostgresKernelUnitOfWork(database) as uow:

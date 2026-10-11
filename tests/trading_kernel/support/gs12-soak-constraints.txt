@@ -1,0 +1,10 @@
+# Match the core package versions used by the local Python test environment.
+# The evidence records the actual full dependency inventory and image identity.
+alembic==1.18.5
+asyncpg==0.30.0
+ccxt==4.5.56
+greenlet==3.5.4
+pydantic==2.13.4
+SQLAlchemy==2.0.51
+pytest==9.1.1
+pytest-asyncio==1.4.0

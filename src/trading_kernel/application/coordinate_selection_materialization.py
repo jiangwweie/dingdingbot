@@ -31,6 +31,7 @@ from src.trading_kernel.application.install_strategy_universe import (
     install_strategy_universe,
 )
 from src.trading_kernel.application.ports import (
+    GenericCloseAlreadyConsumed,
     KernelUnitOfWork,
     SelectionPersistenceConflict,
     UnitOfWorkFactory,
@@ -1599,7 +1600,10 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                     attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
                 if certified.status is not UniverseActivationStatus.ALREADY_ACTIVE:
                     return _blocked(str(certified.reason_code))
-                proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                try:
+                    proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                except GenericCloseAlreadyConsumed:
+                    return _blocked("GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED")
                 sequence = 1 if prior is None or prior.authority.period.feature_cutoff_at_ms != snapshot.feature_cutoff_at_ms else prior.authority.authority_sequence+1
                 authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
                     selection_spec_id=snapshot.selection_spec_id,strategy_group_id=snapshot.strategy_group_id,
@@ -2029,7 +2033,11 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     selection_spec_id=generation.selection_spec_id,target_members=snapshot.selected_members)
                 if blocker is not None:
                     return _blocked(blocker)
-                proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                try:
+                    proof = await prepare_generic_current_close_proof(uow,selection_snapshot_id=snapshot.selection_snapshot_id)
+                except GenericCloseAlreadyConsumed:
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                        reason_code="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED",entry_vacuum_id=vacuum.entry_vacuum_id,**identity)
                 sequence = 1 if prior is None or prior.authority.period!=proof.period else prior.authority.authority_sequence+1
                 authority = GenericSelectionAuthority(selection_authority_id=f"authority:{snapshot.selection_snapshot_id}:{sequence}",
                     selection_spec_id=generation.selection_spec_id,strategy_group_id=generation.strategy_group_id,selection_epoch_id=generation.selection_epoch_id,

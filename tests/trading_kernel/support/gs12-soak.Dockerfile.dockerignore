@@ -1,0 +1,6 @@
+**
+!requirements.txt
+!tests/
+!tests/trading_kernel/
+!tests/trading_kernel/support/
+!tests/trading_kernel/support/gs12-soak-constraints.txt

@@ -1338,6 +1338,20 @@ GS11_LOCAL_ACCEPTED。逐项证据如下；先前IN_PROGRESS切片保留其历�
 
 ### GS-12 — Hourly churn production-shaped soak
 
+#### 2026-10-11 frozen workload / cgroup / consumed-close运行增量（未整卡签收）
+
+本地SoakWorkload固定一条Candidate24 common closed-market tape；四策略重叠窗口逐根相同，固定Decimal38，MPG真实numeric rank/hysteresis在24h产生19 additions/19 removals（约0.79/h）、21个changed periods，MI19/19/15，CPM11/11/6，BRF2 19/19/6。先写缺module RED，再实现；合同5项PASS包含100h闭合前置历史、p95 nearest rank、Vacuum interval union与拒绝伪造资源预算。该synthetic workload只用于工程，不是新Alpha/经济Replay/production authority。
+
+Docker Hub与mirror pull均卡在credential helper，两个具体pull进程已终止；未改credential。用已有digest-pinned postgres16-alpine构建本地Python3.12隔离工具，tracked Dockerfile/constraints（非YAML）可重建；core包版本与本地pytest一致。source image实际ID sha256:0c051fffe2e237730d687901f2d495e1611ad996f395295ac56d56c1f2d1235e，cgroup cpu.max=100000/100000、memory.max=1073741824，pids128、只读repo mount/tmpfs/no-bytecode。PG为独立dingdingbot-pg，未给PG套Worker预算。source容器合同4 passed（随后加第5个历史合同本地主机PASS）；不能将bootstrap image结果伪称source-image full soak。
+
+首次四策略正式Owner pending→Runner→同槽warming运行先暴露tape4h历史不足和旧Static fixture observation_generation=0；补足历史并修正明确旧来源夹具，不缩lookback、不写target warm fields。随后真实慢warming暴露：某队列策略旧Static在prefence期间已合法消费current close，锁coverage正确拒绝，但抛普通RuntimeError形成tick_failed。代码源头08e2044e的consumed-close拒绝不变；新增typed GenericCloseAlreadyConsumed，NORMAL NO_CHANGE及STAGED activation精确转BLOCKED/GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED，不catch普通RuntimeError/SQL错误，不新增grant/clear Vacuum、不刷新deadline。双事务Observation先消费的RED已复现，末版四策略并发/coverage/continuity13 passed（35.03s），正常/crash/timeout resident16 passed（142.20s），共享SOR materialization/Vacuum/Full-chain196 passed（190.95s），Fast Unit/Architecture/API1568 passed（22.90s），Ruff/Mypy161/diff PASS。
+
+真实cgroup四策略场景当前仅认证已消费close的fail-closed分类，不是健康first activation全部PASS；早期固定CPM等待420s timeout已记录，真实队列顺序不同，末版按实际被拒策略核对Static/current/pending/STAGED/Vacuum/原deadline/零Command。该测试仍在运行，结果不能提前标PASS。首次激活的合法Static close loss独立记录，不用它代替已连续Dynamic的24h健康零漏close证明。
+
+末版resource运行273.79s确实到预期typed blocker且无tick_failed，但断言错误读取GenerationUniverseTarget.exchange_instrument_ids而FAIL；已改为正式Universe member repository exact-load，不改生产行为，重验仍运行。全部容器都由test finally正常停止，只有当前重验容器可存在；生成output不commit。本段是可恢复本地checkpoint，不是PASS。
+
+GS-12保持IN_PROGRESS：连续24h healthy所有due与非空churn、actual Comparison rebase、close/source/command ledger、八项指标、原资源idle/四Worker Safety负载、完整故障段及Policy B本地负载仍需交付。GS-13所有准备/R4均WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。
 
 **允许**：本地soak harness、recording source/venue、可处置PG及worker测试、display-only evidence。**禁止**：真实exchange写、为通过测试缩N/cadence、临时加入incremental warming、把业务deadline随加速比例缩放。

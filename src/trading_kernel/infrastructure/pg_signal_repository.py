@@ -15,6 +15,7 @@ from src.trading_kernel.application.ports import (
     ActiveStrategyUniverseMembershipSnapshot,
     ActiveStrategyUniverseSnapshot,
     EventSpecSnapshot,
+    GenericCloseAlreadyConsumed,
     GenericSelectionMemberRuntimeStatus,
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
@@ -258,7 +259,7 @@ class PostgresSignalRepository:
             raise ValueError("Generic grant coverage members differ from Spec")
         evidence = await self._lock_selection_observation_cursors(event_spec_id=event_spec_id,exchange_instrument_ids=exchange_instrument_ids)
         if any(cursor.last_observed_at_ms is not None and cursor.last_observed_at_ms>=closed_at_ms for cursor in evidence):
-            raise RuntimeError("Generic grant close was already consumed")
+            raise GenericCloseAlreadyConsumed("Generic grant close was already consumed")
         return evidence
 
     async def lock_recovery_close_coverage(self, *, event_spec_id: str, exchange_instrument_ids: tuple[str, ...],
