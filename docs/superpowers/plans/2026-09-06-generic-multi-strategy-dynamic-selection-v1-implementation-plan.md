@@ -1168,6 +1168,14 @@ RED复现：新close+8ms普通Observation先读到旧Authority expired，返回I
 
 本段完成MPG/MI normal NO_CHANGE concurrent resident与restart两period切片；四小时CPM/BRF2、changed Desired全set真实warming、故障/recovery等resident边界及GS-10 requirement audit仍待证明，不据此签GS-10或GS-12。GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-11 four-strategy resident cadence / all-member close验收（基于27ed5518，未整卡签收）
+
+扩展同一resident renewal矩阵到CPM/BRF2，使用冻结4h cutoff及1h Observation，而MPG/MI保持1h；测试source的4h candles以request closed_at的真实4h边界对齐，不用把未来4h close错移到小时close。CPM/BRF2 Selection保留各Candidate自己的冻结geometry，不以同一window平铺成改变rank；BRF2负向market上下文只用于工程no-signal workload，不修改Detector阈值或exit规则。
+
+四策略各正式已有Active前置→独立process三个Plane+facts loops→两个NO_CHANGE period，中间完整SIGTERM/restart。每个selected scope在两次grant close均由实际Observation返回NO_SIGNAL；CPM/BRF2四小时周期之间每一个hourly close也逐member核对，最终DB所有member Episode cursor等于最后close，而非只取一个member/max时间证明全量。原Universe不变、零Signal/Command、无手工续warm TTL、隔离目录零文件；独立certification为明确测试前置，不替代Reconciliation/真实Binance认证。
+
+末版四策略resident4 passed（40.22s），Unit/Architecture/API1498 passed（18.16s），Ruff、Mypy161 files、diff PASS，所有进程终态。本轮仅tests/support/docs变更，无生产修改。Normal NO_CHANGE的1h/4h并发续期与restart已有证据；changed Desired全set真正warming、故障恢复resident边界及GS-10逐项审计仍待证明，不签GS-10/GS-12；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

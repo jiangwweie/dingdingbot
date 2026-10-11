@@ -493,17 +493,25 @@ async def test_generic_member_status_tracks_persisted_comparison_rebase(database
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group",["MPG-001","MI-001"])
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
 async def test_actual_resident_planes_renew_and_consume_hourly_close(database: AsyncEngine,tmp_path: Path,group: str) -> None:
     import os
     import sys
 
-    source,first,_,uid=await _exercise_generic_generation(database,group,True,durable=True,first_activation=True,natural_selection=True)
+    comparative=group in {"MPG-001","MI-001"}
+    source,first,_,uid=await _exercise_generic_generation(database,group,comparative,durable=True,first_activation=True,natural_selection=True)
+    cadence=source.spec.cadence_hours*HOUR
+    first_cutoff=CUTOFF+cadence
+    first_close=first_cutoff+HOUR
+    second_cutoff=first_cutoff+cadence
+    second_close=second_cutoff+HOUR
+    async with database.connect() as connection:
+        scope_ids=set((await connection.execute(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":uid})).scalars())
     async with database.begin() as connection:
         await connection.execute(sa.text("UPDATE brc_instrument_certification_current SET observed_at_ms=:at,valid_until_ms=:until,next_check_at_ms=:until WHERE runtime_profile_id='tiny-live-v1'"),
-            {"at":CUTOFF+HOUR,"until":CUTOFF+5*HOUR})
+            {"at":CUTOFF+HOUR,"until":second_close+2*HOUR})
     process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
-        group,str(CUTOFF+HOUR+60_000),cwd=tmp_path,
+        group,str(first_cutoff+60_000),cwd=tmp_path,
         env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
             "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
         stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
@@ -522,17 +530,24 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
         except TimeoutError:
             meaningful=[r for r in seen if r["component_id"]=="observation" and r["status"]!="no_work"]
             pytest.fail(f"resident progression missing; observations={meaningful[-5:]}; last results={seen[-3:]}")
+    def all_observed(close):
+        return {r["runtime_scope_id"] for r in seen if r["component_id"]=="observation" and
+            r.get("trigger_candle_close_time_ms")==close and r.get("observation_status")=="no_signal"}==scope_ids
     try:
         await until(lambda r:r["component_id"]=="selection" and r["status"]=="snapshot_ready")
         assert process.stdin is not None
-        process.stdin.write(f"{CUTOFF+2*HOUR+8}\n".encode())
+        process.stdin.write(f"{first_close+8}\n".encode())
         await process.stdin.drain()
         await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="NO_CHANGE")
         # A blocked pre-grant Observation has a durable retry due time. The
         # accelerated market clock must advance past it, not freeze at +8ms.
-        process.stdin.write(f"{CUTOFF+2*HOUR+2_008}\n".encode())
+        process.stdin.write(f"{first_close+2_008}\n".encode())
         await process.stdin.drain()
-        await until(lambda r:r["component_id"]=="observation" and r.get("trigger_candle_close_time_ms")==CUTOFF+2*HOUR and r.get("observation_status")=="no_signal")
+        await until(lambda _:all_observed(first_close))
+        for close in range(first_close+HOUR,second_close,HOUR):
+            process.stdin.write(f"{close+2_008}\n".encode())
+            await process.stdin.drain()
+            await until(lambda _,close=close:all_observed(close))
         process.terminate()
         output,error=await asyncio.wait_for(process.communicate(),timeout=5)
         assert process.returncode==0,error.decode()
@@ -543,19 +558,19 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
             await process.communicate()
     # Restart all planes in a fresh OS process for a second normal renewal.
     process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
-        group,str(CUTOFF+2*HOUR+60_000),cwd=tmp_path,
+        group,str(second_cutoff+60_000),cwd=tmp_path,
         env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
             "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
         stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
     try:
-        await until(lambda r:r["component_id"]=="selection" and r["status"] in {"snapshot_ready","already_ready"} and r.get("period_anchor_ms")==CUTOFF+2*HOUR)
+        await until(lambda r:r["component_id"]=="selection" and r["status"] in {"snapshot_ready","already_ready"} and r.get("period_anchor_ms")==second_cutoff)
         assert process.stdin is not None
-        process.stdin.write(f"{CUTOFF+3*HOUR+8}\n".encode())
+        process.stdin.write(f"{second_close+8}\n".encode())
         await process.stdin.drain()
-        await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="NO_CHANGE" and r.get("period_anchor_ms")==CUTOFF+2*HOUR)
-        process.stdin.write(f"{CUTOFF+3*HOUR+2_008}\n".encode())
+        await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="NO_CHANGE" and r.get("period_anchor_ms")==second_cutoff)
+        process.stdin.write(f"{second_close+2_008}\n".encode())
         await process.stdin.drain()
-        await until(lambda r:r["component_id"]=="observation" and r.get("trigger_candle_close_time_ms")==CUTOFF+3*HOUR and r.get("observation_status")=="no_signal")
+        await until(lambda _:all_observed(second_close))
         process.terminate()
         output,error=await asyncio.wait_for(process.communicate(),timeout=5)
         assert process.returncode==0,error.decode()
@@ -567,7 +582,7 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
     async with PostgresKernelUnitOfWork(database) as uow:
         authority=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         assert authority.authority.authority_outcome=="NO_CHANGE"
-        assert authority.authority.period.feature_cutoff_at_ms==CUTOFF+2*HOUR
+        assert authority.authority.period.feature_cutoff_at_ms==second_cutoff
         assert authority.authority.selection_snapshot_id!=first.selection_snapshot_id
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
     assert any(r["component_id"]=="facts" and r["status"]=="facts_refreshed" for r in seen)
@@ -575,7 +590,9 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
     async with database.connect() as connection:
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
-        assert await connection.scalar(sa.text("SELECT max(comparison_last_observed_at_ms) FROM brc_exposure_episode_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})==CUTOFF+3*HOUR
+        assert await connection.scalar(sa.text("SELECT max(last_observed_at_ms) FROM brc_exposure_episode_current WHERE event_spec_id=:event"),{"event":source.spec.event_spec_id})==second_close
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current WHERE event_spec_id=:event AND last_observed_at_ms=:close"),
+            {"event":source.spec.event_spec_id,"close":second_close})==len(scope_ids)
 
 
 @pytest.mark.asyncio

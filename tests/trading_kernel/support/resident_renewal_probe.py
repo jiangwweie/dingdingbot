@@ -36,6 +36,8 @@ from tests.trading_kernel.support.generic_selection import (
     shift_window,
 )
 from tests.trading_kernel.unit.detectors.fixtures import (
+    brf2_short_snapshot,
+    cpm_flat_snapshot,
     mi_flat_snapshot,
     mpg_flat_snapshot,
 )
@@ -45,17 +47,21 @@ async def main() -> None:
     group,initial=sys.argv[1:]
     clock=[int(initial)]
     source=inputs(group)
-    template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+    comparative=group in {"MPG-001","MI-001"}
+    template={"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"CPM-RO-001":cpm_flat_snapshot,
+        "BRF2-001":lambda:brf2_short_snapshot(strong_uptrend=True)}[group]()
     class Market:
         async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
             return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms,
-                "venue_status":"TRADING" if w.exchange_instrument_id==source.spec.candidate_ids[0] else "PENDING_TRADING"}) for w in source.member_windows)
+                "venue_status":"TRADING" if not comparative or w.exchange_instrument_id==source.spec.candidate_ids[0] else "PENDING_TRADING"}) for w in source.member_windows)
         async def fetch_generic_selection_klines(self,request):
-            return shift_window(source.member_windows[0],request.feature_cutoff_at_ms-CUTOFF).candles
+            window=source.member_windows[0] if comparative else next(w for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+            return shift_window(window,request.feature_cutoff_at_ms-CUTOFF).candles
         async def fetch_closed_candles(self,request):
-            close=clock[0]//HOUR*HOUR
-            delta=close-template.trigger_candle_close_time_ms
             candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            interval=HOUR if request.timeframe=="1h" else 4*HOUR
+            close=request.closed_at_ms//interval*interval
+            delta=close-candles[-1].close_time_ms
             return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)[-request.limit:]
     engine=create_async_engine(os.environ["BRC_RESIDENT_TEST_DATABASE_URL"])
     uow=lambda:PostgresKernelUnitOfWork(engine)
