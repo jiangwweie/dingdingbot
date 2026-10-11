@@ -2344,9 +2344,10 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("head_condition",["expired","expired_live_lease","owner_paused","control_drift"])
+@pytest.mark.parametrize("head_condition,target_stage",[(condition,"warming") for condition in
+    ("expired","expired_live_lease","owner_paused","control_drift","target_timeout","target_pause")]+[("target_timeout","staged"),("target_pause","staged")])
 @pytest.mark.parametrize("groups",[("MI-001","CPM-RO-001"),("MPG-001","BRF2-001")])
-async def test_generic_global_queue_skips_ineligible_head_before_cleanup(database: AsyncEngine,tmp_path: Path,head_condition: str,groups: tuple[str,str]) -> None:
+async def test_generic_global_queue_skips_ineligible_head_before_cleanup(database: AsyncEngine,tmp_path: Path,head_condition: str,target_stage: str,groups: tuple[str,str]) -> None:
     import os
     import sys
 
@@ -2390,7 +2391,72 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
     head=generations[groups[0]]
     assert head.desired_at_ms<generations[groups[1]].desired_at_ms
     now=CUTOFF+HOUR+20
-    if head_condition.startswith("expired"):
+    async def child_tick(group,at):
+        process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_materialization_probe",
+            group,str(at),"queue-child",cwd=tmp_path,
+            env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
+                "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+            stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        try:
+            output,error=await asyncio.wait_for(process.communicate(),timeout=15)
+            assert process.returncode==0,error.decode()
+            return json.loads(output)
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.communicate()
+    if head_condition.startswith("target"):
+        for offset in range(3):
+            await child_tick(groups[0],now+offset)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            warming=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
+            targets=await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id)
+        assert warming.lifecycle_state.value=="MATERIALIZING"
+        assert len(targets)==1 and targets[0].lifecycle_state.value=="warming"
+        busy=await child_tick(groups[1],now+3)
+        assert busy["reason_code"]=="GLOBAL_WARMING_SLOT_BUSY",busy
+        if target_stage=="staged":
+            close=CUTOFF+HOUR
+            await make_warming_ready(database,universe_version_id=targets[0].universe_version_id,warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+            template=mi_flat_snapshot() if groups[0]=="MI-001" else mpg_flat_snapshot()
+            delta=close-template.trigger_candle_close_time_ms
+            candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+            projection=build_comparative_universe_projection(event_spec_id=inputs(groups[0]).spec.event_spec_id,
+                universe_version_id=targets[0].universe_version_id,strategy_group_id=groups[0],exchange_instrument_ids=inputs(groups[0]).spec.candidate_ids,
+                closed_bar_time_ms=close,lookback_bars=12 if groups[0]=="MI-001" else 8,freshness_window_ms=HOUR,
+                member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles) for member in inputs(groups[0]).spec.candidate_ids))
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await uow.strategy_universes.save_comparative_projection(projection)
+            staged=await child_tick(groups[0],now+4)
+            assert staged["disposition"]=="GENERATION_STAGED",staged
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id))[0].lifecycle_state.value=="staged"
+            now+=2
+        if head_condition=="target_pause":
+            now+=4
+            async with PostgresKernelUnitOfWork(database) as uow:
+                owner=await uow.owner_controls.get_strategy_control(groups[0])
+                await set_strategy_entry_state(uow,strategy_group_id=groups[0],target_state=StrategyEntryState.PAUSED,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="queue_target_pause",idempotency_key="queue:pause:target",owner_identity="owner",now_ms=now),
+                    authentication_strength="totp_step_up")
+            now+=1
+        else:
+            now=warming.fenced_at_ms+inputs(groups[0]).spec.materialization_timeout_ms
+        failed=await child_tick(groups[0],now)
+        if head_condition=="target_pause":
+            assert failed["disposition"]=="OWNER_PAUSED",failed
+        else:
+            assert failed["reason_code"]=="MATERIALIZATION_TIMEOUT",failed
+        async with PostgresKernelUnitOfWork(database) as uow:
+            released=await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id)
+            terminal=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
+            assert terminal.lifecycle_state.value==("ABANDONED" if head_condition=="target_pause" else "FAILED_CLOSED")
+            assert all(t.lifecycle_state.value=="abandoned" for t in released)
+            assert (await uow.strategy_universes.get_current(inputs(groups[0]).spec.event_spec_id)).universe_version_id==head.previous_events[0].universe_version_id
+            old_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id)
+            assert old_vacuum is not None and old_vacuum.blocks_new_entry
+        now+=1
+    elif head_condition.startswith("expired"):
         now=snapshots[groups[0]].expires_at_ms+1
         if head_condition=="expired_live_lease":
             async with PostgresKernelUnitOfWork(database) as uow:
@@ -2407,27 +2473,25 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
             await set_strategy_entry_state(uow,strategy_group_id=groups[0],target_state=StrategyEntryState.PAUSED,
                 request=ControlMutationRequest(expected_version=owner.control_version,reason="queue_head_pause",idempotency_key="queue:pause:head",owner_identity="owner",now_ms=now-1),
                 authentication_strength="totp_step_up")
-    # No head cleanup tick has run: the live next strategy must still advance.
-    process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_materialization_probe",
-        groups[1],str(now),"queue-next",cwd=tmp_path,
-        env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
-            "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
-        stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
-    try:
-        output,error=await asyncio.wait_for(process.communicate(),timeout=15)
-        assert process.returncode==0,error.decode()
-        result=json.loads(output)
-        assert result["reason_code"]!="GLOBAL_WARMING_SLOT_BUSY",result
-    finally:
-        if process.returncode is None:
-            process.kill()
-            await process.communicate()
+    result=await child_tick(groups[1],now)
+    assert result["reason_code"]!="GLOBAL_WARMING_SLOT_BUSY",result
     assert tuple(tmp_path.rglob("*"))==()
     async with PostgresKernelUnitOfWork(database) as uow:
         advanced=await uow.instrument_selection.get_generic_materialization_generation(generations[groups[1]].materialization_generation_id)
         assert advanced.lifecycle_state.value=="DRAINING_ENTRY" and advanced.fenced_at_ms==now
         unchanged=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
-        assert unchanged.lifecycle_state.value=="DESIRED" and unchanged.fenced_at_ms is None
+        if head_condition.startswith("target"):
+            assert unchanged==terminal
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id)==old_vacuum
+            stale_callback=await advance_strategy_universe(uow,UniverseActivationRequest(
+                universe_version_id=targets[0].universe_version_id,attempted_at_ms=now,
+                operation=UniverseActivationOperation.STAGE_DYNAMIC,materialization_generation_id=head.materialization_generation_id,
+                materialization_lease_owner="queue-child",materialization_lease_epoch=warming.lease_epoch))
+            assert stale_callback.status is UniverseActivationStatus.NOT_READY,stale_callback
+            assert await uow.instrument_selection.get_generic_materialization_generation(advanced.materialization_generation_id)==advanced
+            assert all(t.lifecycle_state.value=="abandoned" for t in await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id))
+        else:
+            assert unchanged.lifecycle_state.value=="DESIRED" and unchanged.fenced_at_ms is None
         if head_condition=="expired_live_lease":
             assert unchanged.lease_owner=="crashed-head" and unchanged.lease_expires_at_ms>now
         assert await uow.instrument_selection.get_current_generic_authority(snapshots[groups[0]].selection_spec_id) is None

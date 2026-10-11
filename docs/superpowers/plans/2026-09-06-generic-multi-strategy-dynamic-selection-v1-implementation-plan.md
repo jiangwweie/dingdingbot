@@ -1132,6 +1132,14 @@ Selector Plane真实跨进程与多cutoff已有上述证据；Materialization/Ob
 
 末版上述八分支+原slot并发1共9 passed（18.65s）；Unit/Architecture/API1444 passed（19.94s）；Ruff、Mypy161 files、diff PASS。所有进程终态，本轮仅tests/support/docs变更，无生产源码修改、无生产操作。target warming/STAGED/timeout/SUPERSEDED后跨进程release及三个Plane同时resident多period/restart仍需整卡验证，不以这一队列切片签GS-10/GS-12；GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-11 warming / STAGED target release跨进程验收（基于042f7a6e，未整卡签收）
+
+扩展同一queue矩阵而非另建重复fixture：MI→CPM、MPG→BRF2两组正式Owner/Runner/Materializer DESIRED；独立child process连续正式tick使队头进入DRAINING→MATERIALIZING、实际安装warming target。另一策略此时GLOBAL_WARMING_SLOT_BUSY且未fence。warming及STAGED target各覆盖Owner正式Pause和原deadline timeout，清理在新OS process调用正式runtime；target ABANDONED、Generation ABANDONED或FAILED_CLOSED、原Static current Universe保持、原Vacuum继续blocks_new_entry，然后另一个新process才取得槽位。
+
+STAGED readiness/certification/比较projection采用既有显式测试前置夹具，本轮不冒称真正warming Worker已生产证据；实际Universe STAGE及失败/清理/槽位接管仍由原runtime/PG约束执行。timeout不被重复tick延长，Pause不恢复ENTRY。后到旧stage回调NOT_READY，全部旧target仍abandoned，新持槽Generation逐字段不变；零Command/Authority，无SQL恢复、无新队列表或并行warming。
+
+末版八种head/target分支×两策略组合+原materializer并发共17 passed（66.40s），Unit/Architecture/API1444 passed（20.13s），Ruff、Mypy161 files、diff PASS，所有进程终态。本轮仅tests/docs改变，production_modified=NO。queue过期/paused/drift及warming/STAGED timeout/Pause释放已有上述证据；SUPERSEDED接管与三个Plane同时resident多period/crash recovery、status剩余要求仍需整卡证明，GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。
