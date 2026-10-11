@@ -1056,6 +1056,74 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
         assert (await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)).lifecycle_state.value=="ABANDONED"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,group: str,monkeypatch) -> None:
+    import pyotp
+    from argon2 import PasswordHasher
+    from httpx import ASGITransport, AsyncClient
+
+    from src.trading_kernel.interfaces.owner_console_http.app import (
+        OwnerConsoleSettings,
+        create_owner_console_app,
+    )
+    from src.trading_kernel.interfaces.owner_console_http.auth import (
+        OwnerAuthService,
+        OwnerAuthSettings,
+    )
+    from src.trading_kernel.interfaces.owner_console_http.routes import (
+        controls as routes,
+    )
+
+    await _install_static_selection_source(database,group)
+    await _apply_owner_control_grants(database)
+    clock=[CUTOFF-1]
+    seed="JBSWY3DPEHPK3PXP"
+    settings=OwnerConsoleSettings(database_dsn="postgresql+asyncpg://unused",account_id="generic-snapshot",
+        public_origin="https://owner.example.test",public_host="owner.example.test",auth=OwnerAuthSettings(username="owner",
+            password_hash=PasswordHasher(time_cost=3,memory_cost=65536,parallelism=1).hash("test-password"),totp_seed=seed,
+            session_signing_key="generic-http-test-session-signing-material"))
+    app=create_owner_console_app(settings)
+    app.state.owner_console_settings=settings
+    app.state.owner_console_engine=database
+    app.state.owner_control_engine=database
+    app.state.owner_clock_ms=lambda:clock[0]
+    app.state.owner_auth_service=OwnerAuthService(settings.auth)
+    class RoleUow(PostgresKernelUnitOfWork):
+        async def __aenter__(self):
+            result=await super().__aenter__()
+            await self._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+            return result
+    monkeypatch.setattr(routes,"PostgresKernelUnitOfWork",RoleUow)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url=settings.public_origin) as client:
+        code=pyotp.TOTP(seed).at(clock[0]//1000)
+        login=await client.post("/api/owner/v1/auth/login",json={"username":"owner","password":"test-password","totp_code":code})
+        assert login.status_code==204,login.text
+        preview=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
+        assert preview.status_code==200,preview.text
+        data=preview.json()
+        assert data["runtime"]["installed"] and data["control"]["selection_mode"]=="static_baseline"
+        assert data["next_effective_period_anchor_ms"]==CUTOFF
+        assert data["next_eligibility_not_before_ms"]==CUTOFF+HOUR
+        body={"expected_version":data["control"]["control_version"],"effective_period_anchor_ms":CUTOFF,
+            "reason":"http_generic_activation","idempotency_key":f"http:activate:{group}","totp_code":"000000"}
+        url=f"/api/owner/v1/controls/strategies/{group}/selection/dynamic/activate"
+        invalid=await client.post(url,headers={"Origin":settings.public_origin},json=body)
+        assert invalid.status_code==403,invalid.text
+        assert (await client.get("/api/owner/v1/auth/session")).status_code==200
+        response=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"totp_code":code})
+        assert response.status_code==200,response.text
+        staged=response.json()
+        assert staged["selection_mode"]=="static_baseline" and staged["pending_selection_mode"]=="dynamic_selection"
+        assert staged["pending_effective_period_anchor_ms"]==CUTOFF
+        assert staged["selection_epoch_id"] is not None
+    async with database.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==1
+        for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
+            "brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_signal_events","brc_trade_tickets","brc_exchange_commands"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+
+
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:
     role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
     grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]

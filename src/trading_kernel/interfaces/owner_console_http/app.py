@@ -56,6 +56,7 @@ from src.trading_kernel.interfaces.owner_console_http.auth import (
     InvalidCredentials,
     LoginThrottled,
     OwnerAuthService,
+    StepUpInvalid,
 )
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     OwnerConsoleSettings,
@@ -273,6 +274,7 @@ async def _cleanup_lifespan_resources(
 def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(UnauthorizedError, _handle_unauthorized)
     app.add_exception_handler(InvalidCredentials, _handle_invalid_credentials)
+    app.add_exception_handler(StepUpInvalid, _handle_step_up_invalid)
     app.add_exception_handler(LoginThrottled, _handle_login_throttled)
     app.add_exception_handler(SignalNotFound, _handle_not_found)
     app.add_exception_handler(OwnerResourceNotFound, _handle_not_found)
@@ -325,6 +327,10 @@ async def _handle_unauthorized(_: Request, __: Exception) -> JSONResponse:
 
 async def _handle_invalid_credentials(_: Request, __: Exception) -> JSONResponse:
     return unauthorized_response()
+
+
+async def _handle_step_up_invalid(_: Request, __: Exception) -> JSONResponse:
+    return error_response(status_code=403,code="step_up_invalid",message="Owner step-up proof is invalid or already used")
 
 
 async def _handle_login_throttled(_: Request, __: Exception) -> JSONResponse:

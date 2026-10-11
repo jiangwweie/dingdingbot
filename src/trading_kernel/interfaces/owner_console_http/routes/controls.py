@@ -5,6 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -23,6 +24,8 @@ from src.trading_kernel.application.owner_control import (
     set_global_entry_state,
     set_strategy_entry_state,
     stage_dynamic_selection_mode,
+    stage_generic_dynamic_selection_mode,
+    stage_generic_static_selection_mode,
     switch_event_exit_profile,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
@@ -30,6 +33,7 @@ from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     ExitProfileRecord,
 )
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.owner_control import (
     OwnerControlOperation,
     StrategyEntryControl,
@@ -43,7 +47,10 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     owner_read_transaction,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.interfaces.owner_console_http.auth import InvalidCredentials
+from src.trading_kernel.interfaces.owner_console_http.auth import (
+    InvalidCredentials,
+    StepUpInvalid,
+)
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     get_auth_service,
     get_clock_ms,
@@ -54,7 +61,10 @@ from src.trading_kernel.interfaces.owner_console_http.dependencies import (
 from src.trading_kernel.interfaces.readonly_api import (
     ExitProfileAuthorityReadonlyRequest,
     ExitProfileAuthorityReadonlyView,
+    GenericSelectionRuntimeReadonlyRequest,
+    GenericSelectionRuntimeReadonlyView,
     get_exit_profile_authority_view,
+    get_generic_selection_runtime_view,
 )
 
 router = APIRouter(prefix="/api/owner/v1", tags=["owner-controls"])
@@ -76,6 +86,24 @@ class FlattenBody(ControlWriteBody):
 
 class DynamicSelectionActivationBody(ControlWriteBody):
     effective_session_start_ms: int = Field(gt=0)
+
+
+class GenericSelectionActivationBody(ControlWriteBody):
+    effective_period_anchor_ms: int = Field(gt=0)
+
+
+class GenericStaticSelectionActivationBody(GenericSelectionActivationBody):
+    rollback_baseline_id: str = Field(min_length=1,max_length=160)
+    selection_epoch_id: str = Field(min_length=1,max_length=160)
+
+
+class GenericSelectionPreviewView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    control: SelectionControl | None
+    runtime: GenericSelectionRuntimeReadonlyView
+    cadence_hours: int
+    next_effective_period_anchor_ms: int
+    next_eligibility_not_before_ms: int
 
 
 class ExitProfileBindingBody(ControlWriteBody):
@@ -460,12 +488,22 @@ async def resume_strategy(
 )
 async def activate_dynamic_selection(
     strategy_group_id: str,
-    body: DynamicSelectionActivationBody,
+    body: DynamicSelectionActivationBody | GenericSelectionActivationBody,
     request: Request,
 ) -> SelectionControl:
     _validate_write_request(request)
     settings = get_settings(request)
     now_ms = get_clock_ms(request)
+    if strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}:
+        if not isinstance(body,GenericSelectionActivationBody):
+            raise OwnerControlBlocked("generic_selection_requires_period_anchor")
+        await _require_step_up(body,request)
+        async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            return await stage_generic_dynamic_selection_mode(uow,strategy_group_id=strategy_group_id,
+                effective_period_anchor_ms=body.effective_period_anchor_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
+    if not isinstance(body,DynamicSelectionActivationBody):
+        raise OwnerControlBlocked("sor_selection_requires_session_start")
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         current = await uow.instrument_selection.get_selection_control(
             strategy_group_id
@@ -483,6 +521,36 @@ async def activate_dynamic_selection(
             request=_mutation(body, settings.auth.username, now_ms),
             authentication_strength="totp_step_up",
         )
+
+
+@router.get("/controls/strategies/{strategy_group_id}/selection")
+async def preview_generic_selection(strategy_group_id: str,request: Request) -> GenericSelectionPreviewView:
+    try:
+        spec=generic_selection_spec(strategy_group_id)
+    except ValueError as exc:
+        raise OwnerControlBlocked("generic_strategy_not_supported") from exc
+    now=get_clock_ms(request)
+    cadence=spec.cadence_hours*3_600_000
+    anchor=(now//cadence+1)*cadence
+    async with PostgresKernelUnitOfWork(get_read_engine(request)) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+        control=await uow.instrument_selection.get_selection_control(strategy_group_id)
+        runtime=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=strategy_group_id,now_ms=now))
+    return GenericSelectionPreviewView(control=control,runtime=runtime,cadence_hours=spec.cadence_hours,
+        next_effective_period_anchor_ms=anchor,next_eligibility_not_before_ms=anchor+3_600_000)
+
+
+@router.post("/controls/strategies/{strategy_group_id}/selection/static/activate")
+async def activate_generic_static_selection(strategy_group_id: str,body: GenericStaticSelectionActivationBody,request: Request) -> SelectionControl:
+    _validate_write_request(request)
+    await _require_step_up(body,request)
+    settings=get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
+            rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
+            effective_period_anchor_ms=body.effective_period_anchor_ms,
+            request=_mutation(body,settings.auth.username,get_clock_ms(request)),authentication_strength="totp_step_up")
 
 
 @router.get("/controls/exit-profiles")
@@ -707,11 +775,11 @@ def _mutation(body: ControlWriteBody, owner_identity: str, now_ms: int) -> Contr
 
 async def _require_step_up(body: ControlWriteBody, request: Request) -> None:
     if body.totp_code is None:
-        raise InvalidCredentials
-    await get_auth_service(request).verify_step_up(
-        body.totp_code,
-        now_ms=get_clock_ms(request),
-    )
+        raise StepUpInvalid
+    try:
+        await get_auth_service(request).verify_step_up(body.totp_code,now_ms=get_clock_ms(request))
+    except InvalidCredentials as exc:
+        raise StepUpInvalid from exc
 
 
 def _validate_write_request(request: Request) -> None:

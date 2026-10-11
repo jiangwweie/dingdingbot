@@ -27,6 +27,10 @@ _MAX_TOTP_SEED_LENGTH = 256
 _MAX_SIGNING_KEY_LENGTH = 1024
 
 
+class StepUpInvalid(Exception):
+    """Authenticated session is valid, but Owner step-up proof is not."""
+
+
 class InvalidCredentials(Exception):
     """Generic failure for every invalid authentication factor."""
 

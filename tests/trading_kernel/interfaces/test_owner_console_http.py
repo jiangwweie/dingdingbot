@@ -346,6 +346,8 @@ async def owner_console_app(
         OwnerConsoleSettings(
             database_dsn="postgresql+asyncpg://unused",
             account_id="owner-account",
+            public_origin="https://owner.example.test",
+            public_host="owner.example.test",
             auth=OwnerAuthSettings(
                 username="owner",
                 password_hash=PASSWORD_HASH,
@@ -719,6 +721,8 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate",
+        "/api/owner/v1/controls/strategies/{strategy_group_id}/selection",
+        "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate",
         "/api/owner/v1/controls/exit-profiles",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/events/{event_spec_id}/exit-profile",
         "/api/owner/v1/controls/exit-profiles/{exit_profile_id}/retire",
@@ -768,6 +772,16 @@ async def test_login_sets_strict_secure_http_only_cookie(
     assert "HttpOnly" in cookie
     assert "Secure" in cookie
     assert "SameSite=strict" in cookie
+
+
+@pytest.mark.parametrize("totp_code",[None,"000000"])
+async def test_invalid_owner_step_up_is_403_without_expiring_session(owner_console_client: AsyncClient,totp_code) -> None:
+    response=await owner_console_client.post("/api/owner/v1/controls/entry/resume",
+        headers={"Origin":"https://owner.example.test"},json={"expected_version":1,"reason":"step_up_test",
+            "idempotency_key":"step-up:no-logout","totp_code":totp_code})
+    assert response.status_code==403,response.text
+    assert response.json()["error"]["code"]=="step_up_invalid"
+    assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
 
 
 async def test_unauthenticated_session_and_data_share_one_401_shape(

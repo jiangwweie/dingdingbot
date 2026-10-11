@@ -1230,6 +1230,16 @@ RED复现：新close+8ms普通Observation先读到旧Authority expired，返回I
 
 ### GS-11 — Owner API / Console
 
+#### 2026-10-11 Generic HTTP boundary / step-up no logout首个切片（基于107b0d27，未整卡签收）
+
+现有Console/API只有SOR Dynamic表单且InvalidCredentials一律401；GS-11 RED以真实session、合法Origin/Host提交缺失/错误step-up证明返回401导致前端unauthorized跳转。新增独立StepUpInvalid：Control write的有效session下TOTP缺失/无效/已用返回403/step_up_invalid，原login/session/Origin/Host错误仍401，既有不可重放TOTP验证不放松。session后续GET仍200，不读取secret、不改credential、不复用已消费code。
+
+原Dynamic activation路由增加typed Generic period body并接stage_generic_dynamic_selection_mode；保留legacy SOR session body边界而不把Generic 1h/4h伪装日Session。新增每策略selection预览GET（read engine + SET TRANSACTION READ ONLY，actual Control、bounded runtime view、next exact cadence anchor和t+1h eligibility）及Static activate POST到原stage_generic_static_selection_mode；无新Authority/Worker链、无SQL替代Owner mutation。Static POST、幂等/409/failure/actual readonly-role及完整UI尚待后续认证，不能据OpenAPI路由存在当完成。
+
+四Generic策略使用HTTP session登录/step-up、实际SET LOCAL ROLE brc_owner_control（含预览readonly事务）的PG测试4 passed（6.21s）：next period/eligibility clock正确，错误TOTP403后session200，正式授权只创建一条selection_mode_change和Static pending Dynamic epoch；Job/Snapshot/Generation/Vacuum/Authority/Signal/Ticket/Command均零。测试app接实际数据库及认证服务，未运行startup/lifespan release认证，不冒称部署路径已认证。HTTP37 passed（5.42s），Fast Unit/Architecture/API1556 passed（18.05s）、Ruff/Mypy161 files/diff PASS。
+
+GS-11 IN_PROGRESS；tracked前端为frontend/owner-console，本轮尚未改表单/生成schema或做浏览器验收。容量仍本次发布默认Policy B且只有readonly展示；SOR不借Generic新增生产授权。GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：Owner在界面独立控制每策略，看到实际交易权限与等待原因。
 
 **允许**：现有Owner HTTP/application/read models、已tracked Console资产、权限tests与前端测试。启动时先定位tracked前端路径，不触碰主工作区未跟踪`frontend/`。**禁止**：API-only交付、SQL绕过、全局Crypto开关、YAML阈值编辑。
