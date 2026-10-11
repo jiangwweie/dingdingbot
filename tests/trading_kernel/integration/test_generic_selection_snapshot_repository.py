@@ -1058,7 +1058,8 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,group: str,monkeypatch) -> None:
+@pytest.mark.parametrize("target_mode",["dynamic","static"])
+async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,group: str,target_mode: str,monkeypatch) -> None:
     import pyotp
     from argon2 import PasswordHasher
     from httpx import ASGITransport, AsyncClient
@@ -1075,9 +1076,12 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         controls as routes,
     )
 
-    await _install_static_selection_source(database,group)
+    if target_mode=="dynamic":
+        await _install_static_selection_source(database,group)
+    else:
+        await _exercise_generic_generation(database,group,False,durable=True,first_activation=True,natural_selection=True)
     await _apply_owner_control_grants(database)
-    clock=[CUTOFF-1]
+    clock=[CUTOFF-1 if target_mode=="dynamic" else CUTOFF+HOUR+60_000]
     seed="JBSWY3DPEHPK3PXP"
     settings=OwnerConsoleSettings(database_dsn="postgresql+asyncpg://unused",account_id="generic-snapshot",
         public_origin="https://owner.example.test",public_host="owner.example.test",auth=OwnerAuthSettings(username="owner",
@@ -1095,6 +1099,11 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
             await self._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
             return result
     monkeypatch.setattr(routes,"PostgresKernelUnitOfWork",RoleUow)
+    tracked_tables=("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
+        "brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_signal_events","brc_trade_tickets","brc_exchange_commands")
+    async with database.connect() as connection:
+        before={table:await connection.scalar(sa.text(f"SELECT count(*) FROM {table}")) for table in tracked_tables}
+        authorizations_before=await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))
     async with AsyncClient(transport=ASGITransport(app=app),base_url=settings.public_origin) as client:
         code=pyotp.TOTP(seed).at(clock[0]//1000)
         login=await client.post("/api/owner/v1/auth/login",json={"username":"owner","password":"test-password","totp_code":code})
@@ -1102,26 +1111,47 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         preview=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
         assert preview.status_code==200,preview.text
         data=preview.json()
-        assert data["runtime"]["installed"] and data["control"]["selection_mode"]=="static_baseline"
-        assert data["next_effective_period_anchor_ms"]==CUTOFF
-        assert data["next_eligibility_not_before_ms"]==CUTOFF+HOUR
-        body={"expected_version":data["control"]["control_version"],"effective_period_anchor_ms":CUTOFF,
-            "reason":"http_generic_activation","idempotency_key":f"http:activate:{group}","totp_code":"000000"}
-        url=f"/api/owner/v1/controls/strategies/{group}/selection/dynamic/activate"
+        source_mode="static_baseline" if target_mode=="dynamic" else "dynamic_selection"
+        desired_mode="dynamic_selection" if target_mode=="dynamic" else "static_baseline"
+        assert data["runtime"]["installed"] and data["control"]["selection_mode"]==source_mode
+        cadence=inputs(group).spec.cadence_hours*HOUR
+        next_anchor=(clock[0]//cadence+1)*cadence
+        assert data["next_effective_period_anchor_ms"]==next_anchor
+        assert data["next_eligibility_not_before_ms"]==next_anchor+HOUR
+        body={"expected_version":data["control"]["control_version"],"effective_period_anchor_ms":next_anchor,
+            "reason":"http_generic_activation","idempotency_key":f"http:activate:{group}:{target_mode}","totp_code":"000000"}
+        if target_mode=="static":
+            body.update(rollback_baseline_id=data["control"]["rollback_baseline_id"],selection_epoch_id=data["control"]["selection_epoch_id"])
+        url=f"/api/owner/v1/controls/strategies/{group}/selection/{target_mode}/activate"
+        stale=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"expected_version":body["expected_version"]-1,
+            "idempotency_key":f"http:stale:{group}:{target_mode}"})
+        assert stale.status_code==409,stale.text
         invalid=await client.post(url,headers={"Origin":settings.public_origin},json=body)
         assert invalid.status_code==403,invalid.text
         assert (await client.get("/api/owner/v1/auth/session")).status_code==200
-        response=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"totp_code":code})
+        submitted={**body,"totp_code":code}
+        responses=await asyncio.gather(*(client.post(url,headers={"Origin":settings.public_origin},json=submitted) for _ in range(2)))
+        assert [r.status_code for r in responses]==[200,200],[r.text for r in responses]
+        assert responses[0].json()==responses[1].json()
+        response=responses[0]
         assert response.status_code==200,response.text
         staged=response.json()
-        assert staged["selection_mode"]=="static_baseline" and staged["pending_selection_mode"]=="dynamic_selection"
-        assert staged["pending_effective_period_anchor_ms"]==CUTOFF
+        assert staged["selection_mode"]==source_mode and staged["pending_selection_mode"]==desired_mode
+        assert staged["pending_effective_period_anchor_ms"]==next_anchor
         assert staged["selection_epoch_id"] is not None
+        replay=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"totp_code":code})
+        assert replay.status_code==200,replay.text
+        assert replay.json()==staged
+        without_new_proof=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"totp_code":None})
+        assert without_new_proof.status_code==200,without_new_proof.text
+        assert without_new_proof.json()==staged
+        conflict=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"reason":"different_intent","totp_code":code})
+        assert conflict.status_code==409,conflict.text
+        assert (await client.get("/api/owner/v1/auth/session")).status_code==200
     async with database.connect() as connection:
-        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==1
-        for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
-            "brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_signal_events","brc_trade_tickets","brc_exchange_commands"):
-            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==authorizations_before+1
+        for table in tracked_tables:
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
 
 
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:

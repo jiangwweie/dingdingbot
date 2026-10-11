@@ -479,6 +479,8 @@ async def resume_strategy(
     request: Request,
 ) -> StrategyEntryControl:
     _validate_write_request(request)
+    if strategy_group_id=="SOR-001":
+        raise OwnerControlBlocked("strategy_retired")
     await _require_step_up(body, request)
     return await _set_strategy(strategy_group_id, StrategyEntryState.ENABLED, body, request)
 
@@ -492,13 +494,31 @@ async def activate_dynamic_selection(
     request: Request,
 ) -> SelectionControl:
     _validate_write_request(request)
+    if strategy_group_id=="SOR-001":
+        raise OwnerControlBlocked("strategy_retired")
     settings = get_settings(request)
     now_ms = get_clock_ms(request)
     if strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}:
         if not isinstance(body,GenericSelectionActivationBody):
             raise OwnerControlBlocked("generic_selection_requires_period_anchor")
-        await _require_step_up(body,request)
         async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
+            existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
+            if existing is not None:
+                # Only the original application boundary can validate and
+                # replay an already step-up-authorized immutable intent.
+                return await stage_generic_dynamic_selection_mode(uow,strategy_group_id=strategy_group_id,
+                    effective_period_anchor_ms=body.effective_period_anchor_ms,
+                    request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
+            current=await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
+            if current is None:
+                raise OwnerControlBlocked("generic_selection_control_missing")
+            if current.control_version!=body.expected_version:
+                raise OwnerControlConflict("selection_control_version_conflict")
+            # Local cryptographic verification has no network I/O. Keep this
+            # rare Owner mutation under its existing transaction lock, so a
+            # duplicate cannot consume proof before the first intent commits.
+            await _require_step_up(body,request)
             return await stage_generic_dynamic_selection_mode(uow,strategy_group_id=strategy_group_id,
                 effective_period_anchor_ms=body.effective_period_anchor_ms,
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
@@ -544,13 +564,26 @@ async def preview_generic_selection(strategy_group_id: str,request: Request) -> 
 @router.post("/controls/strategies/{strategy_group_id}/selection/static/activate")
 async def activate_generic_static_selection(strategy_group_id: str,body: GenericStaticSelectionActivationBody,request: Request) -> SelectionControl:
     _validate_write_request(request)
-    await _require_step_up(body,request)
     settings=get_settings(request)
+    now_ms=get_clock_ms(request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
+        existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
+        if existing is not None:
+            return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
+                rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
+                effective_period_anchor_ms=body.effective_period_anchor_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
+        current=await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
+        if current is None:
+            raise OwnerControlBlocked("generic_selection_control_missing")
+        if current.control_version!=body.expected_version:
+            raise OwnerControlConflict("selection_control_version_conflict")
+        await _require_step_up(body,request)
         return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
             rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
             effective_period_anchor_ms=body.effective_period_anchor_ms,
-            request=_mutation(body,settings.auth.username,get_clock_ms(request)),authentication_strength="totp_step_up")
+            request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
 
 
 @router.get("/controls/exit-profiles")

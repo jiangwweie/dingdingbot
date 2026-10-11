@@ -1242,6 +1242,14 @@ GS-11 IN_PROGRESS；tracked前端为frontend/owner-console，本轮尚未改表�
 
 **目标**：Owner在界面独立控制每策略，看到实际交易权限与等待原因。
 
+#### 2026-10-11 HTTP idempotency / concurrent double-click / Static回退意图（基于aa9cd2e3，未整卡签收）
+
+真实role HTTP RED：成功Dynamic请求再次到来先验证同TOTP，因code已消费返回403；并发双击两请求又会在首事务提交前分别进入step-up，第二个403。现Generic Dynamic/Static两路由复用Owner→Selection当前行锁，精确事务内先查immutable authorization，已授权请求仅交原application核对Owner/purpose/request digest/target scope/当前epoch与pending状态；匹配返回原Control，不再索要新TOTP，不新增authority。新意图先CAS version检查，再本地cryptographic step-up及写authorization；同短事务无network IO。不引入分布式锁、lease或第二授权链。
+
+四策略×Dynamic/Static共8 actual brc_owner_control HTTP测试19.07s：Static来源由既有正式Owner→Runner→Materializer激活链产生；stale expected version409且不消费proof、错误TOTP403/session200、同code并发双击两响应完全相同、串行同request重放及省略新code都返回原结果、同key不同reason409。只增加一条selection_mode_change authorization，pending mode/next 1h或4h anchor/t+1h eligibility正确；既有Job/Snapshot/Generation/Vacuum/Authority/Signal/Ticket/Command数量不变，提交Static意图不执行切换。
+
+遵循Owner SOR永久停止决定，正式HTTP拒绝SOR-001 Resume和Dynamic Activate（422 strategy_retired）；Pause及已有安全lifecycle不改变，legacy语义/历史代码不删除、不因Generic新能力复活。拒绝发生于新step-up/DB mutation之前，既有session保持。HTTP39 passed（5.36s），Fast Unit/Architecture/API1558 passed（18.54s），Ruff/Mypy161 files/diff PASS，所有verification终态。实际readonly角色、完整Static生效/恢复与UI/浏览器仍需GS-11后续认证；无生产修改，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION。
+
 **允许**：现有Owner HTTP/application/read models、已tracked Console资产、权限tests与前端测试。启动时先定位tracked前端路径，不触碰主工作区未跟踪`frontend/`。**禁止**：API-only交付、SQL绕过、全局Crypto开关、YAML阈值编辑。
 
 **RED与要求**：STATIC/DYNAMIC预览/激活/回退，typed时间；version/idempotency由UI维护，TOTP在正式应用边界验证。错误step-up不跳登录，401仅真正session失效；409刷新状态但不自动提交新权限。双击/刷新返回同operation。

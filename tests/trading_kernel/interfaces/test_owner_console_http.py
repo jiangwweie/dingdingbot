@@ -784,6 +784,18 @@ async def test_invalid_owner_step_up_is_403_without_expiring_session(owner_conso
     assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
 
 
+@pytest.mark.parametrize("action",["resume","selection/dynamic/activate"])
+async def test_retired_sor_cannot_be_reactivated_by_owner_http(owner_console_client: AsyncClient,action: str) -> None:
+    body={"expected_version":1,"reason":"retired_strategy","idempotency_key":"retired:sor","totp_code":"000000"}
+    if action.startswith("selection"):
+        body["effective_session_start_ms"]=BASE_MS
+    response=await owner_console_client.post(f"/api/owner/v1/controls/strategies/SOR-001/{action}",
+        headers={"Origin":"https://owner.example.test"},json=body)
+    assert response.status_code==422,response.text
+    assert response.json()["error"]["message"]=="strategy_retired"
+    assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
+
+
 async def test_unauthenticated_session_and_data_share_one_401_shape(
     owner_console_app: FastAPI,
 ) -> None:
