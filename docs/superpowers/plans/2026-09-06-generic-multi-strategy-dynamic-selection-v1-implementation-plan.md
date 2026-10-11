@@ -8,16 +8,16 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-12
-authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
-gs13_authority: WAIT_OWNER_CONFIRMATION
+active_execution_scope: GS-13_RELEASE_ASSURANCE
+authorized_execution_scope: CAP-01_GS-10_TO_GS-13_AND_STOPPED_FLAT_DEPLOYMENT
+gs13_authority: OWNER_AUTHORIZED
 completed_execution_scope: GS-04_TO_GS-11
 completed_amendment_scope: CAP-01_LOCAL_ACCEPTED
 local_acceptance_status: GS04_GS11_ACCEPTED
 gs12_local_performance_status: VERIFIED_BOUNDED_SAMPLES
-gs12_long_run_status: PENDING_SERVER_VALIDATION
-server_test_authority: WAIT_OWNER_CONFIRMATION
-production_authority: NONE
+gs12_long_run_status: DEFERRED_POST_DEPLOYMENT_NOT_PASSED
+server_test_authority: NOT_REQUESTED
+production_authority: STOPPED_FLAT_DEPLOYMENT_AFTER_REQUIRED_GATES
 further_feature_research: CLOSED
 owner_amendments: ACCEPTED_2026-09-21
 ---
@@ -25,6 +25,18 @@ owner_amendments: ACCEPTED_2026-09-21
 # Generic Multi-Strategy Dynamic Selection V1 — Implementation Plan
 
 ## 1. 目标、权限与来源
+
+### 2026-10-11 最新 Owner 部署决策（覆盖下方历史等待状态）
+
+Owner 明确授权本次统一部署，要求先完成必要保证；若持仓阻塞，由 Owner 在界面一键平仓。此前 GS-13 等待确认与 production_authority=NONE 的文字是历史执行边界，不再限制本轮必要 release assurance 和正式 stopped-flat deployment。
+
+- 不再以本地 24h-equivalent soak 或隔离服务器时间测试作为部署前置；未执行的长期 churn/latency/missed-close 验证明确为 DEFERRED_POST_DEPLOYMENT_NOT_PASSED，不改写为 PASS。既有有界资源及保护生命周期测试保留。
+- 必须完成 exact candidate R4、数值合同、Owner API/UI、source provenance、terminal lineage preservation、角色权限和 fresh PostgreSQL/Binance/systemd 身份/平仓硬门槛。advisory facts 不代替停止 writers 后的 authoritative facts。
+- 正式部署 authority 事务默认生成并启用独立 Capacity Policy B；migration/restart 不自行启用。SOR-001 保持 retired/paused，不授予任何新 ENTRY。Dynamic activation 和 ExitProfile switch 不由部署自动触发。
+- 活跃 Ticket、未知 Command、Incident、风险预留或残单未收尾时不得迁移，不直接 SQL 清除状态。持仓期间 Safety Worker 继续保护、退出与对账。
+- 最小 immutable live evidence 链已交付；离线 MAE/MFE projector 尚未交付，本轮不把研究展示工具计入部署安全保证，也不因此宣称 GS-13 全卡 DONE。此前完整验收要求及未完成项作为历史与后续清单保留。
+
+本轮可声明的是实际通过的 release/deployment gates，不宣称原 GS-12 完整 soak 或全部 GS-13 交付通过。精确生产事实只记录在 MAIN_CONTROL_ROADMAP。
 
 **本计划将已批准设计拆成GS-00至GS-13共14张可验收Task Card；当前已经进入获授权的本地代码与测试阶段。** 初始独立复核只允许修订设计与计划，随后Owner明确授予本地实施权限；Tokyo操作、部署或策略activation仍未授权。实际完成度以§2.1证据台账为准。
 
