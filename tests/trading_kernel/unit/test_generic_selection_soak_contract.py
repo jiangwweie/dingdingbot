@@ -61,6 +61,25 @@ def test_soak_overlapping_source_windows_are_the_same_closed_market_path() -> No
         assert all(c.close_time_ms <= CUTOFF for w in first.member_windows for c in w.candles)
 
 
+def test_fresh_soak_epoch_has_explicit_bootstrap_not_hidden_warmup_retention() -> None:
+    workload = SoakWorkload()
+    expected = {"CPM-RO-001":(11,11,6),"MPG-001":(19,18,21),"MI-001":(19,19,15),"BRF2-001":(19,19,6)}
+    for group in SOAK_GROUPS:
+        prior = None
+        additions = removals = changes = 0
+        for hour in range(0,25,workload.spec(group).cadence_hours):
+            snapshot = compute_generic_selection(workload.selection_input(group,cutoff_ms=CUTOFF+hour*HOUR,predecessor=prior))
+            if prior is not None:
+                additions+=len(set(snapshot.selected_members)-set(prior.selected_members))
+                removals+=len(set(prior.selected_members)-set(snapshot.selected_members))
+                changes+=snapshot.selected_members!=prior.selected_members
+            else:
+                assert snapshot.predecessor_snapshot_id is None
+                assert not any(member.retained for member in snapshot.members)
+            prior = snapshot
+        assert (additions,removals,changes)==expected[group]
+
+
 def test_soak_metrics_do_not_hide_overlap_or_small_sample_latency() -> None:
     assert percentile95((1, 2, 100)) == 100
     assert percentile95(()) is None

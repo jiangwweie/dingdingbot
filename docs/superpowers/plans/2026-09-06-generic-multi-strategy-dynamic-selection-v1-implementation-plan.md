@@ -1350,7 +1350,19 @@ Docker Hub与mirror pull均卡在credential helper，两个具体pull进程已�
 
 末版resource运行273.79s确实到预期typed blocker且无tick_failed，但断言错误读取GenerationUniverseTarget.exchange_instrument_ids而FAIL；已改为正式Universe member repository exact-load，不改生产行为，重验仍运行。全部容器都由test finally正常停止，只有当前重验容器可存在；生成output不commit。本段是可恢复本地checkpoint，不是PASS。
 
-GS-12保持IN_PROGRESS：连续24h healthy所有due与非空churn、actual Comparison rebase、close/source/command ledger、八项指标、原资源idle/四Worker Safety负载、完整故障段及Policy B本地负载仍需交付。GS-13所有准备/R4均WAIT_OWNER_CONFIRMATION，production_modified=NO。
+#### 2026-10-11 Policy B / healthy period ledger增量（基于25690672，未整卡签收）
+
+consumed-close末版真实1CPU/1GiB容器1 passed（233.24s）：actual被拒策略的Static/current/pending不改，正式target STAGED、原Vacuum/1800s deadline保留、同close已合法消费、零Command且无tick_failed。该结论是边界/fault证据，不是健康first activation 4/4或24h PASS。
+
+新增healthy_24h参数使用同一资源probe和可处置PG，不创建第二runtime链。新Policy B通过现有deploy_compatible_upgrade_identity本地stopped-flat boundary生成，SOR paused，max_same_strategy_side2/family2/2/1；随后正式arm_acceptance_policy，避免把旧Policy A或command-fenced Lifecycle当正常负载。首两次不完整试跑分别发现缺B与Safety command fence，主动SIGINT终止，153.95s/327.85s不记PASS；finally已正常停止原容器，不因观测timeout重复启动同一handle。
+
+健康bootstrap明确旧Static来源fixture的下一Observation due=第二close，只是建立测试前置；测量从实际四策略Dynamic激活/Comparison rebase之后开始。新target绝不手写warm fields；同一个5s/2s/5s official loop和真实PG依次完成full-set warming。健康60 due periods（MPG/MI各24、CPM/BRF2各6）按逐period expected frozen tape核对Source Snapshot、actual Authority/cutoff、actual Universe成员、所有current成员Episode close；96组逐策略/close ledger，所有未消费close与precommit proof保持，miss/expiry失败不能被打印零掩盖。Generation/fence/grant/Vacuum来自PG，不拿日志替代事实；queue/fence实际时间保持1:1 wall，只有idle市场时间跳跃。记录每次source identity/digest/injected5ms/实际elapsed、cgroup CPU/memory/节流、三Safety角色空闲tick、终端command ledger与idle cumulative CPU。
+
+新epoch从cutoff0无predecessor正式开始，MPG测量19 additions/18 removals/21 changes（末尾成员13），与具有预热hysteresis的19/19 trace不同；新增独立合同明确两种前置，不借warmup隐含retention，约0.79/0.75每小时仍为冻结0.77量级。其余fresh epoch CPM11/11/6、MI19/19/15、BRF2 19/19/6。合同6项PASS；Fast Unit/Architecture/API1569 passed（23.26s），容量发布/合同/架构98 passed（15.67s，先于新增fresh epoch合同），末版合同/架构88 passed（7.18s），Ruff/Mypy161/diff PASS。
+
+独立fault当前复验：来源retry/miss/挂起隔离10 passed（15.15s）；missing source/warming Pause/Policy B自然hourly full-chain10 passed（26.98s）；actual changed-set normal/SIGKILL/timeout/并行source14 passed（103.40s）；unknown/partial/Static保护链8 passed（45.54s）。集合重叠不合计；它们是已有production-shaped branch回归，不冒称资源下完整fault soak/新收益证据。
+
+当前healthy资源长跑仍在bootstrap；三Safety结果真实为Entry no_candidate/Lifecycle no_work/Reconciliation no_work，不靠Runtime Fence短路。该probe目前在同一OS process调用四Worker逻辑tick，不把它冒称四独立OS service的resource envelope，也不证明有曝光Safety负载、SOR due与完整cancel attribution已完成。GS-12保持IN_PROGRESS，须完整24h终态/八项指标、共享四进程资源与独立故障/受保护Ticket负载、SOR compatibility/read-only source、最终逐项audit全部闭合。GS-13所有准备/R4均WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。
 

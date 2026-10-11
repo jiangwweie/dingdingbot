@@ -180,7 +180,8 @@ async def database(head_template_engine: AsyncEngine, request: pytest.FixtureReq
 
 
 @pytest.mark.asyncio
-async def test_resource_constrained_resident_reports_consumed_close_without_crash(database: AsyncEngine, tmp_path: Path) -> None:
+@pytest.mark.parametrize("soak_mode", ["consumed_close", "healthy_24h"])
+async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_path: Path, soak_mode: str) -> None:
     """A legal Static close during queue wait cannot become a second grant."""
     import os
     import time
@@ -191,6 +192,11 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
         instrument_certification_current,
         instruments,
     )
+    from src.trading_kernel.infrastructure.runtime_authority_seed import (
+        ArmAcceptancePolicyRequest,
+        arm_acceptance_policy,
+        deploy_compatible_upgrade_identity,
+    )
     from tests.trading_kernel.support.generic_selection_soak import (
         SOAK_CUTOFF,
         SOAK_GROUPS,
@@ -199,6 +205,21 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
 
     cutoff = SOAK_CUTOFF
     tape = SoakWorkload()
+    # Install the approved B revision through the real local stopped-flat
+    # identity boundary, before any pending Selection or warm target exists.
+    # No production/source migration or GS-13 rehearsal is performed here.
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id='SOR-001'"))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id="generic-snapshot",
+            runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=cutoff-10))
+    async with database.connect() as connection:
+        policy = (await connection.execute(sa.text("SELECT * FROM brc_owner_policy_current WHERE owner_policy_id='policy-main'"))).mappings().one()
+        assert policy["max_same_strategy_side"]==2
+        assert policy["family_ticket_limits"]=={"long_continuation":2,"opening_range":2,"rally_failure_short":1}
+        assert not policy["new_entry_submit_enabled"]
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await arm_acceptance_policy(uow,ArmAcceptancePolicyRequest(armed_at_ms=cutoff-9))
     baselines = {}
     for group in SOAK_GROUPS:
         baseline_uid, _ = await _install_static_selection_source(database, group, cutoff_ms=cutoff)
@@ -208,12 +229,17 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
             # Newly materialized targets are never given synthetic generations.
             await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),
                 {"uid":baseline_uid})
+            if soak_mode=="healthy_24h":
+                # Explicit historical Static cadence fixture only. The measured
+                # healthy interval starts after real Dynamic bootstrap/rebase.
+                # No new target gets synthetic readiness or delayed cadence.
+                await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET next_observation_due_at_ms=:at WHERE universe_version_id=:uid"),
+                    {"uid":baseline_uid,"at":cutoff+2*HOUR})
         async with PostgresKernelUnitOfWork(database) as uow:
             await stage_generic_dynamic_selection_mode(uow, strategy_group_id=group, effective_period_anchor_ms=cutoff,
                 request=ControlMutationRequest(expected_version=1, reason="gs12_resident_setup", idempotency_key=f"gs12:first:{group}",
                     owner_identity="owner", now_ms=cutoff-1), authentication_strength="totp_step_up")
     async with database.begin() as connection:
-        await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
         for member in tape.spec(SOAK_GROUPS[0]).candidate_ids:
             # Explicit independently certified local account facts, not target warming.
             await connection.execute(pg_insert(instruments).values(exchange_instrument_id=member, venue_id="binance-usdm", asset_class="crypto",
@@ -239,7 +265,7 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
             row = json.loads(line)
             seen.append(row)
     reader = asyncio.create_task(consume())
-    async def until(predicate, timeout=420):
+    async def until(predicate, timeout=900):
         began = time.monotonic()
         while time.monotonic()-began < timeout:
             if any(r["status"]=="tick_failed" for r in seen):
@@ -253,11 +279,19 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
         return len({r["component_id"] for r in seen if r["status"]=="snapshot_ready"})==4
     async def consumed_close_reported():
         return any(r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED" for r in seen)
+    async def all_activated():
+        async with database.connect() as connection:
+            return await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_control_current WHERE strategy_group_id=ANY(:groups) AND selection_mode='dynamic_selection' AND pending_selection_mode IS NULL"),
+                {"groups":list(SOAK_GROUPS)})==4
     try:
         await until(all_snapshots)
         assert process.stdin is not None
         process.stdin.write(f"{cutoff+HOUR+8}\n".encode())
         await process.stdin.drain()
+        if soak_mode=="healthy_24h":
+            await until(all_activated)
+            await _assert_resource_soak_healthy_periods(database,process,seen,until,tape,tmp_path)
+            return
         await until(consumed_close_reported)
         assert seen[0]["cpu_cores"]=="1" and seen[0]["memory_limit_bytes"]==1024**3
         assert seen[0]["workload_digest"]==tape.semantic_digest
@@ -290,6 +324,133 @@ async def test_resource_constrained_resident_reports_consumed_close_without_cras
         _output, error = await asyncio.wait_for(process.communicate(), timeout=10)
         assert process.returncode==0, error.decode()[-2000:]
     assert tuple(tmp_path.rglob("*"))==()
+
+
+async def _assert_resource_soak_healthy_periods(database, process, seen, until, tape, tmp_path):
+    """Keep wall-time cadence/I/O costs while advancing only idle market time."""
+    from tests.trading_kernel.support.generic_selection_soak import (
+        SOAK_CUTOFF,
+        SOAK_GROUPS,
+        percentile95,
+        vacuum_time_union_ms,
+    )
+    expected = {}
+    priors = {}
+    for hour in range(25):
+        for group in SOAK_GROUPS:
+            if hour % tape.spec(group).cadence_hours:
+                continue
+            snapshot = compute_generic_selection(tape.selection_input(group,cutoff_ms=SOAK_CUTOFF+hour*HOUR,predecessor=priors.get(group)))
+            expected[group,hour] = snapshot
+            priors[group] = snapshot
+    ledger = []
+    metrics = {group:{"periods":0,"changes":0,"generations":0,"queue_wait_ms":[],"fence_grant_ms":[],"vacuum_intervals":[],
+                     "missed_eligible_closes":0,"no_eligible_close_before_expiry":0,"selection_entry_cancellations":0} for group in SOAK_GROUPS}
+    for hour in range(1,25):
+        close = SOAK_CUTOFF+(hour+1)*HOUR
+        due = [g for g in SOAK_GROUPS if hour%tape.spec(g).cadence_hours==0]
+        async def precommitted(due=due,hour=hour,close=close):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                for group in due:
+                    control = await uow.instrument_selection.get_selection_control(group)
+                    sid = compute_generic_selection(tape.selection_input(group,cutoff_ms=SOAK_CUTOFF+hour*HOUR,
+                        epoch=control.selection_epoch_id)).selection_snapshot_id
+                    exists = await uow._connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=:sid)"),{"sid":sid})
+                    if not exists:
+                        return False
+                    snapshot = await uow.instrument_selection.get_generic_snapshot(sid)
+                    assert snapshot.committed_at_ms<close
+            return True
+        await until(precommitted)
+        process.stdin.write(f"{close+8}\n".encode())
+        await process.stdin.drain()
+        async def period_consumed(hour=hour,close=close):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                for group in SOAK_GROUPS:
+                    spec = tape.spec(group)
+                    authority = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
+                    expected_hour = hour//spec.cadence_hours*spec.cadence_hours
+                    if authority is None or authority.authority.period.feature_cutoff_at_ms!=SOAK_CUTOFF+expected_hour*HOUR:
+                        return False
+                    current = await uow.strategy_universes.get_current(spec.event_spec_id)
+                    if await uow.strategy_universes.get_members(current.universe_version_id)!=expected[group,expected_hour].selected_members:
+                        return False
+                    members = await uow.strategy_universes.get_members(current.universe_version_id)
+                    rows = (await uow._connection.execute(sa.text("SELECT exchange_instrument_id,last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=ANY(:members)"),
+                        {"event":spec.event_spec_id,"members":list(members)})).mappings().all()
+                    if len(rows)!=len(members) or any(r["last_observed_at_ms"]!=close for r in rows):
+                        return False
+            return True
+        await until(period_consumed)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            for group in SOAK_GROUPS:
+                spec = tape.spec(group)
+                authority = (await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)).authority
+                current = await uow.strategy_universes.get_current(spec.event_spec_id)
+                members = await uow.strategy_universes.get_members(current.universe_version_id)
+                ledger.append({"group":group,"close_ms":close,"authority_id":authority.selection_authority_id,
+                    "snapshot_id":authority.selection_snapshot_id,"universe_id":current.universe_version_id,"members":members,
+                    "outcome":authority.authority_outcome,"comparison_revision":authority.comparison_transition_revision})
+                if group not in due:
+                    continue
+                prior_hour = hour-spec.cadence_hours
+                changed = expected[group,hour].selected_members!=expected[group,prior_hour].selected_members
+                metric = metrics[group]
+                metric["periods"]+=1
+                metric["changes"]+=int(changed)
+                if changed:
+                    generation = await uow.instrument_selection.get_generic_materialization_generation(authority.materialization_generation_id)
+                    assert generation.lifecycle_state.value=="ACTIVE" and generation.fenced_at_ms is not None
+                    assert authority.created_at_ms<generation.fenced_at_ms+spec.materialization_timeout_ms
+                    vacuum = (await uow._connection.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"),
+                        {"gid":generation.materialization_generation_id})).mappings().one()
+                    assert vacuum["resolved_at_ms"] is not None
+                    metric["generations"]+=1
+                    metric["fence_grant_ms"].append(authority.created_at_ms-generation.fenced_at_ms)
+                    # Within one close step, logical milliseconds advance at 1:1
+                    # wall-time. No market-time jumps occur inside open Vacuum.
+                    metric["queue_wait_ms"].append(generation.fenced_at_ms-(close+8))
+                    metric["vacuum_intervals"].append((vacuum["fenced_at_ms"],vacuum["resolved_at_ms"]))
+                else:
+                    assert authority.authority_outcome=="NO_CHANGE"
+        print(json.dumps({"gs12_progress":"period_complete","hour":hour,"close_ms":close,
+            "ledger_rows":len(ledger),"due_groups":due}),flush=True)
+        assert tuple(tmp_path.rglob("*"))==()
+    async with database.connect() as connection:
+        commands = (await connection.execute(sa.text("SELECT command_id,command_kind,ticket_id FROM brc_exchange_commands ORDER BY command_id"))).mappings().all()
+        assert not commands
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots WHERE feature_cutoff_at_ms>:start AND feature_cutoff_at_ms<=:end"),
+            {"start":SOAK_CUTOFF,"end":SOAK_CUTOFF+24*HOUR})==60
+        for group in SOAK_GROUPS:
+            metric = metrics[group]
+            assert metric["periods"]==(24 if tape.spec(group).cadence_hours==1 else 6)
+            assert metric["changes"]>0 and metric["generations"]==metric["changes"]
+            duration = vacuum_time_union_ms(tuple(metric.pop("vacuum_intervals")),start_ms=SOAK_CUTOFF+2*HOUR,end_ms=SOAK_CUTOFF+26*HOUR)
+            metric["vacuum_duty_cycle"] = str(Decimal(duration)/Decimal(24*HOUR))
+            assert Decimal(metric["vacuum_duty_cycle"])<=Decimal("0.10")
+            metric["p95_queue_wait_ms"] = percentile95(tuple(metric["queue_wait_ms"]))
+            metric["p95_fence_grant_ms"] = percentile95(tuple(metric["fence_grant_ms"]))
+    source_ledger = [r for r in seen if r["component_id"]=="source"]
+    assert source_ledger and all(r["elapsed_wall_ms"]>=r["injected_wait_ms"] for r in source_ledger)
+    assert all(len(r["source_digest"])==71 for r in source_ledger)
+    for component in ("entry","lifecycle","reconciliation"):
+        assert any(r["component_id"]==component for r in seen)
+    resources = [r for r in seen if r["component_id"]=="resource"]
+    assert resources and max(r["memory_bytes"] for r in resources)<1024**3
+    # Idle CPU is measured from cgroup cumulative usage, not one Docker % sample.
+    # All source requests and normal tick costs stay in real wall time.
+    idle_started = seen[-1]["wall_elapsed_ms"]
+    await asyncio.sleep(35)
+    idle = [r for r in seen if r["component_id"]=="resource" and r["wall_elapsed_ms"]>=idle_started]
+    assert len(idle)>=5
+    idle_cpu = Decimal(idle[-1]["cpu_usage_usec"]-idle[0]["cpu_usage_usec"])/Decimal((idle[-1]["wall_elapsed_ms"]-idle[0]["wall_elapsed_ms"])*1000)
+    assert idle_cpu<Decimal("0.10")
+    assert max(r["memory_bytes"] for r in idle)<Decimal("0.80")*Decimal(1024**3)
+    resource_summary = {"cpu_limit":1,"memory_limit_bytes":1024**3,"peak_memory_bytes":max(r["memory_bytes"] for r in resources),
+        "idle_cpu_fraction":str(idle_cpu),"idle_sample_count":len(idle),"source_request_count":len(source_ledger),
+        "source_ledger_digest":canonical_digest(source_ledger)}
+    print(json.dumps({"gs12_status":"HEALTHY_CORE_SLICE_PASS","workload_digest":tape.semantic_digest,
+        "metrics":metrics,"close_ledger":ledger,"command_ledger":commands,"resource_summary":resource_summary},default=str))
 
 
 async def _install_static_selection_source(database: AsyncEngine, group: str, *, member_count: int = 1, cutoff_ms: int = CUTOFF):
