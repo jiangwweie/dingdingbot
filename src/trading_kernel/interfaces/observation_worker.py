@@ -135,8 +135,14 @@ async def run_observation_worker_once(
         observation.status is ObservationStatus.INVALID
         and observation.detector_reason == "market_snapshot_unavailable"
     )
+    if observation.status is ObservationStatus.INVALID and observation.detector_reason in {
+        "selection_authority_missing_or_expired","selection_entry_vacuum",
+    }:
+        async with uow_factory() as uow:
+            scope=await uow.signals.get_runtime_scope(claim.runtime_scope_id)
+        retry=scope is not None and scope.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}
     due_at_ms = (
-        request.now_ms + request.retry_interval_ms
+        min(request.now_ms + request.retry_interval_ms,claim.trigger_candle_close_time_ms + interval_ms)
         if retry
         else claim.trigger_candle_close_time_ms + interval_ms
     )

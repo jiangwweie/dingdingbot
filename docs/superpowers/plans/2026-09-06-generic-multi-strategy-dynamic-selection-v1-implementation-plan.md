@@ -1156,6 +1156,18 @@ STAGED readiness/certification/比较projection采用既有显式测试前置夹
 
 末版正常跨进程8 passed（53.80s），共用测试Owner Pause邻接8 passed（46.54s）；Fast Unit/Architecture/API1448 passed（20.46s），Ruff、Mypy161 files、diff PASS，所有verification终态。本轮仅tests/docs改变，无生产源码/生产操作。该证据与首次pending过期恢复区分；GS-10仍需三个Plane同时resident多period/crash、状态剩余边界及整卡要求核对，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-11 concurrent resident hourly renewal漏close修复（基于140bbbb2，未整卡签收）
+
+新增MPG/MI真实OS process，原run_worker_process_group独立Selection/Materialization/Facts/Observation四loop调用正式runtime入口、真实Docker PG；stdin只推进显式工程市场clock，未替换application/claim/CAS/lease/Detector/Authority逻辑。已激活前置沿用既有Owner→Runner→Materializer链，renewal期间不手工续warm TTL，独立certification保持fresh。本测试不冒称真实Binance经济/性能soak。
+
+RED复现：新close+8ms普通Observation先读到旧Authority expired，返回INVALID/selection_authority_missing_or_expired；worker原本仅market_snapshot_unavailable短retry，其余INVALID全部schedule到下一hour。随后Facts刷新、NO_CHANGE Authority成功，本close仍永久漏处理。这不是应强制future-only的recovery，而是正常precommitted Snapshot + unconsumed close被调度错误丢失。
+
+现四Generic策略的selection_authority_missing_or_expired或selection_entry_vacuum只短retry观察调度；retry due不超过下一close，下一tick仍按原current close/Authority/recovery proof全部验证，不绕过Vacuum、不消费Episode、不创建权限。VALID_EMPTY/Owner Pause/rebase不按这种正常等待放行，SOR行为不变；真正gap仍必须future-close-only+rebase。加速测试必须越过原retry due，不能冻结+8ms后要求虚假的即时成功。
+
+两个策略各两次正常hourly renewal，中间停止并重启全部plane的新OS process；每次最新Snapshot在close前committed，close+8ms授权NO_CHANGE后由实际Observation消费该close，最终comparison_last_observed_at_ms准确到第三hour，原Universe不变、零Signal/Command、隔离目录零文件。50 unit边界覆盖四Generic/SOR×transient/EMPTY/Pause/rebase×close初/末，末版resident2 passed（14.94s）、共享Observation/runtime safety27 passed（51.83s）、Unit/Architecture/API1498 passed（20.86s）、Ruff/Mypy161 files/diff PASS，全部进程终态。
+
+本段完成MPG/MI normal NO_CHANGE concurrent resident与restart两period切片；四小时CPM/BRF2、changed Desired全set真实warming、故障/recovery等resident边界及GS-10 requirement audit仍待证明，不据此签GS-10或GS-12。GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。
