@@ -653,9 +653,9 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("crash_during_warming",[False,True])
-async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(database: AsyncEngine,tmp_path: Path,group: str,crash_during_warming: bool) -> None:
+@pytest.mark.parametrize("group,crash_during_warming",[(g,crash) for g in ("CPM-RO-001","MPG-001","MI-001","BRF2-001") for crash in (False,True)]+
+    [(g,"timeout") for g in ("CPM-RO-001","MPG-001","MI-001","BRF2-001")])
+async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(database: AsyncEngine,tmp_path: Path,group: str,crash_during_warming: bool | str) -> None:
     import os
     import sys
 
@@ -698,7 +698,8 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
                     assert result["status"]!="tick_failed",result
                     if predicate(result): return result
         except TimeoutError:
-            pytest.fail(f"changed set did not advance; last results={seen[-8:]}")
+            observations=[r for r in seen if r["component_id"]=="observation" and r["status"]!="no_work"]
+            pytest.fail(f"changed set did not advance; observations={observations[-5:]}; last results={seen[-3:]}")
     try:
         selected=await until(lambda r:r["component_id"]=="selection" and r["status"]=="snapshot_ready")
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -718,6 +719,68 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
                 interrupted_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
             assert interrupted.lifecycle_state.value=="MATERIALIZING" and len(interrupted_targets)==1
             assert interrupted_targets[0].lifecycle_state.value=="warming"
+            if crash_during_warming=="timeout":
+                timeout_at=interrupted.fenced_at_ms+source.spec.materialization_timeout_ms
+                process.stdin.write(f"{timeout_at}\n".encode())
+                await process.stdin.drain()
+                await until(lambda r:r["component_id"]=="materialization" and r.get("reason_code")=="MATERIALIZATION_TIMEOUT")
+                if source.spec.cadence_hours==1:
+                    # The next future close is already the old membership's
+                    # absolute stale deadline: no legal fallback may be granted.
+                    for _ in range(3):
+                        await until(lambda r:r["component_id"]=="materialization" and r.get("reason_code")=="MATERIALIZATION_TIMEOUT")
+                    async with PostgresKernelUnitOfWork(database) as uow:
+                        failed=await uow.instrument_selection.get_generic_materialization_generation(expected_generation)
+                        abandoned=await uow.strategy_universes.get_generation_universe_targets(expected_generation)
+                        blocked_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+                        current_authority=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                        assert failed.lifecycle_state.value=="FAILED_CLOSED"
+                        assert failed.fenced_at_ms==interrupted.fenced_at_ms
+                        assert abandoned[0].lifecycle_state.value=="abandoned"
+                        assert blocked_vacuum.blocks_new_entry
+                        assert current_authority.authority.authority_outcome!="FALLBACK_PREVIOUS"
+                        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+                    process.terminate()
+                    output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+                    assert process.returncode==0,error.decode()
+                    assert b"tick_failed" not in output
+                    assert tuple(tmp_path.rglob("*"))==()
+                    async with database.connect() as connection:
+                        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+                        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+                    return
+                await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="FALLBACK_PREVIOUS")
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    recovered=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+                    failed=await uow.instrument_selection.get_generic_materialization_generation(expected_generation)
+                    abandoned=await uow.strategy_universes.get_generation_universe_targets(expected_generation)
+                    assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
+                    assert recovered.authority.authority_outcome=="FALLBACK_PREVIOUS"
+                    assert recovered.authority.recovery_proof.first_eligible_close_time_ms>timeout_at
+                    assert failed.lifecycle_state.value=="FAILED_CLOSED" and failed.fenced_at_ms==interrupted.fenced_at_ms
+                    assert abandoned[0].lifecycle_state.value=="abandoned"
+                    assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+                # Consume only a future close, through the formal recovery
+                # observation barrier; the timed-out close cannot be replayed.
+                first_future=recovered.authority.recovery_proof.first_eligible_close_time_ms
+                process.stdin.write(f"{first_future+2_008}\n".encode())
+                await process.stdin.drain()
+                await until(lambda r:r["component_id"]=="observation" and r.get("trigger_candle_close_time_ms")==first_future and
+                    r.get("observation_status")=="no_signal")
+                async with database.connect() as connection:
+                    assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current WHERE event_spec_id=:event AND authority_recovery_last_observed_at_ms=:close"),
+                        {"event":source.spec.event_spec_id,"close":close})==0
+                    assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current WHERE event_spec_id=:event AND authority_recovery_last_observed_at_ms=:close"),
+                        {"event":source.spec.event_spec_id,"close":first_future})>0
+                process.terminate()
+                output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+                assert process.returncode==0,error.decode()
+                assert b"tick_failed" not in output
+                assert tuple(tmp_path.rglob("*"))==()
+                async with database.connect() as connection:
+                    assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+                    assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+                return
             process.kill()
             await asyncio.wait_for(process.communicate(),timeout=5)
             # Respect the original Observation lease, without resetting the

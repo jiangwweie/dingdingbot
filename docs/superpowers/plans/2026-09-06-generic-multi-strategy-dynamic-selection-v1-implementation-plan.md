@@ -8,12 +8,12 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-10
+active_execution_scope: GS-11
 authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
 gs13_authority: WAIT_OWNER_CONFIRMATION
-completed_execution_scope: GS-04_TO_GS-09
+completed_execution_scope: GS-04_TO_GS-10
 completed_amendment_scope: CAP-01_LOCAL_ACCEPTED
-local_acceptance_status: GS04_GS09_ACCEPTED
+local_acceptance_status: GS04_GS10_ACCEPTED
 production_authority: NONE
 further_feature_research: CLOSED
 owner_amendments: ACCEPTED_2026-09-21
@@ -31,10 +31,10 @@ owner_amendments: ACCEPTED_2026-09-21
 design_status = DESIGN_APPROVED / PLAN_ONLY
 plan_status = PLAN_APPROVED
 implementation_authority = CODE_AND_TEST_ONLY
-active_execution_scope = GS-10
+active_execution_scope = GS-11
 authorized_execution_scope = CAP-01_GS-10_GS-11_GS-12
 gs13_authority = WAIT_OWNER_CONFIRMATION
-completed_execution_scope = GS-04_TO_GS-09
+completed_execution_scope = GS-04_TO_GS-10
 completed_amendment_scope = CAP-01_LOCAL_ACCEPTED
 production_activation_authority = NONE
 further_feature_research = CLOSED
@@ -1193,6 +1193,30 @@ RED复现：新close+8ms普通Observation先读到旧Authority expired，返回I
 另一真实process同时调用四Generic Selector，每组正式Owner pending/Static来源，MI分别永久等待qualification或抛typed temporary unavailable（HTTP429工程分类），其它三策略各唯一Snapshot，同时四scope Observation正式Policy-blocked短路，零market请求/Signal/交易权限。永久等待Job仍CLAIMED；temporary失败只有一个Attempt、next_retry在原period expiry之前，不因resident重复poll重新发source请求。SIGTERM正常取消挂起loop，DB没有Job/Snapshot之外的Generation/Vacuum/Authority/Ticket/Command，隔离目录零文件。这证明Selector/Observation loop隔离，不伪装protected Lifecycle实盘验证。
 
 末版四策略normal/crash warming8 passed（50.94s）、parallel挂起/temporary2 passed（4.21s）；Unit/Architecture/API1554 passed（18.51s）、Ruff/Mypy161 files/diff PASS，所有verification终态。本轮仅tests/support/docs变更，无生产修改。GS-10仍需resident失败恢复、status剩余边界及requirement-by-requirement整卡审计；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
+#### 2026-10-11 resident timeout recovery / GS-10 local acceptance
+
+扩展同一四策略resident changed-set矩阵到持续warming source失败，按原fence+1800s deadline推进，未手工失败Generation、resolve Vacuum或写rebase。CPM/BRF2正式FAILED_CLOSED→Facts刷新→FALLBACK_PREVIOUS恢复原Universe，first eligible严格未来；实际Observation只在未来close推进recovery cursor，timeout中错过close没有被补消费。MPG/MI的下一future close已等于原membership绝对stale deadline，不能grant fallback：原Universe保持、target abandoned、Vacuum fenced、零Signal/Command。这是冻结fail-closed成本，不以追认过去close修补漏机会。
+
+末版normal/crash/timeout resident矩阵12 passed（92.35s）；timeout4专项44.14s、CPM未来close复验1 passed（17.63s，均与组合重叠不合计）；Fast Unit/Architecture/API1554 passed（18.34s），SOR clock/hosting/readonly CLI/materialization子集151 passed（52.44s），当前readonly/static/parallel PG13 passed（13.32s），Ruff/Mypy161 files/diff PASS；所有verification终态。本轮新增测试，无生产源码变更、无生产操作，不是exact release R4。
+
+**GS10_LOCAL_ACCEPTED**：按原Task Card要求作以下逐项核对，不以尚属GS-11界面或GS-12性能soak的工作无限扩展GS-10。
+
+| 原要求 | 当前证据边界 | 本地判定 |
+| --- | --- | --- |
+| 四常驻service、三个独立logical plane；无第五service/串行等待链 | tracked四systemd units；真实resident process独立Selector/Materializer/Observation与facts调度；并发挂起与temporary源2分支 | PASS |
+| Job/Generation lease独立及expiry/reclaim；restart不重开已完成工作 | 四策略真实SIGKILL Selector lease→同Job接管→下一cutoff；warming SIGKILL恢复同target/fence；PG Generation活lease不抢占 | PASS |
+| global queue aging、失效头/目标释放、latest supersession | 两配对expired/paused/drift/live-lease head；warming/STAGED timeout/Pause释放；四策略正常SUPERSEDED新OS process接管 | PASS |
+| source retry预算、慢source不阻塞其它调度 | public HTTP client显式timeout；临时失败1 Attempt与原period内next_retry；三策略及正式Observation独立推进；原materialization deadline不重设 | PASS |
+| current-close/cursor/rebase/stale recovery | 四策略两period真实resident NO_CHANGE/all-member小时close；changed-set真正全量warming；fallback未来close及小时stale拒绝；错过close不补追认 | PASS |
+| latest-successful与actual-membership-source两组age；stale仍Dynamic | typed generic readonly/CLI独立completion/cutoff/source age；expired/control/rebase/Policy显示；real PG SET TRANSACTION READ ONLY | PASS |
+| Static无pending/未安装Selector短路；healthy cadence零文件 | actual CLI两次Static resident重启、fail-on-network源、零Job/Snapshot/new Authority；四策略未安装入口短路；所有child隔离目录零文件 | PASS |
+| Pause独立、已有Ticket生命周期不耦合Selection | queue/target/IO中正式Pause矩阵；Entry-only Vacuum；既有GS-09 frozen Ticket保护链保持；四角色隔离、无Lifecycle读取Selector的新路径 | PASS |
+| §3.4 SOR相关回归 | daily01:00/01:15、lease、Static/Owner-pause调度与shared materialization151子集；SOR保持退役、零ENTRY复活 | PASS |
+
+五策略due的早期表述遵循Owner最终SOR停止决策：四Generic实际并发due，SOR只认证compatibility、Owner paused/static/uninstalled零source/Job及既有安全cleanup；不为测试恢复SOR生产候选身份。被证明的是工程运行正确性，不是策略收益、Tokyo SLO或真实资金验收。
+
+下一active_execution_scope=GS-11，completed_execution_scope=GS-04_TO_GS-10，CAP-01_LOCAL_ACCEPTED保持。GS-11 Owner API/UI及GS-12 24h-equivalent resource/churn/source/close/command ledger仍未完成；GS-13全部准备子项及最终R4必须Owner另行确认，production_authority=NONE。下文早期GS-10 IN_PROGRESS段落为对应切片历史证据，不覆盖本次逐项签收。
 
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
