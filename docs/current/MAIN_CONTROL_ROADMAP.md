@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-08-14
+last_verified: 2026-10-12
 ---
 
 # Main Control Roadmap
@@ -27,7 +27,64 @@ different Netting Domains progress concurrently.
 
 ## Current Verified State
 
-### 2026-10-11 Authorized Maintenance — Advisory Evidence, Not Deployed
+### 2026-10-12 Unified Generic Selection / Capacity V0 — DEPLOYMENT_COMPLETE
+
+**Software deployment is complete. Trading has not been resumed.** This table
+supersedes the dated preparation and prior release snapshots below.
+
+| Area | Directly verified production fact |
+| --- | --- |
+| Production commit | `962e19dd611a6692d0531d872d668659c216ebdd` |
+| Production tag | `tokyo-runtime-2026.10.12.1`; immutable local tag resolves to the exact certified production commit |
+| Production-commit certification | Exact R4 PASS: 1,541 Unit/Architecture, 1,627 PostgreSQL Integration and 54 Full-chain tests; Ruff, Mypy (192 files), diff, Golden integrity and production Core parity PASS |
+| Kernel / schema | `/opt/brc/releases/brc-trading-kernel-962e19dd611a`; Alembic and runtime identity are `0009_capacity_policy_v0` |
+| Runtime Seed | `sha256:a053adc206ecb7fa2fe9ee813c779bca5a6feb654a0a5256879e9aaefa1945ed`; release marker, PostgreSQL and readonly recomputation agree |
+| Owner API / Console | Both active release symlinks identify the production commit; exact R2/R1 PASS, API service/socket health PASS, static index hash matches and public `/trading/` returns 200 |
+| Migration / preservation | Stopped-flat `0007 -> 0008 -> 0009`, forward-only; all Writers including Owner API stopped; fresh authoritative 14 MPG/MI provenance proofs PASS; exact source-row preservation digest `sha256:8dda6247770de7d8809bb8ba06566e84e9665e496636941bf4fe4c9599b714a7` PASS before runtime identity rotation |
+| Capacity Policy | Version `18` installed atomically by the formal compatible deployment identity transaction; same Strategy/side maximum 2; family limits `long_continuation=2 / opening_range=2 / rally_failure_short=1`; global 3 Tickets, per-Ticket 2%, gross 6% and directional 4% stop-risk boundaries unchanged |
+| Owner controls | Policy version `18` has `new_entry_submit_enabled=false`; no automatic Dynamic activation or ExitProfile mutation |
+| Generic installed Specs | CPM, MPG, MI and BRF2 exact frozen Specs installed through the typed release-owned repository boundary after preservation/identity PASS; each numeric certification PASS, zero mismatches, 96 archives; CPM/BRF2 463 cutoffs each, MPG/MI 1,852 each; all four controls remain `static_baseline` with no pending activation |
+| SOR retirement | `SOR-001` Entry remains paused at control version 6; historical Selection control/version and drained standalone OWNER_PAUSED Vacuum preserved; no resume/delete/new ENTRY authority |
+| Runtime ownership | Observation, Lifecycle and Reconciliation active; Entry inactive/disabled with write fence present; Owner API active. All checked services have zero restarts after release |
+| PostgreSQL / exchange | Readonly integrity, flatness, Registry/Seed/Universe identities PASS; active Ticket/position, unresolved Command and open Incident all zero; Binance positions/open orders zero, independent sides/Cross/configured 5x |
+| Dynamic Selection postflight | Source counts exactly preserved: Jobs 38, Snapshots 38, Generations 18, Vacuums 18, Authorities 53, Gap Audits 19; active Universe membership digest unchanged; Spec installation created no Job/Snapshot/Generation/Authority/Ticket/Command |
+| ExitProfile postflight | 8 Profiles / 8 immutable Bindings / 8 current pointers / 8 ACTIVATED events, exact catalog PASS; no switch or retirement |
+| Resource boundary | Kernel slice remains 1 CPU / 1 GiB / Tasks 128; direct postflight memory about 409 MiB / 7 tasks; server available memory about 1.57 GiB and release volume free about 11 GiB |
+| Deferred evidence | 24h/long soak remains unperformed, not PASS. Legacy Static-batch Entry promotion flags remain false with the preserved actual 22-instrument Universe; they are not claimed to authorize trading |
+
+（来源：exact candidate R4/R1/R2 manifests、four-Spec numeric verifier、formal
+Tokyo deploy result `status=pass / elapsed_ms=128890`、typed Spec installation
+result、fresh Tokyo PostgreSQL/Binance/systemd/API/static/resource postflight。）
+
+The first deployment attempt found a readonly revision-discovery allowlist
+omission for the valid `0007` source before any DDL. Five regression cases proved
+RED then GREEN; the replacement clean candidate received a new complete R4.
+At a subsequent advisory check, Observation was between hourly close updates;
+the provenance gate correctly refused the temporary mixed-time source. After
+the natural update completed and every Writer stopped, the fresh 14-proof source
+passed without deleting or fabricating any lifecycle facts.
+
+R4 performance work now streams output, prints the 30 slowest Integration cases,
+clones isolated preseeded Generic test templates and removes the duplicate
+migration invocation (all migration tests remain in full Integration). Whole
+Integration remained about 79m37s: no material whole-suite speedup is claimed.
+The measured longest resource case was 256.21s; numerous real Authority/Trading
+chains, not a stuck process or an unbounded 24h wait, dominate the suite. Further
+portfolio consolidation is separate from this completed deployment.
+
+### Current Remaining Control Actions
+
+- No remaining software installation or migration step for this release.
+- Entry remains deliberately closed/fenced; ordinary restoration must follow
+  fresh official gates, not the legacy fixed-Static manifest assumptions or a
+  direct Policy/SQL bypass.
+- Four Generic strategies are technically installed and numerically certified,
+  not live Dynamic. First activation remains an explicit official Owner action;
+  there is no additional economic/research/Shadow waiting gate.
+- Crypto SOR remains permanently retired. Existing lifecycle/history is not
+  rewritten, and no additional exchange mutation was performed in deployment.
+
+### 2026-10-11 Preparation Evidence — Superseded By The Release Above
 
 Owner authorized the unified Generic Selection / Capacity V0 stopped-flat
 release after necessary assurance. The Owner then closed Entry and flattened
@@ -172,7 +229,7 @@ fix-forward only. Software installation does not authorize Crypto `SOR-001`
 resume, first Dynamic activation, ExitProfile switch or exchange write.（来源：
 `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`；R4 manifests in local Git metadata）
 
-## Remaining Critical Path
+## Historical Program And Acceptance Record — Superseded
 
 The natural TradFi acceptance below is an independent production-evidence lane.
 It does not block local infrastructure, documentation, or Owner Console work.
@@ -285,10 +342,8 @@ stale or contradictory facts, same-domain occupancy, missing budget or Initial
 Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
-The `0007_exit_profile_authority_v1` R4 deployment is sealed at
-`dd047941495634fff3fdda54a1e96f7b1a5ad20e`. Global Entry is enabled at Policy
-version `14`; the Entry worker is active/enabled and the write fence is absent.
-SOR Dynamic Selection remains `static_baseline` until the committed next UTC
-Session activation, with `pending_selection_mode=dynamic_selection` and exact
-TOTP Owner authorization. Observation, Entry, Lifecycle and Reconciliation now
-run in the ordinary four-worker production posture.
+The current production identity and posture are exclusively the 2026-10-12
+table above. Schema is `0009_capacity_policy_v0`, Policy version is `18`, Entry
+is disabled and operationally fenced, four Generic controls are Static with no
+pending activation, and Crypto SOR remains retired/paused. Older dated snapshots
+and historical acceptance records do not resume trading or authorize activation.
