@@ -1282,6 +1282,8 @@ export interface components {
         };
         /** GenericSelectionRuntimeReadonlyView */
         GenericSelectionRuntimeReadonlyView: {
+            /** Consecutive Missed Periods */
+            consecutive_missed_periods: number | null;
             /** Current Authority Id */
             current_authority_id: string | null;
             /** Current Authority Outcome */
@@ -1290,6 +1292,10 @@ export interface components {
             first_blocker: string | null;
             /** Installed */
             installed: boolean;
+            /** Latest Ready Count */
+            latest_ready_count: number | null;
+            /** Latest Selected Count */
+            latest_selected_count: number | null;
             /** Latest Successful Committed At Ms */
             latest_successful_committed_at_ms: number | null;
             /** Latest Successful Completion Age Ms */
@@ -1302,6 +1308,12 @@ export interface components {
             latest_successful_selection_age_ms: number | null;
             /** Latest Successful Snapshot Id */
             latest_successful_snapshot_id: string | null;
+            /** Materialization Deadline Ms */
+            materialization_deadline_ms: number | null;
+            /** Materialization Generation Id */
+            materialization_generation_id: string | null;
+            /** Materialization State */
+            materialization_state: string | null;
             /** Members */
             members: components["schemas"]["GenericSelectionMemberReadonlyView"][];
             /** Membership Source Age Ms */
@@ -1310,6 +1322,8 @@ export interface components {
             membership_source_cutoff_at_ms: number | null;
             /** Membership Source Snapshot Id */
             membership_source_snapshot_id: string | null;
+            /** Membership Valid Until Ms */
+            membership_valid_until_ms: number | null;
             /** Observed At Ms */
             observed_at_ms: number;
             selection_mode: components["schemas"]["SelectionMode"] | null;
@@ -1317,6 +1331,12 @@ export interface components {
             selection_spec_id: string;
             /** Strategy Group Id */
             strategy_group_id: string;
+            /** Vacuum Fenced At Ms */
+            vacuum_fenced_at_ms: number | null;
+            /** Vacuum State */
+            vacuum_state: string | null;
+            /** Valid Empty Reason */
+            valid_empty_reason: string | null;
         };
         /** GenericStaticSelectionActivationBody */
         GenericStaticSelectionActivationBody: {

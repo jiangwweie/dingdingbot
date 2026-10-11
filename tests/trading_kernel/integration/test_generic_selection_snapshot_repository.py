@@ -160,13 +160,16 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 
 
 @pytest_asyncio.fixture
-async def database(head_template_engine: AsyncEngine) -> AsyncIterator[AsyncEngine]:
+async def database(head_template_engine: AsyncEngine, request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]:
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
         await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
             account_id="generic-snapshot", runtime_commit="a" * 40,
             schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=CUTOFF - HOUR,
         ))
         for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
+            parameters=getattr(request.node,"callspec",None)
+            if parameters is not None and parameters.params.get("target_mode")=="not_installed" and parameters.params.get("group")==group:
+                continue
             spec = inputs(group).spec
             await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF-HOUR, certification=SpecNumericInstallationEvidence(
                 selection_spec_id=spec.selection_spec_id, algorithm_semantic_digest=spec.algorithm_semantic_digest,
@@ -1058,7 +1061,7 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("target_mode",["dynamic","static"])
+@pytest.mark.parametrize("target_mode",["dynamic","static","not_installed"])
 async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,group: str,target_mode: str,monkeypatch) -> None:
     import pyotp
     from argon2 import PasswordHasher
@@ -1076,12 +1079,12 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         controls as routes,
     )
 
-    if target_mode=="dynamic":
+    if target_mode in {"dynamic","not_installed"}:
         await _install_static_selection_source(database,group)
     else:
         await _exercise_generic_generation(database,group,False,durable=True,first_activation=True,natural_selection=True)
     await _apply_owner_control_grants(database)
-    clock=[CUTOFF-1 if target_mode=="dynamic" else CUTOFF+HOUR+60_000]
+    clock=[CUTOFF-1 if target_mode in {"dynamic","not_installed"} else CUTOFF+HOUR+60_000]
     seed="JBSWY3DPEHPK3PXP"
     settings=OwnerConsoleSettings(database_dsn="postgresql+asyncpg://unused",account_id="generic-snapshot",
         public_origin="https://owner.example.test",public_host="owner.example.test",auth=OwnerAuthSettings(username="owner",
@@ -1111,6 +1114,19 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         preview=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
         assert preview.status_code==200,preview.text
         data=preview.json()
+        if target_mode=="not_installed":
+            assert not data["runtime"]["installed"] and data["runtime"]["first_blocker"]=="SPEC_NOT_INSTALLED"
+            assert data["control"] is None
+            blocked=await client.post(f"/api/owner/v1/controls/strategies/{group}/selection/dynamic/activate",
+                headers={"Origin":settings.public_origin},json={"expected_version":1,"effective_period_anchor_ms":CUTOFF,
+                    "reason":"uninstalled","idempotency_key":f"http:not-installed:{group}","totp_code":code})
+            assert blocked.status_code==422,blocked.text
+            async with database.connect() as connection:
+                for table in tracked_tables:
+                    assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==authorizations_before
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":inputs(group).spec.event_spec_id})==1
+            return
         source_mode="static_baseline" if target_mode=="dynamic" else "dynamic_selection"
         desired_mode="dynamic_selection" if target_mode=="dynamic" else "static_baseline"
         assert data["runtime"]["installed"] and data["control"]["selection_mode"]==source_mode
@@ -2936,6 +2952,15 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
     async with PostgresKernelUnitOfWork(database) as uow:
         advanced=await uow.instrument_selection.get_generic_materialization_generation(generations[groups[1]].materialization_generation_id)
         assert advanced.lifecycle_state.value=="DRAINING_ENTRY" and advanced.fenced_at_ms==now
+        from src.trading_kernel.interfaces.readonly_api import (
+            GenericSelectionRuntimeReadonlyRequest,
+            get_generic_selection_runtime_view,
+        )
+        view=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=groups[1],now_ms=now))
+        assert view.materialization_generation_id==advanced.materialization_generation_id
+        assert view.materialization_state=="DRAINING_ENTRY"
+        assert view.materialization_deadline_ms==now+inputs(groups[1]).spec.materialization_timeout_ms
+        assert view.vacuum_state=="DRAINING_ENTRY" and view.vacuum_fenced_at_ms==now
         unchanged=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
         if head_condition.startswith("target"):
             assert unchanged==terminal
@@ -3107,6 +3132,16 @@ async def test_generic_empty_snapshot_coordinator_commits_negative_authority(dat
             request=request,clock_ms=lambda tick=tick:snapshot.effective_from_ms+tick+1))
     assert results[-1].disposition == MaterializationDisposition.VALID_EMPTY
     assert results[-1].selection_authority_id == results[-2].selection_authority_id
+    from src.trading_kernel.interfaces.readonly_api import (
+        GenericSelectionRuntimeReadonlyRequest,
+        get_generic_selection_runtime_view,
+    )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+        status=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=group,now_ms=snapshot.effective_from_ms+5))
+        assert status.latest_ready_count==0 and status.latest_selected_count==0
+        assert status.valid_empty_reason=="ZERO_QUALIFIED_MEMBERS"
+        assert status.current_authority_outcome=="VALID_EMPTY"
     async with database.connect() as conn:
         scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":uid})
     class NoMarket:

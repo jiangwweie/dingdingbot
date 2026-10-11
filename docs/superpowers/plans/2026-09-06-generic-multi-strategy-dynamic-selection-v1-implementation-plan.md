@@ -1274,6 +1274,16 @@ GS-11 IN_PROGRESS；tracked前端为frontend/owner-console，本轮尚未改表�
 
 **验证**：实际role的API integration与浏览器UI测试；每策略independent activation、Owner pause并发、source freshness/deadline/missed-periods、EMPTY原因、comparison rebase状态、MPG12..16说明；不得绿色DYNAMIC掩盖stale或rebase阻断。认证失败未安装策略显示Dynamic不可用，原Static保持，activation被拒且零side effect；不能将“不安装”显示成已认证STATIC Selector。
 
+#### 2026-10-11 bounded deadline / EMPTY / genuine uninstalled HTTP切片（基于7830d694，未整卡签收）
+
+Generic readonly view追加actual membership valid-until/missed count、latest Ready/Selected count、Desired EMPTY解释、unfinished或Vacuum-source Generation state/deadline、Vacuum state/fence。均exact/bounded current读取，deadline为原fenced_at+冻结timeout，不按重试刷新；pending Static用GenericStaticMaterializationGeneration独立typed读取，不把rollback source解成Dynamic。预览GET明确REPEATABLE READ / READ ONLY，字段来自同一快照，不refresh运行权限。
+
+EMPTY解释只描述latest Desired：0 qualified与frozen rank band中无qualified分开；Console明确实际ENTRY权限以current Authority为准、VALID_EMPTY不fallback且不追溯已有Ticket。actual ACTIVE/fallback/stale的membership source年龄/截止时间仍独立，不拿新成功Snapshot更新时间续旧membership。UI只加只读标签，使用既有组件与可访问性规则，不新增阈值/YAML维护面。
+
+四策略not_installed HTTP使用真正未安装Spec的fixture，不删除immutable认证事实：原Static current保留，预览NOT_INSTALLED/control null，正式Dynamic422且authorization/Job/Snapshot/Generation/Vacuum/Authority/Signal/Ticket/Command均零增量。扩展原HTTP矩阵，无平行Owner操作链。四策略EMPTY协调器在SET TRANSACTION READ ONLY下显示ZERO_QUALIFIED_MEMBERS及current VALID_EMPTY；queue DRAINING实测state/fence/deadline exact，member freshness/miss unit RED→GREEN。
+
+PG EMPTY+HTTP组合20 passed（40.27s），not_installed4 passed（8.12s，与组合重叠不合计）、queue deadline2 passed（5.44s）；repeatable-read HTTP末版12 passed（28.96s）。Fast Unit/Architecture/API1558 passed（18.67s）、Frontend46 passed（5.00s）、TypeScript PASS、Vite build PASS（>500kB warning保留）、Ruff/Mypy161 files/diff PASS；全部进程终态。UI解释测试区分未commit Desired EMPTY与PRE_FENCE_CONTINUITY actual Authority。GS-11仍需actual Static生效/runtime与readonly role/lifespan及完整状态浏览器认证，不据路由/组件存在签收；GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **Done**：Owner无需curl或手填version即可完成操作并观察active/fallback/stale/pause；TOTP secrets不进入日志，0意外logout；不实际操作生产。
 
 ### GS-12 — Hourly churn production-shaped soak

@@ -67,7 +67,12 @@ export function SelectionControlPanel({ strategyGroupId }: { strategyGroupId: st
         <div>最新 cutoff 年龄：{age(preview.runtime.latest_successful_cutoff_age_ms)}</div>
         <div>实际 membership 来源年龄：{age(preview.runtime.membership_source_age_ms)}</div>
         <div>实际 Authority：{preview.runtime.current_authority_outcome ?? "—"}</div>
+        <div>membership stale deadline：{utc(preview.runtime.membership_valid_until_ms)} · missed periods {preview.runtime.consecutive_missed_periods ?? "—"}</div>
+        <div>最新合格 / selected：{preview.runtime.latest_ready_count ?? "—"} / {preview.runtime.latest_selected_count ?? "—"}</div>
+        <div>Materialization：{preview.runtime.materialization_state ?? "无待执行 Generation"} · deadline {utc(preview.runtime.materialization_deadline_ms)}</div>
+        <div>Vacuum：{preview.runtime.vacuum_state ?? "无"} · fenced {utc(preview.runtime.vacuum_fenced_at_ms)}</div>
       </dl>
+      {preview.runtime.valid_empty_reason ? <p>最新 Desired 为 EMPTY：{preview.runtime.valid_empty_reason === "ZERO_QUALIFIED_MEMBERS" ? "合格标的为 0" : "冻结 rank band 内无合格成员"}。实际 new Entry 权限以当前 Authority 为准；VALID_EMPTY 生效后不恢复旧标的，也不追溯撤销已有 Ticket。</p> : null}
       {strategyGroupId === "MPG-001" ? <p>MPG 使用冻结的 12–16 retention band；资格不足时不补造合格成员。</p> : null}
       <ul>{preview.runtime.members.map(member => <li key={member.facts.runtime_scope_id}>{member.facts.exchange_instrument_id} · {member.first_blocker ?? "无成员级 Selection 阻断"}</li>)}</ul>
     </>}

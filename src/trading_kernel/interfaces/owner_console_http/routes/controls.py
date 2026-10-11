@@ -554,7 +554,7 @@ async def preview_generic_selection(strategy_group_id: str,request: Request) -> 
     anchor=(now//cadence+1)*cadence
     async with PostgresKernelUnitOfWork(get_read_engine(request)) as uow:
         assert uow._connection is not None
-        await uow._connection.execute(sa.text("SET TRANSACTION READ ONLY"))
+        await uow._connection.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         control=await uow.instrument_selection.get_selection_control(strategy_group_id)
         runtime=await get_generic_selection_runtime_view(uow,GenericSelectionRuntimeReadonlyRequest(strategy_group_id=strategy_group_id,now_ms=now))
     return GenericSelectionPreviewView(control=control,runtime=runtime,cadence_hours=spec.cadence_hours,

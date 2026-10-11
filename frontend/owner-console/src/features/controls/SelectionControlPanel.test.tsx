@@ -107,3 +107,15 @@ it("uses the freshly read server version and anchor, not the cached preview", as
     expected_version: 9, effective_period_anchor_ms: 400000000,
   }));
 });
+
+it("keeps Desired EMPTY separate from actual authority and shows deadlines", async () => {
+  vi.mocked(getSelectionPreview).mockResolvedValue({ ...selectionFixture,
+    runtime: { ...selectionFixture.runtime, latest_ready_count: 0, latest_selected_count: 0, valid_empty_reason: "ZERO_QUALIFIED_MEMBERS",
+      materialization_state: "DRAINING_ENTRY", materialization_deadline_ms: 378000000,
+      membership_valid_until_ms: 381600000, consecutive_missed_periods: 1, current_authority_outcome: "PRE_FENCE_CONTINUITY" } });
+  render(<QueryClientProvider client={ownerQueryClient}><SelectionControlPanel strategyGroupId="CPM-RO-001" /></QueryClientProvider>);
+  expect(await screen.findByText(/最新 Desired 为 EMPTY/)).toHaveTextContent("实际 new Entry 权限以当前 Authority 为准");
+  expect(screen.getByText(/Materialization：DRAINING_ENTRY/)).toHaveTextContent("1970-01-05T09:00:00 UTC");
+  expect(screen.getByText(/membership stale deadline/)).toHaveTextContent("missed periods 1");
+  expect(screen.getByText(/实际 Authority：PRE_FENCE_CONTINUITY/)).toBeInTheDocument();
+});

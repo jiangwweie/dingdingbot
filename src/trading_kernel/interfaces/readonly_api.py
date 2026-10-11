@@ -22,6 +22,10 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
     build_exit_profile_catalog_digest,
 )
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+    GenericStaticMaterializationGeneration,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS
 from src.trading_kernel.domain.selection_authority import (
@@ -94,6 +98,16 @@ class GenericSelectionRuntimeReadonlyView(BaseModel):
     membership_source_age_ms: int | None
     current_authority_id: str | None
     current_authority_outcome: str | None
+    membership_valid_until_ms: int | None
+    consecutive_missed_periods: int | None
+    latest_ready_count: int | None
+    latest_selected_count: int | None
+    valid_empty_reason: str | None
+    materialization_generation_id: str | None
+    materialization_state: str | None
+    materialization_deadline_ms: int | None
+    vacuum_state: str | None
+    vacuum_fenced_at_ms: int | None
     members: tuple[GenericSelectionMemberReadonlyView,...]
     first_blocker: str | None
     observed_at_ms: int
@@ -123,6 +137,17 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
     owner=await uow.owner_controls.get_strategy_control(request.strategy_group_id)
     members=tuple(GenericSelectionMemberReadonlyView(facts=member,first_blocker=_generic_member_blocker(member,request.now_ms))
         for member in await uow.signals.list_generic_selection_member_status(event_spec_id=family.event_spec_id))
+    generation: GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None=None
+    if installed:
+        static_pending=control is not None and control.pending_selection_mode is SelectionMode.STATIC_BASELINE and control.pending_authorization_id is not None
+        if static_pending:
+            assert control is not None and control.pending_authorization_id is not None
+            generation=await repo.get_generic_static_materialization_generation(GenericStaticMaterializationGeneration.id_for_authorization(control.pending_authorization_id))
+        else:
+            generation=await repo.get_latest_unfinished_generic_generation(strategy_group_id=request.strategy_group_id,selection_spec_id=family.selection_spec_id)
+        if generation is None and vacuum is not None and vacuum.source_generation_id is not None:
+            generation=(await repo.get_generic_static_materialization_generation(vacuum.source_generation_id) if static_pending else
+                await repo.get_generic_materialization_generation(vacuum.source_generation_id))
     blocker=None
     if not installed:
         blocker="SPEC_NOT_INSTALLED"
@@ -164,6 +189,16 @@ async def get_generic_selection_runtime_view(uow: KernelUnitOfWork,
         membership_source_age_ms=None if freshness is None else max(0,request.now_ms-freshness.source_snapshot_cutoff_at_ms),
         current_authority_id=None if authority is None else authority.selection_authority_id,
         current_authority_outcome=None if authority is None else authority.authority_outcome,
+        membership_valid_until_ms=None if freshness is None else freshness.membership_valid_until_ms,
+        consecutive_missed_periods=None if freshness is None else freshness.consecutive_missed_periods,
+        latest_ready_count=None if latest is None else latest.ready_count,
+        latest_selected_count=None if latest is None else len(latest.selected_members),
+        valid_empty_reason=None if latest is None or latest.selected_members else "ZERO_QUALIFIED_MEMBERS" if latest.ready_count==0 else "NO_QUALIFIED_MEMBER_IN_FROZEN_RANK_BAND",
+        materialization_generation_id=None if generation is None else generation.materialization_generation_id,
+        materialization_state=None if generation is None else generation.lifecycle_state.value,
+        materialization_deadline_ms=None if generation is None or generation.fenced_at_ms is None else generation.fenced_at_ms+family.materialization_timeout_ms,
+        vacuum_state=None if vacuum is None else vacuum.state.value,
+        vacuum_fenced_at_ms=None if vacuum is None else vacuum.fenced_at_ms,
         members=members,first_blocker=blocker,observed_at_ms=request.now_ms)
 
 

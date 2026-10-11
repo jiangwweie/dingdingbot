@@ -287,7 +287,8 @@ async def test_generic_readonly_separates_latest_success_age_from_membership_sou
     class Repo:
         async def get_generic_spec(self,*_): return spec
         async def get_selection_control(self,*_): return control
-        async def get_latest_generic_snapshot(self,*_,**__): return SimpleNamespace(selection_snapshot_id="snapshot:new",feature_cutoff_at_ms=100*3600000,committed_at_ms=100*3600000+1)
+        async def get_latest_generic_snapshot(self,*_,**__): return SimpleNamespace(selection_snapshot_id="snapshot:new",feature_cutoff_at_ms=100*3600000,committed_at_ms=100*3600000+1,ready_count=1,selected_members=("member",))
+        async def get_latest_unfinished_generic_generation(self,**_): return None
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=SimpleNamespace(membership_freshness=fresh,selection_authority_id="authority:old",authority_outcome="PRE_FENCE_CONTINUITY"))
         async def get_current_entry_vacuum(self,**_): return None
         async def list_generic_selection_member_status(self,**_): return ()
@@ -330,6 +331,7 @@ async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defe
         async def get_generic_spec(self,*_): return spec
         async def get_selection_control(self,*_): return control
         async def get_latest_generic_snapshot(self,*_,**__): return None
+        async def get_latest_unfinished_generic_generation(self,**_): return None
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=authority)
         async def get_current_entry_vacuum(self,**_): return None
         async def list_generic_selection_member_status(self,**_):
@@ -347,6 +349,8 @@ async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defe
     view=await get_generic_selection_runtime_view(SimpleNamespace(instrument_selection=Repo(),owner_controls=Owner(),signals=Repo()),
         GenericSelectionRuntimeReadonlyRequest(strategy_group_id="MI-001",now_ms=now))
     assert view.first_blocker==expected
+    assert view.membership_valid_until_ms==fresh.membership_valid_until_ms
+    assert view.consecutive_missed_periods==fresh.consecutive_missed_periods
     assert len(view.members)==2
     if defect in {"rebase","some_rebase"}:
         assert view.members[0].first_blocker=="COMPARISON_REBASE_REQUIRED"
