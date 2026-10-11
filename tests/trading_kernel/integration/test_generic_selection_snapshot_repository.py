@@ -1099,7 +1099,13 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
     )
 
     if target_mode in {"dynamic","not_installed"}:
-        await _install_static_selection_source(database,group)
+        baseline_uid,_=await _install_static_selection_source(database,group)
+        if target_mode=="dynamic":
+            # Existing legal Static Entry is the local test prerequisite, not
+            # an implicit side effect of the later Dynamic HTTP authorization.
+            async with database.begin() as connection:
+                await connection.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+            await make_warming_ready(database,universe_version_id=baseline_uid,warm_closed_bar_time_ms=CUTOFF-HOUR,valid_until_ms=CUTOFF+2*HOUR)
     else:
         await _exercise_generic_generation(database,group,False,durable=True,first_activation=True,natural_selection=True)
     await _apply_owner_control_grants(database)
@@ -1132,6 +1138,9 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         code=pyotp.TOTP(seed).at(clock[0]//1000)
         login=await client.post("/api/owner/v1/auth/login",json={"username":"owner","password":"test-password","totp_code":code})
         assert login.status_code==204,login.text
+        page=await client.get("/api/owner/v1/controls")
+        assert page.status_code==200,page.text
+        assert page.json()["dynamic_selection"] is None
         preview=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
         assert preview.status_code==200,preview.text
         data=preview.json()
@@ -1190,7 +1199,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         async with database.connect() as connection:
             for table in tracked_tables:
                 assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
-        if target_mode=="static":
+        if target_mode in {"dynamic","static"}:
             import os
             import sys
 
@@ -1201,6 +1210,29 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
                 instruments,
             )
             due=next_anchor+HOUR+8
+            if target_mode=="dynamic":
+                from src.trading_kernel.interfaces.selection_runtime_worker import (
+                    SelectionRuntimeRequest,
+                    run_materialization_runtime_once,
+                )
+                source=inputs(group).model_copy(update={"selection_epoch_id":staged["selection_epoch_id"]})
+                class PublicSource:
+                    async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                        return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in source.member_windows)
+                    async def fetch_generic_selection_klines(self,request):
+                        return next(w.candles for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+                selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=PublicSource(),
+                    request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=staged["selection_epoch_id"],
+                        period_anchor_ms=next_anchor,worker_id="http-dynamic-selector"),clock_ms=lambda:next_anchor+60_000)
+                assert selected.outcome=="SNAPSHOT_READY",selected
+                for offset in range(3):
+                    at=due+offset
+                    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+                        fenced=await run_materialization_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),audit_source=None,
+                            request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id,
+                                worker_id="http-first-fence",now_ms=at),clock_ms=lambda at=at:at)
+                assert fenced.disposition is MaterializationDisposition.WAITING_VACUUM,fenced
+                due+=3
             async with database.begin() as connection:
                 sample=dict((await connection.execute(sa.select(instrument_certification_current).where(
                     instrument_certification_current.c.runtime_profile_id=="tiny-live-v1",instrument_certification_current.c.status=="eligible").limit(1))).mappings().one())
@@ -1213,6 +1245,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
                 await connection.execute(sa.update(instruments).where(instruments.c.exchange_instrument_id.in_(inputs(group).spec.candidate_ids)).values(status="active"))
             process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
                 group,str(due),cwd=tmp_path,env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
+                    "BRC_RESIDENT_ALL_QUALIFIED":"1" if target_mode=="dynamic" else "0",
                     "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
                 stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
             try:
@@ -1242,19 +1275,25 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
             effective=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
             assert effective.status_code==200,effective.text
             final=effective.json()
-            assert final["control"]["selection_mode"]=="static_baseline" and final["control"]["pending_selection_mode"] is None
-            assert final["control"]["selection_epoch_id"] is None
+            assert final["control"]["selection_mode"]==desired_mode and final["control"]["pending_selection_mode"] is None
+            assert final["control"]["selection_epoch_id"]==(staged["selection_epoch_id"] if target_mode=="dynamic" else None)
             async with PostgresKernelUnitOfWork(database) as uow:
                 baseline=await uow.instrument_selection.get_generic_static_rollback_baseline(staged["rollback_baseline_id"])
                 current=await uow.strategy_universes.get_current(inputs(group).spec.event_spec_id)
-                assert await uow.strategy_universes.get_members(current.universe_version_id)==await uow.strategy_universes.get_members(baseline.source_event.universe_version_id)
+                if target_mode=="static":
+                    assert await uow.strategy_universes.get_members(current.universe_version_id)==await uow.strategy_universes.get_members(baseline.source_event.universe_version_id)
+                else:
+                    snapshot=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+                    assert await uow.strategy_universes.get_members(current.universe_version_id)==snapshot.selected_members
                 assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=inputs(group).spec.selection_spec_id) is None
-                assert await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id) is None
+                actual_authority=await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id)
+                if target_mode=="static": assert actual_authority is None
+                else: assert actual_authority.authority.selection_snapshot_id==selected.selection_snapshot_id
             assert tuple(tmp_path.rglob("*"))==()
     async with database.connect() as connection:
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==authorizations_before+1
         for table in tracked_tables:
-            if target_mode=="static" and table not in {"brc_signal_events","brc_trade_tickets","brc_exchange_commands"}: continue
+            if target_mode in {"dynamic","static"} and table not in {"brc_signal_events","brc_trade_tickets","brc_exchange_commands"}: continue
             assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
 
 

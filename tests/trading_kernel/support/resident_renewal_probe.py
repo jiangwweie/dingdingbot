@@ -51,6 +51,7 @@ async def main() -> None:
     blocked_member=[None]
     source=inputs(group)
     comparative=group in {"MPG-001","MI-001"}
+    if os.environ.get("BRC_RESIDENT_ALL_QUALIFIED")=="1": comparative=False
     excluded=os.environ.get("BRC_RESIDENT_EXCLUDE_MEMBER")
     template={"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"CPM-RO-001":cpm_flat_snapshot,
         "BRF2-001":lambda:brf2_short_snapshot(strong_uptrend=True)}[group]()

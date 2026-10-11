@@ -1298,6 +1298,16 @@ UI Static pending只有FAILED_CLOSED/ABANDONED时提供重新授权入口，使�
 
 末版HTTP+Static+readonly role+resident normal/crash/timeout+锁序组合29 passed（178.86s）；锁序专项1 passed（4.33s，与组合重叠不合计）；共享Observation19 passed（49.43s，锁序owner位置细化前切片），Fast Unit/Architecture/API1559 passed（20.85s），Frontend47 passed（5.60s）、TypeScript/Vite PASS（大chunk warning保留）、Ruff/Mypy161 files/diff PASS，所有verification终态。GS-11仍需完整界面状态/实际读链及逐项审计，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+### GS-11 2026-10-11 整页SOR去耦 / actual Dynamic生效 / 输入脱敏增量（基于b2028f7a，未整卡签收）
+
+actual brc_owner_console HTTP GET /controls RED证明没有legacy SOR Selection Control时整页RuntimeError，Generic表单无法呈现。现历史dynamic_selection字段可null，不造SOR Control；整页统一read engine + REPEATABLE READ/READ ONLY，组合预算/策略/Operation只读快照同源。SOR历史mode使用原SelectionMode enum，兼容disabled/Static/Dynamic事实不意味着Resume授权。生成schema同步，无old-table reader/第二控制链。
+
+四策略Dynamic HTTP成功不止停在intent：既有合法Static Entry/独立certificate为明确本地前置（不是HTTP隐式启用），正式Runner用HTTP epoch产生precommitted Snapshot，原runtime驱动fence，再独立resident真正warming→ACTIVE_NEW；最终HTTP预览Dynamic/pending清除/current成员exact匹配Snapshot。Static仍走上一切片真实rollback链，未安装仍零副作用。没有编造ENTRY/Ticket，runtime的exchange command能力不被该操作开启。本测试首先按正式步骤fence、随后启动resident warming，未宣称首次activation的所有poll竞态已被浏览器全链认证。
+
+另一RED证明FastAPI默认422 union错误会嵌入提交body、回显TOTP。现在RequestValidationError只返回稳定invalid_request，不echo任何输入，验证拒绝仍生效。有效session的Origin/Host/content-type拒绝改为forbidden_request403，不把请求不合法伪装Session失效；未登录/无效login保持401，step-up仍独立403。Console按error code区分来源校验与code失效，避免错误引导反复输入验证码。
+
+末版actual role HTTP完整GET/预览/并发/幂等/Static与Dynamic生效/未安装12 passed（43.58s）；Fast Unit/Architecture/API1561 passed（17.82s），Ruff/Mypy161 files/diff PASS；Frontend47 passed（4.88s）及build PASS，大chunk warning保留，全部进程终态。整页也在read-only角色中实际返回而非仅mock组件；无生产修改。GS-11仍需完整状态/Origin边界/actual浏览器链与逐项签收审计，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 ### GS-12 — Hourly churn production-shaped soak
 
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。

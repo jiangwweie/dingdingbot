@@ -10,6 +10,7 @@ from typing import Any
 import ccxt.async_support as ccxt_async
 import sqlalchemy as sa
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.exc import TimeoutError as SqlAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -53,6 +54,7 @@ from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
 from src.trading_kernel.interfaces.owner_console_http.auth import (
+    ForbiddenOwnerRequest,
     InvalidCredentials,
     LoginThrottled,
     OwnerAuthService,
@@ -275,6 +277,8 @@ def _register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(UnauthorizedError, _handle_unauthorized)
     app.add_exception_handler(InvalidCredentials, _handle_invalid_credentials)
     app.add_exception_handler(StepUpInvalid, _handle_step_up_invalid)
+    app.add_exception_handler(ForbiddenOwnerRequest, _handle_forbidden_owner_request)
+    app.add_exception_handler(RequestValidationError, _handle_invalid_request)
     app.add_exception_handler(LoginThrottled, _handle_login_throttled)
     app.add_exception_handler(SignalNotFound, _handle_not_found)
     app.add_exception_handler(OwnerResourceNotFound, _handle_not_found)
@@ -331,6 +335,16 @@ async def _handle_invalid_credentials(_: Request, __: Exception) -> JSONResponse
 
 async def _handle_step_up_invalid(_: Request, __: Exception) -> JSONResponse:
     return error_response(status_code=403,code="step_up_invalid",message="Owner step-up proof is invalid or already used")
+
+
+async def _handle_invalid_request(_: Request, __: Exception) -> JSONResponse:
+    # Default union/body errors embed whole submitted payloads, including
+    # authentication material. Validation still rejects; echo no input values.
+    return error_response(status_code=422,code="invalid_request",message="Request fields are invalid")
+
+
+async def _handle_forbidden_owner_request(_: Request, __: Exception) -> JSONResponse:
+    return error_response(status_code=403,code="forbidden_request",message="Owner request is not permitted")
 
 
 async def _handle_login_throttled(_: Request, __: Exception) -> JSONResponse:

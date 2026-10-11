@@ -39,7 +39,10 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
     StrategyEntryState,
 )
-from src.trading_kernel.domain.selection_authority import SelectionControl
+from src.trading_kernel.domain.selection_authority import (
+    SelectionControl,
+    SelectionMode,
+)
 from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
     PostgresExitProfileAuthorityRepository,
 )
@@ -48,6 +51,7 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.owner_console_http.auth import (
+    ForbiddenOwnerRequest,
     InvalidCredentials,
     StepUpInvalid,
 )
@@ -201,8 +205,8 @@ class DynamicSelectionControlView(BaseModel):
 
     strategy_group_id: str
     selection_spec_id: str
-    selection_mode: Literal["static_baseline", "dynamic_selection"]
-    pending_selection_mode: Literal["dynamic_selection"] | None
+    selection_mode: SelectionMode
+    pending_selection_mode: SelectionMode | None
     pending_effective_session_start_ms: int | None
     control_version: int
 
@@ -225,7 +229,7 @@ class ControlsResponse(BaseModel):
     global_entry: GlobalEntryView
     account_capacity: AccountCapacityView
     runtime_entry_authority: RuntimeEntryAuthorityView
-    dynamic_selection: DynamicSelectionControlView
+    dynamic_selection: DynamicSelectionControlView | None
     strategies: tuple[StrategyControlView, ...]
     current_operation: OwnerControlOperation | None
     recent_operations: tuple[OwnerControlOperation, ...]
@@ -256,15 +260,15 @@ class NotFoundResponse(BaseModel):
 @router.get("/controls")
 async def read_controls(request: Request) -> ControlsResponse:
     settings = get_settings(request)
-    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+    async with PostgresKernelUnitOfWork(get_read_engine(request)) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         policy = await uow.entry_admission.get_owner_policy(settings.owner_policy_id)
         if policy is None:
             raise RuntimeError("Owner Policy is unavailable")
         dynamic_selection = await uow.instrument_selection.get_selection_control(
             "SOR-001"
         )
-        if dynamic_selection is None:
-            raise RuntimeError("SOR Dynamic Selection Control is unavailable")
         strategies = await uow.owner_controls.list_strategy_controls()
         ticket_ids = await uow.aggregates.list_active_ticket_ids(
             venue_id=settings.venue_id,
@@ -425,7 +429,7 @@ async def read_controls(request: Request) -> ControlsResponse:
                 "runtime_profile_ids": runtime_profile_ids,
                 "first_blocker": entry_blocker,
             },
-            "dynamic_selection": {
+            "dynamic_selection": None if dynamic_selection is None else {
                 "strategy_group_id": dynamic_selection.strategy_group_id,
                 "selection_spec_id": dynamic_selection.selection_spec_id,
                 "selection_mode": dynamic_selection.selection_mode.value,
@@ -818,10 +822,10 @@ async def _require_step_up(body: ControlWriteBody, request: Request) -> None:
 def _validate_write_request(request: Request) -> None:
     settings = get_settings(request)
     if request.headers.get("origin") != settings.public_origin:
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest
     host = request.headers.get("host", "").split(":", 1)[0]
     if host != settings.public_host:
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest
     content_type = request.headers.get("content-type", "").split(";", 1)[0]
     if request.method == "POST" and content_type != "application/json":
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest

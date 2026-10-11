@@ -31,6 +31,10 @@ class StepUpInvalid(Exception):
     """Authenticated session is valid, but Owner step-up proof is not."""
 
 
+class ForbiddenOwnerRequest(Exception):
+    """Valid Session, but an Owner write violates its Origin/Host contract."""
+
+
 class InvalidCredentials(Exception):
     """Generic failure for every invalid authentication factor."""
 

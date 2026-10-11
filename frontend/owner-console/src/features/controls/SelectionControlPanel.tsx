@@ -92,7 +92,7 @@ export function SelectionControlPanel({ strategyGroupId }: { strategyGroupId: st
           <p>最早新增 Entry close：{utc(intent?.preview.next_eligibility_not_before_ms)}</p>
           <label className="control-field">操作原因<input value={reason} maxLength={512} disabled={mutation.isPending || conflicted || submittedReason.current !== null} onChange={e => setReason(e.target.value)} /></label>
           <label className="control-field">验证码<input autoComplete="one-time-code" inputMode="numeric" maxLength={8} value={code} disabled={mutation.isPending || conflicted} onChange={e => setCode(e.target.value.replace(/\D/g, ""))} /></label>
-          {mutation.isError ? <p role="alert" className="control-dialog__error">{conflicted ? "状态已变化，已刷新；关闭后重新确认，不会自动重提权限。" : mutation.error instanceof ApiError && mutation.error.status === 403 ? "验证码无效或已使用，登录会话保持。使用同一意图重试。" : "提交未确认；刷新核对状态后，可使用同一意图重试。"}</p> : null}
+          {mutation.isError ? <p role="alert" className="control-dialog__error">{conflicted ? "状态已变化，已刷新；关闭后重新确认，不会自动重提权限。" : mutation.error instanceof ApiError && mutation.error.code === "step_up_invalid" ? "验证码无效或已使用，登录会话保持。使用同一意图重试。" : mutation.error instanceof ApiError && mutation.error.code === "forbidden_request" ? "请求来源未通过安全校验；请刷新页面并核对访问地址。" : "提交未确认；刷新核对状态后，可使用同一意图重试。"}</p> : null}
           <div className="control-dialog__actions">
             <AlertDialog.Cancel asChild><Button disabled={mutation.isPending}>取消</Button></AlertDialog.Cancel>
             <Button disabled={!reason.trim() || code.length < 6 || mutation.isPending || conflicted} onClick={() => mutation.mutate()}>确认提交</Button>

@@ -930,7 +930,7 @@ export interface components {
         ControlsResponse: {
             account_capacity: components["schemas"]["AccountCapacityView"];
             current_operation: components["schemas"]["OwnerControlOperation"] | null;
-            dynamic_selection: components["schemas"]["DynamicSelectionControlView"];
+            dynamic_selection: components["schemas"]["DynamicSelectionControlView"] | null;
             /** Events */
             events: components["schemas"]["ControlEventView"][];
             /** Generated At Ms */
@@ -974,13 +974,8 @@ export interface components {
             control_version: number;
             /** Pending Effective Session Start Ms */
             pending_effective_session_start_ms: number | null;
-            /** Pending Selection Mode */
-            pending_selection_mode: "dynamic_selection" | null;
-            /**
-             * Selection Mode
-             * @enum {string}
-             */
-            selection_mode: "static_baseline" | "dynamic_selection";
+            pending_selection_mode: components["schemas"]["SelectionMode"] | null;
+            selection_mode: components["schemas"]["SelectionMode"];
             /** Selection Spec Id */
             selection_spec_id: string;
             /** Strategy Group Id */

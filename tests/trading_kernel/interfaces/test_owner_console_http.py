@@ -796,6 +796,25 @@ async def test_retired_sor_cannot_be_reactivated_by_owner_http(owner_console_cli
     assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
 
 
+async def test_invalid_control_payload_never_echoes_step_up_input(owner_console_client: AsyncClient) -> None:
+    response=await owner_console_client.post("/api/owner/v1/controls/strategies/CPM-RO-001/selection/dynamic/activate",
+        headers={"Origin":"https://owner.example.test"},json={"expected_version":"invalid","reason":"test",
+            "idempotency_key":"invalid:payload","effective_period_anchor_ms":BASE_MS,"totp_code":"654321"})
+    assert response.status_code==422
+    assert "654321" not in response.text
+    assert response.json()["error"]["code"]=="invalid_request"
+    assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
+
+
+async def test_invalid_owner_write_origin_does_not_expire_valid_session(owner_console_client: AsyncClient) -> None:
+    response=await owner_console_client.post("/api/owner/v1/controls/entry/resume",
+        headers={"Origin":"https://untrusted.example.test"},json={"expected_version":1,"reason":"test",
+            "idempotency_key":"wrong:origin","totp_code":"123456"})
+    assert response.status_code==403,response.text
+    assert response.json()["error"]["code"]=="forbidden_request"
+    assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
+
+
 async def test_unauthenticated_session_and_data_share_one_401_shape(
     owner_console_app: FastAPI,
 ) -> None:
