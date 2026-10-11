@@ -23,7 +23,11 @@ from src.trading_kernel.infrastructure.pg_product_current import (
     PostgresProductCurrentRepository,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.interfaces.owner_console_http.auth import InvalidCredentials
+from src.trading_kernel.interfaces.owner_console_http.auth import (
+    ForbiddenOwnerRequest,
+    InvalidCredentials,
+    StepUpInvalid,
+)
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     get_auth_service,
     get_clock_ms,
@@ -229,10 +233,10 @@ async def apply_universe_change(
 ) -> UniverseInstallResult:
     _validate_write_request(request)
     now_ms = get_clock_ms(request)
-    await get_auth_service(request).verify_step_up(
-        body.totp_code,
-        now_ms=now_ms,
-    )
+    try:
+        await get_auth_service(request).verify_step_up(body.totp_code,now_ms=now_ms)
+    except InvalidCredentials as exc:
+        raise StepUpInvalid from exc
     settings = get_settings(request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         return await configure_strategy_universe_by_owner(
@@ -273,10 +277,10 @@ def _instrument_freshness(
 def _validate_write_request(request: Request) -> None:
     settings = get_settings(request)
     if request.headers.get("origin") != settings.public_origin:
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest
     host = request.headers.get("host", "").split(":", 1)[0]
     if host != settings.public_host:
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest
     content_type = request.headers.get("content-type", "").split(";", 1)[0]
     if content_type != "application/json":
-        raise InvalidCredentials
+        raise ForbiddenOwnerRequest

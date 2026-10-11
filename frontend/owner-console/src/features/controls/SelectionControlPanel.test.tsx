@@ -136,3 +136,21 @@ it("allows a new Static authorization only after its pending generation has fail
     selection_epoch_id: "epoch:current", rollback_baseline_id: "baseline", effective_period_anchor_ms: 360000000,
   }));
 });
+
+it.each([
+  ["ACTIVE_NEW", null], ["FALLBACK_PREVIOUS", "RECOVERY_REBASE_REQUIRED"],
+  ["PRE_FENCE_CONTINUITY", "SELECTION_STALE_PAUSED"], ["VALID_EMPTY", "VALID_EMPTY"],
+  ["ACTIVE_NEW", "OWNER_PAUSED"], ["ACTIVE_NEW", "COMPARISON_REBASE_REQUIRED"],
+] as const)("displays %s with blocker %s without unconditional trading-green", async (outcome, blocker) => {
+  vi.mocked(getSelectionPreview).mockResolvedValue({ ...selectionFixture,
+    control: { ...selectionFixture.control!, selection_mode: "dynamic_selection", selection_epoch_id: "epoch" },
+    runtime: { ...selectionFixture.runtime, current_authority_outcome: outcome, first_blocker: blocker,
+      latest_successful_completion_age_ms: 2000, latest_successful_cutoff_age_ms: 4000, membership_source_age_ms: 7200000 } });
+  render(<QueryClientProvider client={ownerQueryClient}><SelectionControlPanel strategyGroupId="CPM-RO-001" /></QueryClientProvider>);
+  const mode = await screen.findByText("DYNAMIC");
+  expect(mode).toHaveAttribute("data-tone", blocker ? "attention" : "neutral");
+  expect(screen.getByText(`实际 Authority：${outcome}`)).toBeInTheDocument();
+  if (blocker) expect(screen.getByText(`当前阻断：${blocker}`)).toBeInTheDocument();
+  expect(screen.getByText("最新成功 Snapshot 完成年龄：2s")).toBeInTheDocument();
+  expect(screen.getByText("实际 membership 来源年龄：7200s")).toBeInTheDocument();
+});

@@ -1308,6 +1308,16 @@ actual brc_owner_console HTTP GET /controls RED证明没有legacy SOR Selection 
 
 末版actual role HTTP完整GET/预览/并发/幂等/Static与Dynamic生效/未安装12 passed（43.58s）；Fast Unit/Architecture/API1561 passed（17.82s），Ruff/Mypy161 files/diff PASS；Frontend47 passed（4.88s）及build PASS，大chunk warning保留，全部进程终态。整页也在read-only角色中实际返回而非仅mock组件；无生产修改。GS-11仍需完整状态/Origin边界/actual浏览器链与逐项签收审计，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-11 independent Owner Pause / full state rendering增量（基于9971e620，未整卡签收）
+
+扩展既有真实role HTTP矩阵，四策略pending Dynamic后正式HTTP Pause无需新step-up，仅按strategy version/idempotency写原控制边界；预览OWNER_PAUSED且pending intent仍显示。正式Selector在有效period使用fail-on-source实现验证零source调用/NOT_DUE；除Owner Pause应开的Vacuum外，Job/Snapshot/Generation/Authority/Signal/Ticket/Command均不新增，其他策略Selection Control逐字段保持。每策略activation/rollback也核对其它Control原样，不因一个页面操作改变全Crypto。
+
+actual Dynamic生效后HTTP核对membership source是实际已激活Snapshot；resident Selector可能已提交下一cutoff成功Snapshot，因此latest-successful与actual membership来源不要求相等。这一独立性是冻结合同，不将latest成功误当新交易权限。Static生效后旧authorization重放409/session保持，不复活已清pending。原HTTP→actual runtime intent、生效与readonly角色边界继续真实执行。
+
+UI组件六状态矩阵ACTIVE_NEW/FALLBACK_PREVIOUS/PRE_FENCE_CONTINUITY/VALID_EMPTY/OWNER_PAUSED/comparison rebase都保留DYNAMIC mode事实与明确blocker/outcome，blocked用attention、unblocked也只neutral而非无条件交易-green；latest completion与membership age分别显示。相同role旧Instrument Control路径另RED暴露Origin/TOTP失败仍401，统一映射既有ForbiddenOwnerRequest/StepUpInvalid403并保持session，未改变配置Universe准入/校验，不提供新的权限。
+
+末版HTTP+EMPTY+independent Pause24 passed（59.76s），四策略Pause专项4 passed（9.45s，与组合重叠不合计）；Frontend53 passed（5.69s）、TypeScript/Vite build PASS（大chunk warning保留），Fast Unit/Architecture/API1563 passed（19.13s）、Ruff/Mypy161 files/diff PASS，全部进程终态。Browser403/409真实Chrome证据已在前切片，不把本组件六状态当actual DB浏览器回放。GS-11仍待最后状态浏览器/逐项签收，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 ### GS-12 — Hourly churn production-shaped soak
 
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。

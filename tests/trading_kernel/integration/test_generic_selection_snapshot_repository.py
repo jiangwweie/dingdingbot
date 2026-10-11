@@ -1079,7 +1079,7 @@ async def generic_http_read_engine(database: AsyncEngine) -> AsyncIterator[Async
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("target_mode",["dynamic","static","not_installed"])
+@pytest.mark.parametrize("target_mode",["dynamic","static","not_installed","paused_intent"])
 async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,generic_http_read_engine: AsyncEngine,tmp_path: Path,group: str,target_mode: str,monkeypatch) -> None:
     import pyotp
     from argon2 import PasswordHasher
@@ -1098,7 +1098,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         controls as routes,
     )
 
-    if target_mode in {"dynamic","not_installed"}:
+    if target_mode in {"dynamic","not_installed","paused_intent"}:
         baseline_uid,_=await _install_static_selection_source(database,group)
         if target_mode=="dynamic":
             # Existing legal Static Entry is the local test prerequisite, not
@@ -1109,7 +1109,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
     else:
         await _exercise_generic_generation(database,group,False,durable=True,first_activation=True,natural_selection=True)
     await _apply_owner_control_grants(database)
-    clock=[CUTOFF-1 if target_mode in {"dynamic","not_installed"} else CUTOFF+HOUR+60_000]
+    clock=[CUTOFF-1 if target_mode in {"dynamic","not_installed","paused_intent"} else CUTOFF+HOUR+60_000]
     seed="JBSWY3DPEHPK3PXP"
     settings=OwnerConsoleSettings(database_dsn="postgresql+asyncpg://unused",account_id="generic-snapshot",
         public_origin="https://owner.example.test",public_host="owner.example.test",auth=OwnerAuthSettings(username="owner",
@@ -1134,6 +1134,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
     async with database.connect() as connection:
         before={table:await connection.scalar(sa.text(f"SELECT count(*) FROM {table}")) for table in tracked_tables}
         authorizations_before=await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))
+        others=(await connection.execute(sa.text("SELECT * FROM brc_strategy_selection_control_current WHERE strategy_group_id<>:group ORDER BY strategy_group_id"),{"group":group})).mappings().all()
     async with AsyncClient(transport=ASGITransport(app=app),base_url=settings.public_origin) as client:
         code=pyotp.TOTP(seed).at(clock[0]//1000)
         login=await client.post("/api/owner/v1/auth/login",json={"username":"owner","password":"test-password","totp_code":code})
@@ -1157,8 +1158,8 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
                 assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==authorizations_before
                 assert await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_current WHERE event_spec_id=:event"),{"event":inputs(group).spec.event_spec_id})==1
             return
-        source_mode="static_baseline" if target_mode=="dynamic" else "dynamic_selection"
-        desired_mode="dynamic_selection" if target_mode=="dynamic" else "static_baseline"
+        source_mode="static_baseline" if target_mode in {"dynamic","paused_intent"} else "dynamic_selection"
+        desired_mode="dynamic_selection" if target_mode in {"dynamic","paused_intent"} else "static_baseline"
         assert data["runtime"]["installed"] and data["control"]["selection_mode"]==source_mode
         cadence=inputs(group).spec.cadence_hours*HOUR
         next_anchor=(clock[0]//cadence+1)*cadence
@@ -1168,7 +1169,7 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
             "reason":"http_generic_activation","idempotency_key":f"http:activate:{group}:{target_mode}","totp_code":"000000"}
         if target_mode=="static":
             body.update(rollback_baseline_id=data["control"]["rollback_baseline_id"],selection_epoch_id=data["control"]["selection_epoch_id"])
-        url=f"/api/owner/v1/controls/strategies/{group}/selection/{target_mode}/activate"
+        url=f"/api/owner/v1/controls/strategies/{group}/selection/{'dynamic' if target_mode=='paused_intent' else target_mode}/activate"
         stale=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"expected_version":body["expected_version"]-1,
             "idempotency_key":f"http:stale:{group}:{target_mode}"})
         assert stale.status_code==409,stale.text
@@ -1199,6 +1200,34 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         async with database.connect() as connection:
             for table in tracked_tables:
                 assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
+            assert (await connection.execute(sa.text("SELECT * FROM brc_strategy_selection_control_current WHERE strategy_group_id<>:group ORDER BY strategy_group_id"),{"group":group})).mappings().all()==others
+        if target_mode=="paused_intent":
+            from src.trading_kernel.interfaces.selection_runtime_worker import (
+                SelectionRuntimeRequest,
+                run_selection_runtime_once,
+            )
+            async with database.connect() as connection:
+                owner_version=await connection.scalar(sa.text("SELECT control_version FROM brc_strategy_entry_controls_current WHERE strategy_group_id=:group"),{"group":group})
+            paused=await client.post(f"/api/owner/v1/controls/strategies/{group}/pause",headers={"Origin":settings.public_origin},
+                json={"expected_version":owner_version,"reason":"hold_pending_dynamic","idempotency_key":f"http:pause:{group}"})
+            assert paused.status_code==200,paused.text
+            preview=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
+            assert preview.status_code==200,preview.text
+            assert preview.json()["runtime"]["first_blocker"]=="OWNER_PAUSED"
+            assert preview.json()["control"]["pending_selection_mode"]=="dynamic_selection"
+            class NoSource:
+                async def fetch_generic_selection_qualifications(self,**_): raise AssertionError("Pause must short-circuit source")
+                async def fetch_generic_selection_klines(self,*_): raise AssertionError("Pause must short-circuit source")
+            result=await run_selection_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=NoSource(),
+                request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=inputs(group).spec.selection_spec_id,
+                    worker_id="paused-http-intent",now_ms=next_anchor+20),clock_ms=lambda:next_anchor+20)
+            assert result.status.value=="not_due" and result.reason_code=="OWNER_PAUSED"
+            async with database.connect() as connection:
+                for table in tracked_tables:
+                    if table=="brc_strategy_entry_vacuums_current": continue
+                    assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
+                assert (await connection.execute(sa.text("SELECT * FROM brc_strategy_selection_control_current WHERE strategy_group_id<>:group ORDER BY strategy_group_id"),{"group":group})).mappings().all()==others
+            return
         if target_mode in {"dynamic","static"}:
             import os
             import sys
@@ -1277,6 +1306,15 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
             final=effective.json()
             assert final["control"]["selection_mode"]==desired_mode and final["control"]["pending_selection_mode"] is None
             assert final["control"]["selection_epoch_id"]==(staged["selection_epoch_id"] if target_mode=="dynamic" else None)
+            assert final["runtime"]["selection_mode"]==desired_mode
+            if target_mode=="dynamic":
+                assert final["runtime"]["current_authority_outcome"]=="ACTIVE_NEW"
+                assert final["runtime"]["membership_source_snapshot_id"]==selected.selection_snapshot_id
+                assert final["runtime"]["latest_successful_snapshot_id"] is not None
+            else:
+                old_replay=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"totp_code":None})
+                assert old_replay.status_code==409,old_replay.text
+                assert (await client.get("/api/owner/v1/auth/session")).status_code==200
             async with PostgresKernelUnitOfWork(database) as uow:
                 baseline=await uow.instrument_selection.get_generic_static_rollback_baseline(staged["rollback_baseline_id"])
                 current=await uow.strategy_universes.get_current(inputs(group).spec.event_spec_id)

@@ -806,12 +806,30 @@ async def test_invalid_control_payload_never_echoes_step_up_input(owner_console_
     assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
 
 
-async def test_invalid_owner_write_origin_does_not_expire_valid_session(owner_console_client: AsyncClient) -> None:
+@pytest.mark.parametrize("surface",["controls","instruments"])
+async def test_invalid_owner_write_origin_does_not_expire_valid_session(owner_console_client: AsyncClient,surface: str) -> None:
+    if surface=="instruments":
+        response=await owner_console_client.post("/api/owner/v1/instruments/universes/preview",
+            headers={"Origin":"https://untrusted.example.test"},json={"runtime_profile_id":"tiny-live-v1","event_id":"CPM-LONG",
+                "exchange_instrument_ids":["binance-usdm:ETHUSDT:perpetual"]})
+        assert response.status_code==403,response.text
+        assert response.json()["error"]["code"]=="forbidden_request"
+        assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
+        return
     response=await owner_console_client.post("/api/owner/v1/controls/entry/resume",
         headers={"Origin":"https://untrusted.example.test"},json={"expected_version":1,"reason":"test",
             "idempotency_key":"wrong:origin","totp_code":"123456"})
     assert response.status_code==403,response.text
     assert response.json()["error"]["code"]=="forbidden_request"
+    assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
+
+
+async def test_invalid_universe_step_up_preserves_authenticated_session(owner_console_client: AsyncClient) -> None:
+    response=await owner_console_client.post("/api/owner/v1/instruments/universes/apply",headers={"Origin":"https://owner.example.test"},
+        json={"runtime_profile_id":"tiny-live-v1","event_id":"CPM-LONG","exchange_instrument_ids":["binance-usdm:ETHUSDT:perpetual"],
+            "reason":"test","idempotency_key":"universe:invalid-step","totp_code":"000000"})
+    assert response.status_code==403,response.text
+    assert response.json()["error"]["code"]=="step_up_invalid"
     assert (await owner_console_client.get("/api/owner/v1/auth/session")).status_code==200
 
 
