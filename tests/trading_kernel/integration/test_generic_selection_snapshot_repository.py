@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, PropertyMock, patch
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.trading_kernel.application.abandon_strategy_universe import (
     AbandonStrategyUniverseRequest,
@@ -141,6 +141,9 @@ from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_RE
 from tests.trading_kernel.integration.universe_activation_support import (
     make_warming_ready,
 )
+from tests.trading_kernel.support.generic_seed_template import (
+    GenericSeedTemplateHarness,
+)
 from tests.trading_kernel.support.generic_selection import (
     CUTOFF,
     HOUR,
@@ -160,23 +163,18 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 
 
 @pytest_asyncio.fixture
-async def database(head_template_engine: AsyncEngine, request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]:
-    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
-        await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
-            account_id="generic-snapshot", runtime_commit="a" * 40,
-            schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=CUTOFF - HOUR,
-        ))
-        for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"):
-            parameters=getattr(request.node,"callspec",None)
-            if parameters is not None and parameters.params.get("target_mode")=="not_installed" and parameters.params.get("group")==group:
-                continue
-            spec = inputs(group).spec
-            await uow.instrument_selection.install_generic_spec(spec, installed_at_ms=CUTOFF-HOUR, certification=SpecNumericInstallationEvidence(
-                selection_spec_id=spec.selection_spec_id, algorithm_semantic_digest=spec.algorithm_semantic_digest,
-                checked_cutoffs=463 if spec.cadence_hours == 4 else 1852, mismatch_count=0, source_archive_count=96,
-                reference_commit="f65d72fa92580de4b8c0323f4106d5975b97f4eb", common_numeric_authority="PASS", sor_golden="PASS", spec_cert="PASS",
-            ))
-    yield head_template_engine
+async def database(request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]:
+    parameters = getattr(request.node, "callspec", None)
+    excluded = (parameters.params.get("group") if parameters is not None
+        and parameters.params.get("target_mode") == "not_installed" else None)
+    harness = GenericSeedTemplateHarness(excluded_group=excluded)
+    name, url = await harness.create_clone()
+    engine = create_async_engine(url)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+        await harness.drop_clone(name)
 
 
 @pytest_asyncio.fixture

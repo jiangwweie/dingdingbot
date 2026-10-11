@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 from scripts.trading_kernel.certify_release_candidate import (
@@ -12,6 +16,43 @@ from scripts.trading_kernel.certify_release_candidate import (
     certification_commands_for,
     validate_manifest_identity,
 )
+
+
+def test_certification_command_streams_output_before_process_exit(tmp_path: Path) -> None:
+    from scripts.trading_kernel.certify_release_candidate import (
+        run_certification_command,
+    )
+
+    marker = tmp_path / "ack"
+    class LiveStream:
+        def write(self, value: str) -> int:
+            if "step_started" in value:
+                marker.touch()
+            return len(value)
+        def flush(self) -> None:
+            pass
+    code = "import pathlib,time,sys; print('step_started',flush=True); p=pathlib.Path(sys.argv[1]); end=time.monotonic()+2; " \
+        "\nwhile not p.exists() and time.monotonic()<end: time.sleep(.01)\nassert p.exists(),'output was buffered until exit'\nprint('step_complete',flush=True)"
+    result = run_certification_command((sys.executable,"-c",code,str(marker)),cwd=tmp_path,stream=LiveStream())
+    assert result.returncode == 0 and "step_complete" in result.stdout
+
+
+def test_certification_command_keeps_bounded_failure_tail(tmp_path: Path) -> None:
+    import io
+
+    from scripts.trading_kernel.certify_release_candidate import (
+        run_certification_command,
+    )
+    result = run_certification_command((sys.executable,"-c","import sys; print('x'*100000); print('last_error'); sys.exit(2)"),cwd=tmp_path,stream=io.StringIO())
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == 2 and len(result.stdout) <= 8000 and "last_error" in result.stdout
+
+
+def test_r4_preservation_targets_are_not_executed_twice() -> None:
+    from pathlib import PurePosixPath
+    targets = [PurePosixPath(part) for command in certification_commands_for(ReleaseCertificationLevel.R4)
+        if "pytest" in command for part in command if part.startswith("tests/")]
+    assert not [(a,b) for i,a in enumerate(targets) for b in targets[i+1:] if a==b or a in b.parents or b in a.parents]
 
 COMMIT = "a" * 40
 

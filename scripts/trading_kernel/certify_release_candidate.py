@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -14,7 +15,7 @@ from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TextIO
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -246,13 +247,7 @@ def certify_release_candidate(
             flush=True,
         )
         started = time.monotonic()
-        completed = subprocess.run(
-            command,
-            cwd=repo_root,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        completed = run_certification_command(command, cwd=repo_root)
         durations.append(max(0, int((time.monotonic() - started) * 1_000)))
         if completed.returncode != 0:
             output = (completed.stdout + "\n" + completed.stderr)[-8_000:]
@@ -274,6 +269,35 @@ def certify_release_candidate(
         encoding="utf-8",
     )
     return manifest
+
+
+def run_certification_command(
+    command: tuple[str, ...], *, cwd: Path, stream: TextIO | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Expose live test progress while keeping only a bounded failure tail."""
+    destination = sys.stdout if stream is None else stream
+    process = subprocess.Popen(
+        command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1, env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    tail = ""
+    try:
+        assert process.stdout is not None
+        for line in process.stdout:
+            destination.write(line)
+            destination.flush()
+            tail = (tail + line)[-8000:]
+        return subprocess.CompletedProcess(command, process.wait(), tail, "")
+    finally:
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 
 def _require_exact_clean_head(repo_root: Path, commit: str) -> None:

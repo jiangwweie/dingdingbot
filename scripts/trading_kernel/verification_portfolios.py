@@ -79,7 +79,7 @@ R3_SAME_SCHEMA_KERNEL_COMMANDS: Final[CommandSet] = (
         "tests/trading_kernel/architecture",
         "-q",
     ),
-    (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/integration", "-q"),
+    (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/integration", "-q", "--durations=30"),
     (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/full_chain", "-q"),
     (
         ".venv/bin/ruff",
@@ -106,19 +106,8 @@ R4_SCHEMA_AUTHORITY_COMMANDS: Final[CommandSet] = (
         ".venv/bin/python",
         "scripts/trading_kernel/verify_sor_dynamic_selection_core_parity.py",
     ),
-    (
-        ".venv/bin/python",
-        "-m",
-        "pytest",
-        "tests/trading_kernel/integration/test_sor_v3_compatible_migration.py",
-        "tests/trading_kernel/integration/test_portfolio_admission_observability_migration.py",
-        "tests/trading_kernel/integration/test_portfolio_admission_flat_compatible_deployment.py",
-        "tests/trading_kernel/integration/test_tradfi_instrument_center_upgrade.py",
-        "tests/trading_kernel/integration/test_exit_profile_authority_migration.py",
-        "tests/trading_kernel/integration/test_exit_profile_authority_repository.py",
-        "tests/trading_kernel/integration/test_clean_baseline_rebuild.py",
-        "-q",
-    ),
+    # All preservation/migration targets already execute in the complete
+    # Integration command above. R4 adds Golden/core parity, not duplicate pytest.
 )
 
 PERIODIC_AUDIT_COMMANDS: Final[CommandSet] = (
