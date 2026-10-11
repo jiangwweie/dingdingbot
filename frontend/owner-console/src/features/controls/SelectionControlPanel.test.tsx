@@ -79,3 +79,31 @@ it("submits a frozen Static baseline and epoch without editing them", async () =
   await waitFor(() => expect(submitSelectionIntent).toHaveBeenCalledOnce());
   expect(submitSelectionIntent).toHaveBeenCalledWith("CPM-RO-001", "static", expect.objectContaining({ rollback_baseline_id: "baseline", selection_epoch_id: "epoch:current" }));
 });
+
+it("refuses cached authority after a failed fresh preview", async () => {
+  const user = userEvent.setup();
+  render(<QueryClientProvider client={ownerQueryClient}><SelectionControlPanel strategyGroupId="CPM-RO-001" /></QueryClientProvider>);
+  const activate = await screen.findByRole("button", { name: "启用 CPM-RO-001 Dynamic" });
+  vi.mocked(getSelectionPreview).mockRejectedValue(new ApiError(503, "unavailable", "preview unavailable"));
+  await user.click(activate);
+  expect(await screen.findByRole("alert")).toHaveTextContent("权限提交已禁用");
+  expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  expect(activate).toBeDisabled();
+  expect(submitSelectionIntent).not.toHaveBeenCalled();
+});
+
+it("uses the freshly read server version and anchor, not the cached preview", async () => {
+  const user = userEvent.setup();
+  render(<QueryClientProvider client={ownerQueryClient}><SelectionControlPanel strategyGroupId="CPM-RO-001" /></QueryClientProvider>);
+  const activate = await screen.findByRole("button", { name: "启用 CPM-RO-001 Dynamic" });
+  vi.mocked(getSelectionPreview).mockResolvedValue({ ...selectionFixture, next_effective_period_anchor_ms: 400000000,
+    control: { ...selectionFixture.control!, control_version: 9 } });
+  await user.click(activate);
+  await user.type(await screen.findByLabelText("操作原因"), "fresh preview");
+  await user.type(screen.getByLabelText("验证码"), "123456");
+  await user.click(screen.getByRole("button", { name: "确认提交" }));
+  await waitFor(() => expect(submitSelectionIntent).toHaveBeenCalledOnce());
+  expect(submitSelectionIntent).toHaveBeenCalledWith("CPM-RO-001", "dynamic", expect.objectContaining({
+    expected_version: 9, effective_period_anchor_ms: 400000000,
+  }));
+});

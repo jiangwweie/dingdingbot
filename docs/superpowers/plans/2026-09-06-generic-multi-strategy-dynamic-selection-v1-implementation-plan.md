@@ -1264,6 +1264,14 @@ GS-11 IN_PROGRESS；tracked前端为frontend/owner-console，本轮尚未改表�
 
 **RED与要求**：STATIC/DYNAMIC预览/激活/回退，typed时间；version/idempotency由UI维护，TOTP在正式应用边界验证。错误step-up不跳登录，401仅真正session失效；409刷新状态但不自动提交新权限。双击/刷新返回同operation。
 
+#### 2026-10-11 actual Chrome fixture交互 / fresh-preview边界（基于04d799f0，未整卡签收）
+
+用Playwright CLI（非替代application的test-runner假DOM）打开本地Vite真实Chrome，先snapshot取得元素引用，再实际点击Generic Dynamic按钮、填写原因/测试code、提交。局部API fixture返回403 step_up_invalid后URL仍/trading/controls、确认框保持、code清除、原reason frozen；换code重试fixture409后自动refetch预览，两个输入与确认按钮disabled，不自动重提、不跳login。390×844 viewport实际dialog矩形x16/width358/right374，document scrollWidth=390，无水平溢出。错误console项是注入403/409及初始错误base路径404，不冒称生产API故障。
+
+本地fixture故意使用测试period/Policy事实，截图中的PROD是原UI标签，不是生产证据。snapshot与截图可恢复保存在忽略的output/playwright/gs11/cli-artifacts，未commit generated runtime output；Chrome session已关闭，自己启动的127.0.0.1:4180 Vite也已正常终止。没有Tokyo/API/交易所写入。
+
+新增两个组件回归：fresh preview读失败时不能用cached authority打开确认框，mutation零调用；fresh preview version/anchor变化后只能提交新服务端值。Frontend45 passed（5.27s）、TypeScript/Vite build PASS（原>500kB chunk warning保留）、docs authority25 passed/diff PASS。该浏览器切片使用拦截fixture，不替代真实role的API/Static生效/runtime chain与更多状态/恢复浏览器验收，GS-11仍IN_PROGRESS，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **验证**：实际role的API integration与浏览器UI测试；每策略independent activation、Owner pause并发、source freshness/deadline/missed-periods、EMPTY原因、comparison rebase状态、MPG12..16说明；不得绿色DYNAMIC掩盖stale或rebase阻断。认证失败未安装策略显示Dynamic不可用，原Static保持，activation被拒且零side effect；不能将“不安装”显示成已认证STATIC Selector。
 
 **Done**：Owner无需curl或手填version即可完成操作并观察active/fallback/stale/pause；TOTP secrets不进入日志，0意外logout；不实际操作生产。
