@@ -40,6 +40,9 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
+from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
+    read_preserved_runtime_state,
+)
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
@@ -110,7 +113,7 @@ def _universe_manifest_matches(
     manifest: Sequence[Mapping[str, object]],
     *,
     expected_event_specs: Sequence[tuple[str, str]],
-    expected_member_ids: tuple[str, ...],
+    expected_member_ids: tuple[str, ...] | None,
 ) -> bool:
     expected_group_by_event = {
         event_spec_id: strategy_group_id
@@ -126,7 +129,7 @@ def _universe_manifest_matches(
         if not isinstance(raw_member_ids, (list, tuple)):
             return False
         member_ids = tuple(str(member_id) for member_id in raw_member_ids)
-        if member_ids != expected_member_ids:
+        if expected_member_ids is not None and member_ids != expected_member_ids:
             return False
         try:
             expected_digest = build_strategy_universe(
@@ -637,6 +640,7 @@ async def _certify(
                     )
                 ).scalar_one()
             )
+            preserved_runtime = await read_preserved_runtime_state(connection)
             dynamic_selection_runtime_counts_row = (
                 await connection.execute(
                     text(
@@ -1413,7 +1417,11 @@ async def _certify(
             expected_event_specs=expected_groups,
             expected_member_ids=member_ids,
         )
-    universe_identity_pass = all(universe_profile_checks.values())
+    universe_identity_pass = _universe_manifest_matches(
+        active_universe_manifest,
+        expected_event_specs=expected_event_specs,
+        expected_member_ids=None,
+    )
     warming_universe_manifest = [
         {
             "event_spec_id": str(row["event_spec_id"]),
@@ -1606,6 +1614,7 @@ async def _certify(
         "release_counts": release_counts,
         "active_counts": active_counts,
         "dynamic_selection_runtime_counts": dynamic_selection_runtime_counts,
+        "preserved_runtime": preserved_runtime,
         "exit_profile_authority": exit_profile_authority,
         "owner_projection": owner_projection,
         "closure_ticket": closure_ticket,

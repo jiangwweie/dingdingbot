@@ -36,6 +36,7 @@ from src.trading_kernel.infrastructure.generic_selection_source_provenance impor
     SourceProvenanceInsufficient,
     certify_0007_static_comparison_sources,
     count_nonquiescent_source_vacuums,
+    read_preserved_runtime_state,
 )
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -937,6 +938,7 @@ async def _verify_generic_selection_source(
                 ),
             })
             manifest = await _generic_source_preservation_manifest(connection)
+            preserved_runtime = await read_preserved_runtime_state(connection)
             runtime_identity = await _runtime_identity(connection)
             registry_identity = await _target_registry_identity(connection)
             owner_policy = await _current_owner_policy(connection)
@@ -950,6 +952,16 @@ async def _verify_generic_selection_source(
                 provenance = {"status": "pass", "proof_count": len(proofs)}
             except SourceProvenanceInsufficient as exc:
                 provenance = {"status": "fail", "reason_code": str(exc)}
+            account_mode = {
+                "status": "pass" if (
+                    runtime_profile["status"] == "pass"
+                    and runtime_profile["position_mode"] == "independent_sides"
+                    and owner_policy["status"] == "pass"
+                    and owner_policy["supported_margin_mode"] == "cross"
+                ) else "fail",
+                "position_mode": runtime_profile["position_mode"],
+                "margin_mode": owner_policy["supported_margin_mode"],
+            }
             await connection.rollback()
     finally:
         await engine.dispose()
@@ -959,6 +971,7 @@ async def _verify_generic_selection_source(
         and all(int(value) == 0 for value in migration_gate.values())
         and runtime_identity["schema_revision"] == source_revision
         and provenance["status"] == "pass"
+        and account_mode["status"] == "pass"
         and registry_identity["status"] == "pass"
         and owner_policy["status"] == "pass"
         and runtime_profile["status"] == "pass"
@@ -978,6 +991,8 @@ async def _verify_generic_selection_source(
         "capabilities": capabilities,
         "migration_gate": migration_gate,
         "provenance": provenance,
+        "account_mode": account_mode,
+        "preserved_runtime": preserved_runtime,
         "preservation_manifest": manifest,
     }
 

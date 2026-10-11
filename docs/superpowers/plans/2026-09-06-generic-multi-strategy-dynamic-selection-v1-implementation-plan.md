@@ -44,6 +44,8 @@ Fresh source 检查发现 standalone Owner Pause 的已 drain Vacuum 是持久�
 
 另新增停止writers前后preservation变化回归，部署必须以第二次fresh source manifest作为post-migration对照，不能复用advisory digest。迁移前还需停止独立Owner API writer；Kernel部署脚本只管理四Worker，不把API漏出写面。测试进度及exact final R4据实际终态填写；中断的早期candidate认证不记PASS。
 
+真实路径复核还补齐0007 source verifier的account_mode字段，使其满足deploy consumer的independent_sides/Cross合同。postflight不再要求历史Dynamic事实总数为零或回到最初Static Universe：停止writers后冻结source/target/schema/preservation绑定的部署证据，再从目标PG复核历史cardinality与Active Universe身份/member digest未变。原migration前后逐record preservation仍是硬Gate。该release marker只由部署认证工具读取，不是Worker交易权限来源；重启/失败恢复必须复用exact候选证据，缺失或不匹配即停止。非零历史、unexpected新增Snapshot及Universe漂移都需独立回归。
+
 **本计划将已批准设计拆成GS-00至GS-13共14张可验收Task Card；当前已经进入获授权的本地代码与测试阶段。** 初始独立复核只允许修订设计与计划，随后Owner明确授予本地实施权限；Tokyo操作、部署或策略activation仍未授权。实际完成度以§2.1证据台账为准。
 
 规范来源为[详细设计](../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)，特别是§4.7、§6.4、§8.4、§10.3四项amendment。设计§18记录条件批准及处理结果；研究出处见设计§19与Stage-3.1 provenance amendment。Task条款不得覆盖冻结Feature、N、cadence、SOR Golden、资金、ExitProfile或Owner控制边界。

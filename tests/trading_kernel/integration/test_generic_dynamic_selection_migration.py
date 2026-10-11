@@ -55,6 +55,7 @@ from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
     SourceProvenanceInsufficient,
     certify_0007_static_comparison_sources,
+    read_preserved_runtime_state,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -172,6 +173,7 @@ async def test_drained_owner_pause_fence_is_preserved_not_resumed_by_upgrade(fau
                 await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='OPEN',first_blocker='AUTHORITY_GAP'"))
             before = await _generic_source_preservation_manifest(conn)
         source = await _verify_compatible_source(url, "0007_exit_profile_authority_v1")
+        source_runtime = source["preserved_runtime"]
         if fault is not None:
             assert source["migration_gate"]["open_selection_vacuums"] == 1
             with pytest.raises(AssertionError, match="flat quiescent source: brc_strategy_entry_vacuums_current"):
@@ -186,6 +188,7 @@ async def test_drained_owner_pause_fence_is_preserved_not_resumed_by_upgrade(fau
         await engine.dispose()
         async with engine.connect() as conn:
             after = await _generic_source_preservation_manifest(conn)
+            assert await read_preserved_runtime_state(conn) == source_runtime
             assert after["digest"] == before["digest"]
             row = (await conn.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current"))).mappings().one()
             assert row["state"] == "OWNER_PAUSED" and row["resolved_at_ms"] is None
@@ -1087,6 +1090,9 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             source_gate["provenance"]["status"],
         )
         assert source_gate["provenance"]["status"] == "pass"
+        assert source_gate.get("account_mode") == {
+            "status": "pass", "position_mode": "independent_sides", "margin_mode": "cross"
+        }
         async with engine.connect() as conn:
             await conn.execute(sa.text("SET TRANSACTION READ ONLY"))
             proofs = await certify_0007_static_comparison_sources(conn)

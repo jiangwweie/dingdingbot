@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -389,6 +390,22 @@ def test_compatible_upgrade_certifies_recovery_only_after_writer_stop() -> None:
     assert (
         "verify_preservation", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, "sha256:" + "e" * 64
     ) not in backend.calls
+
+
+@pytest.mark.parametrize("drift", [None, "dynamic_runtime", "preserved_membership"])
+def test_compatible_upgrade_preserves_nonzero_dynamic_history_without_new_artifacts(drift: str | None) -> None:
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION, postflight_drift=drift)
+    backend.preserved_runtime = {
+        "active_universe_manifest_digest": "sha256:" + "7" * 64,
+        "dynamic_selection_runtime_counts": {"jobs":38,"snapshots":38,"generations":18,"vacuums":18,"authorities":53,"gap_audits":19},
+    }
+    if drift:
+        message = "preserved Active Universe membership differs" if drift == "preserved_membership" else "unexpected Dynamic Selection runtime facts"
+        with pytest.raises(DeploymentBlocked, match=message):
+            deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    else:
+        assert deploy_tokyo_release(backend, _compatible_plan(enable_entry=False)).status == "pass"
+    assert backend.entry_is_inactive_disabled_and_fenced()
 
 
 def test_compatible_upgrade_recovers_target_without_copying_a_stale_manifest() -> None:
@@ -1652,6 +1669,11 @@ class FakeDeploymentBackend:
             "simulated target recovery failure"
         )
         self.calls: list[tuple[object, ...]] = []
+        self.preserved_runtime = {
+            "active_universe_manifest_digest": "sha256:" + "7" * 64,
+            "dynamic_selection_runtime_counts": {key:0 for key in ("jobs","snapshots","generations","vacuums","authorities","gap_audits")},
+        }
+        self.preserved_runtime_marker = None
         self.current_release = current_release
         self.target_release_exists = (
             target_release_exists or current_release == TARGET_RELEASE
@@ -1682,6 +1704,7 @@ class FakeDeploymentBackend:
         payload: dict[str, object] = {
             "status": "pass",
             "database_integrity_pass": True,
+            "preserved_runtime": self.preserved_runtime,
             "flatness_pass": True,
             "universe_bootstrap_pass": not self.expired_certification_batch,
             "certification_batch_pass": not self.expired_certification_batch,
@@ -1696,14 +1719,7 @@ class FakeDeploymentBackend:
                 "positions": 0,
                 "incidents": 0,
             },
-            "dynamic_selection_runtime_counts": {
-                "jobs": 0,
-                "snapshots": 0,
-                "generations": 0,
-                "vacuums": 0,
-                "authorities": 0,
-                "gap_audits": 0,
-            },
+            "dynamic_selection_runtime_counts": self.preserved_runtime["dynamic_selection_runtime_counts"],
             "exit_profile_authority": {
                 "status": "pass",
                 "catalog_digest": build_exit_profile_catalog_digest(),
@@ -1818,6 +1834,11 @@ class FakeDeploymentBackend:
                 "authorities": 0,
                 "gap_audits": 0,
             }
+        elif self.postflight_drift == "preserved_membership":
+            payload["preserved_runtime"] = {
+                **self.preserved_runtime,
+                "active_universe_manifest_digest": "sha256:" + "8" * 64,
+            }
         elif self.postflight_drift == "exit_profile_authority":
             payload["exit_profile_authority"] = {
                 "status": "fail",
@@ -1930,6 +1951,7 @@ class FakeDeploymentBackend:
         payload: dict[str, object] = {
             "status": "pass",
             "alembic_revision": self.source_schema_revision,
+            "preserved_runtime": self.preserved_runtime,
             "runtime_identity": {
                 "runtime_commit": self.runtime_commit,
                 "schema_revision": self.source_schema_revision,
@@ -2016,10 +2038,21 @@ class FakeDeploymentBackend:
             return {"status": "requested"}
         return {"status": self.drain_status}
 
+    def record_preserved_runtime(self, release: str, payload: Mapping[str, object]) -> None:
+        self.calls.append(("record_preserved_runtime", release))
+        self.preserved_runtime_marker = dict(payload)
+
     def read_release_marker(self, release: str, marker: str) -> str:
         self.calls.append(("read_release_marker", release, marker))
+        if marker == ".brc-preserved-runtime":
+            return json.dumps(self.preserved_runtime_marker or {
+                "source_commit":CURRENT_COMMIT,"target_commit":TARGET_COMMIT,
+                "source_schema_revision":SOURCE_SCHEMA_REVISION,"preservation_digest":PRESERVATION_DIGEST,
+                "preserved_runtime":self.preserved_runtime,
+            })
         if marker == ".brc-runtime-commit":
             return TARGET_COMMIT if release == TARGET_RELEASE else CURRENT_COMMIT
+
         if marker == ".brc-schema-revision":
             return (
                 TARGET_SCHEMA_REVISION

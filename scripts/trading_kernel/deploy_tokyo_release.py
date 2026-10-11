@@ -212,6 +212,8 @@ class TokyoReleaseBackend(Protocol):
 
     def read_release_marker(self, release: str, marker: str) -> str: ...
 
+    def record_preserved_runtime(self, release: str, payload: Mapping[str, object]) -> None: ...
+
     def stop_services(self, services: tuple[str, ...]) -> None: ...
 
     def services_active(self, services: tuple[str, ...]) -> frozenset[str]: ...
@@ -648,6 +650,16 @@ def _deploy_compatible_upgrade(
             # Advisory facts may legitimately change while source writers run.
             # Only the fresh stopped-writer snapshot authorizes preservation.
             source_certification = final_source
+            baseline = {
+                "source_commit": compatibility_fact.from_commit,
+                "target_commit": plan.target_commit,
+                "source_schema_revision": COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                "preservation_digest": _require_preservation_digest(final_source),
+                "preserved_runtime": final_source.get("preserved_runtime"),
+            }
+            if not isinstance(baseline["preserved_runtime"], Mapping):
+                raise DeploymentBlocked("source preserved runtime evidence is missing")
+            backend.record_preserved_runtime(plan.target_release, baseline)
             try:
                 migration_attempted = True
                 backend.migrate_schema(
@@ -931,9 +943,23 @@ def _require_target_postflight(
     }:
         raise DeploymentBlocked("deployed runtime identity differs from target")
     if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        compatibility = plan.runtime_release_compatibility_fact
+        if compatibility is None:
+            raise DeploymentBlocked("release compatibility fact is missing")
+        baseline = json.loads(backend.read_release_marker(plan.target_release, ".brc-preserved-runtime"))
+        if (
+            not isinstance(baseline, Mapping)
+            or baseline.get("source_commit") != compatibility.from_commit
+            or baseline.get("target_commit") != plan.target_commit
+            or baseline.get("source_schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION
+            or not _SEED_IDENTITY.fullmatch(str(baseline.get("preservation_digest", "")))
+            or not isinstance(baseline.get("preserved_runtime"), Mapping)
+        ):
+            raise DeploymentBlocked("exact source preserved runtime evidence differs")
         _require_dynamic_selection_postflight(
             certification,
             seed_identity=seed_identity,
+            preserved_runtime=baseline["preserved_runtime"],
         )
         policy=certification.get("owner_policy")
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
@@ -945,6 +971,7 @@ def _require_dynamic_selection_postflight(
     certification: Mapping[str, object],
     *,
     seed_identity: str,
+    preserved_runtime: Mapping[str, object],
 ) -> None:
     owner_policy = certification.get("owner_policy")
     if (
@@ -970,6 +997,13 @@ def _require_dynamic_selection_postflight(
         or strategy_universe.get("semantic_digest_status") != "pass"
     ):
         raise DeploymentBlocked("exact Universe identity differs")
+    actual_preserved = certification.get("preserved_runtime")
+    if (
+        not isinstance(actual_preserved, Mapping)
+        or actual_preserved.get("active_universe_manifest_digest")
+        != preserved_runtime.get("active_universe_manifest_digest")
+    ):
+        raise DeploymentBlocked("preserved Active Universe membership differs")
     if int(str(strategy_universe.get("active_current_count", -1))) != 8:
         raise DeploymentBlocked("exact eight Active Universes are missing")
     runtime_identity = certification.get("runtime_identity")
@@ -998,7 +1032,7 @@ def _require_dynamic_selection_postflight(
             "authorities",
             "gap_audits",
         }
-        or any(int(str(value)) != 0 for value in runtime_counts.values())
+        or runtime_counts != preserved_runtime.get("dynamic_selection_runtime_counts")
     ):
         raise DeploymentBlocked(
             "compatible upgrade created unexpected Dynamic Selection runtime facts"
@@ -1569,6 +1603,10 @@ class SshTokyoReleaseBackend:
 
     def read_release_marker(self, release: str, marker: str) -> str:
         return self._remote(("sudo", "cat", f"{release}/{marker}")).stdout
+
+    def record_preserved_runtime(self, release: str, payload: Mapping[str, object]) -> None:
+        # Release-gate evidence only; no Worker reads this marker as authority.
+        self._write_release_marker(release, ".brc-preserved-runtime", json.dumps(payload, sort_keys=True))
 
     def stop_services(self, services: tuple[str, ...]) -> None:
         self._remote(("sudo", "systemctl", "stop", *services))

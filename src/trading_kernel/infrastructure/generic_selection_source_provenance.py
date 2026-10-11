@@ -20,6 +20,36 @@ from src.trading_kernel.domain.exposure_episode import ExposureEpisodeState
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 
+async def read_preserved_runtime_state(connection: AsyncConnection) -> dict[str, object]:
+    """Deployment evidence only: persisted membership and historical cardinality."""
+    rows = (await connection.execute(sa.text("""
+        SELECT c.event_spec_id,c.universe_version_id,c.semantic_digest,
+               c.lifecycle_state,c.activation_generation,c.activated_at_ms,
+               u.source_kind,u.materialization_generation_id,
+               array_agg(m.exchange_instrument_id ORDER BY m.exchange_instrument_id) AS member_ids
+        FROM brc_strategy_universe_current c
+        JOIN brc_strategy_universe_versions u USING(universe_version_id)
+        JOIN brc_strategy_universe_members m USING(universe_version_id)
+        GROUP BY c.event_spec_id,c.universe_version_id,c.semantic_digest,c.lifecycle_state,
+                 c.activation_generation,c.activated_at_ms,u.source_kind,u.materialization_generation_id
+        ORDER BY c.event_spec_id
+    """))).mappings().all()
+    counts = {}
+    for key, table in (
+        ("jobs", "brc_instrument_selection_jobs_current"),
+        ("snapshots", "brc_instrument_selection_snapshots"),
+        ("generations", "brc_strategy_universe_materialization_generations"),
+        ("vacuums", "brc_strategy_entry_vacuums_current"),
+        ("authorities", "brc_selection_session_authorities"),
+        ("gap_audits", "brc_selection_authority_gap_audits_current"),
+    ):
+        counts[key] = int(await connection.scalar(sa.text(f"SELECT count(*) FROM {table}")) or 0)
+    return {
+        "active_universe_manifest_digest": canonical_digest([dict(row) for row in rows]),
+        "dynamic_selection_runtime_counts": counts,
+    }
+
+
 class SourceProvenanceInsufficient(RuntimeError):
     """The source cannot justify an unchanged Static comparison checkpoint."""
 

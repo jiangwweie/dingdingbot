@@ -27,6 +27,33 @@ different Netting Domains progress concurrently.
 
 ## Current Verified State
 
+### 2026-10-11 Authorized Maintenance — Advisory Evidence, Not Deployed
+
+Owner authorized the unified Generic Selection / Capacity V0 stopped-flat
+release after necessary assurance. The Owner then closed Entry and flattened
+through the Console. Fresh readonly source verification and Binance probing
+confirmed the maintenance facts below. This is advisory evidence; the official
+deployment must repeat it after every migration writer, including the Owner API,
+is stopped. No new release is sealed and no target schema is active yet.
+
+| Area | Directly verified maintenance fact |
+| --- | --- |
+| Running Kernel | `/opt/brc/releases/brc-trading-kernel-dbe62a32c4ae`; runtime commit `dbe62a32c4ae74d3fd82c58a33196c6dc6f81357`, schema `0007_exit_profile_authority_v1` |
+| Owner API / static | Both release symlinks identify `34ead07f7fc6225ac365b39bddcd7c21bb6cf4db`; these supersede the older Console snapshot below |
+| Owner Entry | Policy revision `17`, `new_entry_submit_enabled=false`; the four current Worker services remain active pending release assurance |
+| PostgreSQL closure | Zero active Ticket, position, reservation, Netting Domain, unresolved Command, open Incident, nonterminal Aggregate and missing terminal Review |
+| Binance advisory | Zero non-flat and open-order domains in the 22-instrument current Universe probe; independent sides, Cross, configured 5x |
+| Static comparison source | 14 exact MPG/MI provenance proofs pass; source shape, Registry, Policy, capabilities and runtime identity pass |
+| SOR retirement | Strategy Entry control revision `6` remains paused; Selection control revision `9` still records the historical Dynamic mode. Its standalone `OWNER_PAUSED` Vacuum is drained and must remain a negative ENTRY fence, not be resumed or deleted |
+| Preservation source | All 74 source tables / 28,651 rows were scanned in advisory verification; the digest is refreshed after writers stop, never reused from this advisory snapshot |
+| Release assurance | Deployment-tool regressions discovered during preflight are being closed before final exact R4. Interrupted earlier certifications are not PASS; staging candidate files does not switch `/opt/brc/current` |
+| Long-duration validation | Owner removed isolated-server / 24h soak as a predeployment prerequisite. Long-run evidence remains unperformed and deferred to postdeployment observation, not PASS |
+| Production mutation | No service stop, migration, release activation, Policy B installation or exchange write has been performed by the agent in this maintenance preparation |
+
+（来源：本任务 Owner 授权、东京 PostgreSQL source verifier、Binance readonly probe、release symlink及systemd查询。）
+
+### Previous Sealed Release Snapshot — 2026-09-06
+
 | Area | Verified state |
 | --- | --- |
 | Integration branch | `dev` |

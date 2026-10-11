@@ -87,6 +87,12 @@ def test_portfolio_admission_universe_manifest_requires_canonical_digest() -> No
         expected_event_specs=(("CPM-RO-001", event_spec_id),),
         expected_member_ids=members,
     )
+    # Persisted valid membership need not equal the first-deployment Static batch.
+    assert _universe_manifest_matches(
+        manifest,
+        expected_event_specs=(("CPM-RO-001", event_spec_id),),
+        expected_member_ids=None,
+    )
     assert not _universe_manifest_matches(
         [
             {
