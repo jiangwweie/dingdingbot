@@ -45,7 +45,7 @@ supersedes the dated preparation and prior release snapshots below.
 | Owner controls | Policy version `18` has `new_entry_submit_enabled=false`; no automatic Dynamic activation or ExitProfile mutation |
 | Generic installed Specs | CPM, MPG, MI and BRF2 exact frozen Specs installed through the typed release-owned repository boundary after preservation/identity PASS; each numeric certification PASS, zero mismatches, 96 archives; CPM/BRF2 463 cutoffs each, MPG/MI 1,852 each; all four controls remain `static_baseline` with no pending activation |
 | SOR retirement | `SOR-001` Entry remains paused at control version 6; historical Selection control/version and drained standalone OWNER_PAUSED Vacuum preserved; no resume/delete/new ENTRY authority |
-| Runtime ownership | Observation, Lifecycle and Reconciliation active; Entry inactive/disabled with write fence present; Owner API active. All checked services have zero restarts after release |
+| Runtime ownership | Observation, Lifecycle and Reconciliation active; Owner-authorized Entry service restart completed after deployment: Entry active/enabled but its startup wrapper waits for the retained write fence, so the trading loop is not running; Owner API active. All checked services have zero restarts after release |
 | PostgreSQL / exchange | Readonly integrity, flatness, Registry/Seed/Universe identities PASS; active Ticket/position, unresolved Command and open Incident all zero; Binance positions/open orders zero, independent sides/Cross/configured 5x |
 | Dynamic Selection postflight | Source counts exactly preserved: Jobs 38, Snapshots 38, Generations 18, Vacuums 18, Authorities 53, Gap Audits 19; active Universe membership digest unchanged; Spec installation created no Job/Snapshot/Generation/Authority/Ticket/Command |
 | ExitProfile postflight | 8 Profiles / 8 immutable Bindings / 8 current pointers / 8 ACTIVATED events, exact catalog PASS; no switch or retirement |
@@ -75,7 +75,7 @@ portfolio consolidation is separate from this completed deployment.
 ### Current Remaining Control Actions
 
 - No remaining software installation or migration step for this release.
-- Entry remains deliberately closed/fenced; ordinary restoration must follow
+- Entry service is restarted/enabled, but new ENTRY remains closed/fenced; ordinary trading restoration must follow
   fresh official gates, not the legacy fixed-Static manifest assumptions or a
   direct Policy/SQL bypass.
 - Four Generic strategies are technically installed and numerically certified,
@@ -344,6 +344,6 @@ overlap, or official-path bypass.
 
 The current production identity and posture are exclusively the 2026-10-12
 table above. Schema is `0009_capacity_policy_v0`, Policy version is `18`, Entry
-is disabled and operationally fenced, four Generic controls are Static with no
+service is active/enabled waiting for its operational fence, new ENTRY Policy remains disabled, four Generic controls are Static with no
 pending activation, and Crypto SOR remains retired/paused. Older dated snapshots
 and historical acceptance records do not resume trading or authorize activation.
