@@ -450,6 +450,7 @@ async def test_readonly_certification_reports_exact_runtime_authority(
         "enabled": True,
         "new_entry_submit_enabled": False,
         "max_concurrent_tickets": 3,
+        "max_same_strategy_side": None,
         "family_ticket_limits": {
             "long_continuation": 1,
             "opening_range": 2,

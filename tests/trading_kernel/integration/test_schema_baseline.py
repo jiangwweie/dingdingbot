@@ -140,8 +140,12 @@ def test_strategy_universe_metadata_has_forward_only_authority_shape() -> None:
     ) in _index_column_sets(certifications)
     assert (
         "event_spec_id",
-        "universe_version_id",
+        "member_set_digest",
+        "comparison_transition_revision",
         "closed_bar_time_ms",
+        "projection_status",
+        "projection_version",
+        "universe_version_id",
     ) in _index_column_sets(comparative)
 
 

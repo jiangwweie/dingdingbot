@@ -40,13 +40,15 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    arm_acceptance_policy,
     deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.support.frozen_seed import (
+    arm_frozen_source,
+    pause_sor_for_capacity_release,
+)
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
@@ -83,12 +85,7 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            enabled = await arm_acceptance_policy(
-                uow,
-                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
-            )
-        assert enabled.new_entry_submit_enabled
+        arm_frozen_source(database_url, at_ms=1_800_000_000_100)
         async with engine.begin() as connection:
             await connection.execute(
                 sa.update(owner_policy_current)
@@ -111,6 +108,7 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
             expected_digest=preservation_digest,
         )
         assert preserved["status"] == "pass", preserved
+        await pause_sor_for_capacity_release(engine, at_ms=1_800_000_000_250)
         async with PostgresKernelUnitOfWork(engine) as uow:
             deployed = await deploy_compatible_upgrade_identity(
                 uow,
@@ -135,6 +133,8 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                 ).mappings()
             }
             assert set(policies) == {"policy-main"}
+            # This historical Product expansion is not the release-owned
+            # 0007 -> 0009 Capacity B transition, certified separately.
             assert policies["policy-main"]["policy_version"] == 11
             assert not policies["policy-main"]["new_entry_submit_enabled"]
             mappings = policies["policy-main"]["scope"][

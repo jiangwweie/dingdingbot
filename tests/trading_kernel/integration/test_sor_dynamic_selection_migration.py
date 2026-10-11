@@ -24,11 +24,10 @@ from scripts.trading_kernel.verify_schema import (
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    arm_acceptance_policy,
     seed_runtime_authority,
 )
+from tests.trading_kernel.support.frozen_seed import arm_frozen_source, run_frozen_seed
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -188,11 +187,7 @@ async def test_production_shaped_0005_upgrade_preserves_static_pair_and_seeds_no
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await arm_acceptance_policy(
-                uow,
-                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
-            )
+        arm_frozen_source(database_url, at_ms=1_800_000_000_100)
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(
@@ -483,11 +478,7 @@ async def test_real_0005_to_0006_identity_rotation_preserves_static_authority() 
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await arm_acceptance_policy(
-                uow,
-                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
-            )
+        arm_frozen_source(database_url, at_ms=1_800_000_000_100)
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(
@@ -765,24 +756,10 @@ def _run_seed_runtime_authority(
     runtime_commit: str,
     now_ms: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        (
-            sys.executable,
-            "scripts/trading_kernel/seed_runtime_authority.py",
-            "--database-url",
-            database_url,
-            "deploy-compatible-identity",
-            "--account-id",
-            account_id,
-            "--runtime-commit",
-            runtime_commit,
-            "--schema-revision",
-            TARGET_REVISION,
-            "--now-ms",
-            str(now_ms),
-        ),
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    return run_frozen_seed(
+        database_url, "deploy-compatible-identity",
+        "--account-id", account_id,
+        "--runtime-commit", runtime_commit,
+        "--schema-revision", TARGET_REVISION,
+        "--now-ms", str(now_ms),
     )

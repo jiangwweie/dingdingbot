@@ -41,6 +41,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnit
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
+from tests.trading_kernel.support.frozen_seed import pause_sor_for_capacity_release
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
@@ -410,6 +411,7 @@ async def test_compatible_fix_forward_resolves_only_exact_runtime_fence(
     )
     async with PostgresKernelUnitOfWork(runtime_seed_engine) as uow:
         await runtime_seed.deploy_runtime_identity(uow, initial)
+    await pause_sor_for_capacity_release(runtime_seed_engine, at_ms=1_800_000_000_040)
     async with runtime_seed_engine.begin() as connection:
         await connection.execute(
             sa.insert(runtime_incidents).values(

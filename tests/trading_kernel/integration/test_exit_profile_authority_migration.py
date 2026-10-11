@@ -16,11 +16,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    arm_acceptance_policy,
     seed_runtime_authority,
 )
+from tests.trading_kernel.support.frozen_seed import arm_frozen_source, run_frozen_seed
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -335,11 +334,7 @@ async def test_real_0006_to_0007_source_verification_preservation_and_identity_p
                     seeded_at_ms=1_800_000_000_000,
                 ),
             )
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            await arm_acceptance_policy(
-                uow,
-                ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
-            )
+        arm_frozen_source(database_url, at_ms=1_800_000_000_100)
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(
@@ -531,26 +526,12 @@ def _run_seed_runtime_authority(
     schema_revision: str,
     now_ms: int,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        (
-            sys.executable,
-            "scripts/trading_kernel/seed_runtime_authority.py",
-            "--database-url",
-            database_url,
-            action,
-            "--account-id",
-            "exit-profile-deployment-path",
-            "--runtime-commit",
-            runtime_commit,
-            "--schema-revision",
-            schema_revision,
-            "--now-ms",
-            str(now_ms),
-        ),
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
+    return run_frozen_seed(
+        database_url, action,
+        "--account-id", "exit-profile-deployment-path",
+        "--runtime-commit", runtime_commit,
+        "--schema-revision", schema_revision,
+        "--now-ms", str(now_ms),
     )
 
 

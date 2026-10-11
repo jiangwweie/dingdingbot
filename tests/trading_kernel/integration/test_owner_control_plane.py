@@ -33,13 +33,12 @@ from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     OWNER_POLICY_ID,
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    arm_acceptance_policy,
     deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.support.frozen_seed import arm_frozen_source
 from tests.trading_kernel.support.postgres import (
     create_empty_database,
     drop_disposable_database,
@@ -219,12 +218,7 @@ async def test_flat_0003_upgrade_seeds_controls_and_pauses_entry() -> None:
                         seeded_at_ms=1_800_000_000_000,
                     ),
                 )
-            async with PostgresKernelUnitOfWork(engine) as uow:
-                armed = await arm_acceptance_policy(
-                    uow,
-                    ArmAcceptancePolicyRequest(armed_at_ms=1_800_000_000_100),
-                )
-                assert armed.new_entry_submit_enabled
+            arm_frozen_source(database_url, at_ms=1_800_000_000_100)
             async with engine.begin() as connection:
                 await connection.execute(
                     sa.text(

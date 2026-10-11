@@ -46,9 +46,10 @@ is stopped. No new release is sealed and no target schema is active yet.
 | Static comparison source | 14 exact MPG/MI provenance proofs pass; source shape, Registry, Policy, capabilities and runtime identity pass |
 | SOR retirement | Strategy Entry control revision `6` remains paused; Selection control revision `9` still records the historical Dynamic mode. Its standalone `OWNER_PAUSED` Vacuum is drained and must remain a negative ENTRY fence, not be resumed or deleted |
 | Preservation source | All 74 source tables / 28,651 rows were scanned in advisory verification; the digest is refreshed after writers stop, never reused from this advisory snapshot |
-| Release assurance | Deployment-tool regressions discovered during preflight are being closed before final exact R4. Interrupted earlier certifications are not PASS; staging candidate files does not switch `/opt/brc/current` |
+| Release assurance | Candidate `c9934a569702be9adc481801631b030820c61897` exact R4 failed its Integration command: 1,608 passed / 14 failed, 4,974.19s. Causes were stale table/index/revision/nullable-policy assertions, retired 401 step-up behavior, a missing retired-SOR fixture prerequisite, and using latest seed code on old-schema migration fixtures. Test-only corrections passed the complete affected 118-test slice and 1,533 Unit/Architecture tests; production code remains unchanged. No R4 PASS manifest exists for that candidate; new clean candidate certification is required |
 | Long-duration validation | Owner removed isolated-server / 24h soak as a predeployment prerequisite. Long-run evidence remains unperformed and deferred to postdeployment observation, not PASS |
 | Production mutation | No service stop, migration, release activation, Policy B installation or exchange write has been performed by the agent in this maintenance preparation |
+| Staged services | Kernel, Owner API and static Console archives for `c9934a569702be9adc481801631b030820c61897` were prepared without activation. Owner API/static exact manifests passed; all active symlinks still identify the prior running releases |
 
 （来源：本任务 Owner 授权、东京 PostgreSQL source verifier、Binance readonly probe、release symlink及systemd查询。）
 

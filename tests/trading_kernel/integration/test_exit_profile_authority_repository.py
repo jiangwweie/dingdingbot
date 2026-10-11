@@ -723,7 +723,8 @@ async def test_exit_profile_http_requires_totp_and_maps_stale_version_to_409() -
                 json=body,
                 headers=headers,
             )
-            assert missing_totp.status_code == 401
+            assert missing_totp.status_code == 403
+            assert missing_totp.json()["error"]["code"] == "step_up_invalid"
 
             stale = await client.post(
                 (
