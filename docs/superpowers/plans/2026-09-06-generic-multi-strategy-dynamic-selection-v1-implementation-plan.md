@@ -1176,6 +1176,16 @@ RED复现：新close+8ms普通Observation先读到旧Authority expired，返回I
 
 末版四策略resident4 passed（40.22s），Unit/Architecture/API1498 passed（18.16s），Ruff、Mypy161 files、diff PASS，所有进程终态。本轮仅tests/support/docs变更，无生产修改。Normal NO_CHANGE的1h/4h并发续期与restart已有证据；changed Desired全set真正warming、故障恢复resident边界及GS-10逐项审计仍待证明，不签GS-10/GS-12；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-11 changed Desired resident全量warming与预期竞态修复（基于f291b993，未整卡签收）
+
+新增四策略已有Active→下一cutoff不同Desired→独立resident Selection/Materialization/Facts/Observation loops→新Universe ACTIVE_NEW。新目标从未手写warm fields；实际Observation逐member读取闭合行情、同一Detector生成Facts/readiness，再由Coordinator STAGE/activate。Candidate资格改变仅为预冻结工程workload；独立certification/instrument-active是明确测试前置，不把候选默认candidate状态当已认证active，更不修改生产Gate。每个目标scope的DB warm close/completion/digest/generation逐字段验证，成员exact等于Snapshot，旧Universe retired、Vacuum已resolve、零Signal/Command、隔离目录零文件。
+
+该并发测试RED暴露两类预期竞态以普通RuntimeError刷tick_failed：Facts提交末端跨close虽rollback，但runtime未分类；Universe STAGE/activation清旧scope lease后，旧Observation scheduling callback不再拥有generation/lease。现使用CurrentFactsRefreshCloseChanged→CURRENT_FACT_CLOSE_CHANGED（保持UoW rollback），ObservationLeaseChanged→SUPERSEDED（不重新安排新scope、保留已完成Observation status供展示）；仅捕获typed类别，独立RuntimeError仍暴露。不是放松close或CAS检查，也不靠异常文本判断。
+
+最后一个warming callback可在activation后才emit，因此用durable每scope readiness为权威而非日志条数；仍要求实际WARMED调用及完整DB逐member证据。新增PG commit-boundary注入证明Facts/warm证据原样rollback、无Signal；unit覆盖typed close变化与其他错误、旧lease正常/失败回调边界。末版changed-set4 passed（27.42s），resident renewal/changed-set/clock/Pause组合12 passed（80.35s），补Facts逐字段rollback专项1 passed（4.35s）；共享Observation/runtime safety27 passed（52.92s），Unit/Architecture/API1554 passed（20.21s），Ruff、Mypy161 files、diff PASS，所有进程终态。
+
+本段证明四策略正常不同Desired真正全量warming resident，不等于GS-12 24h资源soak或实盘收益。GS-10仍需故障恢复resident/跨策略慢source与逐项签收审计、status剩余边界；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

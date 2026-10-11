@@ -596,7 +596,93 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("refresh_fault",[None,"owner_pause","close_boundary"])
+@pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
+async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(database: AsyncEngine,tmp_path: Path,group: str) -> None:
+    import os
+    import sys
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from src.trading_kernel.infrastructure.pg_models import (
+        instrument_certification_current,
+        instruments,
+    )
+    source,first,_,uid=await _exercise_generic_generation(database,group,group in {"MPG-001","MI-001"},
+        durable=True,first_activation=True,natural_selection=True)
+    cutoff=CUTOFF+source.spec.cadence_hours*HOUR
+    close=cutoff+HOUR
+    # Independent exchange certification fixtures only; no target warm fields.
+    async with database.begin() as connection:
+        sample=dict((await connection.execute(sa.select(instrument_certification_current).where(
+            instrument_certification_current.c.runtime_profile_id=="tiny-live-v1",instrument_certification_current.c.status=="eligible").limit(1))).mappings().one())
+        for member in source.spec.candidate_ids:
+            values={**sample,"exchange_instrument_id":member,"status":"eligible","blocker_code":None,
+                "observed_at_ms":CUTOFF+HOUR,"valid_until_ms":close+2*HOUR,"next_check_at_ms":close+2*HOUR,
+                "lease_owner":None,"lease_expires_at_ms":None}
+            await connection.execute(pg_insert(instrument_certification_current).values(**values).on_conflict_do_update(
+                index_elements=[instrument_certification_current.c.runtime_profile_id,instrument_certification_current.c.exchange_instrument_id],
+                set_=values))
+        await connection.execute(sa.update(instruments).where(instruments.c.exchange_instrument_id.in_(source.spec.candidate_ids)).values(status="active"))
+    process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
+        group,str(cutoff+60_000),cwd=tmp_path,env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),
+            "PYTHONDONTWRITEBYTECODE":"1","BRC_RESIDENT_EXCLUDE_MEMBER":first.selected_members[0],
+            "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+        stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    seen=[]
+    async def until(predicate):
+        try:
+            async with asyncio.timeout(20):
+                while True:
+                    line=await process.stdout.readline()
+                    assert line,"resident exited"
+                    result=json.loads(line)
+                    seen.append(result)
+                    assert result["status"]!="tick_failed",result
+                    if predicate(result): return result
+        except TimeoutError:
+            pytest.fail(f"changed set did not advance; last results={seen[-8:]}")
+    try:
+        selected=await until(lambda r:r["component_id"]=="selection" and r["status"]=="snapshot_ready")
+        async with PostgresKernelUnitOfWork(database) as uow:
+            snapshot=await uow.instrument_selection.get_generic_snapshot(selected["selection_snapshot_id"])
+        assert snapshot.selected_members and snapshot.selected_members!=first.selected_members
+        assert len(snapshot.selected_members)>1
+        process.stdin.write(f"{close+8}\n".encode())
+        await process.stdin.drain()
+        expected_generation=GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)
+        active=await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="ACTIVE_NEW" and r.get("materialization_generation_id")==expected_generation)
+        process.terminate()
+        output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+        assert process.returncode==0,error.decode()
+        assert b"tick_failed" not in output
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current=await uow.strategy_universes.get_current(source.spec.event_spec_id)
+        assert current.universe_version_id!=uid
+        assert await uow.strategy_universes.get_members(current.universe_version_id)==snapshot.selected_members
+        authority=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert authority.authority.selection_snapshot_id==snapshot.selection_snapshot_id
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+    # Activation may supersede the final callback before its result is emitted.
+    # Durable readiness, not display-log cardinality, is authority.
+    assert any(r["component_id"]=="observation" and r.get("observation_status")=="warmed" for r in seen)
+    assert active["materialization_generation_id"] is not None
+    assert tuple(tmp_path.rglob("*"))==()
+    async with database.connect() as connection:
+        scopes=(await connection.execute(sa.text("SELECT * FROM brc_runtime_scopes_current WHERE universe_version_id=:uid"),{"uid":current.universe_version_id})).mappings().all()
+        assert len(scopes)==len(snapshot.selected_members)
+        assert all(row["warm_closed_bar_time_ms"]==close and row["warm_completed_at_ms"]>=close and row["warm_valid_until_ms"]>close+8
+            and row["warm_readiness_digest"] is not None and row["observation_generation"]>0 for row in scopes)
+        assert await connection.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid})=="retired"
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refresh_fault",[None,"owner_pause","close_boundary","commit_boundary"])
 async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: AsyncEngine,refresh_fault) -> None:
     source,first,_,uid=await _exercise_generic_generation(database,"MPG-001",True,
         durable=True,first_activation=True,natural_selection=True)
@@ -620,6 +706,7 @@ async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: Asyn
     async with database.connect() as connection:
         scope_id=await connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid LIMIT 1"),{"uid":uid})
         before_episodes=(await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()
+        before_facts=(await connection.execute(sa.text("SELECT * FROM brc_facts_current ORDER BY fact_current_id"))).mappings().all()
     template=mpg_flat_snapshot()
     close=now//HOUR*HOUR
     class RefreshMarket:
@@ -642,6 +729,8 @@ async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: Asyn
     refresh_clock=AsyncMock(return_value=now-1)
     if refresh_fault=="close_boundary":
         refresh_clock=AsyncMock(side_effect=[now-1,close+HOUR])
+    elif refresh_fault=="commit_boundary":
+        refresh_clock=AsyncMock(side_effect=[now-1,now-1,now-1,close+HOUR])
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=refresh_clock):
         from src.trading_kernel.interfaces.selection_runtime_worker import (
             CurrentFactRefreshRuntimeRequest,
@@ -650,10 +739,14 @@ async def test_normal_hourly_renewal_without_fixture_warm_refresh(database: Asyn
         refreshed=await run_current_fact_refresh_runtime_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=RefreshMarket(),
             request=CurrentFactRefreshRuntimeRequest(strategy_group_id="MPG-001",selection_spec_id=source.spec.selection_spec_id,
                 worker_id="current-facts-renewal",runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,now_ms=now-1))
-    assert refreshed.status==("facts_refreshed" if refresh_fault is None else "invalid"),refreshed
+    assert refreshed.status==("facts_refreshed" if refresh_fault is None else "blocked" if refresh_fault=="commit_boundary" else "invalid"),refreshed
+    if refresh_fault=="commit_boundary":
+        assert refreshed.reason_code=="CURRENT_FACT_CLOSE_CHANGED"
     async with database.connect() as connection:
         assert (await connection.execute(sa.text("SELECT * FROM brc_exposure_episode_current"))).mappings().all()==before_episodes
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
+        if refresh_fault=="commit_boundary":
+            assert (await connection.execute(sa.text("SELECT * FROM brc_facts_current ORDER BY fact_current_id"))).mappings().all()==before_facts
     if refresh_fault is not None:
         async with database.connect() as connection:
             assert await connection.scalar(sa.text("SELECT warm_closed_bar_time_ms FROM brc_runtime_scopes_current WHERE runtime_scope_id=:scope"),{"scope":scope_id})<close

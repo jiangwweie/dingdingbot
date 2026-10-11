@@ -48,12 +48,14 @@ async def main() -> None:
     clock=[int(initial)]
     source=inputs(group)
     comparative=group in {"MPG-001","MI-001"}
+    excluded=os.environ.get("BRC_RESIDENT_EXCLUDE_MEMBER")
     template={"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"CPM-RO-001":cpm_flat_snapshot,
         "BRF2-001":lambda:brf2_short_snapshot(strong_uptrend=True)}[group]()
     class Market:
         async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
             return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms,
-                "venue_status":"TRADING" if not comparative or w.exchange_instrument_id==source.spec.candidate_ids[0] else "PENDING_TRADING"}) for w in source.member_windows)
+                "venue_status":"TRADING" if (w.exchange_instrument_id!=excluded if excluded else
+                    not comparative or w.exchange_instrument_id==source.spec.candidate_ids[0]) else "PENDING_TRADING"}) for w in source.member_windows)
         async def fetch_generic_selection_klines(self,request):
             window=source.member_windows[0] if comparative else next(w for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
             return shift_window(window,request.feature_cutoff_at_ms-CUTOFF).candles

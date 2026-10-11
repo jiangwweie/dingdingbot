@@ -20,7 +20,10 @@ from src.trading_kernel.application.observe_strategy_scope import (
     ObservationStatus,
     observe_strategy_scope,
 )
-from src.trading_kernel.application.ports import UnitOfWorkFactory
+from src.trading_kernel.application.ports import (
+    ObservationLeaseChanged,
+    UnitOfWorkFactory,
+)
 from src.trading_kernel.application.project_shadow_outcome import (
     project_claimed_shadow_outcome,
 )
@@ -29,6 +32,7 @@ from src.trading_kernel.domain.market import ClosedCandle
 
 class ObservationWorkerStatus(StrEnum):
     NO_WORK = "no_work"
+    SUPERSEDED = "superseded"
     OBSERVED = "observed"
     RETRY_SCHEDULED = "retry_scheduled"
     SHADOW_COMPLETED = "shadow_completed"
@@ -117,12 +121,13 @@ async def run_observation_worker_once(
         )
     except Exception as exc:  # noqa: BLE001 - observation failure must retain retry authority.
         async with uow_factory() as uow:
-            await uow.signals.schedule_observation_scope(
-                runtime_scope_id=claim.runtime_scope_id,
-                worker_id=request.worker_id,
-                observation_generation=claim.observation_generation,
-                due_at_ms=request.now_ms + request.retry_interval_ms,
-            )
+            try:
+                await uow.signals.schedule_observation_scope(
+                    runtime_scope_id=claim.runtime_scope_id,worker_id=request.worker_id,
+                    observation_generation=claim.observation_generation,due_at_ms=request.now_ms + request.retry_interval_ms)
+            except ObservationLeaseChanged:
+                return ObservationWorkerResult(status=ObservationWorkerStatus.SUPERSEDED,runtime_scope_id=claim.runtime_scope_id,
+                    trigger_candle_close_time_ms=claim.trigger_candle_close_time_ms,detail="OBSERVATION_LEASE_CHANGED")
         return ObservationWorkerResult(
             status=ObservationWorkerStatus.RETRY_SCHEDULED,
             runtime_scope_id=claim.runtime_scope_id,
@@ -148,12 +153,13 @@ async def run_observation_worker_once(
     )
     activation_universe_version_id: str | None = None
     async with uow_factory() as uow:
-        await uow.signals.schedule_observation_scope(
-            runtime_scope_id=claim.runtime_scope_id,
-            worker_id=request.worker_id,
-            observation_generation=claim.observation_generation,
-            due_at_ms=due_at_ms,
-        )
+        try:
+            await uow.signals.schedule_observation_scope(
+                runtime_scope_id=claim.runtime_scope_id,worker_id=request.worker_id,
+                observation_generation=claim.observation_generation,due_at_ms=due_at_ms)
+        except ObservationLeaseChanged:
+            return ObservationWorkerResult(status=ObservationWorkerStatus.SUPERSEDED,runtime_scope_id=claim.runtime_scope_id,
+                trigger_candle_close_time_ms=claim.trigger_candle_close_time_ms,observation_status=observation.status,detail="OBSERVATION_LEASE_CHANGED")
         if observation.status is ObservationStatus.WARMED:
             scope = await uow.signals.get_runtime_scope(
                 claim.runtime_scope_id

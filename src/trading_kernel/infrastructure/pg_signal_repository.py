@@ -18,6 +18,7 @@ from src.trading_kernel.application.ports import (
     GenericSelectionMemberRuntimeStatus,
     InstrumentRulesSnapshot,
     InstrumentSnapshot,
+    ObservationLeaseChanged,
     ObservationScopeClaim,
     ObservationUniverseMembershipSnapshot,
     ReadinessSnapshot,
@@ -870,7 +871,7 @@ class PostgresSignalRepository:
             )
         )
         if result.rowcount != 1:
-            raise RuntimeError("observation scope lease is not owned by worker")
+            raise ObservationLeaseChanged("observation scope lease is not owned by worker")
 
     async def _get_next_candidate_ready(
         self,

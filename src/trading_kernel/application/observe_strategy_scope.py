@@ -72,6 +72,10 @@ from src.trading_kernel.domain.strategy_registry import (
 )
 
 
+class CurrentFactsRefreshCloseChanged(RuntimeError):
+    """Facts transaction crossed a market close; rollback, then retry current facts."""
+
+
 class ObservationStatus(StrEnum):
     WARMED = "warmed"
     FACTS_REFRESHED = "facts_refreshed"
@@ -609,7 +613,7 @@ async def observe_strategy_scope(
             await uow.signals.save_current_fact_readiness(readiness)
             finished_at_ms=await uow.instrument_selection.read_authority_clock_ms()
             if finished_at_ms<completed_at_ms or finished_at_ms//3600000*3600000!=request.trigger_candle_close_time_ms:
-                raise RuntimeError("Current fact refresh commit crossed close")
+                raise CurrentFactsRefreshCloseChanged("Current fact refresh commit crossed close")
             return ObservationResult(status=ObservationStatus.FACTS_REFRESHED,runtime_scope_id=scope.runtime_scope_id,
                 event_spec_id=scope.event_spec_id,detector_reason=detector_result.reason_code,signal_event_id=None,current_fact_count=len(persisted_facts))
 

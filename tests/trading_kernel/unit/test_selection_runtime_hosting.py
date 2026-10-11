@@ -392,7 +392,8 @@ async def test_materialization_waits_for_current_facts_before_fencing_ready_snap
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("after_scope,expected_scope",[(None,"scope:a"),("scope:a","scope:b"),("scope:b","scope:a")])
-async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkeypatch,after_scope,expected_scope):
+@pytest.mark.parametrize("failure",["timeout","close_changed","unexpected"])
+async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkeypatch,after_scope,expected_scope,failure):
     from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
     from src.trading_kernel.interfaces.selection_runtime_worker import (
         CurrentFactRefreshRuntimeRequest,
@@ -416,12 +417,24 @@ async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkey
         signals=Signals()
         async def __aenter__(self): return self
         async def __aexit__(self,*_): return None
-    async def hangs(*_): await asyncio.Event().wait()
+    async def hangs(*_):
+        if failure=="close_changed":
+            from src.trading_kernel.application.observe_strategy_scope import (
+                CurrentFactsRefreshCloseChanged,
+            )
+            raise CurrentFactsRefreshCloseChanged("Current fact refresh commit crossed close")
+        if failure=="unexpected":
+            raise RuntimeError("independent defect")
+        await asyncio.Event().wait()
     monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.observe_strategy_scope",hangs)
     request=CurrentFactRefreshRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="timeout",
         now_ms=360000010,runtime_commit="test",schema_revision="test",timeout_seconds=0.01,after_runtime_scope_id=after_scope)
+    if failure=="unexpected":
+        with pytest.raises(RuntimeError,match="independent defect"):
+            await run_current_fact_refresh_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),request=request)
+        return
     result=await asyncio.wait_for(run_current_fact_refresh_runtime_once(uow_factory=Uow,market_source=SimpleNamespace(),request=request),timeout=1)
-    assert result.status=="blocked" and result.reason_code=="CURRENT_FACT_SOURCE_TIMEOUT"
+    assert result.status=="blocked" and result.reason_code==("CURRENT_FACT_CLOSE_CHANGED" if failure=="close_changed" else "CURRENT_FACT_SOURCE_TIMEOUT")
     assert result.runtime_scope_id==expected_scope
 
 

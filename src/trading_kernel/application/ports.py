@@ -1098,6 +1098,10 @@ class EntryAdmissionRepository(Protocol):
     async def release_global_lane(self, *, ticket_id: str) -> None: ...
 
 
+class ObservationLeaseChanged(RuntimeError):
+    """This callback no longer owns the exact runtime scope generation/lease."""
+
+
 class SignalRepository(Protocol):
     async def advance_static_recovery_observation(self, *, runtime_scope_id: str, observed_at_ms: int,
         detector_status: DetectorStatus, occurred_at_ms: int | None,

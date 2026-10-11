@@ -30,6 +30,7 @@ from src.trading_kernel.application.market_ports import (
     PublicMarketSource,
 )
 from src.trading_kernel.application.observe_strategy_scope import (
+    CurrentFactsRefreshCloseChanged,
     ObservationRequest,
     current_facts_refresh_vacuum_allowed,
     observe_strategy_scope,
@@ -172,6 +173,8 @@ async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory
             trigger_candle_close_time_ms=request.now_ms//HOUR_MS*HOUR_MS,attempted_at_ms=request.now_ms,operation="refresh_current_facts")),timeout=request.timeout_seconds)
     except TimeoutError:
         return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="CURRENT_FACT_SOURCE_TIMEOUT",runtime_scope_id=scope.runtime_scope_id)
+    except CurrentFactsRefreshCloseChanged:
+        return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="CURRENT_FACT_CLOSE_CHANGED",runtime_scope_id=scope.runtime_scope_id)
     return CurrentFactRefreshRuntimeResult(status=observed.status.value,reason_code=observed.detector_reason,runtime_scope_id=scope.runtime_scope_id)
 
 
