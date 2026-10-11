@@ -1286,6 +1286,18 @@ PG EMPTY+HTTP组合20 passed（40.27s），not_installed4 passed（8.12s，与�
 
 **Done**：Owner无需curl或手填version即可完成操作并观察active/fallback/stale/pause；TOTP secrets不进入日志，0意外logout；不实际操作生产。
 
+#### 2026-10-11 actual Static HTTP→resident→preview / role边界（基于6d7a7136，未整卡签收）
+
+四策略HTTP矩阵的Static分支从真实Dynamic active前置，通过Owner role+TOTP提交并发/幂等Static intent，先核对零runtime副作用，再独立OS process运行正式Materializer/Facts/Observation真实预热并切回冻结baseline。最终preview为Static、pending/epoch清除，current成员exact等于原baseline，Vacuum及Dynamic current Authority清除，Signal/Ticket/Command零新增；没有SQL切换/手写warm readiness。加速1h/4h时钟使原Session确实超过idle TTL时按正式login重新认证，不改Session寿命、不把真正401当unexpected logout。
+
+读取改用原create_owner_read_engine和实际brc_owner_console role（tracked read-grants），写仍brc_owner_control；原startup read verifier实际核对read-only/repeatable-read/3s/current schema。测试构造app state而非完整network lifespan，不据此冒称Tokyo/API发布已认证。新增Static pending时Facts Vacuum guard RED：不得尝试Dynamic decode rollback Generation；现保持等待Static coordinator，已失败Dynamic的精确Facts恢复合同不受影响。
+
+Static并发曾出现DBAPI事实，另锁序RED固定可成环风险：comparative cache writer原先Universe→comparison，与cutover的Owner/Selection→comparison→Universe冲突。现缓存持久化先Owner→Selection，再同input advisory→Universe→comparison；network依旧在事务外。不捕获/自动retry DBAPIError，test-only诊断仅输出sqlstate/class/首行，不输出参数/credentials。真实双事务barrier证明writer等待Owner时controller可FOR UPDATE NOWAIT拿Universe，提交后writer按原input identity完成；纯展示timestamps不被误当模型整体等值。
+
+UI Static pending只有FAILED_CLOSED/ABANDONED时提供重新授权入口，使用fresh预览/current baseline/epoch、新intent key和TOTP；普通pending仍不可重复提交，actual application继续验证terminal来源与Owner版本。不借界面提供SQL修复或扩大恢复权限。该UI组件casePASS，不冒称全部故障浏览器路径已认证。
+
+末版HTTP+Static+readonly role+resident normal/crash/timeout+锁序组合29 passed（178.86s）；锁序专项1 passed（4.33s，与组合重叠不合计）；共享Observation19 passed（49.43s，锁序owner位置细化前切片），Fast Unit/Architecture/API1559 passed（20.85s），Frontend47 passed（5.60s）、TypeScript/Vite PASS（大chunk warning保留）、Ruff/Mypy161 files/diff PASS，所有verification终态。GS-11仍需完整界面状态/实际读链及逐项审计，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 ### GS-12 — Hourly churn production-shaped soak
 
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。

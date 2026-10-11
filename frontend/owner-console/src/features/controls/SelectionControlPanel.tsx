@@ -10,6 +10,10 @@ import { getSelectionPreview, submitSelectionIntent, type SelectionPreview } fro
 type Intent = { mode: "dynamic" | "static"; preview: SelectionPreview; key: string };
 function utc(time: number | null | undefined) { return time == null ? "—" : new Date(time).toISOString().replace(".000Z", " UTC"); }
 function age(value: number | null) { return value == null ? "—" : `${Math.floor(value / 1000)}s`; }
+function staticRetry(preview: SelectionPreview) {
+  return preview.control?.pending_selection_mode === "static_baseline" && !!preview.control.pending_authorization_id &&
+    ["FAILED_CLOSED", "ABANDONED"].includes(preview.runtime.materialization_state ?? "");
+}
 
 export function SelectionControlPanel({ strategyGroupId }: { strategyGroupId: string }) {
   const query = useQuery({ queryKey: ["owner", "selection", strategyGroupId], queryFn: () => getSelectionPreview(strategyGroupId) });
@@ -40,7 +44,8 @@ export function SelectionControlPanel({ strategyGroupId }: { strategyGroupId: st
   const open = async (mode: Intent["mode"]) => {
     const fresh = await query.refetch();
     const current = fresh.data;
-    if (fresh.isError || !current?.runtime.installed || !current.control || current.control.pending_selection_mode) return;
+    if (fresh.isError || !current?.runtime.installed || !current.control) return;
+    if (current.control.pending_selection_mode && !(mode === "static" && staticRetry(current))) return;
     if (mode === "dynamic" && current.control.selection_mode !== "static_baseline") return;
     if (mode === "static" && (current.control.selection_mode !== "dynamic_selection" || !current.control.rollback_baseline_id || !current.control.selection_epoch_id)) return;
     setIntent({ mode, preview: current, key: `owner-selection:${globalThis.crypto.randomUUID()}` });
@@ -50,13 +55,14 @@ export function SelectionControlPanel({ strategyGroupId }: { strategyGroupId: st
   const pending = preview?.control?.pending_selection_mode;
   const dynamic = preview?.control?.selection_mode === "dynamic_selection";
   const blocked = preview?.runtime.first_blocker;
+  const retryStatic = preview ? staticRetry(preview) : false;
   return <Panel title={`${strategyGroupId} Selection`}>
     {!preview ? <p role="status">Selection 状态不可用；不提交任何权限变更。</p> : <>
       <div className="control-row">
         <StatusTag tone={blocked ? "attention" : "neutral"}>{!preview.runtime.installed ? "NOT_INSTALLED" : !preview.control ? "UNKNOWN" : dynamic ? "DYNAMIC" : preview.control.selection_mode === "disabled" ? "DISABLED" : "STATIC"}</StatusTag>
         <span>{preview.runtime.installed ? `${preview.cadence_hours}h Selection · 1h 延迟` : "Dynamic 不可用：Spec 未安装或未认证"}</span>
         <Button disabled={query.isError || query.isFetching || !preview.runtime.installed || preview.control?.selection_mode !== "static_baseline" || !!pending} onClick={() => void open("dynamic")}>启用 {strategyGroupId} Dynamic</Button>
-        <Button disabled={query.isError || query.isFetching || !dynamic || !!pending || !preview.control?.rollback_baseline_id} onClick={() => void open("static")}>回退 {strategyGroupId} Static</Button>
+        <Button disabled={query.isError || query.isFetching || !dynamic || (!!pending && !retryStatic) || !preview.control?.rollback_baseline_id} onClick={() => void open("static")}>{retryStatic ? "重新授权" : "回退"} {strategyGroupId} Static</Button>
         <Button disabled={query.isFetching} onClick={() => void query.refetch()}>刷新 {strategyGroupId}</Button>
       </div>
       {query.isError ? <p role="alert">最新预览读取失败，旧数据显示仅供参考；权限提交已禁用。</p> : null}

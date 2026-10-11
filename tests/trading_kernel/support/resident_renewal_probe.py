@@ -78,6 +78,13 @@ async def main() -> None:
             delta=close-candles[-1].close_time_ms
             return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in candles)[-request.limit:]
     engine=create_async_engine(os.environ["BRC_RESIDENT_TEST_DATABASE_URL"])
+    @sa.event.listens_for(engine.sync_engine,"handle_error")
+    def report_test_database_error(context):
+        cause=context.original_exception.__cause__
+        print(json.dumps({"component_id":"test-diagnostic","status":"database_error",
+            "sqlstate":getattr(context.original_exception,"sqlstate",None),
+            "database_error_class":None if cause is None else type(cause).__name__,
+            "database_message":None if cause is None else str(cause).splitlines()[0][:240]}),flush=True)
     uow=lambda:PostgresKernelUnitOfWork(engine)
     market=Market()
     async def authority_clock(_): return clock[0]

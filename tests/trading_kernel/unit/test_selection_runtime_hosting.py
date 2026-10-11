@@ -455,13 +455,14 @@ def test_current_facts_refresh_rejects_unbounded_timeout(timeout):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("defect",[None,"open","undrained","missing_source","warming","control","epoch","wrong_universe","missing_generation","drain_blocker"])
+@pytest.mark.parametrize("defect",[None,"open","undrained","missing_source","warming","control","epoch","wrong_universe","missing_generation","drain_blocker","static_pending"])
 async def test_recovery_facts_refresh_requires_exact_drained_failed_source(defect):
     from src.trading_kernel.application.observe_strategy_scope import (
         current_facts_refresh_vacuum_allowed,
     )
     from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuumState
-    control=SimpleNamespace(strategy_group_id="MI-001",selection_spec_id="spec",selection_epoch_id="epoch",control_version=2)
+    control=SimpleNamespace(strategy_group_id="MI-001",selection_spec_id="spec",selection_epoch_id="epoch",control_version=2,
+        pending_selection_mode=SelectionMode.STATIC_BASELINE if defect=="static_pending" else None)
     vacuum=SimpleNamespace(state=StrategyEntryVacuumState.OPEN if defect=="open" else StrategyEntryVacuumState.RECONFIGURING,
         drained_at_ms=None if defect=="undrained" else 20,source_generation_id=None if defect=="missing_source" else "generation")
     generation=SimpleNamespace(lifecycle_state=MaterializationGenerationState.MATERIALIZING if defect=="warming" else MaterializationGenerationState.FAILED_CLOSED,
@@ -469,7 +470,9 @@ async def test_recovery_facts_refresh_requires_exact_drained_failed_source(defec
         selection_control_version=1 if defect=="control" else 2,fenced_at_ms=10,terminal_at_ms=30,
         previous_events=(SimpleNamespace(universe_version_id="previous"),))
     class Repo:
-        async def get_generic_materialization_generation(self,*_): return None if defect=="missing_generation" else generation
+        async def get_generic_materialization_generation(self,*_):
+            assert defect!="static_pending","Static source must never be decoded as Dynamic"
+            return None if defect=="missing_generation" else generation
         async def entry_vacuum_has_drain_blockers(self,**_): return defect=="drain_blocker"
     permitted=await current_facts_refresh_vacuum_allowed(SimpleNamespace(instrument_selection=Repo()),vacuum=vacuum,control=control,
         universe_version_id="wrong" if defect=="wrong_universe" else "previous")

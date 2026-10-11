@@ -119,3 +119,20 @@ it("keeps Desired EMPTY separate from actual authority and shows deadlines", asy
   expect(screen.getByText(/membership stale deadline/)).toHaveTextContent("missed periods 1");
   expect(screen.getByText(/实际 Authority：PRE_FENCE_CONTINUITY/)).toBeInTheDocument();
 });
+
+it("allows a new Static authorization only after its pending generation has failed", async () => {
+  const user = userEvent.setup();
+  vi.mocked(getSelectionPreview).mockResolvedValue({ ...selectionFixture,
+    control: { ...selectionFixture.control!, selection_mode: "dynamic_selection", selection_epoch_id: "epoch:current",
+      pending_selection_mode: "static_baseline", pending_authorization_id: "authorization:failed", pending_effective_period_anchor_ms: 350000000 },
+    runtime: { ...selectionFixture.runtime, materialization_state: "FAILED_CLOSED" } });
+  render(<QueryClientProvider client={ownerQueryClient}><SelectionControlPanel strategyGroupId="CPM-RO-001" /></QueryClientProvider>);
+  await user.click(await screen.findByRole("button", { name: "重新授权 CPM-RO-001 Static" }));
+  await user.type(await screen.findByLabelText("操作原因"), "recover failed restoration");
+  await user.type(screen.getByLabelText("验证码"), "123456");
+  await user.click(screen.getByRole("button", { name: "确认提交" }));
+  await waitFor(() => expect(submitSelectionIntent).toHaveBeenCalledOnce());
+  expect(submitSelectionIntent).toHaveBeenCalledWith("CPM-RO-001", "static", expect.objectContaining({
+    selection_epoch_id: "epoch:current", rollback_baseline_id: "baseline", effective_period_anchor_ms: 360000000,
+  }));
+});

@@ -1059,16 +1059,35 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
         assert (await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)).lifecycle_state.value=="ABANDONED"
 
 
+@pytest_asyncio.fixture
+async def generic_http_read_engine(database: AsyncEngine) -> AsyncIterator[AsyncEngine]:
+    from src.trading_kernel.infrastructure.pg_owner_read_repository import (
+        create_owner_read_engine,
+    )
+    script=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-read-role.sql").read_text()
+    async with database.begin() as connection:
+        if not await connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_console')")):
+            await connection.execute(sa.text("CREATE ROLE brc_owner_console NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"))
+        for statement in ("GRANT USAGE ON SCHEMA public TO brc_owner_console;"+script.split("GRANT USAGE ON SCHEMA public TO brc_owner_console;",1)[1]).split(";"):
+            if statement.strip(): await connection.execute(sa.text(statement))
+    engine=create_owner_read_engine(database.url.render_as_string(hide_password=False))
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
 @pytest.mark.parametrize("target_mode",["dynamic","static","not_installed"])
-async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,group: str,target_mode: str,monkeypatch) -> None:
+async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(database: AsyncEngine,generic_http_read_engine: AsyncEngine,tmp_path: Path,group: str,target_mode: str,monkeypatch) -> None:
     import pyotp
     from argon2 import PasswordHasher
     from httpx import ASGITransport, AsyncClient
 
     from src.trading_kernel.interfaces.owner_console_http.app import (
         OwnerConsoleSettings,
+        _verify_startup_read_transaction,
         create_owner_console_app,
     )
     from src.trading_kernel.interfaces.owner_console_http.auth import (
@@ -1092,14 +1111,16 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
             session_signing_key="generic-http-test-session-signing-material"))
     app=create_owner_console_app(settings)
     app.state.owner_console_settings=settings
-    app.state.owner_console_engine=database
+    app.state.owner_console_engine=generic_http_read_engine
     app.state.owner_control_engine=database
     app.state.owner_clock_ms=lambda:clock[0]
     app.state.owner_auth_service=OwnerAuthService(settings.auth)
+    await _verify_startup_read_transaction(generic_http_read_engine)
     class RoleUow(PostgresKernelUnitOfWork):
         async def __aenter__(self):
             result=await super().__aenter__()
-            await self._connection.execute(sa.text("SET LOCAL ROLE brc_owner_control"))
+            role="brc_owner_console" if self._engine is generic_http_read_engine else "brc_owner_control"
+            await self._connection.execute(sa.text(f"SET LOCAL ROLE {role}"))
             return result
     monkeypatch.setattr(routes,"PostgresKernelUnitOfWork",RoleUow)
     tracked_tables=("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots","brc_strategy_universe_materialization_generations",
@@ -1164,10 +1185,134 @@ async def test_generic_http_preview_and_dynamic_stage_with_real_owner_role(datab
         conflict=await client.post(url,headers={"Origin":settings.public_origin},json={**body,"reason":"different_intent","totp_code":code})
         assert conflict.status_code==409,conflict.text
         assert (await client.get("/api/owner/v1/auth/session")).status_code==200
+        # Submission itself has no runtime side effects. Static intents then
+        # cross the official process boundary and genuinely warm their target.
+        async with database.connect() as connection:
+            for table in tracked_tables:
+                assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
+        if target_mode=="static":
+            import os
+            import sys
+
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            from src.trading_kernel.infrastructure.pg_models import (
+                instrument_certification_current,
+                instruments,
+            )
+            due=next_anchor+HOUR+8
+            async with database.begin() as connection:
+                sample=dict((await connection.execute(sa.select(instrument_certification_current).where(
+                    instrument_certification_current.c.runtime_profile_id=="tiny-live-v1",instrument_certification_current.c.status=="eligible").limit(1))).mappings().one())
+                for member in inputs(group).spec.candidate_ids:
+                    values={**sample,"exchange_instrument_id":member,"status":"eligible","blocker_code":None,
+                        "observed_at_ms":CUTOFF+HOUR,"valid_until_ms":due+2*HOUR,"next_check_at_ms":due+2*HOUR,
+                        "lease_owner":None,"lease_expires_at_ms":None}
+                    await connection.execute(pg_insert(instrument_certification_current).values(**values).on_conflict_do_update(
+                        index_elements=[instrument_certification_current.c.runtime_profile_id,instrument_certification_current.c.exchange_instrument_id],set_=values))
+                await connection.execute(sa.update(instruments).where(instruments.c.exchange_instrument_id.in_(inputs(group).spec.candidate_ids)).values(status="active"))
+            process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
+                group,str(due),cwd=tmp_path,env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
+                    "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+                stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            try:
+                async with asyncio.timeout(20):
+                    diagnostics=[]
+                    while True:
+                        line=await process.stdout.readline()
+                        assert line,"Static resident exited"
+                        result=json.loads(line)
+                        if result["component_id"]=="test-diagnostic": diagnostics.append(result)
+                        assert result["status"]!="tick_failed",(result,diagnostics)
+                        if result["component_id"]=="materialization" and result.get("disposition")=="ACTIVE_NEW": break
+                process.terminate()
+                output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+                assert process.returncode==0,error.decode()
+                assert b"tick_failed" not in output
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.communicate()
+            clock[0]=due
+            # The accelerated maintenance clock genuinely expires the old
+            # idle Session. Reauthenticate, never relax Session lifetime.
+            renewed=await client.post("/api/owner/v1/auth/login",json={"username":"owner","password":"test-password",
+                "totp_code":pyotp.TOTP(seed).at(clock[0]//1000)})
+            assert renewed.status_code==204,renewed.text
+            effective=await client.get(f"/api/owner/v1/controls/strategies/{group}/selection")
+            assert effective.status_code==200,effective.text
+            final=effective.json()
+            assert final["control"]["selection_mode"]=="static_baseline" and final["control"]["pending_selection_mode"] is None
+            assert final["control"]["selection_epoch_id"] is None
+            async with PostgresKernelUnitOfWork(database) as uow:
+                baseline=await uow.instrument_selection.get_generic_static_rollback_baseline(staged["rollback_baseline_id"])
+                current=await uow.strategy_universes.get_current(inputs(group).spec.event_spec_id)
+                assert await uow.strategy_universes.get_members(current.universe_version_id)==await uow.strategy_universes.get_members(baseline.source_event.universe_version_id)
+                assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=inputs(group).spec.selection_spec_id) is None
+                assert await uow.instrument_selection.get_current_generic_authority(inputs(group).spec.selection_spec_id) is None
+            assert tuple(tmp_path.rglob("*"))==()
     async with database.connect() as connection:
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_owner_authorizations WHERE purpose='selection_mode_change'"))==authorizations_before+1
         for table in tracked_tables:
+            if target_mode=="static" and table not in {"brc_signal_events","brc_trade_tickets","brc_exchange_commands"}: continue
             assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==before[table]
+
+
+@pytest.mark.asyncio
+async def test_comparative_cache_writer_locks_owner_before_universe_during_cutover(database: AsyncEngine,monkeypatch) -> None:
+    source,_,_,uid=await _exercise_generic_generation(database,"MI-001",False,durable=True,first_activation=True,natural_selection=True)
+    close=CUTOFF+2*HOUR
+    template=mi_flat_snapshot()
+    delta=close-template.trigger_candle_close_time_ms
+    candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,"close_time_ms":c.close_time_ms+delta}) for c in template.candles_1h)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        binding=await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id)
+    projection=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,universe_version_id=uid,
+        strategy_group_id=source.spec.strategy_group_id,exchange_instrument_ids=source.spec.candidate_ids,closed_bar_time_ms=close,
+        lookback_bars=12,freshness_window_ms=HOUR,
+        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=member,candles_1h=candles) for member in source.spec.candidate_ids))
+    projection=projection.model_copy(update={"comparison_transition_revision":binding.comparison_transition_revision})
+    actual=sa.ext.asyncio.AsyncConnection.execute
+    locked=[]
+    writer_waiting=asyncio.Event()
+    controller=[None]
+    async def record(connection,statement,*args,**kwargs):
+        sql=str(statement)
+        if "FOR UPDATE" in sql:
+            for table in ("brc_strategy_entry_controls_current","brc_strategy_selection_control_current","brc_strategy_universe_versions"):
+                if table in sql: locked.append(table)
+            if controller[0] is not None and connection is not controller[0] and "brc_strategy_entry_controls_current" in sql:
+                writer_waiting.set()
+        return await actual(connection,statement,*args,**kwargs)
+    monkeypatch.setattr(sa.ext.asyncio.AsyncConnection,"execute",record)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.strategy_universes.save_comparative_projection(projection)
+    assert locked[:3]==["brc_strategy_entry_controls_current","brc_strategy_selection_control_current","brc_strategy_universe_versions"]
+    async def write():
+        async with PostgresKernelUnitOfWork(database) as uow:
+            return await uow.strategy_universes.save_comparative_projection(projection)
+    writer=None
+    try:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.owner_controls.get_strategy_control("MI-001",for_update=True)
+            await uow.instrument_selection.get_selection_control("MI-001",for_update=True)
+            await uow.instrument_selection.get_comparison_universe_binding(source.spec.event_spec_id,for_update=True)
+            controller[0]=uow._connection
+            writer=asyncio.create_task(write())
+            await asyncio.wait_for(writer_waiting.wait(),timeout=3)
+            assert not writer.done()
+            # A cache writer must wait before taking this Universe row;
+            # otherwise binding-first cutover and universe-first writer cycle.
+            await asyncio.wait_for(uow._connection.execute(sa.text("SELECT universe_version_id FROM brc_strategy_universe_versions WHERE universe_version_id=:uid FOR UPDATE NOWAIT"),{"uid":uid}),timeout=3)
+        completed=await asyncio.wait_for(writer,timeout=3)
+        assert completed.closed_bar_time_ms==projection.closed_bar_time_ms
+        assert completed.member_set_digest==projection.member_set_digest
+        assert completed.member_windows==projection.member_windows
+        assert completed.comparison_transition_revision==projection.comparison_transition_revision
+    finally:
+        if writer is not None and not writer.done():
+            writer.cancel()
+            await asyncio.gather(writer,return_exceptions=True)
 
 
 async def _apply_owner_control_grants(database: AsyncEngine) -> None:

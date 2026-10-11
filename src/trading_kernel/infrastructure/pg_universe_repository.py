@@ -2975,6 +2975,17 @@ class PostgresStrategyUniverseRepository:
         key = canonical_digest({"event": outcome.event_spec_id,
             "members": outcome.member_set_digest, "revision": outcome.comparison_transition_revision,
             "close": outcome.closed_bar_time_ms})
+        group=await self._connection.scalar(sa.select(strategy_universe_versions.c.strategy_group_id).where(
+            strategy_universe_versions.c.universe_version_id==outcome.universe_version_id,
+            strategy_universe_versions.c.event_spec_id==outcome.event_spec_id))
+        if group in {"MPG-001","MI-001"}:
+            # Cutover takes Owner -> Selection -> Universe -> comparison.
+            # Cache persistence must not hold Universe while waiting for a
+            # comparison pointer already held by that cutover transaction.
+            await self._connection.execute(sa.select(strategy_entry_controls_current.c.strategy_group_id).where(
+                strategy_entry_controls_current.c.strategy_group_id==group).with_for_update())
+            await self._connection.execute(sa.select(strategy_selection_control_current.c.strategy_group_id).where(
+                strategy_selection_control_current.c.strategy_group_id==group).with_for_update())
         await self._connection.execute(sa.select(sa.func.pg_advisory_xact_lock(
             sa.func.hashtextextended("comparative-cache:" + key, 0))))
 

@@ -155,6 +155,8 @@ class CurrentFactsRefreshSource(BaseModel):
 async def current_facts_refresh_vacuum_allowed(uow: KernelUnitOfWork, *, vacuum: StrategyEntryVacuum,
     control: SelectionControl,universe_version_id: str | None=None) -> bool:
     """Readiness-only recovery: never relax the unresolved ENTRY fence."""
+    if control.pending_selection_mode is not None and control.pending_selection_mode.value=="static_baseline":
+        return False
     if vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None or vacuum.source_generation_id is None:
         return False
     generation=await uow.instrument_selection.get_generic_materialization_generation(vacuum.source_generation_id)
