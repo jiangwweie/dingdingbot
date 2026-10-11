@@ -7,9 +7,31 @@ export type ControlWriteBody = components["schemas"]["ControlWriteBody"];
 export type FlattenBody = components["schemas"]["FlattenBody"];
 export type FlattenPreview = components["schemas"]["FlattenPreview"];
 export type OwnerControlOperation = components["schemas"]["OwnerControlOperation"];
-export type DynamicSelectionActivationBody = ControlWriteBody & {
-  effective_session_start_ms: number;
-};
+export type SelectionPreview = components["schemas"]["GenericSelectionPreviewView"];
+export type SelectionIntent = components["schemas"]["GenericSelectionActivationBody"];
+
+export async function getSelectionPreview(strategyGroupId: string): Promise<SelectionPreview> {
+  const result = await apiClient.GET("/api/owner/v1/controls/strategies/{strategy_group_id}/selection", {
+    params: { path: { strategy_group_id: strategyGroupId } },
+  });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+  if (!result.data) throw new ApiError(502, "invalid_response", "Selection preview is missing");
+  return result.data;
+}
+
+export async function submitSelectionIntent(strategyGroupId: string, mode: "dynamic" | "static", body: SelectionIntent & {
+  rollback_baseline_id?: string; selection_epoch_id?: string;
+}): Promise<void> {
+  const result = mode === "dynamic"
+    ? await apiClient.POST("/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate", {
+      params: { path: { strategy_group_id: strategyGroupId } }, body,
+    })
+    : await apiClient.POST("/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate", {
+      params: { path: { strategy_group_id: strategyGroupId } },
+      body: { ...body, rollback_baseline_id: body.rollback_baseline_id!, selection_epoch_id: body.selection_epoch_id! },
+    });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+}
 
 export const controlsQueryKey = ["owner", "controls"] as const;
 
@@ -42,24 +64,6 @@ export async function setGlobalEntry(
     ? await apiClient.POST("/api/owner/v1/controls/entry/pause", { body })
     : await apiClient.POST("/api/owner/v1/controls/entry/resume", { body });
   if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
-}
-
-export async function activateSorDynamicSelection(
-  body: DynamicSelectionActivationBody,
-): Promise<void> {
-  const response = await fetch(
-    "/api/owner/v1/controls/strategies/SOR-001/selection/dynamic/activate",
-    {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
-  if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => null);
-    throw apiErrorFromResponse(response, payload);
-  }
 }
 
 export async function getFlattenPreview(): Promise<FlattenPreview> {

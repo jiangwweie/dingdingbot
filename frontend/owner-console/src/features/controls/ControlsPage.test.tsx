@@ -5,7 +5,8 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ownerQueryClient } from "../../app/queryClient";
 import { ControlsPage } from "./ControlsPage";
-import { activateSorDynamicSelection, getControls, getFlattenPreview } from "./api";
+import { getControls, getFlattenPreview, getSelectionPreview } from "./api";
+import { selectionFixture } from "./selectionFixtures";
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
@@ -16,7 +17,8 @@ vi.mock("./api", async (importOriginal) => {
     setGlobalEntry: vi.fn(),
     setStrategyControl: vi.fn(),
     submitFlatten: vi.fn(),
-    activateSorDynamicSelection: vi.fn(),
+    getSelectionPreview: vi.fn(),
+    submitSelectionIntent: vi.fn(),
   };
 });
 
@@ -37,6 +39,8 @@ const controlsFixture = {
 beforeEach(() => {
   ownerQueryClient.clear();
   vi.mocked(getControls).mockResolvedValue(controlsFixture);
+  vi.mocked(getSelectionPreview).mockImplementation(async group => ({ ...selectionFixture, control: null,
+    runtime: { ...selectionFixture.runtime, installed: false, strategy_group_id: group, first_blocker: "SPEC_NOT_INSTALLED" } }));
   vi.mocked(getFlattenPreview).mockResolvedValue({
     runtime_profile_id: "account-wide",
     venue_id: "binance-usdm",
@@ -102,15 +106,8 @@ it("shows one readable control operation instead of individual state-machine eve
   expect(screen.queryByText("owner-authorization:technical-id")).not.toBeInTheDocument();
 });
 
-it("keeps Dynamic activation TOTP-local and submits only after confirmation", async () => {
-  const user = userEvent.setup();
+it("never offers reactivation of retired SOR", async () => {
   render(<QueryClientProvider client={ownerQueryClient}><MemoryRouter initialEntries={["/controls"]}><ControlsPage /></MemoryRouter></QueryClientProvider>);
-  await user.click(await screen.findByRole("button", { name: "激活 Dynamic" }));
-  expect(screen.getByText("确认激活 SOR Dynamic Universe")).toBeInTheDocument();
-  await user.type(screen.getByLabelText("Google Authenticator 验证码"), "123456");
-  await user.click(screen.getByRole("button", { name: "确认激活" }));
-  expect(vi.mocked(activateSorDynamicSelection)).toHaveBeenCalledOnce();
-  expect(vi.mocked(activateSorDynamicSelection)).toHaveBeenCalledWith(
-    expect.objectContaining({ expected_version: 3 }),
-  );
+  expect(await screen.findByText("SOR 已退役")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "激活 Dynamic" })).not.toBeInTheDocument();
 });

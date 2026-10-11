@@ -1252,6 +1252,16 @@ GS-11 IN_PROGRESS；tracked前端为frontend/owner-console，本轮尚未改表�
 
 **允许**：现有Owner HTTP/application/read models、已tracked Console资产、权限tests与前端测试。启动时先定位tracked前端路径，不触碰主工作区未跟踪`frontend/`。**禁止**：API-only交付、SQL绕过、全局Crypto开关、YAML阈值编辑。
 
+#### 2026-10-11 tracked Console Generic表单首个切片（基于e2a75751，未整卡签收）
+
+使用frontend/owner-console原Radix确认框、Query client、Panel/StatusTag及CSS tokens接入四Generic每策略Selection面板；服务端OpenAPI新增预览/Static path经原allowlist生成schema.d.ts，不手写第二套接口模型。Dynamic/Static操作先重新读预览，再冻结该次period/version/baseline/epoch与唯一key；Owner只填原因/TOTP，不手填内部authority。重试冻结原key/原因，code只存组件内且失败/关闭后清除，无localStorage或日志；409刷新但不自动按新version重提，403不发session-expired event。
+
+页面分别显示最新完成/cutoff/实际membership age及Authority outcome、member blockers；DYNAMIC仅为mode，不显示无条件绿色交易授权；未安装显示NOT_INSTALLED并禁用激活，不伪装certified STATIC。MPG显示12–16 retention band说明。全局/策略控制成功后一起invalidate Selection查询，避免Pause后的旧状态继续使用；确认框打开前再refetch，不拿长期缓存的period授权。更完整deadline/source/EMPTY说明与pending operation恢复仍待后续。
+
+原SOR专用激活表单/请求函数删除，SOR strategy control标retired并禁用切换，历史API类型仍保留供兼容事实，不复活ENTRY；容量没有新增启用按钮，仍遵循本次发布默认Policy B。组件test RED→GREEN覆盖服务器period/version、Static baseline/epoch、TOTP403同key重试不logout、409不自动提交、未安装禁用、retired SOR无激活入口。
+
+末版Frontend43 passed（5.42s），TypeScript/Vite build PASS（保留>500kB chunk warning，未隐藏）；API schema生成PASS，Python Fast及architecture回归见本轮终态。该证据是组件/mock测试，不是浏览器或actual HTTP→runtime full-chain认证，GS-11仍IN_PROGRESS，GS-12未执行，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。UI skill只用于可访问标签/确认框/原组件组合，未引入新主题、依赖或配置维护面。
+
 **RED与要求**：STATIC/DYNAMIC预览/激活/回退，typed时间；version/idempotency由UI维护，TOTP在正式应用边界验证。错误step-up不跳登录，401仅真正session失效；409刷新状态但不自动提交新权限。双击/刷新返回同operation。
 
 **验证**：实际role的API integration与浏览器UI测试；每策略independent activation、Owner pause并发、source freshness/deadline/missed-periods、EMPTY原因、comparison rebase状态、MPG12..16说明；不得绿色DYNAMIC掩盖stale或rebase阻断。认证失败未安装策略显示Dynamic不可用，原Static保持，activation被拒且零side effect；不能将“不安装”显示成已认证STATIC Selector。

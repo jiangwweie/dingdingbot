@@ -14,7 +14,6 @@ import { formatOwnerReason, formatOwnerStatus } from "../../components/ui/presen
 import {
   getControls,
   getFlattenPreview,
-  activateSorDynamicSelection,
   setGlobalEntry,
   setStrategyControl,
   submitFlatten,
@@ -23,6 +22,7 @@ import {
   type OwnerControlOperation,
 } from "./api";
 import { controlsQueryKey } from "./api";
+import { SelectionControlPanel } from "./SelectionControlPanel";
 
 type PendingAction =
   | { kind: "global"; action: "pause" | "resume"; version: number }
@@ -67,10 +67,12 @@ export function ControlsPage() {
   const [totpCode, setTotpCode] = useState("");
   const [flattenPreview, setFlattenPreview] = useState<FlattenPreview | null>(null);
   const [confirmationText, setConfirmationText] = useState("");
-  const [dynamicActivationOpen, setDynamicActivationOpen] = useState(false);
 
   const refresh = async () => {
-    await ownerQueryClient.invalidateQueries({ queryKey: controlsQueryKey });
+    await Promise.all([
+      ownerQueryClient.invalidateQueries({ queryKey: controlsQueryKey }),
+      ownerQueryClient.invalidateQueries({ queryKey: ["owner", "selection"] }),
+    ]);
   };
 
   const controlMutation = useMutation({
@@ -116,21 +118,6 @@ export function ControlsPage() {
     },
   });
 
-  const dynamicActivationMutation = useMutation({
-    mutationFn: async () => activateSorDynamicSelection({
-      expected_version: data?.dynamic_selection.control_version ?? 0,
-      effective_session_start_ms: nextUtcSessionStartMs(),
-      reason: "owner_activate_sor_dynamic_selection_v0",
-      idempotency_key: requestId("owner-request-sor-dynamic"),
-      totp_code: totpCode,
-    }),
-    onSuccess: async () => {
-      setDynamicActivationOpen(false);
-      setTotpCode("");
-      await refresh();
-    },
-  });
-
   const data = controls.data;
   const pausedCount = useMemo(
     () => data?.strategies.filter((item) => item.configured_state === "paused").length ?? 0,
@@ -155,8 +142,6 @@ export function ControlsPage() {
   }
 
   const globalPaused = data.global_entry.configured_state === "paused";
-  const dynamicPending = data.dynamic_selection.pending_selection_mode === "dynamic_selection";
-  const dynamicActive = data.dynamic_selection.selection_mode === "dynamic_selection";
   const operation = data.current_operation;
   const actionNeedsTotp = pendingAction?.action === "resume";
 
@@ -214,10 +199,10 @@ export function ControlsPage() {
             return (
               <div className="strategy-control-table__row" role="row" key={strategy.strategy_group_id}>
                 <div><strong>{strategy.strategy_group_id}</strong><small title={strategy.reason}>{formatOwnerReason(strategy.reason).label}</small></div>
-                <StatusTag tone={paused ? "attention" : "success"}>{paused ? "已暂停" : "已启用"}</StatusTag>
+                <StatusTag tone={strategy.strategy_group_id === "SOR-001" ? "neutral" : paused ? "attention" : "success"}>{strategy.strategy_group_id === "SOR-001" ? "已退役" : paused ? "已暂停" : "已启用"}</StatusTag>
                 <span>{formatOwnerStatus(strategy.effective_state)}</span>
                 <span className="tabular-number">v{strategy.control_version} · {formatTime(strategy.updated_at_ms)}</span>
-                <Button onClick={() => setPendingAction({ kind: "strategy", action: paused ? "resume" : "pause", strategyGroupId: strategy.strategy_group_id, version: strategy.control_version })}>
+                <Button disabled={strategy.strategy_group_id === "SOR-001"} onClick={() => setPendingAction({ kind: "strategy", action: paused ? "resume" : "pause", strategyGroupId: strategy.strategy_group_id, version: strategy.control_version })}>
                   {paused ? "恢复" : "暂停"}
                 </Button>
               </div>
@@ -226,17 +211,8 @@ export function ControlsPage() {
         </div>
       </Panel>
 
-      <Panel title="SOR Dynamic Universe">
-        <div className="control-row control-row--global">
-          <div className="control-row__identity">
-            <strong>首个 Dynamic Selection Session</strong>
-            <span>固定 24 Candidate · 当前 Static baseline 将在下一 UTC Session 后由正式 Materialization 接管</span>
-          </div>
-          <StatusTag tone={dynamicActive ? "success" : "attention"}>{dynamicActive ? "已启用" : dynamicPending ? "已授权" : "待激活"}</StatusTag>
-          <div className="control-row__facts"><span>下一 UTC Session</span><strong>{formatTime(nextUtcSessionStartMs())}</strong></div>
-          <Button disabled={dynamicActive || dynamicPending} onClick={() => setDynamicActivationOpen(true)}>{dynamicActive ? "Dynamic 已启用" : dynamicPending ? "等待生效" : "激活 Dynamic"}</Button>
-        </div>
-      </Panel>
+      {(["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"] as const).map(group => <SelectionControlPanel key={group} strategyGroupId={group} />)}
+      <Panel title="SOR 已退役"><p>仅保留历史与兼容能力，不再提供 ENTRY Resume 或 Dynamic 激活。</p></Panel>
 
       <Panel title="当前受控操作">
         {operation ? (
@@ -298,24 +274,6 @@ export function ControlsPage() {
         </AlertDialog.Portal>
       </AlertDialog.Root>
 
-      <AlertDialog.Root open={dynamicActivationOpen} onOpenChange={(open) => { if (!open) { setDynamicActivationOpen(false); setTotpCode(""); } }}>
-        <AlertDialog.Portal>
-          <AlertDialog.Overlay className="control-dialog__overlay" />
-          <AlertDialog.Content className="control-dialog">
-            <AlertDialog.Title>确认激活 SOR Dynamic Universe</AlertDialog.Title>
-            <AlertDialog.Description>将为下一 UTC Session 写入一次性 Dynamic Selection 请求。当前 Static Universe 在正式切换前继续作为权威集合。</AlertDialog.Description>
-            <div className="mt-3 grid gap-1 text-[11px] text-[var(--color-text-secondary)]"><span>下一 UTC Session</span><strong className="tabular-number text-[var(--color-text-primary)]">{formatTime(nextUtcSessionStartMs())}</strong></div>
-            <label className="control-field">Google Authenticator 验证码<input autoComplete="one-time-code" inputMode="numeric" maxLength={8} value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, ""))} /></label>
-            {dynamicActivationMutation.isError ? <p className="control-dialog__error">激活未提交；请刷新当前状态后重试。</p> : null}
-            <div className="control-dialog__actions"><AlertDialog.Cancel asChild><Button>取消</Button></AlertDialog.Cancel><AlertDialog.Action asChild><Button disabled={totpCode.length < 6 || dynamicActivationMutation.isPending} onClick={(event) => { event.preventDefault(); dynamicActivationMutation.mutate(); }}>确认激活</Button></AlertDialog.Action></div>
-          </AlertDialog.Content>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
     </AppShell>
   );
-}
-
-function nextUtcSessionStartMs(nowMs = Date.now()): number {
-  const dayMs = 24 * 60 * 60 * 1000;
-  return (Math.floor(nowMs / dayMs) + 1) * dayMs;
 }

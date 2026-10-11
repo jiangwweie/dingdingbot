@@ -268,6 +268,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Generic Selection */
+        get: operations["preview_generic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate": {
         parameters: {
             query?: never;
@@ -279,6 +296,23 @@ export interface paths {
         put?: never;
         /** Activate Dynamic Selection */
         post: operations["activate_dynamic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_dynamic_activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Generic Static Selection */
+        post: operations["activate_generic_static_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_static_activate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1186,6 +1220,121 @@ export interface components {
          * @enum {string}
          */
         Freshness: "fresh" | "stale" | "unavailable" | "contradictory";
+        /** GenericSelectionActivationBody */
+        GenericSelectionActivationBody: {
+            /** Effective Period Anchor Ms */
+            effective_period_anchor_ms: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** GenericSelectionMemberReadonlyView */
+        GenericSelectionMemberReadonlyView: {
+            facts: components["schemas"]["GenericSelectionMemberRuntimeStatus"];
+            /** First Blocker */
+            first_blocker: string | null;
+        };
+        /**
+         * GenericSelectionMemberRuntimeStatus
+         * @description Bounded display facts, not Entry eligibility or trading authority.
+         */
+        GenericSelectionMemberRuntimeStatus: {
+            /** Comparison Armed At Ms */
+            comparison_armed_at_ms: number | null;
+            /** Comparison Transition Revision */
+            comparison_transition_revision: number | null;
+            /** Entry Submit Enabled */
+            entry_submit_enabled: boolean | null;
+            /** Episode Comparison Transition Revision */
+            episode_comparison_transition_revision: number | null;
+            /** Episode State */
+            episode_state: string | null;
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** Owner Policy Id */
+            owner_policy_id: string;
+            /** Policy Enabled */
+            policy_enabled: boolean | null;
+            /** Policy Version */
+            policy_version: number | null;
+            /** Runtime Scope Id */
+            runtime_scope_id: string;
+            /** Scope Entry Enabled */
+            scope_entry_enabled: boolean;
+            /** Warm Valid Until Ms */
+            warm_valid_until_ms: number | null;
+        };
+        /** GenericSelectionPreviewView */
+        GenericSelectionPreviewView: {
+            /** Cadence Hours */
+            cadence_hours: number;
+            control: components["schemas"]["SelectionControl"] | null;
+            /** Next Effective Period Anchor Ms */
+            next_effective_period_anchor_ms: number;
+            /** Next Eligibility Not Before Ms */
+            next_eligibility_not_before_ms: number;
+            runtime: components["schemas"]["GenericSelectionRuntimeReadonlyView"];
+        };
+        /** GenericSelectionRuntimeReadonlyView */
+        GenericSelectionRuntimeReadonlyView: {
+            /** Current Authority Id */
+            current_authority_id: string | null;
+            /** Current Authority Outcome */
+            current_authority_outcome: string | null;
+            /** First Blocker */
+            first_blocker: string | null;
+            /** Installed */
+            installed: boolean;
+            /** Latest Successful Committed At Ms */
+            latest_successful_committed_at_ms: number | null;
+            /** Latest Successful Completion Age Ms */
+            latest_successful_completion_age_ms: number | null;
+            /** Latest Successful Cutoff Age Ms */
+            latest_successful_cutoff_age_ms: number | null;
+            /** Latest Successful Cutoff At Ms */
+            latest_successful_cutoff_at_ms: number | null;
+            /** Latest Successful Selection Age Ms */
+            latest_successful_selection_age_ms: number | null;
+            /** Latest Successful Snapshot Id */
+            latest_successful_snapshot_id: string | null;
+            /** Members */
+            members: components["schemas"]["GenericSelectionMemberReadonlyView"][];
+            /** Membership Source Age Ms */
+            membership_source_age_ms: number | null;
+            /** Membership Source Cutoff At Ms */
+            membership_source_cutoff_at_ms: number | null;
+            /** Membership Source Snapshot Id */
+            membership_source_snapshot_id: string | null;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            selection_mode: components["schemas"]["SelectionMode"] | null;
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+        };
+        /** GenericStaticSelectionActivationBody */
+        GenericStaticSelectionActivationBody: {
+            /** Effective Period Anchor Ms */
+            effective_period_anchor_ms: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Rollback Baseline Id */
+            rollback_baseline_id: string;
+            /** Selection Epoch Id */
+            selection_epoch_id: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
         /** GlobalEntryView */
         GlobalEntryView: {
             /** Active Ticket Count */
@@ -2952,6 +3101,37 @@ export interface operations {
             };
         };
     };
+    preview_generic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenericSelectionPreviewView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     activate_dynamic_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_dynamic_activate_post: {
         parameters: {
             query?: never;
@@ -2963,7 +3143,42 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DynamicSelectionActivationBody"];
+                "application/json": components["schemas"]["DynamicSelectionActivationBody"] | components["schemas"]["GenericSelectionActivationBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectionControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_generic_static_selection_api_owner_v1_controls_strategies__strategy_group_id__selection_static_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GenericStaticSelectionActivationBody"];
             };
         };
         responses: {

@@ -21,6 +21,8 @@ const approvedPaths = [
   "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
   "/api/owner/v1/controls/strategies/{strategy_group_id}/events/{event_spec_id}/exit-profile",
   "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate",
+  "/api/owner/v1/controls/strategies/{strategy_group_id}/selection",
+  "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate",
   "/api/owner/v1/entry-scope",
   "/api/owner/v1/instruments",
   "/api/owner/v1/instruments/refresh",
