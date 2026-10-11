@@ -168,7 +168,8 @@ async def test_generic_resident_short_circuit_has_no_job_or_market_call(mode,pau
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-async def test_generic_materialization_tick_uses_effective_period_not_current_selector_cutoff(monkeypatch,group):
+@pytest.mark.parametrize("late_first_pending",[False,True])
+async def test_generic_materialization_tick_uses_effective_period_not_current_selector_cutoff(monkeypatch,group,late_first_pending):
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateSelectionMaterializationResult,
         MaterializationDisposition,
@@ -178,14 +179,19 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
     cutoff=100*3600000
     expected=(cutoff-3600000)//(spec.cadence_hours*3600000)*(spec.cadence_hours*3600000)
     control=SelectionControl(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,
-        selection_mode=SelectionMode.DYNAMIC_SELECTION,pending_selection_mode=None,pending_effective_period_anchor_ms=None,
-        pending_authorization_id=None,control_version=2,rollback_baseline_id=None,selection_epoch_id="epoch:materialize",updated_at_ms=cutoff-1)
+        selection_mode=SelectionMode.STATIC_BASELINE if late_first_pending else SelectionMode.DYNAMIC_SELECTION,
+        pending_selection_mode=SelectionMode.DYNAMIC_SELECTION if late_first_pending else None,
+        pending_effective_period_anchor_ms=expected-spec.cadence_hours*3600000 if late_first_pending else None,
+        pending_authorization_id="authorization:first" if late_first_pending else None,
+        control_version=2,rollback_baseline_id=None,selection_epoch_id="epoch:materialize",updated_at_ms=cutoff-1)
     class Repo:
         async def get_selection_control(self,*_): return control
         async def get_generic_spec(self,*_): return spec
-        async def get_latest_unfinished_generic_generation(self,**_): return None
+        async def get_latest_unfinished_generic_generation(self,**_):
+            return SimpleNamespace(materialization_generation_id="generation:original-first") if late_first_pending else None
         async def get_current_entry_vacuum(self,**_): return None
         async def get_selection_job(self,**kwargs):
+            assert not late_first_pending,"later period Snapshot must not displace first activation recovery"
             assert kwargs["period_anchor_ms"]==expected
             assert kwargs["selection_epoch_id"]=="epoch:materialize"
             return SimpleNamespace(state="SNAPSHOT_READY",selection_snapshot_id="snapshot:effective")
@@ -202,8 +208,12 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
         request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,worker_id="materialize",
             now_ms=cutoff+8),clock_ms=lambda:cutoff+8)
     assert result.status is MaterializationRuntimeStatus.ADVANCED
-    assert calls[-1].selection_snapshot_id=="snapshot:effective"
-    assert calls[0].period_anchor_ms==expected
+    if not late_first_pending:
+        assert calls[-1].selection_snapshot_id=="snapshot:effective"
+    if late_first_pending:
+        assert calls[0].materialization_generation_id=="generation:original-first"
+    else:
+        assert calls[0].period_anchor_ms==expected
 
 
 @pytest.mark.asyncio

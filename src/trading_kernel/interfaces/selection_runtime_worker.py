@@ -451,7 +451,10 @@ async def _run_generic_materialization_runtime_once(
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id)
         job=None
-        if cutoff>0 and control.selection_epoch_id is not None and control.permits_dynamic_period(cutoff):
+        first_pending_due=control.selection_mode is SelectionMode.STATIC_BASELINE and (
+            control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and control.pending_effective_period_anchor_ms==cutoff)
+        if cutoff>0 and control.selection_epoch_id is not None and control.permits_dynamic_period(cutoff) and (
+            control.selection_mode is SelectionMode.DYNAMIC_SELECTION or first_pending_due):
             job=await uow.instrument_selection.get_selection_job(selection_spec_id=request.selection_spec_id,
                 selection_epoch_id=control.selection_epoch_id,period_anchor_ms=cutoff)
     step: CoordinateGenericStaticRequest | CoordinateGenericSnapshotRequest | CoordinateGenericGenerationRequest | CoordinateGenericPeriodRequest

@@ -2345,7 +2345,7 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("head_condition,target_stage",[(condition,"warming") for condition in
-    ("expired","expired_live_lease","owner_paused","control_drift","target_timeout","target_pause")]+[("target_timeout","staged"),("target_pause","staged")])
+    ("expired","expired_live_lease","owner_paused","control_drift","target_timeout","target_pause","target_first_expiry")]+[("target_timeout","staged"),("target_pause","staged"),("target_first_expiry","staged")])
 @pytest.mark.parametrize("groups",[("MI-001","CPM-RO-001"),("MPG-001","BRF2-001")])
 async def test_generic_global_queue_skips_ineligible_head_before_cleanup(database: AsyncEngine,tmp_path: Path,head_condition: str,target_stage: str,groups: tuple[str,str]) -> None:
     import os
@@ -2432,7 +2432,17 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
             async with PostgresKernelUnitOfWork(database) as uow:
                 assert (await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id))[0].lifecycle_state.value=="staged"
             now+=2
-        if head_condition=="target_pause":
+        if head_condition=="target_first_expiry":
+            async with PostgresKernelUnitOfWork(database) as uow:
+                control=await uow.instrument_selection.get_selection_control(groups[0])
+            source=next_input(inputs(groups[0])).model_copy(update={"selection_epoch_id":control.selection_epoch_id})
+            empty_source=source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
+            selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=Market(empty_source),
+                request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=control.selection_epoch_id,
+                    period_anchor_ms=source.feature_cutoff_at_ms,worker_id="empty-superseder"),clock_ms=lambda:source.feature_cutoff_at_ms+20)
+            assert selected.outcome=="SNAPSHOT_READY"
+            now=source.feature_cutoff_at_ms+HOUR+8
+        elif head_condition=="target_pause":
             now+=4
             async with PostgresKernelUnitOfWork(database) as uow:
                 owner=await uow.owner_controls.get_strategy_control(groups[0])
@@ -2443,7 +2453,9 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
         else:
             now=warming.fenced_at_ms+inputs(groups[0]).spec.materialization_timeout_ms
         failed=await child_tick(groups[0],now)
-        if head_condition=="target_pause":
+        if head_condition=="target_first_expiry":
+            assert failed["reason_code"]=="MATERIALIZATION_PERIOD_EXPIRED",failed
+        elif head_condition=="target_pause":
             assert failed["disposition"]=="OWNER_PAUSED",failed
         else:
             assert failed["reason_code"]=="MATERIALIZATION_TIMEOUT",failed
@@ -2455,6 +2467,10 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
             assert (await uow.strategy_universes.get_current(inputs(groups[0]).spec.event_spec_id)).universe_version_id==head.previous_events[0].universe_version_id
             old_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id)
             assert old_vacuum is not None and old_vacuum.blocks_new_entry
+            if head_condition=="target_first_expiry":
+                failed_control=await uow.instrument_selection.get_selection_control(groups[0])
+                assert failed_control.selection_mode.value=="static_baseline"
+                assert failed_control.pending_effective_period_anchor_ms==CUTOFF
         now+=1
     elif head_condition.startswith("expired"):
         now=snapshots[groups[0]].expires_at_ms+1

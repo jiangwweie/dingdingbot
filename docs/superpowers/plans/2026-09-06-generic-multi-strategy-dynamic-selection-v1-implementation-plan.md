@@ -1140,6 +1140,14 @@ STAGED readiness/certification/比较projection采用既有显式测试前置夹
 
 末版八种head/target分支×两策略组合+原materializer并发共17 passed（66.40s），Unit/Architecture/API1444 passed（20.13s），Ruff、Mypy161 files、diff PASS，所有进程终态。本轮仅tests/docs改变，production_modified=NO。queue过期/paused/drift及warming/STAGED timeout/Pause释放已有上述证据；SUPERSEDED接管与三个Plane同时resident多period/crash recovery、status剩余要求仍需整卡证明，GS-10 IN_PROGRESS，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
 
+#### 2026-10-11 first pending expiry被后继Snapshot遮蔽修复（基于c79dc18d，未整卡签收）
+
+新增下一cutoff正式Runner成功Snapshot时的queue/target矩阵，真实child runtime RED：首次Static pending的原warming/STAGED Generation尚未完成，后继周期Job READY使runtime优先路由后继Snapshot；Coordinator按首次Owner授权原period边界正确返回STATIC_BASELINE，但原Generation timeout/expiry cleanup不再获得tick，持续占槽/Vacuum。首次授权不能被下一Snapshot扩大，不能用伪造Dynamic/VALID_EMPTY Authority补救。
+
+现在STATIC_BASELINE+pending Dynamic只在pending原cutoff读取Job作新Snapshot路由；超过该cutoff优先原unfinished Generation或Vacuum source恢复，按既有period expiry转FAILED_CLOSED、target abandoned并释放global slot。原mode/pending来源保持正式恢复链，不自动下一期激活，旧Static current不变且Vacuum继续fenced；已启用DYNAMIC仍消费最新有效Job，不改变latest-wins规则。四策略unit明确后一period Job不得抢占首次Generation tick。
+
+两组MI→CPM、MPG→BRF2×warming/STAGED child process新分支4 passed（27.34s），修复后原首次Generation正式MATERIALIZATION_PERIOD_EXPIRED，而非被后继EMPTY输入的STATIC_BASELINE空路由吞掉。末版queue/first-pending/unfenced recovery关联PG28 passed（97.60s）；Fast Unit/Architecture/API1448 passed（20.52s），Ruff、Mypy161 files、diff PASS，所有verification进程终态。GS-10 IN_PROGRESS，实际Dynamic SUPERSEDED接管与三个Plane同时resident多period等未由这一首次激活特例证明；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。
