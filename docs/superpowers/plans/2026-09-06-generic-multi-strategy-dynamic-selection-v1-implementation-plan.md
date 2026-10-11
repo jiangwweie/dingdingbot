@@ -14,6 +14,9 @@ gs13_authority: WAIT_OWNER_CONFIRMATION
 completed_execution_scope: GS-04_TO_GS-11
 completed_amendment_scope: CAP-01_LOCAL_ACCEPTED
 local_acceptance_status: GS04_GS11_ACCEPTED
+gs12_local_performance_status: VERIFIED_BOUNDED_SAMPLES
+gs12_long_run_status: PENDING_SERVER_VALIDATION
+server_test_authority: WAIT_OWNER_CONFIRMATION
 production_authority: NONE
 further_feature_research: CLOSED
 owner_amendments: ACCEPTED_2026-09-21
@@ -1391,6 +1394,28 @@ FOUR_PROCESS_IDLE_PERFORMANCE_PASS：1 passed（51.69s），累计CPU fraction0.
 首轮missing helper RED；随后旧cutoff造成clock早于ENTRY、误读Command.exchange_order_id、日志idle suppression导致计数timeout、TP1 kind应为take_profit而非tp1等测试前置FAIL如实修正。时间选择为严格future CPM cutoff，Safety facts在启动前冻结；不通过手写Aggregate/新warm fields或修改生产Gate修复。末版完整2 passed（54.11s）：MPG Lifecycle5/Reconciliation3，peak404729856 bytes、主体19.01s；MI Lifecycle8/Reconciliation3，peak405200896 bytes、主体23.23s。两容器finally正常停止，独占lock仅一个heavy test，无本机长跑。Fast Unit/Architecture/API1573 passed（22.00s），Ruff/Mypy161/diff PASS；没有修改production code，只扩展tests/support。
 
 本地idle/有限warm boundary/有保护Safety资源样本已取得；长期churn八指标、complete missed-close ledger、长期missing/second miss与full fault workload仍PENDING_SERVER_VALIDATION，工具/状态不宣称GS-12 complete或GS-13 PASS。服务器执行须Owner授权且隔离于生产；GS-13及所有准备/R4仍WAIT_OWNER_CONFIRMATION。
+
+#### 2026-10-11 GS-12 completion audit / 当前停止边界（基于8816294e）
+
+本次completion默认未证明，再按原卡逐项审计。不扩大已完成卡、不缩小GS-12定义、不把服务器待验证伪装本地完成。当前无活跃测试container，只有用户原dingdingbot-pg；没有已启动的服务器job可等待。Owner最新偏好使本机long run关闭，服务器操作又未授权；该剩余不是程序仍在跑，也不是已完成等待部署。
+
+| 原要求 | 当前直接证据 | 完成判定 |
+| --- | --- | --- |
+| CAP-01不可变B与默认发布、不恢复SOR | approved amendment、正式identity原子/幂等测试、自然double-Ticket/cap拒绝链；GS-12新资源前置实际B | LOCAL_ACCEPTED，非生产启用 |
+| GS-10独立plane/lease/FIFO/restart/current-close | 原GS10_LOCAL_ACCEPTED逐项表、actual resident正常/changed/SIGKILL/timeout与zero-file证据 | LOCAL_ACCEPTED |
+| GS-11正式role HTTP+Console/step-up/idempotency/Pause | 原GS11_LOCAL_ACCEPTED逐项表、actual PG roles链与独立真实Chrome fixture明确分层 | LOCAL_ACCEPTED |
+| 1CPU/1GiB四进程、idle CPU<10%/memory<80% | 真实four children同cgroup；idle2.30%/383.7MiB；有限warming boundary395.7MiB/277.54s | VERIFIED_BOUNDED_SAMPLES，非全周期性能认证 |
+| Safety不被source hang/warming饿死、Ticket immutable | MPG/MI自然protected链+CPM挂起warming，四进程Lifecycle/Reconciliation；exact stop/TP1/Command不改，继续terminal chain | 本地两个录制场景PASS，非实盘／全面压力认证 |
+| 固定Candidate24、真实非空Desired churn与Comparison rebase | common frozen tape/canonical core/hysteresis合同；既有actual changed-set与rebase回归 | workload/分支PASS；完整24h runtime trace MISSING |
+| MPG/MI24 due、CPM/BRF2各6、SOR兼容due | GS-00安装资格与短场景证明；长跑仅bootstrap与首测量period部分推进、主动停止 | PENDING_SERVER_VALIDATION，不能称60/60 |
+| 八项全量指标、p95 sample N与Vacuum duty、zero missed close | metric utility未取得完整run；局部cgroup样本不是p95/union/ledger替代 | PENDING_SERVER_VALIDATION |
+| source/close/command完整ledger与signed recording | 短负载250 source digests、zero Command；自然partial/unknown/cancel identity回归 | 局部边界PASS；完整负载ledger MISSING |
+| 独立完整fault段：长期missing/second miss/连续fresh failure/Pause/cancel unknown/SOR staged/Static rollback | 当前代码与actual PG/fault branch回归存在；未在同一冻结资源workload跑完整fault suite | PENDING_SERVER_VALIDATION |
+| exact workload/candidate/environment与最后逐项验收 | commit8816294e及上述各切片身份有记录；没有完整long evidence binding | GS-12 NOT COMPLETE；GS-13未执行 |
+
+剩余所需授权仅为后续明确的**隔离服务器工程测试**：独立test数据库与工作目录、无交易所写凭据、不接生产DSN，不部署/停止生产Worker、不改Owner Policy或实盘Authority；资源余量与冲突必须先readonly核验。它与GS-13/R4/软件部署/真实交易许可分开，本段不授予其中任何一项。服务器资源不足或同生产争用时不得启动，不拿生产Safety吞吐换测试速度。
+
+本机还允许不超过600s且单重任务的必要回归；不自动重新开启long mode、不新增经济研究。当前active_scope保持GS-12，completed仍GS-04_TO_GS-11/CAP-01，GS-12 local performance与server pending分别显式记录。需要Owner明确服务器测试范围后才能继续剩余长期证据；完成目标不能仅从这份audit文档得出。
 
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。
 
