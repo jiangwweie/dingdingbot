@@ -24,6 +24,48 @@ class SourceProvenanceInsufficient(RuntimeError):
     """The source cannot justify an unchanged Static comparison checkpoint."""
 
 
+def count_nonquiescent_source_vacuums(connection: sa.Connection) -> int:
+    """Keep a proved, drained standalone Owner pause as a negative fence.
+
+    This never resolves a Vacuum or grants ENTRY. Generation-linked pauses,
+    missing drain evidence, resumed controls and pending switches still block.
+    Both advisory verification and the locked pre-DDL check use this predicate.
+    """
+    return int(connection.scalar(sa.text("""
+        SELECT count(*) FROM brc_strategy_entry_vacuums_current v
+        WHERE v.resolved_at_ms IS NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_strategy_entry_controls_current o
+          JOIN brc_strategy_entry_control_events oe
+            ON oe.strategy_entry_control_event_id=o.last_event_id
+            AND oe.strategy_group_id=o.strategy_group_id
+            AND oe.control_version=o.control_version
+          JOIN brc_strategy_selection_control_current s
+            ON s.strategy_group_id=o.strategy_group_id
+            AND s.selection_spec_id=v.selection_spec_id
+          WHERE o.strategy_group_id=v.strategy_group_id
+            AND v.state='OWNER_PAUSED' AND v.first_blocker='OWNER_PAUSED'
+            AND v.source_generation_id IS NULL
+            AND v.drained_at_ms>=v.fenced_at_ms
+            AND o.entry_state='paused' AND oe.operation='pause'
+            AND oe.target_state='paused' AND oe.created_at_ms=o.updated_at_ms
+            AND o.updated_at_ms<=v.fenced_at_ms
+            AND s.pending_selection_mode IS NULL
+            AND s.pending_authorization_id IS NULL
+            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events origin
+              WHERE origin.entry_vacuum_id=v.entry_vacuum_id
+                AND origin.event_sequence=1 AND origin.event_type='OPEN'
+                AND origin.occurred_at_ms=v.fenced_at_ms
+                AND origin.payload->>'intended_outcome'='OWNER_PAUSED')
+            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events drained
+              WHERE drained.entry_vacuum_id=v.entry_vacuum_id
+                AND drained.event_sequence=v.projection_version
+                AND drained.event_type='OWNER_PAUSED'
+                AND drained.occurred_at_ms=v.drained_at_ms
+                AND drained.payload->'entry_drain_complete'='true'::jsonb)
+        )
+    """)) or 0)
+
+
 class StaticComparisonSourceEvidence(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -96,6 +96,110 @@ NEW_OWNER_READ_TABLES = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "undrained", "enabled", "missing_open", "missing_drain", "pending", "reconfiguring"])
+async def test_drained_owner_pause_fence_is_preserved_not_resumed_by_upgrade(fault: str | None) -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _generic_source_preservation_manifest,
+        _verify_compatible_source,
+    )
+
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    session = 1_704_067_200_000
+    try:
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0007_exit_profile_authority_v1")
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await seed_runtime_authority(uow, RuntimeAuthoritySeedRequest(
+                account_id="paused-source", runtime_commit="a" * 40,
+                schema_revision="0007_exit_profile_authority_v1", seeded_at_ms=session,
+            ))
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("""
+                INSERT INTO brc_instrument_selection_specs VALUES
+                ('sor-dynamic-selection-v0','SOR-001','sgv:SOR-001:v4',1,
+                 'sor_dynamic_v0',:digest,'active',:at)
+            """), {"digest": "sha256:" + "a" * 64, "at": session})
+            for side in ("long", "short"):
+                await conn.execute(sa.text("INSERT INTO brc_instrument_selection_spec_events VALUES('sor-dynamic-selection-v0',:event,:side)"),
+                    {"event": f"event_spec:SOR-001:SOR-{side.upper()}:v4", "side": side})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_strategy_selection_control_current
+                VALUES('SOR-001','sor-dynamic-selection-v0','dynamic_selection',NULL,NULL,NULL,1,NULL,:at)
+            """), {"at": session})
+        async with engine.begin() as conn:
+            # Frozen 0007 source facts; current repositories must not read old schemas.
+            await conn.execute(sa.text("""
+                INSERT INTO brc_owner_authorizations VALUES
+                ('owner:pause-source','strategy_pause','owner','session',:digest,
+                 '{"strategy_group_id":"SOR-001"}'::jsonb,'owner-request:pause-source',:at)
+            """), {"digest": "sha256:" + "b" * 64, "at": session})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_strategy_entry_control_events VALUES
+                ('strategy-control:pause-source','SOR-001',2,'pause','paused',
+                 'owner:pause-source','permanent_sor_retirement','{}'::jsonb,:at)
+            """), {"at": session})
+            await conn.execute(sa.text("""
+                UPDATE brc_strategy_entry_controls_current SET entry_state='paused',
+                  control_version=2,last_event_id='strategy-control:pause-source',updated_at_ms=:at
+                WHERE strategy_group_id='SOR-001'
+            """), {"at": session})
+            await conn.execute(sa.text("""
+                INSERT INTO brc_strategy_entry_vacuums_current VALUES
+                ('vacuum:preserve-owner-pause','SOR-001','sor-dynamic-selection-v0',:at,NULL,
+                 'OWNER_PAUSED',:at,:drained,NULL,'OWNER_PAUSED',3)
+            """), {"at": session, "drained": session + 1000})
+            for sequence, event_type, payload, at in (
+                (1, "OPEN", {"intended_outcome": "OWNER_PAUSED"}, session),
+                (2, "DRAINING_ENTRY", {"projection_version": 2}, session + 500),
+                (3, "OWNER_PAUSED", {"entry_drain_complete": True}, session + 1000),
+            ):
+                if (fault == "missing_open" and sequence == 1) or (fault == "missing_drain" and sequence == 3):
+                    continue
+                await conn.execute(sa.text("INSERT INTO brc_strategy_entry_vacuum_events VALUES(:id,'vacuum:preserve-owner-pause',:seq,:type,CAST(:payload AS jsonb),:at)"),
+                    {"id": f"pause-source-event:{sequence}", "seq": sequence, "type": event_type, "payload": json.dumps(payload), "at": at})
+            if fault == "undrained":
+                await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='DRAINING_ENTRY',drained_at_ms=NULL"))
+            elif fault == "enabled":
+                await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id='SOR-001'"))
+            elif fault == "pending":
+                await conn.execute(sa.text("""
+                    INSERT INTO brc_owner_authorizations VALUES
+                    ('pending:source','selection_mode_change','owner','totp_step_up',:digest,
+                     '{"strategy_group_id":"SOR-001"}'::jsonb,'owner-request:pending-source',:at)
+                """), {"digest": "sha256:" + "c" * 64, "at": session})
+                await conn.execute(sa.text("UPDATE brc_strategy_selection_control_current SET pending_selection_mode='dynamic_selection',pending_effective_session_start_ms=:at,pending_authorization_id='pending:source'"), {"at": session + 86_400_000})
+            elif fault == "reconfiguring":
+                await conn.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET state='OPEN',first_blocker='AUTHORITY_GAP'"))
+            before = await _generic_source_preservation_manifest(conn)
+        source = await _verify_compatible_source(url, "0007_exit_profile_authority_v1")
+        if fault is not None:
+            assert source["migration_gate"]["open_selection_vacuums"] == 1
+            with pytest.raises(AssertionError, match="flat quiescent source: brc_strategy_entry_vacuums_current"):
+                await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+            async with engine.connect() as conn:
+                assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0007_exit_profile_authority_v1"
+                assert await conn.scalar(sa.text("SELECT to_regclass('public.brc_generic_dynamic_selection_specs_v1')")) is None
+            return
+        assert source["migration_gate"]["open_selection_vacuums"] == 0
+        assert source["provenance"]["status"] == "pass"
+        await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
+        await engine.dispose()
+        async with engine.connect() as conn:
+            after = await _generic_source_preservation_manifest(conn)
+            assert after["digest"] == before["digest"]
+            row = (await conn.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current"))).mappings().one()
+            assert row["state"] == "OWNER_PAUSED" and row["resolved_at_ms"] is None
+            assert row["projection_version"] == 3 and row["drained_at_ms"] == session + 1000
+            assert await conn.scalar(sa.text("SELECT entry_state FROM brc_strategy_entry_controls_current WHERE strategy_group_id='SOR-001'")) == "paused"
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_generations")) == 0
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["pending","claimed","review_pending","needs_intervention"])
 async def test_0007_nonterminal_owner_operation_stops_upgrade_before_target_ddl(state: str) -> None:
     from scripts.trading_kernel.verify_schema import _verify_compatible_source

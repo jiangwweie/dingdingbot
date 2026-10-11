@@ -3,14 +3,16 @@ title: CAPACITY_V0_OWNER_AMENDMENT
 status: BUSINESS_SEMANTICS_FROZEN
 task_id: CAP-01
 implementation_status: LOCAL_ACCEPTED
-authorized_execution_scope: CAP-01_GS-10_GS-11_GS-12
-gs13_authority: WAIT_OWNER_CONFIRMATION
-production_authority: NONE
+authorized_execution_scope: CAP-01_GS-10_TO_GS-13_AND_STOPPED_FLAT_DEPLOYMENT
+gs13_authority: OWNER_AUTHORIZED
+production_authority: STOPPED_FLAT_DEPLOYMENT_AFTER_REQUIRED_GATES
 ---
 
 # Capacity V0 — Owner Amendment / Task Card
 
 ## 1. 权威、目标与来源
+
+**2026-10-11 最新授权覆盖下方历史等待边界。** Owner 已授权必要发布保证及本次统一 stopped-flat 部署；Policy B 仍由正式部署 authority 事务自动切换，不要求额外 Owner 操作。长期 soak 不再作为部署前置，明确未通过并延后生产观测，不豁免平仓、preservation、数值/角色/identity gate。SOR-001 的永久停用及原暂停围栏必须保全。最新范围以关联 Implementation Plan 开头的 Owner 部署决策为准。
 
 **业务语义已由Owner在2026-10-10本任务明确冻结。** 本文件是Generic发布的独立补充任务，不是生产Policy，不替代当前PostgreSQL事实。Owner最新决定：本次上线默认切换新容量，不再需要部署后手动启用；当前仍仅允许本地代码/测试，GS-13和实际部署须另行确认。来源为本任务Owner确认及SOR停止补充说明；关联[Generic Implementation Plan](2026-09-06-generic-multi-strategy-dynamic-selection-v1-implementation-plan.md)。
 

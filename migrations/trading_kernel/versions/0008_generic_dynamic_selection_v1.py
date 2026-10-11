@@ -15,6 +15,7 @@ from alembic import op
 
 from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
     certify_0007_static_comparison_sources_sync,
+    count_nonquiescent_source_vacuums,
 )
 
 revision: str = "0008_generic_dynamic_selection_v1"
@@ -3284,7 +3285,9 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
         "brc_runtime_scopes_current, brc_exposure_episode_current, "
         "brc_comparative_projection_current, brc_facts_current, brc_readiness_current, "
         "brc_strategy_selection_control_current, brc_strategy_universe_materialization_generations, brc_strategy_selection_rollback_baselines, "
-        "brc_strategy_entry_vacuums_current, brc_owner_control_operations_current IN SHARE ROW EXCLUSIVE MODE"
+        "brc_strategy_entry_vacuums_current, brc_strategy_entry_vacuum_events, "
+        "brc_strategy_entry_controls_current, brc_strategy_entry_control_events, "
+        "brc_owner_control_operations_current IN SHARE ROW EXCLUSIVE MODE"
     ))
     predicates = {
         "brc_trade_aggregates": "status NOT IN ('terminal','leverage_rejected','entry_rejected','entry_reconciled_absent')",
@@ -3295,12 +3298,13 @@ def _require_flat_quiescent_source(bind: sa.Connection) -> None:
         "brc_runtime_incidents": "status='open'",
         "brc_strategy_universe_versions": "lifecycle_state IN ('warming','staged')",
         "brc_strategy_universe_materialization_generations": "lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')",
-        "brc_strategy_entry_vacuums_current": "resolved_at_ms IS NULL",
         "brc_owner_control_operations_current": "state NOT IN ('completed','blocked')",
     }
     for table, predicate in predicates.items():
         if bind.scalar(sa.text(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {predicate})")):
             raise RuntimeError(f"0008 requires flat quiescent source: {table}")
+    if count_nonquiescent_source_vacuums(bind):
+        raise RuntimeError("0008 requires flat quiescent source: brc_strategy_entry_vacuums_current")
 
 
 def _comparison_tables() -> None:

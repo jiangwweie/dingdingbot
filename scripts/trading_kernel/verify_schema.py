@@ -35,6 +35,7 @@ from src.trading_kernel.domain.strategy_registry import (
 from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
     SourceProvenanceInsufficient,
     certify_0007_static_comparison_sources,
+    count_nonquiescent_source_vacuums,
 )
 from src.trading_kernel.infrastructure.pg_models import metadata
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
@@ -931,9 +932,9 @@ async def _verify_generic_selection_source(
                 "nonterminal_owner_operations": int((await connection.scalar(text(
                     "SELECT count(*) FROM brc_owner_control_operations_current WHERE state NOT IN ('completed','blocked')"
                 ))) or 0),
-                "open_selection_vacuums": int((await connection.scalar(text(
-                    "SELECT count(*) FROM brc_strategy_entry_vacuums_current WHERE resolved_at_ms IS NULL"
-                ))) or 0),
+                "open_selection_vacuums": await connection.run_sync(
+                    count_nonquiescent_source_vacuums
+                ),
             })
             manifest = await _generic_source_preservation_manifest(connection)
             runtime_identity = await _runtime_identity(connection)

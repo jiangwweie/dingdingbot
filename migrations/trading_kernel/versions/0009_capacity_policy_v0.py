@@ -7,6 +7,10 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
+from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
+    count_nonquiescent_source_vacuums,
+)
+
 revision: str = "0009_capacity_policy_v0"
 down_revision: str | None = "0008_generic_dynamic_selection_v1"
 branch_labels: str | Sequence[str] | None = None
@@ -26,14 +30,16 @@ def upgrade() -> None:
         "brc_runtime_incidents": "status='open'",
         "brc_strategy_universe_versions": "lifecycle_state IN ('warming','staged')",
         "brc_strategy_universe_materialization_generations": "lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')",
-        "brc_strategy_entry_vacuums_current": "resolved_at_ms IS NULL",
         "brc_owner_control_operations_current": "state NOT IN ('completed','blocked')",
     }
     bind.execute(
         sa.text(
             "LOCK TABLE "
             + ",".join(predicates)
-            + ",brc_owner_policy_current,brc_owner_policy_events,brc_capacity_claims IN SHARE ROW EXCLUSIVE MODE"
+            + ",brc_owner_policy_current,brc_owner_policy_events,brc_capacity_claims,"
+            "brc_strategy_entry_vacuums_current,brc_strategy_entry_vacuum_events,"
+            "brc_strategy_entry_controls_current,brc_strategy_entry_control_events,"
+            "brc_strategy_selection_control_current IN SHARE ROW EXCLUSIVE MODE"
         )
     )
     for table, predicate in predicates.items():
@@ -41,6 +47,8 @@ def upgrade() -> None:
             sa.text(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {predicate})")
         ):
             raise RuntimeError(f"0009 requires flat quiescent source: {table}")
+    if count_nonquiescent_source_vacuums(bind):
+        raise RuntimeError("0009 requires flat quiescent source: brc_strategy_entry_vacuums_current")
     # NULL is explicit absence of an extra gate, not a fabricated old limit.
     # No UPDATE, revision, strategy resume or capacity activation occurs here.
     op.add_column(

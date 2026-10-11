@@ -383,6 +383,12 @@ def test_compatible_upgrade_certifies_recovery_only_after_writer_stop() -> None:
         )
     )
     assert service_stop < certified
+    assert (
+        "verify_preservation", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, PRESERVATION_DIGEST
+    ) in backend.calls
+    assert (
+        "verify_preservation", TARGET_RELEASE, SOURCE_SCHEMA_REVISION, "sha256:" + "e" * 64
+    ) not in backend.calls
 
 
 def test_compatible_upgrade_recovers_target_without_copying_a_stale_manifest() -> None:

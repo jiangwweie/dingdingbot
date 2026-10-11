@@ -645,6 +645,9 @@ def _deploy_compatible_upgrade(
             if final_identity != source_identity:
                 raise DeploymentBlocked("source runtime identity changed during cutover")
             _require_preservation_digest(final_source)
+            # Advisory facts may legitimately change while source writers run.
+            # Only the fresh stopped-writer snapshot authorizes preservation.
+            source_certification = final_source
             try:
                 migration_attempted = True
                 backend.migrate_schema(

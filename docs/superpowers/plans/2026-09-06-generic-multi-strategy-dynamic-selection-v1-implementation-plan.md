@@ -38,6 +38,12 @@ Owner 明确授权本次统一部署，要求先完成必要保证；若持仓�
 
 本轮可声明的是实际通过的 release/deployment gates，不宣称原 GS-12 完整 soak 或全部 GS-13 交付通过。精确生产事实只记录在 MAIN_CONTROL_ROADMAP。
 
+#### 部署准备新增回归（2026-10-11）
+
+Fresh source 检查发现 standalone Owner Pause 的已 drain Vacuum 是持久负向权限，不是待完成切换。0007 source verifier 与0008/0009 pre-DDL共用只读quiescence判定：仅无Generation、已drain、exact OPEN及drain事件、current Owner pause/control-event一致且无pending Selection时允许原样保全。暂停状态、事件、时间、版本均不改写；不得为了迁移resume SOR或直接SQL清表。未drain、Owner已enabled、缺origin/drain证据、pending switch及其他未解决Vacuum仍pre-DDL拒绝。
+
+另新增停止writers前后preservation变化回归，部署必须以第二次fresh source manifest作为post-migration对照，不能复用advisory digest。迁移前还需停止独立Owner API writer；Kernel部署脚本只管理四Worker，不把API漏出写面。测试进度及exact final R4据实际终态填写；中断的早期candidate认证不记PASS。
+
 **本计划将已批准设计拆成GS-00至GS-13共14张可验收Task Card；当前已经进入获授权的本地代码与测试阶段。** 初始独立复核只允许修订设计与计划，随后Owner明确授予本地实施权限；Tokyo操作、部署或策略activation仍未授权。实际完成度以§2.1证据台账为准。
 
 规范来源为[详细设计](../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)，特别是§4.7、§6.4、§8.4、§10.3四项amendment。设计§18记录条件批准及处理结果；研究出处见设计§19与Stage-3.1 provenance amendment。Task条款不得覆盖冻结Feature、N、cadence、SOR Golden、资金、ExitProfile或Owner控制边界。
