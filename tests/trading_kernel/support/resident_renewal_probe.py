@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from unittest.mock import patch
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
@@ -46,12 +48,14 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 async def main() -> None:
     group,initial=sys.argv[1:]
     clock=[int(initial)]
+    blocked_member=[None]
     source=inputs(group)
     comparative=group in {"MPG-001","MI-001"}
     excluded=os.environ.get("BRC_RESIDENT_EXCLUDE_MEMBER")
     template={"MPG-001":mpg_flat_snapshot,"MI-001":mi_flat_snapshot,"CPM-RO-001":cpm_flat_snapshot,
         "BRF2-001":lambda:brf2_short_snapshot(strong_uptrend=True)}[group]()
     class Market:
+        announced=False
         async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
             return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms,
                 "venue_status":"TRADING" if (w.exchange_instrument_id!=excluded if excluded else
@@ -60,6 +64,14 @@ async def main() -> None:
             window=source.member_windows[0] if comparative else next(w for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
             return shift_window(window,request.feature_cutoff_at_ms-CUTOFF).candles
         async def fetch_closed_candles(self,request):
+            if request.exchange_instrument_id==blocked_member[0]:
+                async with engine.connect() as connection:
+                    warming=await connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE strategy_group_id=:group AND lifecycle_state='warming')"),{"group":group})
+                if warming:
+                    if not self.announced:
+                        print(json.dumps({"component_id":"source","status":"blocked_for_restart"}),flush=True)
+                        self.announced=True
+                    await asyncio.Event().wait()
             candles=template.candles_1h if request.timeframe=="1h" else template.candles_4h
             interval=HOUR if request.timeframe=="1h" else 4*HOUR
             close=request.closed_at_ms//interval*interval
@@ -89,7 +101,11 @@ async def main() -> None:
     transport,_=await asyncio.get_running_loop().connect_read_pipe(lambda:asyncio.StreamReaderProtocol(reader),sys.stdin)
     async def advance_clock():
         while line:=await reader.readline():
-            clock[0]=int(line)
+            value=line.decode().strip()
+            if value.startswith("BLOCK "):
+                blocked_member[0]=value[6:]
+            else:
+                clock[0]=int(value)
     clock_task=asyncio.create_task(advance_clock())
     try:
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=authority_clock):

@@ -1186,6 +1186,14 @@ RED复现：新close+8ms普通Observation先读到旧Authority expired，返回I
 
 本段证明四策略正常不同Desired真正全量warming resident，不等于GS-12 24h资源soak或实盘收益。GS-10仍需故障恢复resident/跨策略慢source与逐项签收审计、status剩余边界；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-11 resident warming SIGKILL / parallel source隔离验收（基于e5e0f492，未整卡签收）
+
+扩展既有四策略changed-set矩阵为正常/实际warming source挂起后SIGKILL两分支，未新增重复activation fixture。test source仅在PG存在warming target时挂起指定member（IO等待不持事务）；原Generation MATERIALIZING、单warming target、原Vacuum事实先读证，然后kill全部resident Plane。新OS process用原Observation lease到期的逻辑clock继续正式warming，最终同一target ACTIVE_NEW；Generation fence/原deadline不重设，不重建target，全部member实际readiness与旧Universe retired再次逐字段验证。new source/gap不被用来追认旧close，原正常close proof仍由Coordinator检查。certification仍是明确独立前置，不手写warm evidence。
+
+另一真实process同时调用四Generic Selector，每组正式Owner pending/Static来源，MI分别永久等待qualification或抛typed temporary unavailable（HTTP429工程分类），其它三策略各唯一Snapshot，同时四scope Observation正式Policy-blocked短路，零market请求/Signal/交易权限。永久等待Job仍CLAIMED；temporary失败只有一个Attempt、next_retry在原period expiry之前，不因resident重复poll重新发source请求。SIGTERM正常取消挂起loop，DB没有Job/Snapshot之外的Generation/Vacuum/Authority/Ticket/Command，隔离目录零文件。这证明Selector/Observation loop隔离，不伪装protected Lifecycle实盘验证。
+
+末版四策略normal/crash warming8 passed（50.94s）、parallel挂起/temporary2 passed（4.21s）；Unit/Architecture/API1554 passed（18.51s）、Ruff/Mypy161 files/diff PASS，所有verification终态。本轮仅tests/support/docs变更，无生产修改。GS-10仍需resident失败恢复、status剩余边界及requirement-by-requirement整卡审计；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。

@@ -452,6 +452,63 @@ asyncio.run(main())
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure",["hang","temporary"])
+async def test_actual_parallel_selectors_do_not_starve_observation_when_one_source_hangs(database: AsyncEngine,tmp_path: Path,failure: str) -> None:
+    import os
+    import sys
+
+    groups=("CPM-RO-001","MPG-001","MI-001","BRF2-001")
+    for group in groups:
+        await _install_static_selection_source(database,group)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                request=ControlMutationRequest(expected_version=1,reason="parallel_source",idempotency_key=f"parallel:{group}",owner_identity="owner",now_ms=CUTOFF-1),
+                authentication_strength="totp_step_up")
+    process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_parallel_selection_probe",failure,cwd=tmp_path,
+        env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1",
+            "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+        stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    ready=set()
+    observed=set()
+    stalled=False
+    try:
+        async with asyncio.timeout(15):
+            while not (ready==set(groups)-{"MI-001"} and len(observed)==4 and stalled):
+                line=await process.stdout.readline()
+                assert line,"parallel process exited"
+                result=json.loads(line)
+                assert result["status"]!="tick_failed",result
+                if result["status"]=="snapshot_ready": ready.add(result["component_id"])
+                if result["component_id"]=="source:MI-001": stalled=True
+                if failure=="temporary" and result["component_id"]=="MI-001" and result["status"]=="source_failed": stalled=True
+                if result["component_id"]=="observation" and result["status"]=="observed":
+                    assert result["detail"]=="selection_owner_or_policy_blocked",result
+                    observed.add(result["runtime_scope_id"])
+        process.terminate()
+        output,error=await asyncio.wait_for(process.communicate(),timeout=5)
+        assert process.returncode==0,error.decode()
+        assert b"tick_failed" not in output
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.communicate()
+    async with database.connect() as connection:
+        rows=(await connection.execute(sa.select(instrument_selection_jobs_current))).mappings().all()
+        assert len(rows)==4
+        assert sum(row["state"]=="SNAPSHOT_READY" for row in rows)==3
+        failed=next(row for row in rows if row["selection_spec_id"]==inputs("MI-001").spec.selection_spec_id)
+        assert failed["state"]==("CLAIMED" if failure=="hang" else "SOURCE_FAILED")
+        if failure=="temporary":
+            assert failed["next_retry_at_ms"]>CUTOFF+20
+            assert failed["next_retry_at_ms"]<CUTOFF+2*HOUR
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_attempts WHERE selection_job_id=:id"),{"id":failed["selection_job_id"]})==1
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_snapshots"))==3
+        for table in ("brc_strategy_universe_materialization_generations","brc_strategy_entry_vacuums_current","brc_selection_session_authorities","brc_signal_events","brc_trade_tickets","brc_exchange_commands"):
+            assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+    assert tuple(tmp_path.rglob("*"))==()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("group",["MPG-001","MI-001"])
 async def test_generic_member_status_tracks_persisted_comparison_rebase(database: AsyncEngine,group: str) -> None:
     from src.trading_kernel.interfaces.readonly_api import (
@@ -597,7 +654,8 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(database: AsyncEngine,tmp_path: Path,group: str) -> None:
+@pytest.mark.parametrize("crash_during_warming",[False,True])
+async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(database: AsyncEngine,tmp_path: Path,group: str,crash_during_warming: bool) -> None:
     import os
     import sys
 
@@ -647,9 +705,29 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
             snapshot=await uow.instrument_selection.get_generic_snapshot(selected["selection_snapshot_id"])
         assert snapshot.selected_members and snapshot.selected_members!=first.selected_members
         assert len(snapshot.selected_members)>1
+        if crash_during_warming:
+            process.stdin.write(f"BLOCK {snapshot.selected_members[-1]}\n".encode())
         process.stdin.write(f"{close+8}\n".encode())
         await process.stdin.drain()
         expected_generation=GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)
+        if crash_during_warming:
+            await until(lambda r:r["component_id"]=="source" and r["status"]=="blocked_for_restart")
+            async with PostgresKernelUnitOfWork(database) as uow:
+                interrupted=await uow.instrument_selection.get_generic_materialization_generation(expected_generation)
+                interrupted_targets=await uow.strategy_universes.get_generation_universe_targets(expected_generation)
+                interrupted_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            assert interrupted.lifecycle_state.value=="MATERIALIZING" and len(interrupted_targets)==1
+            assert interrupted_targets[0].lifecycle_state.value=="warming"
+            process.kill()
+            await asyncio.wait_for(process.communicate(),timeout=5)
+            # Respect the original Observation lease, without resetting the
+            # materialization fence/deadline or installing another target.
+            resumed_at=close+30_008
+            process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_renewal_probe",
+                group,str(resumed_at),cwd=tmp_path,env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),
+                    "PYTHONDONTWRITEBYTECODE":"1","BRC_RESIDENT_EXCLUDE_MEMBER":first.selected_members[0],
+                    "BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+                stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         active=await until(lambda r:r["component_id"]=="materialization" and r.get("disposition")=="ACTIVE_NEW" and r.get("materialization_generation_id")==expected_generation)
         process.terminate()
         output,error=await asyncio.wait_for(process.communicate(),timeout=5)
@@ -666,6 +744,11 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
         authority=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         assert authority.authority.selection_snapshot_id==snapshot.selection_snapshot_id
         assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+        if crash_during_warming:
+            completed=await uow.instrument_selection.get_generic_materialization_generation(expected_generation)
+            assert completed.fenced_at_ms==interrupted.fenced_at_ms
+            assert (await uow.strategy_universes.get_generation_universe_targets(expected_generation))[0].universe_version_id==interrupted_targets[0].universe_version_id
+            assert interrupted_vacuum.fenced_at_ms==completed.fenced_at_ms
     # Activation may supersede the final callback before its result is emitted.
     # Durable readiness, not display-log cardinality, is authority.
     assert any(r["component_id"]=="observation" and r.get("observation_status")=="warmed" for r in seen)
