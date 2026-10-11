@@ -1382,6 +1382,16 @@ FOUR_PROCESS_IDLE_PERFORMANCE_PASS：1 passed（51.69s），累计CPU fraction0.
 
 顺带修复长期ledger utility的证据读取：Comparison rebase在NOT_TRIGGERED下可能只写durable checkpoint、无canonical Episode行，原仅数Episode rows的假定不成立；现复用kernel exact composite close coverage（Episode/Comparison/Recovery max cursor），没有放宽close消费或改生产behavior。该utility无本机长跑入口，仍须将来实际服务器运行认证，不能由这处修正宣称问题已全部闭合。
 
+#### 2026-10-11 受保护Ticket与挂起warming资源隔离（基于5b4bbd7a，未整卡签收）
+
+在原hourly natural trading测试中新增capacity_v0_resource_safety，不复制第二套producer/Ticket fixture。MPG/MI分别沿正式Owner→Runner→Comparison rebase/NT→TRIGGERED→Signal→Claim→Ticket→durable ENTRY/Initial Stop/TP1至POSITION_PROTECTED；Policy B来自正式本地default identity revision，SOR保持paused。资源probe启动前冻结Position/Lifecycle test facts与exact Initial Stop/TP1两个accepted order reference；运行时仅更新时间，不读current DB projection自动补venue truth，不调用真实venue。这是独立本地fixture，不宣称exchange readonly认证或经济收益。
+
+另一个CPM Owner intent/Runner Snapshot在其next close前提交，单global slot真实创建warming target；closed-candle请求与后继Selection qualification故意挂起，原bounded timeout/lease仍生效，network等待在UoW外。四real children同1CPU/1GiB cgroup：Lifecycle每2s、Reconciliation每5s真实读取冻结facts/调用正式worker；NoExchangeIO使任何新exchange effect失败。保护身份/Ticket所有字段、position qty、initial stop ID、TP1 ID、frozen ExitProfile/Binding、exact Command集合不变，CPM target仍warming。结束后返回monotonic completed clock，原自然链继续TP1/Runner/外部flat/Settlement/Review，保持一个ENTRY generation与Capacity lineage。
+
+首轮missing helper RED；随后旧cutoff造成clock早于ENTRY、误读Command.exchange_order_id、日志idle suppression导致计数timeout、TP1 kind应为take_profit而非tp1等测试前置FAIL如实修正。时间选择为严格future CPM cutoff，Safety facts在启动前冻结；不通过手写Aggregate/新warm fields或修改生产Gate修复。末版完整2 passed（54.11s）：MPG Lifecycle5/Reconciliation3，peak404729856 bytes、主体19.01s；MI Lifecycle8/Reconciliation3，peak405200896 bytes、主体23.23s。两容器finally正常停止，独占lock仅一个heavy test，无本机长跑。Fast Unit/Architecture/API1573 passed（22.00s），Ruff/Mypy161/diff PASS；没有修改production code，只扩展tests/support。
+
+本地idle/有限warm boundary/有保护Safety资源样本已取得；长期churn八指标、complete missed-close ledger、长期missing/second miss与full fault workload仍PENDING_SERVER_VALIDATION，工具/状态不宣称GS-12 complete或GS-13 PASS。服务器执行须Owner授权且隔离于生产；GS-13及所有准备/R4仍WAIT_OWNER_CONFIRMATION。
+
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。
 
 **允许**：本地soak harness、recording source/venue、可处置PG及worker测试、display-only evidence。**禁止**：真实exchange写、为通过测试缩N/cadence、临时加入incremental warming、把业务deadline随加速比例缩放。

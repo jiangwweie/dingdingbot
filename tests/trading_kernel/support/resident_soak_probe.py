@@ -18,8 +18,12 @@ from unittest.mock import patch
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from src.trading_kernel.application.maintain_ticket_lifecycle import (
+    TicketLifecycleFacts,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     PostgresInstrumentSelectionRepository,
 )
@@ -104,6 +108,9 @@ async def main(role: str = "all") -> None:
     class Market:
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
             started = time.monotonic_ns()
+            if os.environ.get("BRC_SOAK_PROTECTED_TICKET_ID"):
+                emit(json.dumps({"component_id":"source","status":"selection_source_hung","identity":{"event_spec_id":event_spec_id}}))
+                await asyncio.Event().wait()
             await inject_request_latency(5)
             group = next(g for g in SOAK_GROUPS if tape.spec(g).event_spec_id == event_spec_id)
             source = tape.selection_input(group, cutoff_ms=observed_at_ms//(tape.spec(group).cadence_hours*HOUR)*(tape.spec(group).cadence_hours*HOUR))
@@ -123,6 +130,9 @@ async def main(role: str = "all") -> None:
 
         async def fetch_closed_candles(self, request):
             started = time.monotonic_ns()
+            if os.environ.get("BRC_SOAK_PROTECTED_TICKET_ID"):
+                emit(json.dumps({"component_id":"source","status":"warming_source_hung","identity":request.model_dump(mode="json")}))
+                await asyncio.Event().wait()
             await inject_request_latency(5)
             interval = HOUR if request.timeframe == "1h" else 4*HOUR
             if request.timeframe not in {"1h", "4h"}:
@@ -183,6 +193,30 @@ async def main(role: str = "all") -> None:
         def __getattr__(self, name):
             raise AssertionError(f"unexpected healthy source boundary: {name}")
     no_io = NoExchangeIO()
+    class ProtectedSafetyFacts:
+        def __init__(self):
+            recorded = json.loads(os.environ["BRC_SOAK_RECORDED_SAFETY_FACTS"])
+            self.ticket_id = recorded["ticket_id"]
+            self.position = PositionSnapshot.model_validate(recorded["position"])
+            self.lifecycle = TicketLifecycleFacts.model_validate(recorded["lifecycle"])
+        async def read_lifecycle_facts(self,request):
+            started = time.monotonic_ns()
+            await inject_request_latency(5)
+            if request.ticket_id!=self.ticket_id or request.netting_domain!=self.position.netting_domain or request.expected_position_quantity!=self.position.quantity:
+                raise AssertionError("wrong protected Ticket identity")
+            result = self.lifecycle.model_copy(update={"observed_at_ms":request.observed_at_ms,
+                "market_facts":self.lifecycle.market_facts.model_copy(update={"watermark_ms":request.observed_at_ms//HOUR*HOUR})})
+            source_evidence("lifecycle",started,{"ticket_id":request.ticket_id,"observed_at_ms":request.observed_at_ms},result.model_dump(mode="python"))
+            return result
+        async def read_position_snapshot(self,request):
+            started = time.monotonic_ns()
+            await inject_request_latency(5)
+            if request.ticket_id!=self.ticket_id or request.netting_domain!=self.position.netting_domain:
+                raise AssertionError("wrong protected position identity")
+            result = self.position.model_copy(update={"observed_at_ms":request.observed_at_ms})
+            source_evidence("position",started,{"ticket_id":request.ticket_id,"observed_at_ms":request.observed_at_ms},result.model_dump(mode="python"))
+            return result
+    safety_facts = ProtectedSafetyFacts() if os.environ.get("BRC_SOAK_PROTECTED_TICKET_ID") else no_io
     async def entry():
         at = clock()
         return await run_entry_worker_once(factory,no_io,no_io,EntryWorkerRequest(worker_id="soak:entry",
@@ -190,15 +224,15 @@ async def main(role: str = "all") -> None:
             timeout_seconds=10,admission_snapshot_validity_ms=5000))
     async def lifecycle():
         at = clock()
-        return await run_lifecycle_worker_once(factory,no_io,no_io,LifecycleWorkerRequest(worker_id="soak:lifecycle",
+        return await run_lifecycle_worker_once(factory,no_io,safety_facts,LifecycleWorkerRequest(worker_id="soak:lifecycle",
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,now_ms=at,lease_until_ms=at+30000,
             timeout_seconds=10,idle_poll_interval_ms=2000))
     async def reconciliation():
-        return await run_reconciliation_worker_once(factory,no_io,no_io,ReconciliationWorkerRequest(worker_id="soak:reconciliation",
+        return await run_reconciliation_worker_once(factory,no_io,safety_facts,ReconciliationWorkerRequest(worker_id="soak:reconciliation",
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,now_ms=clock(),timeout_seconds=10,
             unknown_visibility_grace_ms=30000,idle_poll_interval_ms=5000))
     loops.extend((WorkerProcessLoop("entry",entry,2000,frozenset({"no_candidate","entry_lane_busy"})),
-                  WorkerProcessLoop("lifecycle",lifecycle,2000,frozenset({"no_work","runtime_fenced","no_change"})),
+                  WorkerProcessLoop("lifecycle",lifecycle,2000,frozenset() if os.environ.get("BRC_SOAK_PROTECTED_TICKET_ID") else frozenset({"no_work","runtime_fenced","no_change"})),
                   WorkerProcessLoop("reconciliation",reconciliation,5000,frozenset({"no_work"}))))
     loops = [item for item in loops if role_owns_component(role,item.component_id)]
     async def diagnostic_tick(tick):

@@ -10257,7 +10257,7 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["MPG-001", "MI-001"])
-@pytest.mark.parametrize("fault_stage", [None, "capacity_v0", "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
+@pytest.mark.parametrize("fault_stage", [None, "capacity_v0", "capacity_v0_resource_safety", "comparison_switch_before_claim", "before_issue", "between_claim_ticket", "before_dispatch", "valid_empty_after_protection", "stale_before_claim", "pending_static_between_claim_ticket", "static_after_protection", "static_timeout_after_protection", "static_normal_after_protection", "static_close_boundary_after_protection",
     *(f"static_slow_normal_after_protection:{delay}" for delay in (8000,30000,120000)),
     *("static_new_entry:"+fault for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
     *("real_pause_drain:"+fault for fault in ("sent","unknown","partial","false","string","sent_recover","unknown_recover","partial_recover",
@@ -10266,7 +10266,7 @@ async def _assert_static_normal_cannot_skip_unarmed_recovery(database, *, group,
 async def test_hourly_natural_selection_no_change_successor_is_eligible(
     database: AsyncEngine, group: str, fault_stage: str | None,
 ) -> None:
-    capacity_v0 = fault_stage=="capacity_v0"
+    capacity_v0 = fault_stage in {"capacity_v0","capacity_v0_resource_safety"}
     if capacity_v0:
         from src.trading_kernel.application.owner_control import (
             set_strategy_entry_state,
@@ -10282,7 +10282,7 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         async with PostgresKernelUnitOfWork(database) as uow:
             await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id="generic-snapshot",runtime_commit="a"*40,
                 schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=CUTOFF-HOUR+2))
-        fault_stage=None
+        fault_stage="resource_safety" if fault_stage=="capacity_v0_resource_safety" else None
     await _exercise_generic_generation(database,group,True,
         durable=True,first_activation=True,natural_selection=True)
     spec = inputs(group).spec
@@ -10465,6 +10465,125 @@ async def test_hourly_natural_selection_no_change_successor_is_eligible(
         async with database.connect() as connection:
             assert await connection.scalar(sa.text("SELECT count(*) FROM brc_capacity_claims WHERE max_same_strategy_side=2 AND family_ticket_limit=2"))==1
             assert await connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE status='terminal'"))==1
+
+
+async def _assert_bounded_protected_safety_load(database, *, ticket, now_ms):
+    import os
+    import tempfile
+    import time
+
+    from src.trading_kernel.application.maintain_ticket_lifecycle import (
+        TicketLifecycleFacts,
+    )
+    from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
+    from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+    from tests.trading_kernel.support.local_soak_budget import (
+        LocalSoakBudget,
+        exclusive_local_soak,
+    )
+
+    budget = LocalSoakBudget(started_at=time.monotonic())
+    # A separate CPM intent/Runner Snapshot was legally committed before its
+    # next close. It cannot borrow the protected MPG/MI Ticket's authority.
+    cadence = inputs("CPM-RO-001").spec.cadence_hours*HOUR
+    cutoff = (now_ms//cadence+1)*cadence
+    uid,_ = await _install_static_selection_source(database,"CPM-RO-001",cutoff_ms=cutoff)
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),{"uid":uid})
+    async with PostgresKernelUnitOfWork(database) as uow:
+        staged = await stage_generic_dynamic_selection_mode(uow,strategy_group_id="CPM-RO-001",effective_period_anchor_ms=cutoff,
+            request=ControlMutationRequest(expected_version=1,reason="bounded_safety_parallel_warming",idempotency_key="resource-safety:cpm",
+                owner_identity="owner",now_ms=cutoff-1),authentication_strength="totp_step_up")
+    source = inputs("CPM-RO-001")
+    source = source.model_copy(update={"member_windows":tuple(shift_window(w,cutoff-CUTOFF) for w in source.member_windows)})
+    class SelectionSource:
+        async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+            return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in source.member_windows)
+        async def fetch_generic_selection_klines(self,request):
+            return next(w.candles for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+    selected = await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectionSource(),
+        request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=staged.selection_epoch_id,
+            period_anchor_ms=cutoff,worker_id="resource-safety:selector"),clock_ms=lambda:cutoff+10)
+    assert selected.outcome=="SNAPSHOT_READY"
+    at = cutoff+HOUR+10
+    async with PostgresKernelUnitOfWork(database) as uow:
+        protected = await uow.aggregates.get(ticket.identity.ticket_id)
+        before_commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        references = await uow.exchange_commands.list_order_references(ticket.identity.ticket_id)
+        frozen = await uow.tickets.get(ticket.identity.ticket_id)
+        assert protected.status.value=="position_protected"
+        await uow.aggregates.schedule_next_check(ticket.identity.ticket_id,work_kind="lifecycle",due_at_ms=at)
+        await uow.aggregates.schedule_next_check(ticket.identity.ticket_id,work_kind="reconciliation",due_at_ms=at)
+    recorded_position = PositionSnapshot(netting_domain=ticket.identity.netting_domain,quantity=protected.position_qty,
+        average_entry_price=protected.average_fill_price,venue_reported_liquidation_price=Decimal(0),observed_at_ms=at,
+        open_orders=tuple(VenueOrderSnapshot(exchange_order_id=ref.submitted_exchange_order_id,venue_client_order_id=ref.venue_client_order_id,
+            position_side=ticket.identity.netting_domain.position_side,reduce_only=True,
+            order_namespace=ref.namespace.value) for ref in references
+            if ref.command_kind.value in {"initial_stop","take_profit"}))
+    assert len(recorded_position.open_orders)==2
+    assert {o.exchange_order_id for o in recorded_position.open_orders}=={protected.initial_stop_exchange_order_id,protected.tp1_exchange_order_id}
+    recorded_lifecycle = TicketLifecycleFacts(position_quantity=protected.position_qty,tp1_filled_quantity=Decimal(0),tp1_average_fill_price=None,
+        allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),price_tick=Decimal("0.01"),observed_at_ms=at,
+        market_facts=LifecycleMarketFacts(watermark_ms=at//HOUR*HOUR,is_final_closed_candle=True,latest_close=ticket.entry_reference_price,
+            structure_reference=ticket.initial_stop_price,atr=Decimal(1),holding_bars=1))
+    recorded_facts = json.dumps({"ticket_id":ticket.identity.ticket_id,"position":recorded_position.model_dump(mode="json"),
+        "lifecycle":recorded_lifecycle.model_dump(mode="json")})
+    # Independent eligibility fixtures for the separate warming target only.
+    async with database.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_instrument_certification_current SET observed_at_ms=:at,valid_until_ms=:until,next_check_at_ms=:until"),
+            {"at":at-1,"until":at+HOUR})
+    container = "brc-gs12-safety-"+database.url.database.rsplit("_",1)[-1]
+    repo = str(Path(__file__).resolve().parents[3])
+    url = database.url.set(host="host.docker.internal").render_as_string(hide_password=False)
+    seen = []
+    with exclusive_local_soak(Path(tempfile.gettempdir())/"brc-gs12-local-heavy.lock"):
+        process = await asyncio.create_subprocess_exec("docker","run","--rm","--name",container,"--cpus=1","--memory=1g","--memory-swap=1g",
+            "--pids-limit=128","--mount",f"type=bind,source={repo},target=/workspace,readonly","--tmpfs","/tmp","--workdir","/tmp",
+            "--env","PYTHONPATH=/workspace","--env","PYTHONDONTWRITEBYTECODE=1","--env","BRC_RESIDENT_TEST_DATABASE_URL",
+            "--env","BRC_SOAK_PROTECTED_TICKET_ID","--env","BRC_SOAK_RECORDED_SAFETY_FACTS","--entrypoint","/opt/gs12-venv/bin/python","-i","brc-gs12-python:source-20261011",
+            "-m","tests.trading_kernel.support.resident_soak_probe",str(at),"four",
+            env={**os.environ,"BRC_RESIDENT_TEST_DATABASE_URL":url,"BRC_SOAK_PROTECTED_TICKET_ID":ticket.identity.ticket_id,
+                 "BRC_SOAK_RECORDED_SAFETY_FACTS":recorded_facts},
+            stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        async def consume():
+            while line:=await process.stdout.readline():
+                seen.append(json.loads(line))
+        reader = asyncio.create_task(consume())
+        try:
+            async with asyncio.timeout(min(70,budget.remaining_seconds(now=time.monotonic()))):
+                while True:
+                    if any(r["status"]=="tick_failed" for r in seen):
+                        pytest.fail(json.dumps([r for r in seen if r["status"] in {"tick_failed","validation_error"}]))
+                    lifecycle = [r for r in seen if r["component_id"]=="lifecycle" and r["status"]=="no_change" and r.get("ticket_id")==ticket.identity.ticket_id]
+                    reconciled = [r for r in seen if r["component_id"]=="reconciliation" and r["status"]=="position_reconciled" and r.get("ticket_id")==ticket.identity.ticket_id]
+                    hung = [r for r in seen if r["status"]=="warming_source_hung"]
+                    if len(lifecycle)>=4 and len(reconciled)>=3 and hung:
+                        break
+                    assert process.returncode is None,"protected Safety probe exited"
+                    await asyncio.sleep(0.2)
+            async with PostgresKernelUnitOfWork(database) as uow:
+                after = await uow.aggregates.get(ticket.identity.ticket_id)
+                commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+                assert after.status==protected.status and after.position_qty==protected.position_qty
+                assert after.initial_stop_exchange_order_id==protected.initial_stop_exchange_order_id
+                assert after.tp1_exchange_order_id==protected.tp1_exchange_order_id
+                assert (await uow.tickets.get(ticket.identity.ticket_id))==frozen
+                assert commands==before_commands
+                targets = await uow.strategy_universes.get_generation_universe_targets(GenericMaterializationGeneration.id_for_snapshot(selected.selection_snapshot_id))
+                assert len(targets)==1 and targets[0].lifecycle_state.value=="warming"
+            samples = [r for r in seen if r["component_id"]=="resource"]
+            assert samples and max(r["memory_bytes"] for r in samples)<1024**3
+            print(json.dumps({"gs12_status":"PROTECTED_SAFETY_DURING_WARMING_PASS","group":ticket.identity.runtime.strategy_group_id,
+                "lifecycle_ticks":len(lifecycle),"reconciliation_ticks":len(reconciled),"peak_memory_bytes":max(r["memory_bytes"] for r in samples),
+                "elapsed_wall_seconds":time.monotonic()-budget.started_at}),flush=True)
+            completed_at = max(r["clock_ms"] for r in seen)+1
+        finally:
+            stop = await asyncio.create_subprocess_exec("docker","stop","--time","5",container,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            await asyncio.wait_for(stop.communicate(),timeout=10)
+            await asyncio.wait_for(reader,timeout=10)
+            _,error = await asyncio.wait_for(process.communicate(),timeout=10)
+            assert process.returncode==0,error.decode()[-2000:]
+    return completed_at
 
 
 async def _assert_terminal_static_owner_reauthorization(database, *, group, at_ms, fail_retries=0,owner_role=False):
@@ -11005,7 +11124,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         await assert_no_ticket_for_signal()
         return
     delayed_static = fault_stage is not None and fault_stage.startswith("static_slow_normal_after_protection:")
-    assert delayed_static or fault_stage in {None,"between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection","activated_between_claim_ticket","activated_before_dispatch"}
+    assert delayed_static or fault_stage in {None,"resource_safety","between_claim_ticket","before_dispatch","stale_before_dispatch","valid_empty_after_protection","pending_static_between_claim_ticket","switch_between_claim_ticket","switch_before_dispatch","switch_during_dispatch_facts","static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection","activated_between_claim_ticket","activated_before_dispatch"}
     if fault_stage in {"between_claim_ticket","switch_between_claim_ticket","activated_between_claim_ticket"}:
         from src.trading_kernel.application.issue_ticket import (
             issue_ticket as actual_issue_ticket,
@@ -11317,6 +11436,9 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert protected.initial_stop_exchange_order_id is not None
     assert protected.tp1_exchange_order_id is not None
     exit_offset = 400
+    if fault_stage=="resource_safety":
+        finished_at = await _assert_bounded_protected_safety_load(database,ticket=ticket,now_ms=now_ms+350)
+        exit_offset = finished_at-now_ms+400
     if delayed_static or fault_stage in {"static_after_protection","static_timeout_after_protection","static_normal_after_protection","static_close_boundary_after_protection"}:
         static_at = await _cutover_static_with_protected_ticket(database,group=group,ticket=ticket,at_ms=now_ms+350,
             timeout=fault_stage=="static_timeout_after_protection",
