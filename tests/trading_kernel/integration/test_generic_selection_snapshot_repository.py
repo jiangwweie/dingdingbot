@@ -27,6 +27,7 @@ from src.trading_kernel.application.coordinate_selection_materialization import 
     CoordinateGenericGenerationRequest,
     CoordinateGenericPeriodRequest,
     CoordinateGenericSnapshotRequest,
+    CoordinateSelectionMaterializationResult,
     MaterializationDisposition,
     coordinate_selection_materialization_once,
     prepare_generic_current_close_proof,
@@ -7694,7 +7695,7 @@ async def test_latest_nonempty_snapshot_takes_over_early_generation_after_drain(
     ("draining",True,None),("draining",True,"false"),("draining",True,"string"),
     ("deferred_warming",True,None),("deferred_staged",True,None),("deferred_draining",True,None)])
 async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
-    database: AsyncEngine, group: str, restore_current_members: bool, staged_old_target: bool | str, pause_before_takeover: bool,corrupt_completion: str | None,
+    database: AsyncEngine, tmp_path: Path, group: str, restore_current_members: bool, staged_old_target: bool | str, pause_before_takeover: bool,corrupt_completion: str | None,
 ) -> None:
     deferred_cleanup=isinstance(staged_old_target,str) and staged_old_target.startswith("deferred_")
     if deferred_cleanup:
@@ -7834,10 +7835,27 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
     assert newest.selected_members
     if restore_current_members:
         assert newest.selected_members == first_snapshot.selected_members
-    async with PostgresKernelUnitOfWork(database) as uow:
-        await uow.instrument_selection.save_generic_snapshot(newest,
-            decision_at_ms=newest_source.decision_at_ms,
-            source_observed_at_ms=newest_source.source_observed_at_ms)
+    process_takeover=not restore_current_members and not pause_before_takeover and isinstance(staged_old_target,bool)
+    if process_takeover:
+        class Market:
+            async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
+                return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in newest_source.member_windows)
+            async def fetch_generic_selection_klines(self,request):
+                return next(w.candles for w in newest_source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+        selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=Market(),
+            request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,selection_epoch_id=source.selection_epoch_id,
+                period_anchor_ms=newest_source.feature_cutoff_at_ms,worker_id="latest-superseding-selector"),
+            clock_ms=lambda:newest_source.feature_cutoff_at_ms+60_000)
+        assert selected.outcome=="SNAPSHOT_READY",selected
+        async with PostgresKernelUnitOfWork(database) as uow:
+            actual=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
+        assert actual.selected_members==newest.selected_members
+        newest=actual
+    else:
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.instrument_selection.save_generic_snapshot(newest,
+                decision_at_ms=newest_source.decision_at_ms,
+                source_observed_at_ms=newest_source.source_observed_at_ms)
     at = newest.effective_from_ms + 1
     newest_request = CoordinateGenericSnapshotRequest(selection_snapshot_id=newest.selection_snapshot_id,
         worker_id="latest-target-owner")
@@ -7890,11 +7908,36 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
             strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id) == original_vacuum
         assert await uow.instrument_selection.get_generic_materialization_generation(
             GenericMaterializationGeneration.id_for_snapshot(newest.selection_snapshot_id)) is None
-    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
-        new=AsyncMock(return_value=at)):
-        takeover = await coordinate_selection_materialization_once(
-            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request,
-            clock_ms=lambda: at)
+    if process_takeover:
+        import os
+        import sys
+
+        from src.trading_kernel.interfaces.selection_runtime_worker import (
+            MaterializationRuntimeResult,
+        )
+        async def child_tick(clock):
+            process=await asyncio.create_subprocess_exec(sys.executable,"-m","tests.trading_kernel.support.resident_materialization_probe",
+                group,str(clock),"latest-child",cwd=tmp_path,
+                env={**os.environ,"PYTHONPATH":str(Path(__file__).resolve().parents[3]),"PYTHONDONTWRITEBYTECODE":"1","BRC_RESIDENT_TEST_DATABASE_URL":database.url.render_as_string(hide_password=False)},
+                stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            try:
+                output,error=await asyncio.wait_for(process.communicate(),timeout=20)
+                assert process.returncode==0,error.decode()
+                return MaterializationRuntimeResult.model_validate_json(output)
+            finally:
+                if process.returncode is None:
+                    process.kill()
+                    await process.communicate()
+        runtime_result=await child_tick(at)
+        assert runtime_result.disposition is not None
+        takeover=CoordinateSelectionMaterializationResult(disposition=runtime_result.disposition,materialization_generation_id=runtime_result.materialization_generation_id)
+        assert tuple(tmp_path.rglob("*"))==()
+    else:
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms",
+            new=AsyncMock(return_value=at)):
+            takeover = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request,
+                clock_ms=lambda: at)
     assert takeover.disposition is MaterializationDisposition.GENERATION_MATERIALIZING, takeover
     async with PostgresKernelUnitOfWork(database) as uow:
         retired = await uow.instrument_selection.get_generic_materialization_generation(old_id)
@@ -7921,8 +7964,21 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
         new=AsyncMock(return_value=at+1)):
         stale = await coordinate_selection_materialization_once(
             uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda: at+1)
-        warming = await coordinate_selection_materialization_once(
-            uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+1)
+    if process_takeover:
+        warming=await child_tick(at+1)
+        replay=await child_tick(at+2)
+        assert replay.disposition is MaterializationDisposition.TARGET_WARMING,replay
+        assert replay.materialization_generation_id==replacement.materialization_generation_id
+        async with PostgresKernelUnitOfWork(database) as uow:
+            assert len(await uow.strategy_universes.get_generation_universe_targets(replacement.materialization_generation_id))==1
+            assert await uow.instrument_selection.get_generic_materialization_generation(old_id)==retired
+            latest_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id)
+            assert latest_vacuum==vacuum
+        assert tuple(tmp_path.rglob("*"))==()
+    else:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+1)):
+            warming = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=newest_request, clock_ms=lambda: at+1)
     assert stale.disposition is MaterializationDisposition.BLOCKED
     assert warming.disposition is MaterializationDisposition.TARGET_WARMING, warming
     if restore_current_members:

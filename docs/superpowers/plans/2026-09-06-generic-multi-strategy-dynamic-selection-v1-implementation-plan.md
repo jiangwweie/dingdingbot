@@ -1148,6 +1148,14 @@ STAGED readiness/certification/比较projection采用既有显式测试前置夹
 
 两组MI→CPM、MPG→BRF2×warming/STAGED child process新分支4 passed（27.34s），修复后原首次Generation正式MATERIALIZATION_PERIOD_EXPIRED，而非被后继EMPTY输入的STATIC_BASELINE空路由吞掉。末版queue/first-pending/unfenced recovery关联PG28 passed（97.60s）；Fast Unit/Architecture/API1448 passed（20.52s），Ruff、Mypy161 files、diff PASS，所有verification进程终态。GS-10 IN_PROGRESS，实际Dynamic SUPERSEDED接管与三个Plane同时resident多period等未由这一首次激活特例证明；GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-11 effective Dynamic SUPERSEDED跨进程验收（基于f7b21810，未整卡签收）
+
+将既有latest nonempty supersession矩阵的四策略×warming/STAGED正常分支升级为正式Runner Job/Snapshot→独立OS process run_materialization_runtime_once；复用原first activation→已启用Dynamic前置链及原rollback/约束/后续activation验收，不另建重复矩阵。最新输入是同epoch的下一cutoff真实Candidate24 source，Snapshot在新close前committed，成员集合与原compute合同一致；不是手写Job状态把runtime带到下游。
+
+新process将旧Generation SUPERSEDED、全部旧target abandoned、replacement继承原previous Events，并接管同一Vacuum的原fence/drained timestamp；原Active Universe/Authority保持，不追认或提前激活。两次独立后续process重启只推进同一replacement warming，只有一个target；旧回调BLOCKED、旧Generation逐字段不变、Vacuum identity/version不被重写、隔离目录零文件。target readiness仍使用既有显式fixture前置，不冒称全程真实warming Worker，更不称实盘结果。
+
+末版正常跨进程8 passed（53.80s），共用测试Owner Pause邻接8 passed（46.54s）；Fast Unit/Architecture/API1448 passed（20.46s），Ruff、Mypy161 files、diff PASS，所有verification终态。本轮仅tests/docs改变，无生产源码/生产操作。该证据与首次pending过期恢复区分；GS-10仍需三个Plane同时resident多period/crash、状态剩余边界及整卡要求核对，GS-11/12未签收，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
 **目标**：复用四常驻Worker，三个logical lease独立，恢复不等于重启整个切换。
 
 **允许**：`selection_runtime_worker.py`、`observation_worker.py`、runtime/reconciliation bounded状态读取、status CLI/Owner read repos及tests。**禁止**：新增第五service、periodic cold start、单巨大call stack、runtime全历史扫描。
