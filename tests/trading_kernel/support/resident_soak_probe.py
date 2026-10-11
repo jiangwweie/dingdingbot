@@ -60,7 +60,23 @@ from tests.trading_kernel.support.generic_selection_soak import (
 )
 
 
-async def main() -> None:
+async def inject_request_latency(milliseconds: int) -> None:
+    deadline = time.monotonic_ns()+milliseconds*1_000_000
+    while (remaining := deadline-time.monotonic_ns())>0:
+        await asyncio.sleep(remaining/1_000_000_000)
+
+
+def role_owns_component(role: str, component: str) -> bool:
+    if role not in {"all", "observation", "entry", "lifecycle", "reconciliation"}:
+        raise ValueError("unsupported soak Worker role")
+    if role == "all":
+        return True
+    if role == "observation":
+        return component == "observation" or component.startswith(("selection:", "materialization:", "facts:"))
+    return role == component
+
+
+async def main(role: str = "all") -> None:
     resource = SoakResourceFacts.from_cgroup(
         cpu_max=Path("/sys/fs/cgroup/cpu.max").read_text().strip(),
         memory_max=Path("/sys/fs/cgroup/memory.max").read_text().strip(),
@@ -74,7 +90,7 @@ async def main() -> None:
 
     def emit(value: str) -> None:
         payload = json.loads(value)
-        payload.update(clock_ms=clock(), wall_elapsed_ms=(time.monotonic_ns()-began)//1_000_000)
+        payload.update(clock_ms=clock(), wall_elapsed_ms=(time.monotonic_ns()-began)//1_000_000, worker_role=role)
         print(json.dumps(payload), flush=True)
 
     def source_evidence(method: str, started: int, identity: dict, data: object) -> None:
@@ -88,7 +104,7 @@ async def main() -> None:
     class Market:
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
             started = time.monotonic_ns()
-            await asyncio.sleep(0.005)
+            await inject_request_latency(5)
             group = next(g for g in SOAK_GROUPS if tape.spec(g).event_spec_id == event_spec_id)
             source = tape.selection_input(group, cutoff_ms=observed_at_ms//(tape.spec(group).cadence_hours*HOUR)*(tape.spec(group).cadence_hours*HOUR))
             profiles = {p.exchange_instrument_id: p for p in product_profiles}
@@ -100,14 +116,14 @@ async def main() -> None:
 
         async def fetch_generic_selection_klines(self, request):
             started = time.monotonic_ns()
-            await asyncio.sleep(0.005)
+            await inject_request_latency(5)
             result = tape.candles(request.exchange_instrument_id, close_ms=request.feature_cutoff_at_ms, count=request.expected_bars)
             source_evidence("selection_klines",started,request.model_dump(mode="json"),tuple(c.canonical_values for c in result))
             return result
 
         async def fetch_closed_candles(self, request):
             started = time.monotonic_ns()
-            await asyncio.sleep(0.005)
+            await inject_request_latency(5)
             interval = HOUR if request.timeframe == "1h" else 4*HOUR
             if request.timeframe not in {"1h", "4h"}:
                 raise AssertionError("retired SOR unexpectedly requested market data")
@@ -184,6 +200,7 @@ async def main() -> None:
     loops.extend((WorkerProcessLoop("entry",entry,2000,frozenset({"no_candidate","entry_lane_busy"})),
                   WorkerProcessLoop("lifecycle",lifecycle,2000,frozenset({"no_work","runtime_fenced","no_change"})),
                   WorkerProcessLoop("reconciliation",reconciliation,5000,frozenset({"no_work"}))))
+    loops = [item for item in loops if role_owns_component(role,item.component_id)]
     async def diagnostic_tick(tick):
         try:
             return await tick()
@@ -225,5 +242,49 @@ async def main() -> None:
         await engine.dispose()
 
 
+async def run_four_processes() -> None:
+    """Four real children share the parent Docker cgroup and one test clock."""
+    children = []
+    forwarders = []
+    for role in ("observation", "entry", "lifecycle", "reconciliation"):
+        child = await asyncio.create_subprocess_exec(sys.executable, "-m", __spec__.name, sys.argv[1], role,
+            stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=sys.stderr)
+        children.append(child)
+        async def forward(child=child):
+            while line := await child.stdout.readline():
+                print(line.decode().strip(),flush=True)
+        forwarders.append(asyncio.create_task(forward()))
+    reader = asyncio.StreamReader()
+    transport,_ = await asyncio.get_running_loop().connect_read_pipe(lambda:asyncio.StreamReaderProtocol(reader),sys.stdin)
+    stop = asyncio.Event()
+    import signal
+    for handled in (signal.SIGTERM,signal.SIGINT):
+        asyncio.get_running_loop().add_signal_handler(handled,stop.set)
+    async def clock_commands():
+        while line := await reader.readline():
+            for child in children:
+                if child.returncode is None:
+                    child.stdin.write(line)
+                    await child.stdin.drain()
+    async def watch(child):
+        await child.wait()
+        stop.set()
+    tasks = [asyncio.create_task(clock_commands()),*(asyncio.create_task(watch(child)) for child in children)]
+    try:
+        await stop.wait()
+    finally:
+        for child in children:
+            if child.returncode is None:
+                child.terminate()
+        await asyncio.gather(*(child.wait() for child in children))
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks,*forwarders,return_exceptions=True)
+        transport.close()
+    if any(child.returncode!=0 for child in children):
+        raise RuntimeError("one resource-soak Worker exited unsuccessfully")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    role = sys.argv[2] if len(sys.argv)>2 else "all"
+    asyncio.run(run_four_processes() if role=="four" else main(role))

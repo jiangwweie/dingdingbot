@@ -179,9 +179,24 @@ async def database(head_template_engine: AsyncEngine, request: pytest.FixtureReq
     yield head_template_engine
 
 
+@pytest_asyncio.fixture
+async def local_soak_guard():
+    import tempfile
+    import time
+
+    from tests.trading_kernel.support.local_soak_budget import (
+        LocalSoakBudget,
+        exclusive_local_soak,
+    )
+
+    budget = LocalSoakBudget(started_at=time.monotonic())
+    with exclusive_local_soak(Path(tempfile.gettempdir())/"brc-gs12-local-heavy.lock"):
+        yield budget
+
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("soak_mode", ["consumed_close", "healthy_24h"])
-async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_path: Path, soak_mode: str) -> None:
+@pytest.mark.parametrize("soak_mode", ["four_processes", "idle_static_four"])
+async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_path: Path, soak_mode: str, local_soak_guard) -> None:
     """A legal Static close during queue wait cannot become a second grant."""
     import os
     import time
@@ -205,6 +220,7 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
 
     cutoff = SOAK_CUTOFF
     tape = SoakWorkload()
+    local_soak_guard.require_local_mode(soak_mode)
     # Install the approved B revision through the real local stopped-flat
     # identity boundary, before any pending Selection or warm target exists.
     # No production/source migration or GS-13 rehearsal is performed here.
@@ -229,12 +245,13 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
             # Newly materialized targets are never given synthetic generations.
             await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET observation_generation=1 WHERE universe_version_id=:uid"),
                 {"uid":baseline_uid})
-            if soak_mode=="healthy_24h":
-                # Explicit historical Static cadence fixture only. The measured
-                # healthy interval starts after real Dynamic bootstrap/rebase.
-                # No new target gets synthetic readiness or delayed cadence.
+            if soak_mode=="idle_static_four":
+                # Genuine idle Static source. No Dynamic intent/job or warm
+                # target exists, and no legitimate close is currently due.
                 await connection.execute(sa.text("UPDATE brc_runtime_scopes_current SET next_observation_due_at_ms=:at WHERE universe_version_id=:uid"),
                     {"uid":baseline_uid,"at":cutoff+2*HOUR})
+        if soak_mode=="idle_static_four":
+            continue
         async with PostgresKernelUnitOfWork(database) as uow:
             await stage_generic_dynamic_selection_mode(uow, strategy_group_id=group, effective_period_anchor_ms=cutoff,
                 request=ControlMutationRequest(expected_version=1, reason="gs12_resident_setup", idempotency_key=f"gs12:first:{group}",
@@ -256,9 +273,15 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
         "--memory-swap=1g", "--pids-limit=128", "--mount", f"type=bind,source={repo},target=/workspace,readonly", "--tmpfs", "/tmp",
         "--workdir", "/tmp", "--env", "PYTHONPATH=/workspace", "--env", "PYTHONDONTWRITEBYTECODE=1", "--env", "BRC_RESIDENT_TEST_DATABASE_URL",
         "--entrypoint", "/opt/gs12-venv/bin/python", "-i", "brc-gs12-python:source-20261011", "-m",
-        "tests.trading_kernel.support.resident_soak_probe", str(cutoff+10),
+        "tests.trading_kernel.support.resident_soak_probe", str(cutoff+10), "four",
         env={**os.environ, "BRC_RESIDENT_TEST_DATABASE_URL":url}, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    async def stop_for_host_budget():
+        await asyncio.sleep(max(0,local_soak_guard.remaining_seconds(now=time.monotonic())-20))
+        stop = await asyncio.create_subprocess_exec("docker","stop","--time","5",container,
+            stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        await asyncio.wait_for(stop.communicate(),timeout=10)
+    watchdog = asyncio.create_task(stop_for_host_budget())
     seen = []
     async def consume():
         while line := await process.stdout.readline():
@@ -267,6 +290,7 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
     reader = asyncio.create_task(consume())
     async def until(predicate, timeout=900):
         began = time.monotonic()
+        timeout = min(timeout,local_soak_guard.remaining_seconds(now=began)-10)
         while time.monotonic()-began < timeout:
             if any(r["status"]=="tick_failed" for r in seen):
                 pytest.fail(json.dumps([r for r in seen if r["status"] in {"tick_failed", "validation_error"}]))
@@ -284,17 +308,43 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
             return await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_control_current WHERE strategy_group_id=ANY(:groups) AND selection_mode='dynamic_selection' AND pending_selection_mode IS NULL"),
                 {"groups":list(SOAK_GROUPS)})==4
     try:
+        if soak_mode=="idle_static_four":
+            async def idle_complete():
+                samples = [r for r in seen if r["component_id"]=="resource" and r.get("worker_role")=="observation"]
+                return len(samples)>=9
+            await until(idle_complete)
+            samples = [r for r in seen if r["component_id"]=="resource" and r.get("worker_role")=="observation"][2:]
+            cpu = Decimal(samples[-1]["cpu_usage_usec"]-samples[0]["cpu_usage_usec"])/Decimal(
+                (samples[-1]["wall_elapsed_ms"]-samples[0]["wall_elapsed_ms"])*1000)
+            assert cpu<Decimal("0.10"),cpu
+            assert max(r["memory_bytes"] for r in samples)<Decimal("0.80")*Decimal(1024**3)
+            assert not any(r["component_id"]=="source" for r in seen)
+            assert {r["worker_role"] for r in seen if r["component_id"]=="environment"}=={"observation","entry","lifecycle","reconciliation"}
+            for role, expected_status in (("entry","no_candidate"),("lifecycle","no_work"),("reconciliation","no_work")):
+                assert any(r["component_id"]==role and r["status"]==expected_status for r in seen)
+            async with database.connect() as connection:
+                for table in ("brc_instrument_selection_jobs_current","brc_instrument_selection_snapshots",
+                    "brc_strategy_universe_materialization_generations","brc_selection_session_authorities","brc_trade_tickets","brc_exchange_commands"):
+                    assert await connection.scalar(sa.text(f"SELECT count(*) FROM {table}"))==0
+                assert await connection.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"))==0
+            print(json.dumps({"gs12_status":"FOUR_PROCESS_IDLE_PERFORMANCE_PASS","cpu_fraction":str(cpu),
+                "peak_memory_bytes":max(r["memory_bytes"] for r in samples),"samples":len(samples),
+                "elapsed_wall_seconds":time.monotonic()-local_soak_guard.started_at,"long_soak_status":"PENDING_SERVER_VALIDATION"}),flush=True)
+            return
         await until(all_snapshots)
         assert process.stdin is not None
         process.stdin.write(f"{cutoff+HOUR+8}\n".encode())
         await process.stdin.drain()
-        if soak_mode=="healthy_24h":
-            await until(all_activated)
-            await _assert_resource_soak_healthy_periods(database,process,seen,until,tape,tmp_path)
-            return
         await until(consumed_close_reported)
         assert seen[0]["cpu_cores"]=="1" and seen[0]["memory_limit_bytes"]==1024**3
         assert seen[0]["workload_digest"]==tape.semantic_digest
+        if soak_mode=="four_processes":
+            assert {r["worker_role"] for r in seen if r["component_id"]=="environment"}=={"observation","entry","lifecycle","reconciliation"}
+            for component in ("entry","lifecycle","reconciliation"):
+                assert any(r["component_id"]==component and r["worker_role"]==component for r in seen)
+            assert all(r["worker_role"]=="observation" for r in seen if r["component_id"].startswith(("selection:","materialization:","facts:")))
+            resource_rows = [r for r in seen if r["component_id"]=="resource"]
+            assert resource_rows and max(r["memory_bytes"] for r in resource_rows)<1024**3
         rejected = next(r for r in seen if r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED")
         rejected_group = rejected["component_id"].split(":",1)[1]
         rejected_spec = tape.spec(rejected_group)
@@ -316,11 +366,22 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
             assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
             assert await connection.scalar(sa.text("SELECT last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
                 {"event":rejected_spec.event_spec_id,"member":rejected_spec.candidate_ids[0]})==cutoff+HOUR
+        samples = [r for r in seen if r["component_id"]=="resource"]
+        source_calls = [r for r in seen if r["component_id"]=="source"]
+        assert samples and max(r["memory_bytes"] for r in samples)<1024**3
+        assert source_calls and all(r["elapsed_wall_ms"]>=r["injected_wait_ms"] for r in source_calls)
+        print(json.dumps({"gs12_status":"BOUNDED_RESOURCE_BOUNDARY_PASS","mode":soak_mode,
+            "resource_memory_limit_bytes":1024**3,"resource_cpu_cores":1,
+            "peak_memory_bytes":max(r["memory_bytes"] for r in samples),"source_request_count":len(source_calls),
+            "source_ledger_digest":canonical_digest(source_calls),"elapsed_wall_seconds":time.monotonic()-local_soak_guard.started_at,
+            "long_soak_status":"PENDING_SERVER_VALIDATION"}),flush=True)
     finally:
+        watchdog.cancel()
+        await asyncio.gather(watchdog,return_exceptions=True)
         stop = await asyncio.create_subprocess_exec("docker", "stop", "--time", "5", container,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await stop.communicate()
-        await reader
+        await asyncio.wait_for(stop.communicate(),timeout=10)
+        await asyncio.wait_for(reader,timeout=10)
         _output, error = await asyncio.wait_for(process.communicate(), timeout=10)
         assert process.returncode==0, error.decode()[-2000:]
     assert tuple(tmp_path.rglob("*"))==()
@@ -376,9 +437,12 @@ async def _assert_resource_soak_healthy_periods(database, process, seen, until, 
                     if await uow.strategy_universes.get_members(current.universe_version_id)!=expected[group,expected_hour].selected_members:
                         return False
                     members = await uow.strategy_universes.get_members(current.universe_version_id)
-                    rows = (await uow._connection.execute(sa.text("SELECT exchange_instrument_id,last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=ANY(:members)"),
-                        {"event":spec.event_spec_id,"members":list(members)})).mappings().all()
-                    if len(rows)!=len(members) or any(r["last_observed_at_ms"]!=close for r in rows):
+                    # A Comparison rebase may consume NOT_TRIGGERED in its
+                    # durable checkpoint without creating a canonical Episode.
+                    # Use the kernel's exact max-cursor coverage, not one table.
+                    cursors = await uow.signals.lock_recovery_close_coverage(event_spec_id=spec.event_spec_id,
+                        exchange_instrument_ids=members,selection_mode="dynamic_selection",evaluated_at_ms=close+HOUR-1)
+                    if len(cursors)!=len(members) or any(c.last_observed_at_ms!=close for c in cursors):
                         return False
             return True
         await until(period_consumed)

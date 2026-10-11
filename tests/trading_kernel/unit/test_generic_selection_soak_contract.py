@@ -15,8 +15,63 @@ from tests.trading_kernel.support.generic_selection_soak import (
     percentile95,
     vacuum_time_union_ms,
 )
+from tests.trading_kernel.support.local_soak_budget import (
+    LocalSoakBudget,
+    LocalSoakBudgetError,
+    exclusive_local_soak,
+)
+from tests.trading_kernel.support.resident_soak_probe import (
+    inject_request_latency,
+    role_owns_component,
+)
 
 CUTOFF = SOAK_CUTOFF
+
+
+@pytest.mark.asyncio
+async def test_soak_injected_latency_handles_an_early_timer_wakeup(monkeypatch) -> None:
+    from tests.trading_kernel.support import resident_soak_probe as probe
+
+    clock = [0]
+    calls = []
+    async def early_sleep(seconds):
+        calls.append(seconds)
+        clock[0]+=int(seconds*1_000_000_000)-(100_000 if len(calls)==1 else 0)
+    monkeypatch.setattr(probe.time,"monotonic_ns",lambda:clock[0])
+    monkeypatch.setattr(probe.asyncio,"sleep",early_sleep)
+    await inject_request_latency(5)
+    assert clock[0]>=5_000_000 and len(calls)==2
+
+
+def test_local_soak_budget_is_ten_minutes_and_does_not_reset_per_stage() -> None:
+    budget = LocalSoakBudget(started_at=100)
+    assert budget.remaining_seconds(now=160)==540
+    assert budget.remaining_seconds(now=699)==1
+    with pytest.raises(LocalSoakBudgetError,match="600"):
+        budget.remaining_seconds(now=700)
+    with pytest.raises(LocalSoakBudgetError,match="long"):
+        budget.require_local_mode("healthy_24h")
+    budget.require_local_mode("four_processes")
+    budget.require_local_mode("idle_static_four")
+
+
+def test_local_soak_guard_refuses_concurrent_heavy_tests(tmp_path) -> None:
+    path = tmp_path/"local-soak.lock"
+    with exclusive_local_soak(path), pytest.raises(LocalSoakBudgetError,match="already running"), exclusive_local_soak(path):
+        pytest.fail("a second heavy local soak acquired the lock")
+    with exclusive_local_soak(path):
+        pass
+
+
+def test_resource_soak_hosts_four_roles_without_duplicate_writers() -> None:
+    components = ("selection:CPM-RO-001", "materialization:MI-001", "facts:MPG-001", "observation",
+                  "entry", "lifecycle", "reconciliation")
+    for component in components:
+        owners = [role for role in ("observation", "entry", "lifecycle", "reconciliation") if role_owns_component(role,component)]
+        assert len(owners)==1
+    assert role_owns_component("observation","selection:CPM-RO-001")
+    with pytest.raises(ValueError,match="role"):
+        role_owns_component("fifth-worker","entry")
 
 
 def test_soak_workload_freezes_nonempty_churn_and_real_predecessors() -> None:

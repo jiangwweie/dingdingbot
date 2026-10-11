@@ -1364,6 +1364,24 @@ consumed-close末版真实1CPU/1GiB容器1 passed（233.24s）：actual被拒策
 
 当前healthy资源长跑仍在bootstrap；三Safety结果真实为Entry no_candidate/Lifecycle no_work/Reconciliation no_work，不靠Runtime Fence短路。该probe目前在同一OS process调用四Worker逻辑tick，不把它冒称四独立OS service的resource envelope，也不证明有曝光Safety负载、SOR due与完整cancel attribution已完成。GS-12保持IN_PROGRESS，须完整24h终态/八项指标、共享四进程资源与独立故障/受保护Ticket负载、SOR compatibility/read-only source、最终逐项audit全部闭合。GS-13所有准备/R4均WAIT_OWNER_CONFIRMATION，production_modified=NO。
 
+#### 2026-10-11 本机限时／服务器长期验证执行边界（Owner最新偏好，未整卡签收）
+
+Owner明确不希望为24h长跑持续占用本机，倾向把时间验证放服务器，并要求先搞定性能。当前实施响应只调整本地执行方式：本机不再自动跑完整healthy_24h，保留相同workload/ledger与原门槛，长期项标PENDING_SERVER_VALIDATION，不能用有限短测替代24h通过，也不因地点调整自动获得GS-13/Tokyo/生产授权。服务器隔离库、凭据隔离、资源余量和正式执行范围仍须Owner确认；本轮未SSH/未deploy/未改生产。
+
+healthy core试跑1050.52s被主动SIGINT终止，四策略bootstrap已ACTIVE，首测量period仅部分推进，不能标一个完整period或24h PASS。finally正常停止容器，Docker/进程复查无遗留。此前4 real children同cgroup的consumed-close验证1 passed（280.93s），独立Observation/Entry/Lifecycle/Reconciliation PID与角色归属实际确认；仍只是边界，不冒称完整共享资源健康churn PASS。
+
+本地测试新增600秒单一累计预算（不逐stage重设），每tick wait只能使用剩余预算；watchdog于剩余20秒时stop exact disposable container，正式shutdown预留，finally有界清理。跨pytest进程使用kernel flock禁止第二个重soak同时运行，无PID文件/分布式锁/生产lease。9项contract（来源/时钟/4角色/资源/总时限/排他）先RED→GREEN，合同+architecture91 passed（7.40s），Ruff/Mypy161/diff PASS。只允许four_processes与idle_static_four默认参数：前者真实四策略并发/full-set warming/已消费close fail-closed，后者真实四Static已安装但无pending、未来close未due，四Safety/Observation loops的idle累计CPU<10%/memory<80%验证，零source/Job/Snapshot/new Authority/Ticket/Command/Incident。
+
+四进程短负载当前仍在运行，不能预写PASS；已有实际瞬时Worker386.4MiB、CPU18.04%一个core，PG343.4MiB/0.56%为display-only诊断。PG独立原容器未改资源配置，不把其7.65GiB可用上限当实际占用，不悄悄修改用户共享PG。idle/performance/保护负载与长时序最终审计仍待实测；GS-12状态IN_PROGRESS，GS-13 WAIT_OWNER_CONFIRMATION保持。
+
+本轮有限性能末版增量：默认resource参数收敛four_processes/idle_static_four，不再保留单进程consumed_close重复重测；四Worker同一个实际Docker cgroup，parent只转发clock/stdout与shutdown，不承担生产逻辑。旧本地24h assert helper保留为未认证测试utility，但无自动test入口，不宣称已交付服务器启动命令或server evidence。idleStatic是已合法安装、无pending、当前无due close的真实PG来源，正式Loop持续调用而非sleep代替；Entry/Lifecycle/Reconciliation均真实no-work，Selector零source。
+
+FOUR_PROCESS_IDLE_PERFORMANCE_PASS：1 passed（51.69s），累计CPU fraction0.023039747（约2.30%）、峰值402341888 bytes（383.7MiB）、7个有效5s采样，小于原10%/80%门槛；零source/Job/Snapshot/Generation/Authority/Ticket/Command/open Incident。容器正常停止。四进程负载283.52s先到预期consumed-close阻断，但source注入sleep(5ms)提前返回再整数截断的计时assert FAIL；新增early-timer-wakeup RED/monotonic deadline loop GREEN，保证实际至少5ms，不移除assert。源码测试边界contract10 passed（3.16s），Fast Unit/Architecture/API1573 passed（23.69s），Ruff/Mypy161/diff PASS。末版负载仍在运行，结果待终态；无服务器/生产动作。
+
+限时负载末版BOUNDED_RESOURCE_BOUNDARY_PASS：1 passed（277.54s），测试主体275.41s、峰值414916608 bytes（395.7MiB）、250 source requests，source ledger digest sha256:9cf71c13a9cdd4bac18f99a28c77c4f93c42a4521e2a4ba69a02eb7935aba2fb。4 real children+转发parent共享1CPU/1GiB，真实5s/2s/2s/5s roles、single global warming、Owner Policy B、exact staged/Vacuum/旧Static保护、deadline不刷新、zero Command；source实际注入等待全部满足。watchdog未触发，finally正常停止；Docker核验无剩余测试container。不是healthy churn p95/零遗漏/24h PASS，不安装新Spec/不恢复SOR、不冒称有曝光Safety压力已测试。
+
+顺带修复长期ledger utility的证据读取：Comparison rebase在NOT_TRIGGERED下可能只写durable checkpoint、无canonical Episode行，原仅数Episode rows的假定不成立；现复用kernel exact composite close coverage（Episode/Comparison/Recovery max cursor），没有放宽close消费或改生产behavior。该utility无本机长跑入口，仍须将来实际服务器运行认证，不能由这处修正宣称问题已全部闭合。
+
 **目标**：量化full-set Warming真实成本，确认小时策略仍有可交易close。保持当前simple materialization架构。
 
 **允许**：本地soak harness、recording source/venue、可处置PG及worker测试、display-only evidence。**禁止**：真实exchange写、为通过测试缩N/cadence、临时加入incremental warming、把业务deadline随加速比例缩放。
