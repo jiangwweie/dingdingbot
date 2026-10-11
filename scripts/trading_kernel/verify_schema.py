@@ -2650,6 +2650,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 TRADFI_INSTRUMENT_SOURCE_REVISION,
                 DYNAMIC_SELECTION_SOURCE_REVISION,
                 EXIT_PROFILE_SOURCE_REVISION,
+                GENERIC_SELECTION_SOURCE_REVISION,
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"

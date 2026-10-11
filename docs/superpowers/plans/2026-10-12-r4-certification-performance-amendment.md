@@ -59,3 +59,20 @@ a proven 50% whole-suite speedup. No blind xdist/auto-parallelism, no removal of
 wall-time worker/fault coverage and no server performance experiment is added.
 The deployed software candidate remains separate; this local tooling change
 must not invalidate or fabricate its certification while it is running.
+
+## Deployment entrance repair after completed certification
+
+The original clean candidate `d8826ee0` completed all nine R4 commands PASS:
+Integration 4,773,883ms, Full-chain 108,835ms, and the redundant migration
+specialty 128,037ms. The formal deployment then stopped before DDL because
+readonly deployment-revision discovery omitted the valid `0007` source from
+its allowlist, even though exact source certification passed. A five-case
+regression demonstrated RED for `0007`, then GREEN with only that exact source
+added; unknown, null and intermediate `0008` still fail. Source shape,
+preservation, stopped writers and fresh-flat authorization remain separate
+mandatory gates.
+
+The performance commit is now integrated into the replacement candidate because
+the completed old R4 cannot authorize a changed SHA. Complete new-candidate R4,
+R1/R2 and provisioning identity must pass before migration. The old manifest is
+historical evidence only; it is not copied to the replacement candidate.
