@@ -342,3 +342,41 @@ def test_certification_expiring_during_external_probe_keeps_fence(monkeypatch):
     with pytest.raises(EntryPromotionBlocked,match="final_postflight"):
         promote_entry(backend)
     assert backend.fenced and "unfence" not in backend.calls
+
+
+def test_prepare_owner_resume_starts_worker_without_modifying_paused_policy() -> None:
+    backend=FakePromotionBackend(armed=True)
+    original=backend.certification
+    def paused_evidence():
+        facts=original()
+        facts["owner_policy"]["new_entry_submit_enabled"]=False
+        facts["owner_entry_resume_authorized"]=False
+        return facts
+    backend.certification=paused_evidence
+    assert promote_entry(backend,prepare_owner_resume=True)=="prepared_owner_paused"
+    assert "arm" not in backend.calls and "unfence" in backend.calls
+    assert backend.entry_active and not backend.fenced
+    assert not backend.certification()["owner_policy"]["new_entry_submit_enabled"]
+
+
+def test_prepare_owner_resume_rejects_a_live_policy() -> None:
+    backend=FakePromotionBackend(armed=True)
+    with pytest.raises(EntryPromotionBlocked):
+        promote_entry(backend,prepare_owner_resume=True)
+    assert "unfence" not in backend.calls
+
+
+def test_prepare_owner_resume_policy_change_during_start_restores_fence():
+    backend=FakePromotionBackend(armed=True)
+    original=backend.certification
+    counter=0
+    def changed():
+        nonlocal counter
+        counter+=1
+        facts=original()
+        facts["owner_policy"]["new_entry_submit_enabled"]=(counter>1)
+        return facts
+    backend.certification=changed
+    with pytest.raises(EntryPromotionBlocked,match="final_postflight"):
+        promote_entry(backend,prepare_owner_resume=True)
+    assert backend.fenced and not backend.entry_active

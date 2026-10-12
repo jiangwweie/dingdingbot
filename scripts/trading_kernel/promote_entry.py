@@ -54,19 +54,19 @@ class EntryPromotionBackend(Protocol):
     def restore_entry_fence(self) -> None: ...
 
 
-def promote_entry(backend: EntryPromotionBackend) -> str:
+def promote_entry(backend: EntryPromotionBackend, *, prepare_owner_resume: bool = False) -> str:
     """Perform the one-way promotion; every failure leaves ENTRY fenced."""
 
     entry_already_started_fenced = False
     if not backend.entry_is_inactive_disabled_and_fenced():
         certification = backend.certification()
         if (
-            _authority_is_armed(certification)
+            _authority_matches(certification, prepare_owner_resume=prepare_owner_resume)
             and backend.entry_is_active()
             and backend.external_state_and_rules_match(certification)
             and backend.safety_workers_active_stable()
         ):
-            return "already_promoted"
+            return "prepared_owner_paused" if prepare_owner_resume else "already_promoted"
         if backend.entry_is_active_while_fenced():
             entry_already_started_fenced = True
         else:
@@ -75,7 +75,7 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
             )
     else:
         certification = backend.certification()
-    if not _authority_is_armed(certification):
+    if not _authority_matches(certification, prepare_owner_resume=prepare_owner_resume):
         policy = certification.get("owner_policy")
         if isinstance(policy, Mapping) and (
             policy.get("new_entry_submit_enabled") is not True
@@ -94,12 +94,12 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
             raise EntryPromotionBlocked("entry_not_active_while_fenced")
         postflight = backend.certification()
         if (
-            not _authority_is_armed(postflight)
+            not _authority_matches(postflight, prepare_owner_resume=prepare_owner_resume)
             or postflight.get("entry_recovery_basis_digest")
             != certification.get("entry_recovery_basis_digest")
             or not backend.external_state_and_rules_match(postflight)
             or not backend.safety_workers_active_stable()
-            or not _authority_is_armed(postflight)
+            or not _authority_matches(postflight, prepare_owner_resume=prepare_owner_resume)
         ):
             raise EntryPromotionBlocked("final_postflight_failed")
         backend.remove_entry_fence()
@@ -108,16 +108,16 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
     except Exception:
         backend.restore_entry_fence()
         raise
-    return "promoted"
+    return "prepared_owner_paused" if prepare_owner_resume else "promoted"
 
 
-def _authority_is_armed(certification: Mapping[str, object]) -> bool:
+def _authority_matches(certification: Mapping[str, object], *, prepare_owner_resume: bool = False) -> bool:
     owner_policy = certification.get("owner_policy")
     capabilities = certification.get("capabilities")
     return bool(
         certification.get("status") == "pass"
         and certification.get("entry_recovery_ready") is True
-        and certification.get("owner_entry_resume_authorized") is True
+        and (prepare_owner_resume or certification.get("owner_entry_resume_authorized") is True)
         and isinstance(certification.get("entry_recovery_basis_digest"), str)
         and re.fullmatch(r"sha256:[0-9a-f]{64}", str(certification["entry_recovery_basis_digest"])) is not None
         and type(certification.get("entry_recovery_valid_until_ms")) is int
@@ -125,7 +125,7 @@ def _authority_is_armed(certification: Mapping[str, object]) -> bool:
         and certification.get("flatness_pass") is True
         and isinstance(owner_policy, Mapping)
         and _is_positive_policy_version(owner_policy.get("policy_version"))
-        and owner_policy.get("new_entry_submit_enabled") is True
+        and owner_policy.get("new_entry_submit_enabled") is (not prepare_owner_resume)
         and isinstance(capabilities, Mapping)
         and capabilities.get("exchange_commands") is True
     )
@@ -251,6 +251,8 @@ class LocalEntryPromotionBackend:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("TRADING_KERNEL_DATABASE_URL", ""))
+    parser.add_argument("--prepare-owner-resume", action="store_true",
+                        help="Start the validated worker while Owner Policy remains paused; grants no trading authority")
     return parser
 
 
@@ -262,7 +264,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("database URL must use postgresql+asyncpg")
     try:
         status = promote_entry(
-            LocalEntryPromotionBackend(python=sys.executable, database_url=database_url)
+            LocalEntryPromotionBackend(python=sys.executable, database_url=database_url),
+            prepare_owner_resume=args.prepare_owner_resume,
         )
     except EntryPromotionBlocked as exc:
         print(f"status=blocked reason={exc}", file=sys.stderr)

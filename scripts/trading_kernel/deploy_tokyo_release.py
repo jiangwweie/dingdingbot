@@ -52,6 +52,7 @@ CURRENT_RELEASE = "/opt/brc/current"
 RUNTIME_ENV = "/etc/brc/trading-kernel.env"
 WRITE_FENCE = "/etc/brc/trading-kernel.write-fenced"
 ENTRY_SERVICE = "brc-trading-kernel-entry-worker.service"
+OWNER_API_SERVICE = "brc-owner-console-api.service"
 LIFECYCLE_SERVICE = "brc-trading-kernel-lifecycle-worker.service"
 SAFETY_SERVICES = (
     "brc-trading-kernel-observation-worker.service",
@@ -286,7 +287,7 @@ class TokyoReleaseBackend(Protocol):
 
     def start_services(self, services: tuple[str, ...]) -> None: ...
 
-    def refresh_active_certification_batch(self, release: str) -> None: ...
+    def await_current_certification(self, release: str) -> None: ...
 
     def unfence_entry(self) -> None: ...
 
@@ -314,6 +315,8 @@ def deploy_tokyo_release(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
 ) -> DeploymentResult:
+    if plan.mode is DeploymentMode.REGULAR and plan.enable_entry:
+        raise DeploymentBlocked("software deployment requires separate Owner Resume and Entry promotion")
     if plan.drain_active_tickets:
         _run_optional_deployment_drain(backend, plan)
     if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
@@ -321,19 +324,10 @@ def deploy_tokyo_release(
     current_release = backend.read_current_release()
     if current_release == plan.target_release:
         return _resume_regular_deployment(backend, plan)
-    source_entry_is_fenced = backend.entry_is_inactive_disabled_and_fenced()
-    if source_entry_is_fenced:
-        # A regular release may start while the source Owner Policy still
-        # permits ENTRY.  The external disabled Worker plus write Fence owns
-        # that source maintenance boundary.  Refresh and require its completed
-        # Batch before stopping workers; the target postflight still requires
-        # the paused-policy compatible Batch after identity rotation.
-        backend.refresh_active_certification_batch(current_release)
     backend.install_release(plan.target_commit, plan.target_release)
     _, _, current_identity = _read_release_facts(
         backend,
         plan,
-        allow_fenced_entry_authority=source_entry_is_fenced,
     )
     _require_marker(
         backend,
@@ -349,7 +343,7 @@ def deploy_tokyo_release(
     )
 
     services_stopped = False
-    identity_rotated = False
+    identity_attempted = False
     target_release_activated = False
     try:
         backend.stop_services(ALL_SERVICES)
@@ -362,9 +356,24 @@ def deploy_tokyo_release(
                 + ",".join(sorted(active_after_stop))
             )
 
-        if plan.closure_ticket_id is not None:
-            _read_release_facts(backend, plan)
+        if not backend.migration_writers_stopped_and_entry_fenced():
+            raise DeploymentBlocked("stopped writer and Entry Fence prerequisites failed")
+        final_source, _, final_identity = _read_release_facts(backend, plan)
+        if final_identity != current_identity:
+            raise DeploymentBlocked("source runtime identity changed during cutover")
+        if plan.closure_ticket_id is None:
+            baseline = final_source.get("preserved_runtime")
+            if not isinstance(baseline, Mapping):
+                raise DeploymentBlocked("source current runtime baseline is missing")
+            backend.record_preserved_runtime(plan.target_release, {
+                "source_commit": current_identity["runtime_commit"],
+                "target_commit": plan.target_commit,
+                "source_schema_revision": plan.schema_revision,
+                "preserved_runtime": baseline,
+                "entry_control_posture_digest": final_source.get("entry_control_posture_digest"),
+            })
 
+        identity_attempted = True
         deployment_identity = (
             backend.deploy_closure_identity(
                 plan.target_release,
@@ -383,7 +392,6 @@ def deploy_tokyo_release(
             deployment_identity,
             plan,
         )
-        identity_rotated = True
         backend.activate_release(
             plan.target_release,
             plan.target_commit,
@@ -402,21 +410,14 @@ def deploy_tokyo_release(
 
         backend.start_services(SAFETY_SERVICES)
         if plan.closure_ticket_id is None:
-            backend.refresh_active_certification_batch(plan.target_release)
+            backend.await_current_certification(plan.target_release)
         _require_target_postflight(backend, plan, seed_identity=seed_identity)
-        if plan.enable_entry:
-            backend.start_services((ENTRY_SERVICE,))
-            active_before_unfence = backend.services_active(ALL_SERVICES)
-            if active_before_unfence != frozenset(ALL_SERVICES):
-                raise DeploymentBlocked("ENTRY did not become active while write-fenced")
-            _require_target_postflight(backend, plan, seed_identity=seed_identity)
-            backend.unfence_entry()
         if (
             plan.closure_ticket_id is not None
             and not backend.entry_is_inactive_disabled_and_fenced()
         ):
             raise DeploymentBlocked("closure-only handover did not retain the ENTRY fence")
-        expected_services = ALL_SERVICES if plan.enable_entry else SAFETY_SERVICES
+        expected_services = SAFETY_SERVICES
         active_services = backend.services_active(ALL_SERVICES)
         if active_services != frozenset(expected_services):
             raise DeploymentBlocked(
@@ -426,7 +427,7 @@ def deploy_tokyo_release(
         if services_stopped:
             backend.fence_entry()
             if target_release_activated or (
-                not identity_rotated
+                not identity_attempted
             ):
                 backend.start_services(SAFETY_SERVICES)
         raise
@@ -478,7 +479,7 @@ def _resume_regular_deployment(
         raise DeploymentBlocked(
             "regular deployment resume requires exact safety workers"
         )
-    backend.refresh_active_certification_batch(plan.target_release)
+    backend.await_current_certification(plan.target_release)
     _require_target_postflight(backend, plan, seed_identity=seed_identity)
     return DeploymentResult(
         status="pass",
@@ -851,8 +852,6 @@ def _persist_release_compatibility_exact(
 def _read_release_facts(
     backend: TokyoReleaseBackend,
     plan: DeploymentPlan,
-    *,
-    allow_fenced_entry_authority: bool = False,
 ) -> tuple[Mapping[str, object], Mapping[str, object], dict[str, str]]:
     if plan.closure_ticket_id is not None:
         certification = backend.certify_closure(
@@ -882,8 +881,6 @@ def _read_release_facts(
             compatible_upgrade=(
                 plan.mode is DeploymentMode.COMPATIBLE_UPGRADE
             ),
-            require_entry_promotion=plan.enable_entry,
-            allow_fenced_entry_authority=allow_fenced_entry_authority,
         ),
     )
 
@@ -930,11 +927,6 @@ def _require_target_postflight(
     certification, _, target_identity = _read_release_facts(
         backend,
         plan,
-        allow_fenced_entry_authority=(
-            plan.closure_ticket_id is None
-            and not plan.enable_entry
-            and backend.entry_is_inactive_disabled_and_fenced()
-        ),
     )
     if target_identity != {
         "runtime_commit": plan.target_commit,
@@ -965,6 +957,17 @@ def _require_target_postflight(
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
             "long_continuation":2,"opening_range":2,"rally_failure_short":1}:
             raise DeploymentBlocked("default Capacity V0 Policy was not installed")
+    elif plan.closure_ticket_id is None:
+        baseline = json.loads(backend.read_release_marker(plan.target_release, ".brc-preserved-runtime"))
+        if (not isinstance(baseline, Mapping)
+            or not _COMMIT.fullmatch(str(baseline.get("source_commit", "")))
+            or baseline.get("target_commit") != plan.target_commit
+            or baseline.get("source_schema_revision") != plan.schema_revision
+            or not isinstance(baseline.get("preserved_runtime"), Mapping)
+            or certification.get("preserved_runtime") != baseline["preserved_runtime"]
+            or not _SEED_IDENTITY.fullmatch(str(baseline.get("entry_control_posture_digest", "")))
+            or certification.get("entry_control_posture_digest") != baseline["entry_control_posture_digest"]):
+            raise DeploymentBlocked("current Universe/history changed during same-schema deployment")
 
 
 def _require_dynamic_selection_postflight(
@@ -1218,67 +1221,47 @@ def _require_release_facts(
     *,
     expected_leverage: int,
     compatible_upgrade: bool = False,
-    require_entry_promotion: bool = False,
-    allow_fenced_entry_authority: bool = False,
 ) -> dict[str, str]:
     if certification.get("status") != "pass":
         raise DeploymentBlocked("database flat certification failed")
     required_gates: tuple[tuple[str, str], ...]
     if compatible_upgrade:
         required_gates = (("flatness_pass", "database flatness gate failed"),)
-    elif require_entry_promotion:
-        required_gates = (
-            (
-                "universe_bootstrap_pass",
-                "StrategyUniverse bootstrap certification failed",
-            ),
-            (
-                "certification_batch_pass",
-                "Certification Batch certification failed",
-            ),
-            ("flatness_pass", "database flatness gate failed"),
-        )
     else:
-        batch_gate = (
-            "certification_batch_pass"
-            if allow_fenced_entry_authority
-            else "compatible_certification_batch_pass"
-        )
         required_gates = (
             ("database_integrity_pass", "database integrity gate failed"),
-            (
-                batch_gate,
-                (
-                    "fenced source Certification Batch failed"
-                    if allow_fenced_entry_authority
-                    else "compatible Certification Batch identity failed"
-                ),
-            ),
+            ("entry_recovery_ready", "exact Active StrategyUniverse current certification failed"),
             ("flatness_pass", "database flatness gate failed"),
         )
     for key, message in required_gates:
         if certification.get(key) is not True:
             raise DeploymentBlocked(message)
-    if not compatible_upgrade and not require_entry_promotion:
+    if not compatible_upgrade:
         strategy_universe = certification.get("strategy_universe")
-        entry_promotion_counts = certification.get("entry_promotion_counts")
         if (
             not isinstance(strategy_universe, Mapping)
             or strategy_universe.get("identity_status") != "pass"
             or strategy_universe.get("semantic_digest_status") != "pass"
             or strategy_universe.get("deployment_stage") != "active"
-            or int(str(strategy_universe.get("active_current_count", -1))) != 8
             or int(str(strategy_universe.get("warming_count", -1))) != 0
-            or not isinstance(entry_promotion_counts, Mapping)
-            or int(
-                str(entry_promotion_counts.get("active_current_universes", -1))
-            )
-            != 8
-            or int(str(entry_promotion_counts.get("active_instruments", -1))) != 15
-            or int(str(entry_promotion_counts.get("active_scopes", -1))) != 58
-            or int(str(entry_promotion_counts.get("warming_scopes", -1))) != 0
         ):
             raise DeploymentBlocked("exact Active StrategyUniverse manifest failed")
+        members = certification.get("entry_recovery_members")
+        if (
+            not isinstance(members, list) or not members
+            or members != sorted(set(members))
+            or probe.get("probe_manifest") != members
+            or probe.get("account_id") != certification.get("entry_recovery_account_id")
+            or probe.get("environment") != "live"
+        ):
+            raise DeploymentBlocked("external probe differs from exact current Universe/account")
+        if int(str(certification.get("entry_recovery_valid_until_ms", 0))) <= int(time.time()*1000):
+            raise DeploymentBlocked("current instrument certification expired")
+        registry = certification.get("registry_identity")
+        seed = certification.get("seed_identity")
+        if (not isinstance(registry, Mapping) or registry.get("status") != "pass"
+            or not isinstance(seed, Mapping) or seed.get("status") != "pass"):
+            raise DeploymentBlocked("exact Registry/Seed certification differs")
     active_counts = certification.get("active_counts")
     if not isinstance(active_counts, Mapping) or any(
         int(str(active_counts.get(key, -1))) != 0
@@ -1416,11 +1399,18 @@ def _require_probe_rules(
     *,
     expected_leverage: int,
 ) -> None:
+    now_ms = int(time.time()*1000)
+    if (type(probe.get("observed_at_ms")) is not int
+        or not 0 < int(str(probe["observed_at_ms"])) <= now_ms):
+        raise DeploymentBlocked("production readonly probe time is invalid")
     rules = probe.get("rules")
     if not isinstance(rules, list) or not rules:
         raise DeploymentBlocked("production instrument rule set is incomplete")
     if any(not isinstance(rule, Mapping) for rule in rules):
         raise DeploymentBlocked("production instrument rule set is incomplete")
+    if any(type(rule.get("valid_until_ms")) is not int
+           or int(str(rule["valid_until_ms"])) <= now_ms for rule in rules):
+        raise DeploymentBlocked("production instrument rule evidence expired")
     actual_instrument_ids = tuple(
         sorted(
             str(rule.get("exchange_instrument_id", ""))
@@ -1626,6 +1616,7 @@ class SshTokyoReleaseBackend:
     def migration_writers_stopped_and_entry_fenced(self) -> bool:
         return bool(
             not self.services_active(ALL_SERVICES)
+            and not self.services_active((OWNER_API_SERVICE,))
             and self._remote(
                 ("sudo", "test", "-f", WRITE_FENCE),
                 check=False,
@@ -1832,45 +1823,17 @@ class SshTokyoReleaseBackend:
             raise ValueError("ENTRY must be started as the final isolated phase")
         self._remote(("sudo", "systemctl", "enable", "--now", *services))
 
-    def refresh_active_certification_batch(self, release: str) -> None:
-        for runtime_profile_id in (
-            "tiny-live-v1",
-            "tradfi-equity-usdm-v1",
-        ):
-            self._release_command(
-                release,
-                "scripts/trading_kernel/bootstrap_strategy_universes.py",
-                "--runtime-profile-id",
-                runtime_profile_id,
-                "--refresh-active-certification-batch-only",
-            )
+    def await_current_certification(self, release: str) -> None:
+        # Reconciliation owns refreshing current facts. This deployment read
+        # never creates a Batch, changes members, or runs Universe warming.
         deadline = time.monotonic() + self._timeout_seconds
         while True:
             certification = self.certify_flat(release)
-            if certification.get("certification_batch_pass") is True:
+            if certification.get("entry_recovery_ready") is True:
                 return
-            batches = certification.get("compatible_certification_batches")
-            blocked_batch = next(
-                (
-                    batch
-                    for batch in (
-                        batches.values()
-                        if isinstance(batches, Mapping)
-                        else ()
-                    )
-                    if isinstance(batch, Mapping)
-                    and batch.get("status") == "blocked"
-                ),
-                None,
-            )
-            if blocked_batch is not None:
-                raise DeploymentBlocked(
-                    "target Certification Batch is blocked: "
-                    + str(blocked_batch.get("blocker_code", "unknown"))
-                )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise DeploymentBlocked("target Certification Batch timed out")
+                raise DeploymentBlocked("target current certification timed out")
             time.sleep(min(5.0, remaining))
 
     def unfence_entry(self) -> None:

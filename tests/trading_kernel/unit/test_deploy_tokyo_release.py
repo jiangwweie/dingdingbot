@@ -653,6 +653,12 @@ def test_target_schema_active_target_without_compatibility_fact_fails_closed() -
         entry_gate_ready=True,
     )
     backend.runtime_commit = TARGET_COMMIT
+    backend.preserved_runtime_marker = {
+        "source_commit": CURRENT_COMMIT, "target_commit": TARGET_COMMIT,
+        "source_schema_revision": TARGET_SCHEMA_REVISION,
+        "preserved_runtime": backend.preserved_runtime,
+        "entry_control_posture_digest": "sha256:" + "4" * 64,
+    }
 
     with pytest.raises(
         DeploymentBlocked,
@@ -1014,6 +1020,7 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
     assert [call for call in backend.calls if call[0] == "probe_exchange"] == [
         ("probe_exchange", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
     ]
 
 
@@ -1026,6 +1033,13 @@ def test_fenced_regular_release_resumes_target_postflight_without_reinstall() ->
         entry_gate_ready=True,
     )
     backend.runtime_commit = TARGET_COMMIT
+    backend.preserved_runtime_marker = {
+        "source_commit": CURRENT_COMMIT,
+        "target_commit": TARGET_COMMIT,
+        "source_schema_revision": TARGET_SCHEMA_REVISION,
+        "preserved_runtime": backend.preserved_runtime,
+        "entry_control_posture_digest": "sha256:" + "4" * 64,
+    }
 
     result = deploy_tokyo_release(backend, _plan(enable_entry=False))
 
@@ -1034,38 +1048,18 @@ def test_fenced_regular_release_resumes_target_postflight_without_reinstall() ->
     assert not any(call[0] == "install_release" for call in backend.calls)
     assert not any(call[0] == "deploy_identity" for call in backend.calls)
     assert not any(call[0] == "activate_release" for call in backend.calls)
-    assert ("refresh_active_certification_batch", TARGET_RELEASE) in backend.calls
+    assert ("await_current_certification", TARGET_RELEASE) in backend.calls
     assert backend.entry_fenced is True
     assert backend.active_services == set(SAFETY_SERVICES)
 
 
-def test_regular_release_refreshes_target_batch_before_postflight() -> None:
-    """Catches checking a target commit before its release-bound Batch exists."""
-
+def test_regular_release_awaits_current_facts_without_creating_a_batch() -> None:
     backend = FakeDeploymentBackend(expired_certification_batch=True)
-
     result = deploy_tokyo_release(backend, _plan(enable_entry=False))
-
     assert result.status == "pass"
-    identity = backend.calls.index(
-        (
-            "activate_release",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-            SEED_IDENTITY,
-        )
-    )
-    safety = backend.calls.index(("start_services", SAFETY_SERVICES))
-    refresh = backend.calls.index(
-        ("refresh_active_certification_batch", TARGET_RELEASE)
-    )
-    postflight = max(
-        index
-        for index, call in enumerate(backend.calls)
-        if call == ("certify_flat", TARGET_RELEASE)
-    )
-    assert identity < safety < refresh < postflight
+    assert backend.calls.index(("start_services", SAFETY_SERVICES)) < backend.calls.index(
+        ("await_current_certification", TARGET_RELEASE))
+    assert not any(c[0] == "bootstrap_strategy_universes" for c in backend.calls)
 
 
 def test_fenced_regular_release_accepts_an_expired_promotion_batch() -> None:
@@ -1082,60 +1076,28 @@ def test_fenced_regular_release_accepts_an_expired_promotion_batch() -> None:
     assert backend.active_services == set(SAFETY_SERVICES)
 
 
-def test_entry_enabling_regular_release_still_requires_a_fresh_batch() -> None:
-    """Catches weakening the fresh Batch gate when deployment enables Entry."""
-
-    backend = FakeDeploymentBackend(expired_certification_batch=True)
-
-    with pytest.raises(DeploymentBlocked, match="StrategyUniverse bootstrap"):
+def test_software_release_cannot_enable_entry_even_with_fresh_history() -> None:
+    backend = FakeDeploymentBackend()
+    with pytest.raises(DeploymentBlocked, match="Owner Resume"):
         deploy_tokyo_release(backend, _plan(enable_entry=True))
+    assert not backend.calls
 
-    assert not any(call[0] == "stop_services" for call in backend.calls)
 
-
-def test_fenced_regular_release_requires_compatible_batch_identity() -> None:
-    """Catches accepting an expired Batch whose immutable identity differs."""
-
-    backend = FakeDeploymentBackend(
-        expired_certification_batch=True,
-        certification_gate_failure=(1, "compatible_certification_batch_pass"),
-    )
-
-    with pytest.raises(DeploymentBlocked, match="compatible Certification Batch"):
+def test_fenced_regular_release_requires_current_certification() -> None:
+    backend = FakeDeploymentBackend(certification_gate_failure=(1, "entry_recovery_ready"))
+    with pytest.raises(DeploymentBlocked, match="current certification"):
         deploy_tokyo_release(backend, _plan(enable_entry=False))
+    assert not any(c[0] == "stop_services" for c in backend.calls)
 
-    assert not any(call[0] == "stop_services" for call in backend.calls)
 
-
-def test_fenced_regular_release_accepts_current_entry_authority_from_completed_batch() -> None:
-    """The external Fence, not a historical Policy bit, owns source safety.
-
-    A regular release starts from the already disabled-and-fenced source
-    Worker.  That source may legitimately retain its Owner-approved ENTRY
-    Policy until the target identity atomically installs its paused posture.
-    Its fresh *completed* Certification Batch remains the authority for the
-    source preflight; the target still has to pass the stricter compatible
-    Batch postflight before it can be promoted.
-    """
-
-    backend = FakeDeploymentBackend(
-        source_entry_authority_armed=True,
-        target_entry_authority_retained=True,
-        entry_gate_ready=True,
-    )
-
+def test_fenced_regular_release_preserves_owner_authority_but_never_unfences() -> None:
+    backend = FakeDeploymentBackend(source_entry_authority_armed=True,
+        target_entry_authority_retained=True, entry_gate_ready=True)
     result = deploy_tokyo_release(backend, _plan(enable_entry=False))
-
-    assert result.status == "pass"
-    assert backend.entry_fenced is True
-    source_refresh = backend.calls.index(
-        ("refresh_active_certification_batch", CURRENT_RELEASE)
-    )
-    source_stop = backend.calls.index(("stop_services", ALL_SERVICES))
-    target_refresh = backend.calls.index(
-        ("refresh_active_certification_batch", TARGET_RELEASE)
-    )
-    assert source_refresh < source_stop < target_refresh
+    assert result.status == "pass" and backend.entry_fenced
+    assert ("unfence_entry",) not in backend.calls
+    assert backend.calls.index(("stop_services", ALL_SERVICES)) < backend.calls.index(
+        ("await_current_certification", TARGET_RELEASE))
 
 
 def test_fenced_regular_release_requires_exact_active_universes() -> None:
@@ -1155,8 +1117,8 @@ def test_fenced_regular_release_requires_exact_active_universes() -> None:
 @pytest.mark.parametrize(
     ("certification_gate", "expected_message"),
     [
-        ("universe_bootstrap_pass", "StrategyUniverse bootstrap"),
-        ("certification_batch_pass", "Certification Batch"),
+        ("entry_recovery_ready", "current certification"),
+        ("database_integrity_pass", "database integrity"),
         ("flatness_pass", "database flatness gate"),
     ],
 )
@@ -1169,54 +1131,26 @@ def test_release_certification_requires_every_entry_promotion_fact_before_stop(
     )
 
     with pytest.raises(DeploymentBlocked, match=expected_message):
-        deploy_tokyo_release(backend, _plan(enable_entry=True))
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
 
     assert not any(call[0] == "stop_services" for call in backend.calls)
     assert not any(call == ("start_services", (ENTRY_SERVICE,)) for call in backend.calls)
 
 
 def test_final_database_postflight_failure_restores_fence_and_stops_entry() -> None:
-    backend = FakeDeploymentBackend(
-        certification_gate_failure=(3, "flatness_pass"),
-    )
-
+    backend = FakeDeploymentBackend(certification_gate_failure=(3, "flatness_pass"))
     with pytest.raises(DeploymentBlocked, match="database flatness gate"):
-        deploy_tokyo_release(backend, _plan(enable_entry=True))
-
-    entry_start = backend.calls.index(("start_services", (ENTRY_SERVICE,)))
-    final_certification = max(
-        index
-        for index, call in enumerate(backend.calls)
-        if call == ("certify_flat", TARGET_RELEASE)
-    )
-    recovery_fence = max(
-        index for index, call in enumerate(backend.calls) if call == ("fence_entry",)
-    )
-    assert entry_start < final_certification < recovery_fence
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
+    assert backend.entry_fenced and backend.active_services == set(SAFETY_SERVICES)
     assert ("unfence_entry",) not in backend.calls
-    assert backend.entry_fenced is True
-    assert backend.active_services == set(SAFETY_SERVICES)
 
 
 def test_final_exchange_postflight_failure_restores_fence_and_stops_entry() -> None:
     backend = FakeDeploymentBackend(probe_non_flat_failure_call=3)
-
     with pytest.raises(DeploymentBlocked, match="exchange position is not flat"):
-        deploy_tokyo_release(backend, _plan(enable_entry=True))
-
-    entry_start = backend.calls.index(("start_services", (ENTRY_SERVICE,)))
-    final_probe = max(
-        index
-        for index, call in enumerate(backend.calls)
-        if call == ("probe_exchange", TARGET_RELEASE)
-    )
-    recovery_fence = max(
-        index for index, call in enumerate(backend.calls) if call == ("fence_entry",)
-    )
-    assert entry_start < final_probe < recovery_fence
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
+    assert backend.entry_fenced and backend.active_services == set(SAFETY_SERVICES)
     assert ("unfence_entry",) not in backend.calls
-    assert backend.entry_fenced is True
-    assert backend.active_services == set(SAFETY_SERVICES)
 
 
 def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
@@ -1371,60 +1305,26 @@ def test_compatible_restart_deployment_does_not_wait_for_universe_warming() -> N
     )
 
 
-def test_regular_release_runs_one_bounded_flow_and_enables_entry_last() -> None:
+def test_regular_release_uses_stopped_writer_evidence_and_preserves_runtime() -> None:
     backend = FakeDeploymentBackend()
-
-    result = deploy_tokyo_release(backend, _plan(enable_entry=True))
-
-    assert result.status == "pass"
-    assert result.target_commit == TARGET_COMMIT
-    assert result.entry_enabled is True
-    assert backend.calls == [
-        ("read_current_release",),
-        ("entry_is_inactive_disabled_and_fenced",),
-        ("install_release", TARGET_COMMIT, TARGET_RELEASE),
-        ("certify_flat", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
-        ("stop_services", ALL_SERVICES),
-        ("fence_entry",),
-        ("services_active", ALL_SERVICES),
-        (
-            "deploy_identity",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-        ),
-        (
-            "activate_release",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-            SEED_IDENTITY,
-        ),
-        ("read_current_release",),
-        ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
-        ("start_services", SAFETY_SERVICES),
-        ("refresh_active_certification_batch", TARGET_RELEASE),
-        ("certify_flat", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
-        ("start_services", (ENTRY_SERVICE,)),
-        ("services_active", ALL_SERVICES),
-        ("certify_flat", TARGET_RELEASE),
-        ("probe_exchange", TARGET_RELEASE),
-        ("unfence_entry",),
-        ("services_active", ALL_SERVICES),
-    ]
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False))
+    assert result.status == "pass" and not result.entry_enabled
+    assert backend.calls.count(("certify_flat", TARGET_RELEASE)) == 3
+    assert backend.calls.count(("probe_exchange", TARGET_RELEASE)) == 3
+    stop = backend.calls.index(("stop_services", ALL_SERVICES))
+    proof = backend.calls.index(("migration_writers_stopped_and_entry_fenced",))
+    identity = next(i for i,c in enumerate(backend.calls) if c[0] == "deploy_identity")
+    assert stop < proof < identity
+    assert backend.preserved_runtime_marker["preserved_runtime"] == backend.preserved_runtime
+    assert not any(c[0] in {"bootstrap_strategy_universes", "unfence_entry"} for c in backend.calls)
+    assert backend.active_services == set(SAFETY_SERVICES)
 
 
 def test_preflight_leverage_drift_blocks_before_any_service_stop() -> None:
     backend = FakeDeploymentBackend(configured_leverage=3)
 
     with pytest.raises(DeploymentBlocked, match="configured leverage"):
-        deploy_tokyo_release(backend, _plan(enable_entry=True))
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
 
     assert not any(call[0] == "stop_services" for call in backend.calls)
     assert not any(call[0] == "deploy_identity" for call in backend.calls)
@@ -1449,7 +1349,7 @@ def test_identity_rotated_activation_failure_keeps_all_workers_stopped() -> None
     backend = FakeDeploymentBackend(fail_at="activate_release")
 
     with pytest.raises(RuntimeError, match="simulated activation failure"):
-        deploy_tokyo_release(backend, _plan(enable_entry=True))
+        deploy_tokyo_release(backend, _plan(enable_entry=False))
 
     assert ("fence_entry",) in backend.calls
     assert backend.calls[-1] == ("fence_entry",)
@@ -1474,51 +1374,12 @@ def test_closure_only_release_requires_one_exact_ticket_and_keeps_entry_fenced()
 def test_closure_only_release_recovers_only_the_exact_pending_ticket() -> None:
     ticket_id = "ticket:btc-settlement"
     backend = FakeDeploymentBackend(closure_ticket_id=ticket_id)
-
-    result = deploy_tokyo_release(
-        backend,
-        _plan(enable_entry=False, closure_ticket_id=ticket_id),
-    )
-
-    assert result.status == "pass"
-    assert result.entry_enabled is False
-    assert backend.calls == [
-        ("read_current_release",),
-        ("entry_is_inactive_disabled_and_fenced",),
-        ("install_release", TARGET_COMMIT, TARGET_RELEASE),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
-        ("probe_exchange", TARGET_RELEASE),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", CURRENT_RELEASE, ".brc-schema-revision"),
-        ("stop_services", ALL_SERVICES),
-        ("fence_entry",),
-        ("services_active", ALL_SERVICES),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
-        ("probe_exchange", TARGET_RELEASE),
-        (
-            "deploy_closure_identity",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-            ticket_id,
-        ),
-        (
-            "activate_release",
-            TARGET_RELEASE,
-            TARGET_COMMIT,
-            TARGET_SCHEMA_REVISION,
-            SEED_IDENTITY,
-        ),
-        ("read_current_release",),
-        ("read_release_marker", TARGET_RELEASE, ".brc-runtime-commit"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-schema-revision"),
-        ("read_release_marker", TARGET_RELEASE, ".brc-seed-identity"),
-        ("start_services", SAFETY_SERVICES),
-        ("certify_closure", TARGET_RELEASE, ticket_id),
-        ("probe_exchange", TARGET_RELEASE),
-        ("entry_is_inactive_disabled_and_fenced",),
-        ("services_active", ALL_SERVICES),
-    ]
+    result = deploy_tokyo_release(backend, _plan(enable_entry=False, closure_ticket_id=ticket_id))
+    assert result.status == "pass" and not result.entry_enabled
+    assert backend.calls.count(("certify_closure", TARGET_RELEASE, ticket_id)) == 3
+    assert ("deploy_closure_identity", TARGET_RELEASE, TARGET_COMMIT, TARGET_SCHEMA_REVISION, ticket_id) in backend.calls
+    assert not any(c[0] in {"deploy_identity", "await_current_certification", "unfence_entry"} for c in backend.calls)
+    assert backend.entry_fenced and backend.active_services == set(SAFETY_SERVICES)
 
 
 def _plan(
@@ -1704,6 +1565,11 @@ class FakeDeploymentBackend:
         payload: dict[str, object] = {
             "status": "pass",
             "database_integrity_pass": True,
+            "entry_recovery_ready": self.active_universe_count == 8 and self.warming_universe_count == 0,
+            "entry_recovery_members": list(self.probe_manifest),
+            "entry_recovery_account_id": "account",
+            "entry_recovery_valid_until_ms": 2**62,
+            "entry_control_posture_digest": "sha256:" + "4" * 64,
             "preserved_runtime": self.preserved_runtime,
             "flatness_pass": True,
             "universe_bootstrap_pass": not self.expired_certification_batch,
@@ -1899,8 +1765,12 @@ class FakeDeploymentBackend:
         return payload
 
     def _probe_payload(self) -> dict[str, object]:
+        import time
         payload: dict[str, object] = {
+            "environment": "live",
+            "observed_at_ms": int(time.time()*1000),
             "venue_id": "binance-usdm",
+            "account_id": "account",
             "account_position_mode": "independent_sides",
             "account_margin_mode": "cross",
             "non_flat_domain_count": self.active_ticket_count,
@@ -1909,6 +1779,7 @@ class FakeDeploymentBackend:
                 {
                     "exchange_instrument_id": instrument_id,
                     "configured_leverage": self.configured_leverage,
+                    "valid_until_ms": 2**62,
                 }
                 for instrument_id in self.rule_instrument_ids
             ],
@@ -2372,9 +2243,8 @@ class FakeDeploymentBackend:
             self.active_services.difference_update(SAFETY_SERVICES)
             raise RuntimeError("simulated bootstrap failure")
 
-    def refresh_active_certification_batch(self, release: str) -> None:
-        self.calls.append(("refresh_active_certification_batch", release))
-        self.expired_certification_batch = False
+    def await_current_certification(self, release: str) -> None:
+        self.calls.append(("await_current_certification", release))
 
     def fence_entry(self) -> None:
         self.calls.append(("fence_entry",))
@@ -2393,3 +2263,89 @@ class FakeDeploymentBackend:
             and not self.entry_enabled
             and self.entry_fenced
         )
+
+
+def test_regular_deployment_cannot_implicitly_enable_entry() -> None:
+    backend = FakeDeploymentBackend()
+    with pytest.raises(DeploymentBlocked, match="Owner Resume"):
+        deploy_tokyo_release(backend, _plan(enable_entry=True))
+    assert not backend.calls
+
+
+def test_regular_current_22_scope_needs_no_historical_batch_or_fixed_count() -> None:
+    from scripts.trading_kernel.deploy_tokyo_release import _require_release_facts
+    backend = FakeDeploymentBackend(expired_certification_batch=True)
+    facts = dict(backend.certify_flat(TARGET_RELEASE))
+    members = sorted({*TARGET_EXCHANGE_INSTRUMENT_IDS,
+                      *(f"binance-usdm:TEST{i:02}USDT:perpetual" for i in range(15))})
+    facts.update(entry_recovery_ready=True,entry_recovery_members=members,
+                 entry_recovery_account_id="account",entry_recovery_valid_until_ms=2**62)
+    facts["entry_promotion_counts"]["active_instruments"] = 22
+    probe = dict(backend.probe_exchange(TARGET_RELEASE))
+    probe.update(account_id="account",probe_manifest=members,
+                 rules=[{"exchange_instrument_id":m,"configured_leverage":5,"valid_until_ms":2**62} for m in members])
+    assert _require_release_facts(facts,probe,expected_leverage=5)["runtime_commit"]==CURRENT_COMMIT
+
+
+def test_regular_rejects_external_subset_of_current_universe() -> None:
+    from scripts.trading_kernel.deploy_tokyo_release import _require_release_facts
+    backend = FakeDeploymentBackend()
+    facts = dict(backend.certify_flat(TARGET_RELEASE))
+    facts.update(entry_recovery_ready=True,
+                 entry_recovery_members=[*TARGET_EXCHANGE_INSTRUMENT_IDS,"binance-usdm:OPUSDT:perpetual"],
+                 entry_recovery_account_id="account",entry_recovery_valid_until_ms=2**62)
+    probe = dict(backend.probe_exchange(TARGET_RELEASE))
+    probe["account_id"]="account"
+    with pytest.raises(DeploymentBlocked,match="current Universe"):
+        _require_release_facts(facts,probe,expected_leverage=5)
+
+
+@pytest.mark.parametrize("gate", ["entry_recovery_ready", "flatness_pass", "database_integrity_pass"])
+def test_regular_fresh_stopped_writer_failure_prevents_identity_rotation(gate: str) -> None:
+    backend=FakeDeploymentBackend(certification_gate_failure=(2,gate))
+    with pytest.raises(DeploymentBlocked):
+        deploy_tokyo_release(backend,_plan(enable_entry=False))
+    assert not any(call[0]=="deploy_identity" for call in backend.calls)
+    assert backend.entry_fenced and backend.active_services==set(SAFETY_SERVICES)
+
+
+@pytest.mark.parametrize("drift", ["controls", "preserved_membership"])
+def test_regular_postflight_preserves_policy_controls_and_current_members(drift: str) -> None:
+    backend=FakeDeploymentBackend()
+    original=backend.certify_flat
+    def altered(release):
+        facts=dict(original(release))
+        if backend.runtime_commit==TARGET_COMMIT:
+            if drift=="controls": facts["entry_control_posture_digest"]="sha256:"+"9"*64
+            else: facts["preserved_runtime"]={**backend.preserved_runtime,
+                "active_universe_manifest_digest":"sha256:"+"9"*64}
+        return facts
+    backend.certify_flat=altered
+    with pytest.raises(DeploymentBlocked,match="changed during"):
+        deploy_tokyo_release(backend,_plan(enable_entry=False))
+    assert backend.entry_fenced and ("unfence_entry",) not in backend.calls
+
+
+def test_server_writer_gate_requires_owner_api_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+
+    from scripts.trading_kernel.deploy_tokyo_release import OWNER_API_SERVICE
+    backend=SshTokyoReleaseBackend(target="tokyo",repo_root=Path("."),timeout_seconds=30)
+    monkeypatch.setattr(backend,"services_active",lambda services:
+        frozenset({OWNER_API_SERVICE}) if OWNER_API_SERVICE in services else frozenset())
+    monkeypatch.setattr(backend,"_remote",lambda args,**_:subprocess.CompletedProcess(args,0,"",""))
+    assert not backend.migration_writers_stopped_and_entry_fenced()
+
+
+def test_unknown_identity_write_never_restarts_old_workers() -> None:
+    backend=FakeDeploymentBackend()
+    original=backend.deploy_identity
+    def response_lost(*args):
+        original(*args)
+        raise RuntimeError("identity response lost after commit")
+    backend.deploy_identity=response_lost
+    with pytest.raises(RuntimeError,match="response lost"):
+        deploy_tokyo_release(backend,_plan(enable_entry=False))
+    assert backend.runtime_commit==TARGET_COMMIT
+    assert backend.entry_fenced and not backend.active_services
+    assert not any(c[0]=="start_services" for c in backend.calls)

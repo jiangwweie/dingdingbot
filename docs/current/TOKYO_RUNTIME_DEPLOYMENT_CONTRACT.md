@@ -14,6 +14,16 @@ separate operations. After maintenance, use the existing official
 current Policy revision. The operational tool **does not arm Policy**, submit
 orders, activate Dynamic mode, resume a paused strategy, or switch ExitProfiles.
 
+The explicit `--prepare-owner-resume` mode can instead finish operational
+maintenance while the global Policy remains paused. It checks the same current
+readiness, identity, flatness and fresh external facts, starts the Worker under
+the Fence, rechecks the unchanged paused Policy/current basis after I/O, and
+removes only the operational Fence. It never writes Policy or Owner
+authorizations. This returns `prepared_owner_paused`, not trading restored;
+only a later official Console Owner Resume/TOTP can permit new ENTRY. A live
+Policy or any pre/post drift rejects this preparation. Existing Ticket gates
+continue to enforce the global pause on every admission/dispatch.
+
 Restoration reads one repeatable-read readonly PostgreSQL snapshot. Its
 `entry_recovery_members` is the exact canonical union of current Active Universe
 members, not a fixed initial symbol list and not a caller-supplied subset.
@@ -37,6 +47,28 @@ these gates. Existing Ticket admission/dispatch gates still own each real order.
 This contract describes the tracked restoration repair, not installation or
 live-trading authority. Current deployment and control posture are recorded only
 in `MAIN_CONTROL_ROADMAP.md`; a code/test result is not a production release.
+
+### Same-Schema Maintenance Uses The Same Current Evidence
+
+Regular software deployment never enables Entry. `--enable-entry` is rejected;
+Owner Resume and the official promoter remain separate control steps.
+The certified target's readonly verifier checks the current source before
+cutover; it can do so without trusting the older source's stale Bootstrap
+assumptions. All Kernel Writers and the independent Owner API must then be
+stopped, and Entry must be disabled/fenced. Refresh PostgreSQL and exchange facts
+again after stopping Writers before rotating runtime identity.
+
+Freeze the exact current Universe/Selection history baseline and the Policy,
+Strategy Control and Selection Control posture. Target postflight must preserve
+them exactly. Start only the existing safety Workers; Reconciliation refreshes
+current member certifications. The bounded release wait reads these facts,
+creates no historical Batch and performs zero Universe warming. Missing/expired
+facts, wrong identity, unexpected control/membership drift or an active Writer
+reject the release. If an attempted identity write has an unknown result, keep
+all old Writers stopped rather than infer that it rolled back.
+
+This changes neither Schema nor allowed instruments/capital. Immutable bootstrap
+manifests still own initial installation, not later maintenance/restoration.
 
 ## Runtime State Authority
 

@@ -1602,6 +1602,7 @@ async def _certify(
         "entry_recovery_members": list(entry_restoration.member_ids),
         "entry_recovery_account_id": entry_restoration.account_id,
         "entry_recovery_valid_until_ms": entry_restoration.valid_until_ms,
+        "entry_control_posture_digest": entry_restoration.control_posture_digest,
         "entry_promotion_counts": {
             "active_current_universes": active_current_count,
             "active_scopes": active_scope_count,

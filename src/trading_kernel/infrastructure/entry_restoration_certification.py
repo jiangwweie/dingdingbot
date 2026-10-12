@@ -20,6 +20,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_profiles,
     schema_metadata,
     strategy_entry_controls_current,
+    strategy_selection_control_current,
 )
 
 
@@ -32,6 +33,7 @@ class EntryRestorationState(BaseModel):
     member_ids: tuple[str, ...]
     basis_digest: str
     valid_until_ms: int
+    control_posture_digest: str
 
 
 async def read_entry_restoration_state(
@@ -86,6 +88,8 @@ async def read_entry_restoration_state(
     """))).mappings().all()
     controls = (await connection.execute(sa.select(strategy_entry_controls_current)
         .order_by(strategy_entry_controls_current.c.strategy_group_id))).mappings().all()
+    selection_controls = (await connection.execute(sa.select(strategy_selection_control_current)
+        .order_by(strategy_selection_control_current.c.strategy_group_id))).mappings().all()
     authorization = (await connection.execute(sa.text("""
         SELECT a.authorization_id,a.purpose,a.authentication_strength,
                a.target_scope,a.authorized_at_ms,e.created_at_ms
@@ -138,6 +142,7 @@ async def read_entry_restoration_state(
     )
     basis = {"runtime_identity": identity, "policy": dict(policy),
              "controls": [dict(row) for row in controls],
+             "selection_controls": [dict(row) for row in selection_controls],
              "current_members": [{key: row[key] for key in (
                  "event_spec_id", "universe_version_id", "semantic_digest",
                  "activation_generation", "runtime_profile_id", "exchange_instrument_id",
@@ -150,6 +155,11 @@ async def read_entry_restoration_state(
         ).encode()).hexdigest(),
         valid_until_ms=min((int(row["valid_until_ms"]) for row in rows
                             if row["valid_until_ms"] is not None), default=0),
+        control_posture_digest="sha256:" + sha256(json.dumps(
+            {"policy":dict(policy), "controls":[dict(row) for row in controls],
+             "selection_controls":[dict(row) for row in selection_controls]},
+            sort_keys=True, separators=(",", ":"), default=str,
+        ).encode()).hexdigest(),
     )
 
 
@@ -158,4 +168,5 @@ def _unready_state() -> EntryRestorationState:
         ready=False, owner_resume_authorized=False, account_id="", member_ids=(),
         basis_digest="sha256:" + sha256(b"entry-restoration-unready").hexdigest(),
         valid_until_ms=0,
+        control_posture_digest="sha256:" + sha256(b"entry-controls-unready").hexdigest(),
     )
