@@ -1,7 +1,7 @@
 ---
 title: TOKYO_RUNTIME_DEPLOYMENT_CONTRACT
 status: CURRENT
-last_verified: 2026-08-25
+last_verified: 2026-10-12
 ---
 
 # Tokyo Runtime Deployment Contract
@@ -313,9 +313,11 @@ upgrade:
 -> 0005_tradfi_instrument_center
 -> 0006_sor_dynamic_selection_v0
 -> 0007_exit_profile_authority_v1
+-> 0008_generic_dynamic_selection_v1
+-> 0009_capacity_policy_v0
 ```
 
-It preserves terminal PostgreSQL lineage from the exact `0002` source; it does
+It preserves terminal PostgreSQL lineage from the exact certified source; it does
 not preserve an active old-schema runtime. An active-position handover, dual
 write, old-schema reader, downgrade, schema fallback, manual DML conversion and
 direct SQL lifecycle mutation are forbidden.
@@ -624,6 +626,45 @@ The production tag is the rollback reference for code history only. Retired BRC
 program or database state is not a runtime rollback authority.
 
 ## Version Contract
+
+### Project release versus deployed runtime
+
+Project release tags use `release-YYYY.MM.DD.N` and freeze the consolidated
+repository, documentation and verification notes on `main`. A Project release
+does not redeploy Tokyo, move an existing production tag, or grant ENTRY,
+Dynamic, Profile or exchange authority. `dev` is integration; `main` is the
+published reviewed baseline. Both may fast-forward to the same reviewed commit
+without a redundant merge commit. Exact identities belong only to the roadmap.
+
+### Resource-safe retention
+
+Owner retention is current release only for Kernel/API/static installation
+directories; no historical deployment-directory backups are required. Before
+removal, resolve all current symlinks, process cwd/mapped libraries and shared
+Python dependencies. Remove one exact unused directory at a time with low CPU/
+I/O priority, a timeout and health checks; stop on service/resource deterioration.
+Do not scan the whole filesystem or delete PostgreSQL storage, credentials,
+shared Python, active deployment evidence or unrelated applications.
+
+Systemd journals retain approximately 3 days, using bounded low-priority
+rotation and archived-file vacuum without restarting trading services. File
+boundaries can retain slightly more than the window. This is not a three-day
+deletion rule for PostgreSQL Trade Events, Commands, Tickets or Review facts,
+nor for unrelated application file logs. A periodic maintenance command is not
+a timer-based trading Worker. The installed operational task is machine
+configuration; this repository does not become log-retention runtime authority.
+
+### Generic / Capacity forward upgrade
+
+`0007 -> 0008` preserves Static Detector/Episode/Signal provenance and terminal
+lineage while adding Generic Selection/Comparison/recovery authority.
+`0008 -> 0009` adds strategy-side capacity lineage; migration alone does not
+activate Policy B. Only the reviewed release identity transaction applies the
+Owner-approved capacity revision and installs certified Specs. New ENTRY stays
+paused/fenced through cutover; separate Owner controls govern subsequent Resume
+and per-strategy Dynamic activation. Source preservation uses fresh stopped-
+writer evidence, including the Owner API writer; no old-schema runtime restarts.
+Compatible same-schema releases do zero Universe warming during deployment.
 
 Every successful production release receives one annotated immutable tag using:
 

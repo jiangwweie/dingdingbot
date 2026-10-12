@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN
 status: CURRENT_PLAN
 program_id: P0-TKR
-last_verified: 2026-08-11
+last_verified: 2026-10-12
 ---
 
 # P0 Trading Kernel Rebuild Implementation Plan
@@ -16,8 +16,9 @@ authority and one Tokyo runtime.
 ## Completed Operability Baseline
 
 Scheduling fairness, continuous certification, flat Entry Promotion,
-phase-aware deployment recovery, StrategyUniverse batch bootstrap, SOR v3, and
-multi-Ticket capacity are implemented, certified, and deployed. Their stable
+phase-aware deployment recovery, initial StrategyUniverse bootstrap, Generic
+Selection, ExitProfile Authority and Capacity B are implemented and release
+certified. Crypto SOR is retired, not an active acceptance target. Their stable
 semantics belong to the P0 design, experiment profile, and Tokyo deployment
 contract. Exact production identity and the remaining natural-Ticket acceptance
 belong only to `MAIN_CONTROL_ROADMAP.md`.
@@ -56,9 +57,9 @@ settle, and review concurrently.
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
-| PostgreSQL revision chain | Complete in the current tracked authority | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center -> 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
+| PostgreSQL revision chain | Complete in the current tracked authority | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center -> 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1 -> 0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
 | Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
-| Eight Strategy Events | Complete | Six Crypto CPM/MPG/MI/BRF2/SOR Events plus independent TradFi SOR LONG/SHORT Registry contracts |
+| Registered Strategy Events | Complete | CPM/MPG/MI/BRF2 Crypto Events; retained retired Crypto SOR and independent paused TradFi contracts are not implicit ENTRY permission |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |
 | Arbitration and CapacityClaim | Complete | Deterministic priority, Policy v4 Family/directional/materialization limits, action-time fixed `5x` facts, demand-based remaining margin, and stop risk |
 | Admission evidence and Shadow Outcome | Complete | One Signal-owned Outcome supports eligible portfolio rejection through `fixed_horizon_excursion_v1` and TradFi strategy observation through `sor_path_observation_v1`; Observation creates no simulated Ticket or PnL, while an eligible live Signal may independently continue through the same formal Ticket path: AdmissionDecision, CapacityClaim, Ticket and Command |
@@ -67,7 +68,10 @@ settle, and review concurrently.
 | Protected lifecycle | Complete | Initial Stop, TP1, Break-Even, immutable ExitProfile guards/TimeStop, rolling-extreme ATR Runner, controlled exit |
 | Reconciliation, Settlement, Review | Complete | Exact typed Binance order identities, append-only Review revisions, explicit funding availability, and atomic terminal Owner projection |
 | Runtime ownership | Complete | Persistent Observation, Entry, Lifecycle, and Reconciliation workers |
-| StrategyUniverse capability | Complete and deployed | Versioned 1..10 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
+| StrategyUniverse capability | Implemented | Versioned 1..16 member pools, readonly certification, Warming with zero Signal, automatic atomic activation, frozen Ticket lineage, bounded CLI and PostgreSQL evidence |
+| Generic Selection | Implemented and release certified | Four strategy-specific Specs, Candidate24 DB handoff, independent ComparisonUniverse, epochs, normal-close versus recovery rebase, Owner TOTP controls and resident hosting |
+| Capacity B | Implemented and release certified | Same-strategy/side 2, continuation Family 2, distinct Instrument/Episode/Signal, unchanged global/risk limits and immutable Policy lineage |
+| Deferred evidence | Not PASS | Full long-run soak, offline MAE/MFE projector and complete GS-13 task acceptance remain explicit follow-up, not prerequisites retroactively added to the Owner-approved deployment |
 Exact production identity, certification, runtime state, and remaining progress
 belong only to `MAIN_CONTROL_ROADMAP.md`.
 
@@ -115,28 +119,28 @@ Regular releases use one command:
 
 ```text
 python3 scripts/trading_kernel/deploy_tokyo_release.py \
-  --commit <exact-commit> \
-  --enable-entry
+  --commit <exact-certified-commit> \
+  --mode regular
 ```
 
 The command stages the exact committed release, verifies database and exchange
 flatness, zero open orders, approved leverage configuration, and current
-identity, stops the four workers, rotates runtime identity, switches the
+identity, stops all Kernel and Owner API writers, rotates runtime identity, switches the
 release, starts the three safety workers, repeats readonly certification, and
-starts Entry last. Any failure after service stop fences Entry and restores the
+leaves Entry fenced. Owner Resume/TOTP and official current-Universe preparation
+or promotion are separate operations. Any failure after service stop fences Entry and restores the
 safety workers. This bounded regular-release path does not rebuild PostgreSQL
 and does not run the historical destructive cutover.
 
 The one approved schema-changing path is explicit `compatible_upgrade`. The
-current tracked transition is exact flat `0006_sor_dynamic_selection_v0` to
-`0007_exit_profile_authority_v1`; earlier transitions remain preservation
+latest tracked transitions are exact flat `0007 -> 0008 -> 0009`; earlier transitions remain preservation
 evidence. It requires zero active Ticket, position,
 order, Reservation, Netting Domain, unresolved Command, unreviewed terminal
 Ticket and open Incident, and requires Entry fenced with all old writers
-stopped. It computes the canonical `0006` source-column preservation digest,
-runs the single Alembic revision, verifies the same digest, preserves the sole
-`policy-main` lineage, Strategy controls and Universe authority, installs the
-immutable typed ExitProfile Catalog plus initial EventExitBinding authority,
+stopped. It computes the exact source-column preservation digest,
+runs the certified forward revisions, verifies the same digest, preserves the sole
+`policy-main` lineage, Strategy controls, terminal lineage and Universe authority.
+The formal release transaction installs approved Generic Specs and Capacity B,
 and starts safety workers while Entry stays fenced. Historical `0002 -> 0003`,
 `0003 -> 0004`, `0004 -> 0005` and `0005 -> 0006` evidence remains intact;
 none of these transitions is an active-position handover or a runtime
@@ -161,6 +165,10 @@ No retired BRC backup is a current rollback source. Fixes proceed forward from
 the immutable production tag recorded in `MAIN_CONTROL_ROADMAP.md`.
 
 ## Remaining Execution Stages
+
+These are evidence categories, not assertions that all historical tasks are
+unfinished or a new permission to resume SOR/TradFi. Exact completed and pending
+acceptance facts are owned only by `MAIN_CONTROL_ROADMAP.md`.
 
 ### Stage 1: Controlled Natural Acceptance
 

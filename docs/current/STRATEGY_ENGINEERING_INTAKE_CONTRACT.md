@@ -1,7 +1,7 @@
 ---
 title: STRATEGY_ENGINEERING_INTAKE_CONTRACT
 status: CURRENT
-last_verified: 2026-07-22
+last_verified: 2026-10-12
 ---
 
 # Strategy Engineering Intake Contract
@@ -36,9 +36,14 @@ mutate Ticket lifecycle state.
 
 ## Instrument Pool Intake
 
-For an already registered Event, the only member-pool write path is the
-`configure_strategy_universe.py` application boundary. It accepts **1..10**
+For an already registered Static Event, manual member-pool configuration uses
+the `configure_strategy_universe.py` application boundary. It accepts **1..16**
 unique canonical USDT-perpetual members, installs a Warming Universe, and lets
 the existing Reconciliation and Observation workers certify, prewarm, and
 atomically activate it. The registry, Owner Policy, and configuration order do
 not provide a member or trading-priority fallback.
+
+Dynamic membership uses the distinct official Snapshot-to-Materialization
+Coordinator boundary, then the same Universe certification/Warming/activation
+authority. It never substitutes a direct SQL/member-file write. MPG/MI
+ComparisonUniverse changes require their own versioned rebase provenance.

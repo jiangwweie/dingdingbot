@@ -2,7 +2,7 @@
 title: GENERIC_MULTI_STRATEGY_DYNAMIC_SELECTION_V1_DETAILED_DESIGN
 status: DESIGN_APPROVED
 review_resolution: FOUR_REQUIRED_AMENDMENTS_INCORPORATED
-execution_stage: PLAN_ONLY
+execution_stage: IMPLEMENTED_DESIGN_PROVENANCE
 implementation_plan_authority: ALLOWED
 date: 2026-09-06
 design_authority: ALLOWED_FOR_ELIGIBLE_STRATEGIES
@@ -12,6 +12,13 @@ further_feature_research: CLOSED
 ---
 
 # Generic Multi-Strategy Dynamic Selection V1 — Detailed Design
+
+## Publication status
+
+The frozen design has release-certified implementation. Original design-stage
+permission statements below are historical provenance, not current status.
+Current deployment, Resume, Dynamic activation and incomplete acceptance facts
+belong only to MAIN_CONTROL_ROADMAP; this design is not runtime authority.
 
 ## 1. 设计结论与权限
 

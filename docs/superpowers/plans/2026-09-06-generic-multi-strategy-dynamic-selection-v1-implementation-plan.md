@@ -8,7 +8,7 @@ date: 2026-09-06
 design_authority: ../specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md
 implementation_plan_authority: ALLOWED
 implementation_authority: CODE_AND_TEST_ONLY
-active_execution_scope: GS-13_RELEASE_ASSURANCE
+active_execution_scope: NONE_HISTORICAL_LEDGER
 authorized_execution_scope: CAP-01_GS-10_TO_GS-13_AND_STOPPED_FLAT_DEPLOYMENT
 gs13_authority: OWNER_AUTHORIZED
 completed_execution_scope: GS-04_TO_GS-11
@@ -23,6 +23,15 @@ owner_amendments: ACCEPTED_2026-09-21
 ---
 
 # Generic Multi-Strategy Dynamic Selection V1 — Implementation Plan
+
+## Publication status — supersedes historical execution instructions
+
+Generic/Capacity implementation and exact software release gates have completed.
+This file preserves approved tasks and chronological development evidence; dated
+instructions below are historical, not a request to re-execute deployment.
+Live identity, Resume and Dynamic intents belong only to MAIN_CONTROL_ROADMAP.
+Full long soak and offline MAE/MFE projector remain deferred; complete GS-13
+task acceptance is not claimed.
 
 ## 1. 目标、权限与来源
 

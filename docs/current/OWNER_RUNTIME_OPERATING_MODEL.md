@@ -1,7 +1,7 @@
 ---
 title: OWNER_RUNTIME_OPERATING_MODEL
 status: CURRENT
-last_verified: 2026-08-14
+last_verified: 2026-10-12
 ---
 
 # Owner Runtime Operating Model
@@ -98,7 +98,20 @@ instruments remain configured at fixed `5x`; the kernel adopts and revalidates
 that account fact without mutating leverage.
 
 Capacity is demand-based within the persisted policy's Ticket, gross,
-directional, Family, and margin ceilings; three equal positions are not
+directional, Family, strategy-side, Netting Domain and margin ceilings; three equal positions are not
 promised. Disabling `new_entry_submit_enabled` stops only new ENTRY; it does not
 remove protection or recovery authority from a Ticket that already has
 exchange exposure.
+
+## Selection And Capacity Controls
+
+Global ENTRY Resume and per-strategy Dynamic activation are separate TOTP
+Owner operations. Activating Dynamic stages an exact future period; it is not
+instant Universe takeover. Static can continue until the switching Vacuum;
+existing Tickets retain their frozen lifecycle. CPM/MPG/MI/BRF2 have independent
+Selection controls; Crypto SOR remains retired and must not be resumed.
+
+Capacity B allows two distinct same-strategy/side opportunities under the
+unchanged global three-Ticket, risk and Family ceilings. Manual Regime controls
+eligibility only, Selection controls instruments, and Capacity bounds risk.
+No extra economic review or mandatory Shadow waiting period is introduced.

@@ -1,6 +1,6 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-07-31
+Last updated: 2026-10-12
 Scope: Tokyo Trading Kernel engineering and operation
 
 ## Authority Order
@@ -28,6 +28,12 @@ docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md
 ```
 
 ## Product Objective
+
+The active Crypto experiment families are CPM / MPG / MI / BRF2 with Generic
+Selection capability. Crypto SOR is permanently retired/ENTRY-disabled; retained
+Registry and historical code must never implicitly resume it. Capacity B and
+Selection mode are independent controls. Exact live posture belongs only to
+`docs/current/MAIN_CONTROL_ROADMAP.md`.
 
 The target is a single-Owner, small-capital, loss-capable experiment for
 asymmetric right-tail returns with one readable multi-position trading chain:

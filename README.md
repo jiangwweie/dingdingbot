@@ -62,7 +62,20 @@ acceptance gates are recorded only in
 `docs/current/MAIN_CONTROL_ROADMAP.md`. Deployment procedure and resource limits
 are owned by `docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md`.
 
-## Documentation
+## Current Product Baseline
+
+The Crypto experiment families are CPM, MPG, MI and BRF2 with independent
+Generic Dynamic Selection capability. Crypto SOR is retired and remains only
+as historical code/data lineage. Selection membership is not Ticket capacity;
+Capacity B permits two distinct same-strategy/side opportunities under the
+unchanged global three-Ticket and risk limits. Existing Tickets retain frozen
+ExitProfiles when Universe or Owner controls change.
+
+Project Release tags freeze the repository baseline; Tokyo production tags
+freeze exact deployed software. Publishing `main` does not deploy or activate
+trading. Live posture and deferred acceptance are owned only by the roadmap.
+
+## Documentation Index
 
 | Start here | Responsibility |
 | --- | --- |

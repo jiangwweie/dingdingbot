@@ -328,7 +328,9 @@ def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> 
         "-> 0004_owner_control_plane "
         "-> 0005_tradfi_instrument_center "
         "-> 0006_sor_dynamic_selection_v0 "
-        "-> 0007_exit_profile_authority_v1"
+        "-> 0007_exit_profile_authority_v1 "
+        "-> 0008_generic_dynamic_selection_v1 "
+        "-> 0009_capacity_policy_v0"
     )
 
     for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:
@@ -382,6 +384,33 @@ def test_current_documents_converge_on_portfolio_admission_authority() -> None:
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         missing = [marker for marker in markers if marker not in source]
         assert not missing, f"{relative_path} lacks portfolio authority: {missing}"
+
+
+def test_current_documents_converge_on_generic_selection_and_capacity_b() -> None:
+    requirements = {
+        "docs/current/P0_TRADING_KERNEL_REBUILD_DESIGN.md": (
+            "NORMAL_TRANSITION", "RECOVERY_TRANSITION", "ComparisonUniverse",
+            "max_same_strategy_side=2", "long_continuation=2", "1..16",
+        ),
+        "docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md": (
+            "max_same_strategy_side = 2", "long_continuation=2",
+            "different Instrument", "first eligible", "SOR-001",
+        ),
+        "docs/current/strategy-group-handoffs/STRATEGYGROUP_REGISTRY_CONTRACT.md": (
+            "1..16", "retired", "CPM", "MPG", "MI", "BRF2",
+        ),
+        "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md": (
+            "0008 -> 0009", "3 days", "current release only",
+            "Project release", "does not redeploy",
+        ),
+    }
+    for relative_path, markers in requirements.items():
+        source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        assert all(marker in source for marker in markers), relative_path
+    index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+    assert "PLAN_REVIEW_REQUIRED" not in index
+    plan = (CURRENT_DOCS_ROOT / "P0_TRADING_KERNEL_REBUILD_IMPLEMENTATION_PLAN.md").read_text(encoding="utf-8")
+    assert "--enable-entry" not in plan
 
 
 def test_current_documents_define_signal_owned_observation_without_execution_authority() -> (
@@ -481,7 +510,7 @@ def test_stable_policy_v4_contract_defers_deployed_identity_to_roadmap() -> None
         r"`new_entry_submit_enabled=(?:true|false)`", roadmap,
     )
     assert re.search(r"\| Runtime ownership \|[^\n]*Entry[^\n]*fence", roadmap)
-    assert "0007_exit_profile_authority_v1" in roadmap
+    assert "0009_capacity_policy_v0" in roadmap
     assert "| Dynamic Selection postflight |" in roadmap
 
 

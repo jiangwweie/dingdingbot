@@ -1,7 +1,7 @@
 ---
 title: RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE
 status: CURRENT
-last_verified: 2026-07-31
+last_verified: 2026-10-12
 ---
 
 # Runtime Order-Capable Experiment Profile
@@ -52,6 +52,7 @@ The approved Policy v4 contract is:
 
 ```text
 max_concurrent_tickets = 3
+max_same_strategy_side = 2
 max_ticket_stop_risk_fraction = 0.02
 max_gross_stop_risk_fraction = 0.06
 max_ticket_initial_margin_fraction = 0.30
@@ -74,9 +75,18 @@ stop-risk budget, the remaining `0.90` gross margin budget, the `0.04`
 directional stop-risk budget, venue minimums, and current account facts bind.
 
 Exposure Family is a Registry Event semantic and its limit is Owner Policy
-authority: `long_continuation=1`, `opening_range=2`, and
-`rally_failure_short=1`. StrategyGroup capacity, symbol, and side strings are
-not current admission authority.
+authority: `long_continuation=2`, `opening_range=2`, and
+`rally_failure_short=1` under Capacity B. A second same-strategy/side Ticket
+requires a different Instrument, Episode and Signal, valid current ENTRY
+authority/membership, and all normal admission gates. Existing Tickets outside
+the next Universe retain lifecycle and continue occupying capacity.
+
+Admission remains first eligible: no reserved strategy slot, forced
+diversification, preemption or cross-strategy rank. The effective limit is the
+most restrictive global, directional, Family, strategy-side, Netting Domain,
+risk and margin gate. BRF2 therefore remains limited to one SHORT by its Family.
+Crypto `SOR-001` remains retired/ENTRY-disabled; capability does not authorize it.
+Policy A's single continuation slot is preserved only as immutable history.
 
 The pre-v4 policy model lacked this contract's explicit Family,
 directional-risk, and materialization boundaries. It is historical semantics,

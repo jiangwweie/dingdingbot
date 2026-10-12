@@ -2,12 +2,21 @@
 title: EVENTSPEC_INSTRUMENT_FIT_RESEARCH_OVERVIEW
 status: CURRENT_RESEARCH_OVERVIEW
 date: 2026-08-23
-last_verified: 2026-09-06
+last_verified: 2026-10-12
 phase: P3-X
 production_authority: NONE
 ---
 
 # EventSpec × Instrument Fit Research Overview
+
+## Publication boundary
+
+Research is closed and its evidence remains historical. Generic implementation
+and software release gates have since completed; the older permission/status
+statements below are the record at their dates, not current execution authority.
+CPM/MPG/MI/BRF2 have Dynamic capability; Crypto SOR remains permanently retired.
+Live deployment, Owner intents and incomplete acceptance are owned only by
+MAIN_CONTROL_ROADMAP. No historical selection result proves live profit.
 
 ## Decision
 

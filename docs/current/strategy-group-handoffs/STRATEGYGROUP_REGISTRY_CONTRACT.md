@@ -1,7 +1,7 @@
 ---
 title: STRATEGYGROUP_REGISTRY_CONTRACT
 status: CURRENT
-last_verified: 2026-07-22
+last_verified: 2026-10-12
 ---
 
 # StrategyGroup Registry Contract
@@ -23,7 +23,11 @@ runtime authority; this document defines their meaning and seed boundary.
 | `protection_semantics` | Initial Stop and exit meaning |
 | `status` | Enabled, paused, parked, or retired |
 
-## Active Event Semantics
+## Registered Event Semantics
+
+Registration is not current ENTRY permission. CPM/MPG/MI/BRF2 are the active
+Crypto experiment families; Crypto SOR is retired and retained only for
+historical lineage. TradFi permission remains a separate Owner decision.
 
 | StrategyGroup | Event | Side |
 | --- | --- | --- |
@@ -49,7 +53,7 @@ positions. It never upgrades Owner policy or runtime safety authority.
 
 The Registry owns immutable strategy/event/side semantics only. It does not
 own a member pool, member ordering, member weight, or runtime activation.
-`StrategyUniverse` in PostgreSQL owns the unordered **1..10** certified Binance
+`StrategyUniverse` in PostgreSQL owns the unordered **1..16** certified Binance
 USD-M USDT-perpetual members for one Event. A current pointer is the sole
 authority for new Signal eligibility; a Ticket freezes the selected Universe
 version and digest so later pool replacement cannot rewrite its lifecycle.

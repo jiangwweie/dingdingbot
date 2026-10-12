@@ -2,12 +2,30 @@
 title: MULTI_ASSET_STRATEGYGROUP_ROADMAP
 status: CURRENT_PLAN
 program_id: MASG-P1
-last_verified: 2026-08-25
+last_verified: 2026-10-12
 ---
 
 # Multi-Asset StrategyGroup Roadmap
 
 ## Decision
+
+### 当前产品口径（覆盖下方阶段性研究与路线记录）
+
+主动 Crypto Alpha 为 CPM / MPG / MI / BRF2，均具有 Generic Dynamic Selection
+能力；Crypto `SOR-001` 已由 Owner 永久退役，不因通用容量、发布或保留历史代码
+重新获得 ENTRY。1h+ 是当前主线；TradFi 的历史 15m SOR 路线不是自动实施或启用指令。
+GS 实施、ExitProfile Authority 和 Capacity B 已交付 release-certified 能力，
+实时部署/激活与验收只由 `MAIN_CONTROL_ROADMAP.md` 记录。下面的 SOR 研究、M0–M7
+阶段与授权日期是历史出处和可选扩展设计，不再表示当前下一步或生产许可。
+
+稳定容量为 global 3、same-strategy/side 2、continuation 2、opening_range 2、
+rally_failure_short 1；风险边界不变。Selection Plane、Runtime Materialization、
+Deployment 解耦；MPG/MI 的 ComparisonUniverse 独立。NORMAL_TRANSITION 可在严格
+precommit/latest-unconsumed-close 证明下消费最近 close；真正 gap/failure 的
+RECOVERY_TRANSITION 才 future-close-only + rebase。不存在额外经济上线 Gate。
+长期 soak 和离线 MAE/MFE projector 尚不宣称完成。
+
+（来源：Owner 最终冻结与实施授权；当前 tracked GS/Capacity/ExitProfile 代码。）
 
 后续产品主线以 **StrategyGroup** 为核心，把现有加密永续实验平台扩展为
 一个可管理多个 Venue、产品类别、StrategyVersion 和 StrategyUniverse 的
@@ -15,8 +33,8 @@ last_verified: 2026-08-25
 
 本路线图确认以下稳定方向：
 
-1. 现有加密 **`SOR-001`** 保持独立谱系，其暂停或恢复状态继续由当前
-   Owner Control 和 PostgreSQL 事实决定；
+1. 现有加密 **`SOR-001`** 保持独立历史谱系且永久退役；当前
+   Owner Control 必须保持其 ENTRY 禁用；
 2. 美股参考资产永续合约的 15m SOR 使用新的 StrategyGroup 谱系，规划身份为
    **`SOR-US-EQ-PERP-001`**，不作为 `SOR-001` 的新版本；
 3. StrategyGroup、StrategyVersion、Event 和 StrategyUniverse 分层管理，
@@ -55,7 +73,7 @@ last_verified: 2026-08-25
     滚动样本外优势。因此静态 Universe 排名路线停止，研究对象转为
     **Strategy × Instrument × Current State**。（来源：冻结研究包 `decision.json`、
     `headline.json`、`rolling_oos_bootstrap.json`）
-15. 当前进入 **P3-X：SOR Dynamic Selection & Trading V0**。第一版不是 AI 选币、综合 Fit Score
+15. 历史阶段 **P3-X：SOR Dynamic Selection & Trading V0**。第一版不是 AI 选币、综合 Fit Score
     或机器学习，而是从 SOR 的 **Compression → Expansion** 语义推导少量可解释状态，
     以 `UTC 01:00` 可知的 Pre-trigger `OR Width / ATR` 为 Primary Feature，Activity 为
     最低选择前提，Pre-session Extension 等只作 Shadow Diagnostic。
@@ -401,7 +419,7 @@ Owner Console 后续收敛为四个产品中心。页面只是呈现方式，稳
 前端负责表达和变更 Owner 意图；PostgreSQL 保存版本化权威与追加事实；四类 Worker
 执行唯一正式链路；Ticket、Command、Settlement 和 Review 事实不得被 UI 原地改写。
 
-## Post-M6 Engineering Priorities
+## Historical Post-M6 Engineering Priorities — Not Current Execution Instructions
 
 优先级编号沿用阶段性复盘中的 Owner 语义。**P0 在后台等待市场，P2 的基础设施工作
 先于 P1 产品增强实施**；编号不代表串行执行顺序。
@@ -496,9 +514,10 @@ certification manifest的薄投影，发布仍区分`COMPATIBLE_RESTART`与
 `REQUIRES_RUNTIME_REMATERIALIZATION`。CPM/BRF2只在SOR V0
 证明通用 Selection primitive 值得复制后进入研究；MPG/MI 仍需先分离 ComparisonUniverse。
 
-### Immediate Execution Order
+### Historical Immediate Execution Order — Superseded
 
-P2.1–P2.4 的工程基础设施能力已经完成。本节从当前第一个未完成事项开始排序：
+P2.1–P2.4 的工程基础设施能力已经完成。本节保留当时的排序，不是当前指令；
+现行交付及剩余证据以本文件开头的口径与 MAIN_CONTROL_ROADMAP 为准：
 
 1. **P3-X.3A DS-00 Golden/Evidence/Test Portfolio**：**已完成**。已冻结961×24 member-level
    Decimal Golden、输入/源码/规则digest和Focused/Fast/Release测试组合；Artifact仅用于测试，
@@ -526,8 +545,8 @@ P2.1–P2.4 的工程基础设施能力已经完成。本节从当前第一个�
 1. 当前 **2C4G** 服务器仍使用四类常驻 Worker，不新增每个资产或策略一套服务；SOR Dynamic
    V0 的Selection/Materialization/Observation是三个独立逻辑组件和lease，但不强制第五个
    systemd Worker；
-2. 一般首期 Universe 维持有界小集合；SOR Dynamic V0 明确为 `1..7` 个标的，保持在当前
-   1–10 成员边界内；
+2. Universe 通用上限为 16；历史 SOR Dynamic V0 保持 `1..7` 个标的，
+   不因上限扩大改变 Golden 或恢复 SOR ENTRY；
 3. 15m 策略按闭合 K 线增量运行，不在每次 cadence 重拉完整历史窗口；
 4. Depth、Mark/Index 和高成本事实只在有界候选范围获取；
 5. 新 RuntimeProfile 在 M1–M5 本地候选保持 ENTRY 禁用；M6 首次生产 R4 认证后不等待

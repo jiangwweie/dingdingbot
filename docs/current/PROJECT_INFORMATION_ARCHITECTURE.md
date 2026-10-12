@@ -1,7 +1,7 @@
 ---
 title: PROJECT_INFORMATION_ARCHITECTURE
 status: CURRENT
-last_verified: 2026-08-11
+last_verified: 2026-10-12
 ---
 
 # Project Information Architecture
@@ -74,6 +74,8 @@ is one unbranched forward Alembic chain:
 -> 0005_tradfi_instrument_center
 -> 0006_sor_dynamic_selection_v0
 -> 0007_exit_profile_authority_v1
+-> 0008_generic_dynamic_selection_v1
+-> 0009_capacity_policy_v0
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -113,6 +115,13 @@ from the PostgreSQL current Binding; issued Ticket lifecycle exact-loads only
 its frozen Profile. The migration performs no Profile switch, creates no
 Ticket or Exchange Command, and installs no YAML/YML or file-backed runtime
 authority.
+
+`0007 -> 0008` generalizes Selection to CPM/MPG/MI/BRF2, adds independent
+ComparisonUniverse and epoch/recovery provenance, and preserves exact Static
+Detector/Episode/Signal lineage. `0008 -> 0009` adds Capacity B lineage and
+strategy-side limits. Schema installation is not Dynamic activation: only the
+formal release identity transaction applies the Owner-approved Capacity B
+revision; Owner Console/TOTP separately controls ENTRY and Selection mode.
 
 Strategy semantics live in the Registry, while concrete instrument membership,
 certification, warming, current activation, and frozen Signal/Ticket lineage

@@ -2,7 +2,7 @@
 title: P0_TRADING_KERNEL_REBUILD_DESIGN
 status: CURRENT
 program_id: P0-TKR
-last_verified: 2026-08-11
+last_verified: 2026-10-12
 ---
 
 # P0 Trading Kernel Rebuild Design
@@ -70,14 +70,15 @@ src/trading_kernel/interfaces     bounded runtime and readonly surfaces
 The forward schema chain is `0001_trading_kernel_baseline_v4 ->
 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability ->
 0004_owner_control_plane -> 0005_tradfi_instrument_center ->
-0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1`.
+0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1 ->
+0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0`.
 The frozen `0001_trading_kernel_baseline_v4` definition remains historical
 source lineage only. PostgreSQL owns current runtime truth and append-only
 lifecycle facts. Exchange readonly facts own external truth. Repository
 documents and generated output never own production decisions.
 
 Strategy Registry owns only immutable Event semantics. PostgreSQL
-StrategyUniverse owns each Event's unordered **1..10** member set,
+StrategyUniverse owns each Event's unordered **1..16** member set,
 certification, Warming/Active/Retired lifecycle and current pointer. Warming
 scopes read facts but emit no Signal; only exact Active members can emit a new
 Signal. Signal, Claim and Ticket freeze Universe version/digest; replacement
@@ -137,10 +138,50 @@ Policy v4 owns three concurrent Tickets, `0.02` maximum planned stop risk per
 Ticket, `0.06` gross stop risk, `0.30` initial margin per Ticket, `0.90` gross
 initial-margin utilization, `0.50` minimum materialization, and `0.04`
 directional stop risk. Registry Events freeze an Exposure Family; Owner Policy
-limits `long_continuation=1`, `opening_range=2`, and
-`rally_failure_short=1`. StrategyGroup capacity is not current admission
-authority. Current Reservations, available margin, Initial Stop risk, venue
+limits `long_continuation=2`, `opening_range=2`, and
+`rally_failure_short=1` under Capacity B, with `max_same_strategy_side=2`.
+Legacy Policy A remains historical lineage, not the new default contract.
+Strategy-side capacity is an explicit persisted Policy/Claim gate, not a
+Registry quota. Current Reservations, available margin, Initial Stop risk, venue
 minimums, and liquidation distance still bound every Ticket.
+
+## Generic Selection And ExitProfile Authority
+
+CPM/MPG/MI/BRF2 support independent Static/Dynamic modes. Selection reads the
+frozen Candidate24 market inputs and commits immutable Snapshot facts through
+PostgreSQL; it does not create Generation, Vacuum or read current Universe.
+Materialization separately owns certification, serial Warming and atomic
+activation. Compatible deployment restores durable runtime without waiting
+for Dynamic warming. MPG/MI use an independent ComparisonUniverse, not the
+current TradableUniverse as a changing detector comparison cohort.
+
+`NORMAL_TRANSITION`: precommitted Snapshot plus exact latest-unconsumed-close
+and comparison/epoch continuity proof may consume the latest close even if
+activation completes seconds later. Slow activation alone is not an authority
+gap. `RECOVERY_TRANSITION`: an actual gap/failure requires future-close-only
+and Episode/Comparison rebase; it never retrospectively consumes a missed close.
+Retry cannot extend the original deadline. `VALID_EMPTY` blocks new ENTRY
+prospectively without rewriting an existing Ticket. Owner Pause dominates
+fallback; switching Vacuum drains unfinished ENTRY through durable commands.
+
+Capacity B permits at most two same-strategy/same-side Tickets only for
+different Instruments, Episodes and Signals. The same instrument/side Netting
+Domain remains single-Ticket. Family, direction, global risk and margin gates
+still bind; first eligible admission has no Dynamic-rank scheduling or preemption.
+
+ExitProfile and EventExitBinding are immutable PostgreSQL facts. Claim/Ticket
+issuance rechecks current binding version/CAS; a Ticket retains its frozen
+profile for Initial Stop, TP1, Runner, guards and exit. Rare Owner binding/profile
+mutations share a PostgreSQL transaction-scoped authority lock, not a hot-path
+distributed lock. No YAML/YML owns runtime configuration.
+
+Crypto `SOR-001` is retired and must not regain new ENTRY through generic
+capacity, deployment or Selection changes; retained code/data is historical
+compatibility only. TradFi remains a separate explicit Owner scope.
+
+（来源：tracked Generic Selection/authority/capacity/ExitProfile code;
+forward migrations; frozen Owner decisions. Current activation facts belong
+only to `MAIN_CONTROL_ROADMAP.md`.）
 
 ## Transaction And Exchange Model
 
@@ -200,7 +241,7 @@ not rollback authorities.
 
 The rebuild is complete only when:
 
-1. the six approved Crypto Events can naturally produce typed StrategySignals
+1. the Owner-enabled Crypto Events can naturally produce typed StrategySignals
    in their approved Product scope;
 2. current authority can issue serial Tickets and manage concurrent protected
    positions across independent Netting Domains;
