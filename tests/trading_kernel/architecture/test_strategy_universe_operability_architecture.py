@@ -91,7 +91,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
 
 
 def test_bootstrap_and_promotion_have_no_operator_shrinkable_instrument_scope() -> None:
-    """The approved Crypto and TradFi manifests are non-optional."""
+    """Bootstrap is frozen; restoration scope is exact PG current, not supplied."""
 
     bootstrap_source = _read("scripts/trading_kernel/bootstrap_strategy_universes.py")
     promotion_source = _read("scripts/trading_kernel/promote_entry.py")
@@ -99,9 +99,30 @@ def test_bootstrap_and_promotion_have_no_operator_shrinkable_instrument_scope() 
 
     assert "--instrument" not in bootstrap_source
     assert "--exchange-instrument-id" not in deployment_source
-    assert "APPROVED_ACTIVE_INSTRUMENT_COUNT = len(" in promotion_source
-    assert "APPROVED_UNIVERSE_BATCHES.values()" in promotion_source
+    assert "APPROVED_ACTIVE_INSTRUMENT_COUNT" not in promotion_source
+    assert "APPROVED_UNIVERSE_BATCHES" not in promotion_source
+    assert 'certification.get("entry_recovery_members")' in promotion_source
+    assert "manifest == members == sorted(set(members))" in promotion_source
+    assert "--instrument" not in promotion_source
+    assert "arm_entry_authority" not in promotion_source
+    assert "arm-acceptance" not in promotion_source
+    assert 'certification.get("owner_entry_resume_authorized") is True' in promotion_source
+    recovery_source = _read("src/trading_kernel/infrastructure/entry_restoration_certification.py")
+    assert "brc_strategy_universe_current" in recovery_source
+    assert "brc_instrument_certification_current" in recovery_source
+    assert "brc_owner_authorizations" in recovery_source
+    assert "totp_step_up" in recovery_source
+    assert "brc_instrument_certification_batches" not in recovery_source
+    assert "LIMIT 1025" in recovery_source
     assert "binance-usdm:AVAXUSDT:perpetual" not in bootstrap_source
+
+
+def test_entry_restoration_contract_requires_current_scope_and_owner_proof() -> None:
+    source = _read("docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md")
+    for marker in ("Current-Universe Entry Restoration", "Owner Resume / TOTP",
+                   "entry_recovery_members", "entry_recovery_basis_digest",
+                   "does not arm Policy", "Historical bootstrap batches"):
+        assert marker in source
 
 
 def test_reconciliation_certification_is_a_bounded_safety_worker_concern() -> None:

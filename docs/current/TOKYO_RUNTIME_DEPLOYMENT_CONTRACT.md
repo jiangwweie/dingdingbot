@@ -6,6 +6,38 @@ last_verified: 2026-08-25
 
 # Tokyo Runtime Deployment Contract
 
+## Current-Universe Entry Restoration
+
+Deployment, starting an Entry service, and restoring new-order permission are
+separate operations. After maintenance, use the existing official
+`promote_entry.py` boundary only after **Owner Resume / TOTP** has committed the
+current Policy revision. The operational tool **does not arm Policy**, submit
+orders, activate Dynamic mode, resume a paused strategy, or switch ExitProfiles.
+
+Restoration reads one repeatable-read readonly PostgreSQL snapshot. Its
+`entry_recovery_members` is the exact canonical union of current Active Universe
+members, not a fixed initial symbol list and not a caller-supplied subset.
+Current Event/Profile coverage, scope completeness, Universe digests, eligible
+fresh certification facts, 5x/Cross/independent sides, Runtime Capability,
+Registry/Commit/Schema/Seed and flatness must pass. The current Policy's resume
+event must link to the exact Owner authorization, TOTP strength, scope and time.
+Historical bootstrap batches remain bootstrap/history evidence; they are not
+restoration authority after legitimate Universe changes.
+
+The fresh exchange readonly probe must cover those exact members once each,
+the same account and modes, zero positions/orders and nonexpired 5x rule facts.
+Recheck the database and exchange after starting the service while fenced.
+`entry_recovery_basis_digest` binds runtime, Policy, current Universe membership
+and versions, Strategy Controls and Owner Resume identity; any drift rejects
+unfencing. Database evidence expiry is rechecked after external I/O. Failure
+after startup restores the Fence and stops Entry. No fixed 15/22/24 count,
+Bootstrap rerun, direct Policy SQL or manually deleted Fence substitutes for
+these gates. Existing Ticket admission/dispatch gates still own each real order.
+
+This contract describes the tracked restoration repair, not installation or
+live-trading authority. Current deployment and control posture are recorded only
+in `MAIN_CONTROL_ROADMAP.md`; a code/test result is not a production release.
+
 ## Runtime State Authority
 
 Exact production commit, immutable tag, certification, measured resource state,

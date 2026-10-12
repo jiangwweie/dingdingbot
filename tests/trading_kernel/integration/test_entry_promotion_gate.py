@@ -19,6 +19,10 @@ from scripts.trading_kernel.promote_entry import (
     EntryPromotionBlocked,
     promote_entry,
 )
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    set_global_entry_state,
+)
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
@@ -34,9 +38,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RUNTIME_PROFILE_ID,
     TRADFI_RUNTIME_PROFILE_ID,
-    ArmAcceptancePolicyRequest,
     RuntimeAuthoritySeedRequest,
-    arm_acceptance_policy,
     seed_runtime_authority,
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
@@ -191,10 +193,6 @@ class RecordingPromotionBackend:
         self.calls.append("preflight")
         return self.fenced and not self.entry_enabled and not self.entry_active
 
-    def arm_entry_authority(self) -> Mapping[str, object]:
-        self.calls.append("arm")
-        return asyncio.run(_arm(self.database_url, self.now_ms)).model_dump()
-
     def start_entry_while_fenced(self) -> None:
         self.calls.append("start")
         self.entry_enabled = True
@@ -228,6 +226,11 @@ def test_entry_promotion_rehearses_arm_failure_resume_and_idempotence() -> None:
     asyncio.run(_seed_and_bootstrap(database_name, database_url))
     promotion_now_ms = NOW_MS + 10_000
     try:
+        paused = RecordingPromotionBackend(database_url=database_url, now_ms=promotion_now_ms)
+        with pytest.raises(EntryPromotionBlocked, match="entry_promotion_gate_failed"):
+            promote_entry(paused)
+        assert paused.fenced and paused.calls == ["preflight", "certification"]
+        asyncio.run(_owner_resume(database_url, promotion_now_ms))
         failed = RecordingPromotionBackend(
             database_url=database_url,
             now_ms=promotion_now_ms,
@@ -379,13 +382,18 @@ async def _advance_to_r4_certification_authority(engine) -> None:
     assert updated.rowcount == 1
 
 
-async def _arm(database_url: str, now_ms: int):
+async def _owner_resume(database_url: str, now_ms: int):
     engine = create_async_engine(database_url)
     try:
         async with PostgresKernelUnitOfWork(engine) as uow:
-            return await arm_acceptance_policy(
-                uow,
-                ArmAcceptancePolicyRequest(armed_at_ms=now_ms),
+            policy = await uow.entry_admission.get_owner_policy("policy-main")
+            assert policy is not None
+            return await set_global_entry_state(
+                uow, owner_policy_id="policy-main", enabled=True,
+                request=ControlMutationRequest(expected_version=policy.policy_version,
+                    reason="owner_resume_rehearsal", idempotency_key="rehearsal-entry-resume",
+                    owner_identity="owner", now_ms=now_ms),
+                authentication_strength="totp_step_up",
             )
     finally:
         await engine.dispose()

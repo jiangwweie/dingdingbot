@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol
@@ -15,18 +17,6 @@ from typing import Protocol
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from src.trading_kernel.application.strategy_universe_batch_manifest import (
-    APPROVED_UNIVERSE_BATCHES,
-)
-
-APPROVED_ACTIVE_INSTRUMENT_COUNT = len(
-    {
-        member_id
-        for _event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
-        for member_id in member_ids
-    }
-)
 
 ENTRY_SERVICE = "brc-trading-kernel-entry-worker.service"
 SAFETY_SERVICES = (
@@ -53,8 +43,6 @@ class EntryPromotionBackend(Protocol):
 
     def entry_is_inactive_disabled_and_fenced(self) -> bool: ...
 
-    def arm_entry_authority(self) -> Mapping[str, object]: ...
-
     def start_entry_while_fenced(self) -> None: ...
 
     def entry_is_active_while_fenced(self) -> bool: ...
@@ -72,7 +60,12 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
     entry_already_started_fenced = False
     if not backend.entry_is_inactive_disabled_and_fenced():
         certification = backend.certification()
-        if _authority_is_armed(certification) and backend.entry_is_active():
+        if (
+            _authority_is_armed(certification)
+            and backend.entry_is_active()
+            and backend.external_state_and_rules_match(certification)
+            and backend.safety_workers_active_stable()
+        ):
             return "already_promoted"
         if backend.entry_is_active_while_fenced():
             entry_already_started_fenced = True
@@ -82,21 +75,19 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
             )
     else:
         certification = backend.certification()
-    requires_arm = certification.get("entry_promotion_pass") is True
-    if not requires_arm and not _authority_is_armed(certification):
+    if not _authority_is_armed(certification):
+        policy = certification.get("owner_policy")
+        if isinstance(policy, Mapping) and (
+            policy.get("new_entry_submit_enabled") is not True
+            or certification.get("owner_entry_resume_authorized") is not True
+        ):
+            raise EntryPromotionBlocked("entry_promotion_gate_failed:owner_entry_resume_required")
         raise EntryPromotionBlocked("entry_promotion_gate_failed")
     if not backend.external_state_and_rules_match(certification):
         raise EntryPromotionBlocked("exchange_state_or_rule_gate_failed")
     if not backend.safety_workers_active_stable():
         raise EntryPromotionBlocked("safety_worker_gate_failed")
     try:
-        if requires_arm:
-            armed = backend.arm_entry_authority()
-            if (
-                armed.get("new_entry_submit_enabled") is not True
-                or not _is_positive_policy_version(armed.get("policy_version"))
-            ):
-                raise EntryPromotionBlocked("entry_authority_arm_failed")
         if not entry_already_started_fenced:
             backend.start_entry_while_fenced()
         if not backend.entry_is_active_while_fenced():
@@ -104,8 +95,11 @@ def promote_entry(backend: EntryPromotionBackend) -> str:
         postflight = backend.certification()
         if (
             not _authority_is_armed(postflight)
+            or postflight.get("entry_recovery_basis_digest")
+            != certification.get("entry_recovery_basis_digest")
             or not backend.external_state_and_rules_match(postflight)
             or not backend.safety_workers_active_stable()
+            or not _authority_is_armed(postflight)
         ):
             raise EntryPromotionBlocked("final_postflight_failed")
         backend.remove_entry_fence()
@@ -121,8 +115,13 @@ def _authority_is_armed(certification: Mapping[str, object]) -> bool:
     owner_policy = certification.get("owner_policy")
     capabilities = certification.get("capabilities")
     return bool(
-        certification.get("universe_bootstrap_pass") is True
-        and certification.get("certification_batch_pass") is True
+        certification.get("status") == "pass"
+        and certification.get("entry_recovery_ready") is True
+        and certification.get("owner_entry_resume_authorized") is True
+        and isinstance(certification.get("entry_recovery_basis_digest"), str)
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", str(certification["entry_recovery_basis_digest"])) is not None
+        and type(certification.get("entry_recovery_valid_until_ms")) is int
+        and int(str(certification["entry_recovery_valid_until_ms"])) > int(time.time() * 1000)
         and certification.get("flatness_pass") is True
         and isinstance(owner_policy, Mapping)
         and _is_positive_policy_version(owner_policy.get("policy_version"))
@@ -144,7 +143,20 @@ class LocalEntryPromotionBackend:
         self._database_url = database_url
 
     def certification(self) -> Mapping[str, object]:
-        return self._json_script("certify_readonly.py")
+        result = self._json_script("certify_readonly.py")
+        identity = result.get("runtime_identity")
+        if (
+            not isinstance(identity, Mapping)
+            or type(result.get("certified_at_ms")) is not int
+            or not 0 < int(str(result["certified_at_ms"])) <= int(time.time() * 1000)
+            or not os.environ.get("TRADING_KERNEL_RUNTIME_COMMIT")
+            or identity.get("runtime_commit") != os.environ.get("TRADING_KERNEL_RUNTIME_COMMIT")
+            or identity.get("schema_revision") != os.environ.get("TRADING_KERNEL_SCHEMA_REVISION")
+            or not os.environ.get("TRADING_KERNEL_ACCOUNT_ID")
+            or result.get("entry_recovery_account_id") != os.environ.get("TRADING_KERNEL_ACCOUNT_ID")
+        ):
+            raise EntryPromotionBlocked("deployed_runtime_identity_mismatch")
+        return result
 
     def external_state_and_rules_match(
         self,
@@ -153,21 +165,32 @@ class LocalEntryPromotionBackend:
         probe = self._json_script("probe_production_runtime.py")
         rules = probe.get("rules")
         manifest = probe.get("probe_manifest")
+        members = certification.get("entry_recovery_members")
+        now_ms = int(time.time() * 1000)
         return bool(
-            probe.get("venue_id") == "binance-usdm"
+            probe.get("environment") == "live"
+            and probe.get("venue_id") == "binance-usdm"
+            and probe.get("account_id") == certification.get("entry_recovery_account_id")
             and probe.get("account_position_mode") == "independent_sides"
             and probe.get("account_margin_mode") == "cross"
             and certification.get("flatness_pass") is True
             and probe.get("non_flat_domain_count") == 0
             and probe.get("open_order_domain_count") == 0
             and isinstance(manifest, list)
-            and len(manifest) == APPROVED_ACTIVE_INSTRUMENT_COUNT
+            and isinstance(members, list)
+            and bool(members)
+            and manifest == members == sorted(set(members))
             and isinstance(rules, list)
-            and len(rules) == APPROVED_ACTIVE_INSTRUMENT_COUNT
+            and len(rules) == len(members) == probe.get("instrument_rule_count")
+            and type(probe.get("observed_at_ms")) is int
+            and 0 < int(str(probe["observed_at_ms"])) <= now_ms
             and {str(row.get("exchange_instrument_id")) for row in rules if isinstance(row, Mapping)}
             == {str(item) for item in manifest}
             and all(
-                isinstance(row, Mapping) and row.get("configured_leverage") == 5
+                isinstance(row, Mapping) and type(row.get("configured_leverage")) is int
+                and row.get("configured_leverage") == 5
+                and type(row.get("valid_until_ms")) is int
+                and int(row["valid_until_ms"]) > now_ms
                 for row in rules
             )
         )
@@ -177,9 +200,6 @@ class LocalEntryPromotionBackend:
 
     def entry_is_inactive_disabled_and_fenced(self) -> bool:
         return self._fence_exists() and not self._active(ENTRY_SERVICE) and not self._enabled(ENTRY_SERVICE)
-
-    def arm_entry_authority(self) -> Mapping[str, object]:
-        return self._json_script("seed_runtime_authority.py", "arm-acceptance")
 
     def start_entry_while_fenced(self) -> None:
         self._run("sudo", "systemctl", "enable", "--now", ENTRY_SERVICE)
@@ -207,6 +227,7 @@ class LocalEntryPromotionBackend:
                 **os.environ,
                 "TRADING_KERNEL_DATABASE_URL": self._database_url,
             },
+            timeout=120,
         )
         payload = json.loads(result.stdout)
         if not isinstance(payload, Mapping):
@@ -224,7 +245,7 @@ class LocalEntryPromotionBackend:
 
     @staticmethod
     def _run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(args, check=check, capture_output=True, text=True)
+        return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -246,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     except EntryPromotionBlocked as exc:
         print(f"status=blocked reason={exc}", file=sys.stderr)
         return 2
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         print("status=failed reason=operation_failed", file=sys.stderr)
         return 1
     print(f"status={status}")

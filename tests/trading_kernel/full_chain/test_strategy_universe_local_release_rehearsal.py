@@ -21,6 +21,7 @@ from tests.trading_kernel.support.postgres import (
 from tests.trading_kernel.support.promotion_rehearsal import (
     RecordingPromotionBackend,
     _cleanup,
+    _owner_resume,
     _seed_and_bootstrap,
 )
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
@@ -37,6 +38,7 @@ def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry
     promotion_now_ms = NOW_MS + 10_000
     asyncio.run(_seed_and_bootstrap(database_name, database_url))
     try:
+        asyncio.run(_owner_resume(database_url, promotion_now_ms))
         backend = RecordingPromotionBackend(
             database_url=database_url,
             now_ms=promotion_now_ms,
@@ -80,7 +82,6 @@ def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry
             "certification",
             "external",
             "safety",
-            "arm",
             "start",
             "active_fenced",
             "certification",

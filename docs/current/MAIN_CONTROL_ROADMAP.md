@@ -74,6 +74,21 @@ portfolio consolidation is separate from this completed deployment.
 
 ### Current Remaining Control Actions
 
+**2026-10-12 Entry restoration repair — local verification only:** the focused
+`codex/entry-resume-current-universe-20261012` branch replaces fixed initial
+membership/Batch restoration assumptions with exact PG current pointers,
+fresh member certifications and current Owner Resume/TOTP proof; removes the
+promoter's auto-arm operation; and checks scope/Policy/runtime drift and
+post-I/O expiry before unfencing. Final Unit/Architecture 1,567 PASS, complete
+Full-chain 54 PASS, final restoration PG/chain slice 13 PASS, additional
+Bootstrap/schema/Policy/Owner slice 46 PASS, Ruff/Mypy/diff PASS. A candidate
+readonly query against actual Tokyo facts returned 22 members / readiness true /
+Owner proof false. This did not install code or modify production. The repair
+still requires its exact same-schema release certification and reconciliation
+of the existing regular-deployment wrapper's remaining Static assumptions before
+installation. No new Release PASS or repaired production runtime is claimed.
+The deployed release/tag above remain unchanged and Entry stays fenced.
+
 - No remaining software installation or migration step for this release.
 - Entry service is restarted/enabled, but new ENTRY remains closed/fenced; ordinary trading restoration must follow
   fresh official gates, not the legacy fixed-Static manifest assumptions or a

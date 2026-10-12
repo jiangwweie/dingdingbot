@@ -40,6 +40,9 @@ from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
 )
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
+from src.trading_kernel.infrastructure.entry_restoration_certification import (
+    read_entry_restoration_state,
+)
 from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
     read_preserved_runtime_state,
 )
@@ -501,7 +504,7 @@ async def _certify(
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
-            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
             revision = str(
                 (
                     await connection.execute(
@@ -641,6 +644,9 @@ async def _certify(
                 ).scalar_one()
             )
             preserved_runtime = await read_preserved_runtime_state(connection)
+            entry_restoration = await read_entry_restoration_state(
+                connection, now_ms=effective_now_ms,
+            )
             dynamic_selection_runtime_counts_row = (
                 await connection.execute(
                     text(
@@ -1573,6 +1579,7 @@ async def _certify(
     return {
         "schema": SCHEMA,
         "status": "pass" if passed else "fail",
+        "certified_at_ms": effective_now_ms,
         "alembic_revision": revision,
         "runtime_identity": runtime_identity,
         "table_allowlist": table_allowlist,
@@ -1587,6 +1594,14 @@ async def _certify(
         "flatness_pass": flatness_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
         "entry_promotion_pass": entry_promotion_pass,
+        "entry_recovery_ready": bool(database_integrity_pass and universe_identity_pass
+            and seed_identity["status"] == "pass" and registry_identity["status"] == "pass"
+            and warming_scope_count == 0 and not warming_universe_manifest and entry_restoration.ready),
+        "owner_entry_resume_authorized": entry_restoration.owner_resume_authorized,
+        "entry_recovery_basis_digest": entry_restoration.basis_digest,
+        "entry_recovery_members": list(entry_restoration.member_ids),
+        "entry_recovery_account_id": entry_restoration.account_id,
+        "entry_recovery_valid_until_ms": entry_restoration.valid_until_ms,
         "entry_promotion_counts": {
             "active_current_universes": active_current_count,
             "active_scopes": active_scope_count,
