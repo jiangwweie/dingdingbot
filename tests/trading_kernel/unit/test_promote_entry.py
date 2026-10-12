@@ -263,7 +263,7 @@ def test_external_gate_uses_exact_current_members_not_fixed_size(monkeypatch, co
     assert backend.external_state_and_rules_match(certificate)
 
 
-@pytest.mark.parametrize("fault", ["duplicate_rule", "wrong_member", "wrong_account", "expired", "future", "leverage", "orders"])
+@pytest.mark.parametrize("fault", ["duplicate_rule", "wrong_member", "wrong_account", "expired", "future", "stale", "leverage", "orders"])
 def test_external_gate_rejects_bad_exact_current_proof(monkeypatch, fault):
     import time
     now = int(time.time()*1000)
@@ -281,6 +281,7 @@ def test_external_gate_rejects_bad_exact_current_proof(monkeypatch, fault):
     elif fault == "wrong_account": probe["account_id"] = "other"
     elif fault == "expired": probe["rules"][0]["valid_until_ms"] = now-1
     elif fault == "future": probe["observed_at_ms"] = now+60000
+    elif fault == "stale": probe["observed_at_ms"] = now-30001
     elif fault == "leverage": probe["rules"][0]["configured_leverage"] = 10
     elif fault == "orders": probe["open_order_domain_count"] = 1
     backend = LocalEntryPromotionBackend(python="python", database_url="not-used")

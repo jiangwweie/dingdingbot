@@ -82,6 +82,13 @@ identity-write outcomes keep old Writers stopped. Unit RED/GREEN and an actual
 22-member Docker PG identity-rotation/preservation rehearsal cover this path.
 Do not bypass the exact release certification or claim local code is installed.
 
+The first frozen-candidate preflight exposed that an all-member serial readonly
+probe could outlive its default five-second single-instrument fact TTL. Its
+certification was interrupted before completion, not claimed PASS. Maintenance
+callers now explicitly request the existing probe's bounded 30-second audit
+window and still reject stale/future observation and expired rule evidence.
+No Entry admission/dispatch action-fact TTL or trading parameter changed.
+
 Owner explicitly authorized complete Tokyo software repair. The current
 execution sequence freezes one clean R3 candidate, runs the complete Kernel
 portfolio once, stages its exact archive, stops the Owner API and all Kernel

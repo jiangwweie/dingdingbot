@@ -46,6 +46,10 @@ class ProductionProbeFactsSource(EntryFactsSource, VenueTruthPort, Protocol):
     pass
 
 
+# One bounded multi-instrument maintenance probe, never a per-order fact TTL.
+MAINTENANCE_PROBE_VALIDITY_MS = 30_000
+
+
 class InstrumentRuleProbe(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

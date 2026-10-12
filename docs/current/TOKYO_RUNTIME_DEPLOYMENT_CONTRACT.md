@@ -36,6 +36,11 @@ restoration authority after legitimate Universe changes.
 
 The fresh exchange readonly probe must cover those exact members once each,
 the same account and modes, zero positions/orders and nonexpired 5x rule facts.
+The multi-instrument maintenance audit uses a fixed maximum 30-second evidence
+window; observation age and every rule expiry are checked after collection.
+This display/maintenance-only probe does not dispatch orders or change any
+per-order action-fact validity. The ENTRY worker's configured action-time
+freshness contract is unchanged and rereads facts for each real order.
 Recheck the database and exchange after starting the service while fenced.
 `entry_recovery_basis_digest` binds runtime, Policy, current Universe membership
 and versions, Strategy Controls and Owner Resume identity; any drift rejects

@@ -1175,7 +1175,8 @@ def test_ssh_probe_exchange_has_no_operator_instrument_arguments(
 
     backend.probe_exchange(TARGET_RELEASE)
 
-    assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py")]
+    assert calls == [(TARGET_RELEASE, "scripts/trading_kernel/probe_production_runtime.py",
+                      "--validity-ms", "30000")]
 
 
 def test_compatible_upgrade_verifies_0005_preservation_without_bootstrap(

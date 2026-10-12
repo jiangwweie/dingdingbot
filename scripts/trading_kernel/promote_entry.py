@@ -18,6 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.trading_kernel.probe_production_runtime import (
+    MAINTENANCE_PROBE_VALIDITY_MS,
+)
+
 ENTRY_SERVICE = "brc-trading-kernel-entry-worker.service"
 SAFETY_SERVICES = (
     "brc-trading-kernel-observation-worker.service",
@@ -162,7 +166,8 @@ class LocalEntryPromotionBackend:
         self,
         certification: Mapping[str, object],
     ) -> bool:
-        probe = self._json_script("probe_production_runtime.py")
+        probe = self._json_script("probe_production_runtime.py",
+                                  "--validity-ms", str(MAINTENANCE_PROBE_VALIDITY_MS))
         rules = probe.get("rules")
         manifest = probe.get("probe_manifest")
         members = certification.get("entry_recovery_members")
@@ -184,6 +189,7 @@ class LocalEntryPromotionBackend:
             and len(rules) == len(members) == probe.get("instrument_rule_count")
             and type(probe.get("observed_at_ms")) is int
             and 0 < int(str(probe["observed_at_ms"])) <= now_ms
+            and now_ms-int(str(probe["observed_at_ms"])) < MAINTENANCE_PROBE_VALIDITY_MS
             and {str(row.get("exchange_instrument_id")) for row in rules if isinstance(row, Mapping)}
             == {str(item) for item in manifest}
             and all(

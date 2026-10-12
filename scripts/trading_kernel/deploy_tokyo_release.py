@@ -31,6 +31,9 @@ from scripts.trading_kernel.deployment_control import (
     DeploymentDrainBlocked,
     run_deployment_drain,
 )
+from scripts.trading_kernel.probe_production_runtime import (
+    MAINTENANCE_PROBE_VALIDITY_MS,
+)
 from src.trading_kernel.application.runtime import (
     RUNTIME_COMPATIBILITY_REASONS,
     RuntimeCompatibilityClassification,
@@ -1401,7 +1404,8 @@ def _require_probe_rules(
 ) -> None:
     now_ms = int(time.time()*1000)
     if (type(probe.get("observed_at_ms")) is not int
-        or not 0 < int(str(probe["observed_at_ms"])) <= now_ms):
+        or not 0 < int(str(probe["observed_at_ms"])) <= now_ms
+        or now_ms-int(str(probe["observed_at_ms"])) >= MAINTENANCE_PROBE_VALIDITY_MS):
         raise DeploymentBlocked("production readonly probe time is invalid")
     rules = probe.get("rules")
     if not isinstance(rules, list) or not rules:
@@ -1560,6 +1564,7 @@ class SshTokyoReleaseBackend:
         return self._release_json(
             release,
             "scripts/trading_kernel/probe_production_runtime.py",
+            "--validity-ms", str(MAINTENANCE_PROBE_VALIDITY_MS),
         )
 
     def certify_compatible_source(
