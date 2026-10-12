@@ -27,7 +27,45 @@ different Netting Domains progress concurrently.
 
 ## Current Verified State
 
-### 2026-10-12 Unified Generic Selection / Capacity V0 — DEPLOYMENT_COMPLETE
+### 2026-10-12 Entry Restoration Repair — SERVER_REPAIR_COMPLETE / OWNER_PAUSED
+
+**Server software and operational preparation are complete. No new ENTRY is
+authorized yet: Owner Policy remains paused.** This current table supersedes all
+older snapshots below.
+
+| Area | Fresh directly verified state |
+| --- | --- |
+| Production commit | `1ac0d4ae8fe10937923cecd9fd4948765c42420c` |
+| Production tag | `tokyo-runtime-2026.10.12.2`; immutable tag resolves to the exact certified production candidate |
+| Production-commit certification | Exact R3 PASS: 1,581 Unit/Architecture, 1,639 PostgreSQL Integration, 54 Full-chain; Ruff, Mypy (193 files), diff PASS. Integration 4,630.46s; no partial evidence reused as Release PASS |
+| Kernel / schema | `/opt/brc/releases/brc-trading-kernel-1ac0d4ae8fe1`; runtime and Alembic `0009_capacity_policy_v0`; no migration in this release |
+| Seed / Registry | Seed `sha256:a053adc206ecb7fa2fe9ee813c779bca5a6feb654a0a5256879e9aaefa1945ed`; Registry/Seed integrity and recomputation PASS |
+| Owner API / Console | Both active release links identify production commit, exact R2/R1 PASS, API/socket health PASS, index hash/public static smoke PASS |
+| Same-Schema deployment | Formal `regular` result PASS, 119,499ms; all Kernel Writers plus Owner API stopped; PG/Binance refreshed after stop; no old Writer overlap, schema migration, Bootstrap/Batch creation or exchange write |
+| Owner controls | Policy version `18` has `new_entry_submit_enabled=false`; Capacity B unchanged: same Strategy/side 2, family continuation 2 / opening range 2 / rally failure short 1; risk/margin/leverage parameters unchanged |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation active/enabled, API active, zero restarts. Entry PID 785746 was verified as Python `run_command_worker_once.py --worker-role entry --run-forever`, not the old Fence-wait shell; log `no_candidate` |
+| Operational preparation | Official `promote_entry.py --prepare-owner-resume` returned `prepared_owner_paused`; Fence absent. It did not write Policy or Owner proof and did not submit any order |
+| Resume readiness | Current 22-member readiness true, Owner Resume proof false, official `get_global_entry_resume_blocker` returns none. The only remaining restoration action is Console `恢复新开仓` with TOTP; no extra server operation is needed afterwards |
+| Dynamic Selection postflight | Fresh stopped-writer baseline and target agree: Jobs 38, Snapshots 38, Generations 18, Vacuums 18, Authorities 54, Gap Audits 19; active Universe digest `sha256:10b8ebae2dec11a22cc4fd7572275c36a90ab363be5831ddb5b30c0d28e3d06a` unchanged. The source had naturally advanced from the prior 53-Authority snapshot before this maintenance; no delta was attributed to the release |
+| Control preservation | Source/target Policy + Strategy/Selection control posture digest `sha256:eb6a693791c59c3b5b4e79ccea272df0cd62acf3ac88c69397890394a34b3678` agrees; SOR paused/version 6; four Generic controls Static with no pending activation |
+| PostgreSQL / exchange | Certification/integrity/flatness PASS; active Tickets, positions, unresolved Commands, open Incidents zero; Binance positions/open orders zero, independent sides/Cross/5x |
+| Resource posture | Kernel slice 1 CPU / 1 GiB, about 527 MiB / 10 tasks at final read; server available about 1,423 MiB. No local/server 24h soak is claimed |
+| Probe freshness clarification | Previous agent wording of production ENTRY being 5s was incorrect. Actual server action-fact validity is 30,000ms and this release did not modify its environment, service unit or ENTRY action-fact code. The old maintenance probe default was 5,000ms; maintenance now explicitly uses a bounded 30,000ms audit window and rejects expired/future evidence |
+
+（来源：exact R3/R2/R1 manifests；formal Tokyo release/preparation outputs；
+fresh PG/exchange probes、systemd/PID/journal、readonly Owner controls、resource
+facts and unchanged tracked ENTRY/env/service-code comparison。）
+
+### Remaining Owner Control Action
+
+Open Owner Console → Global ENTRY controls → `恢复新开仓`, enter reason and
+TOTP. This changes the paused Policy through the official Owner boundary;
+strategy pauses, Dynamic modes and capacity/risk gates still apply. It does not
+resume retired Crypto SOR or activate Dynamic automatically. No credential
+sharing, SQL editing, manual Fence deletion, server command or new economic
+review is required from the Owner.
+
+### 2026-10-12 Generic Selection / Capacity V0 Installation — Historical Baseline
 
 **Software deployment is complete. Trading has not been resumed.** This table
 supersedes the dated preparation and prior release snapshots below.
@@ -72,7 +110,7 @@ The measured longest resource case was 256.21s; numerous real Authority/Trading
 chains, not a stuck process or an unbounded 24h wait, dominate the suite. Further
 portfolio consolidation is separate from this completed deployment.
 
-### Current Remaining Control Actions
+### Prior Local Repair Stage — Superseded By The Server Repair Above
 
 **2026-10-12 Entry restoration repair — local verification only:** the focused
 `codex/entry-resume-current-universe-20261012` branch replaces fixed initial
@@ -357,8 +395,9 @@ stale or contradictory facts, same-domain occupancy, missing budget or Initial
 Stop, duplicate or unknown command outcome, schema/code mismatch, old-writer
 overlap, or official-path bypass.
 
-The current production identity and posture are exclusively the 2026-10-12
-table above. Schema is `0009_capacity_policy_v0`, Policy version is `18`, Entry
-service is active/enabled waiting for its operational fence, new ENTRY Policy remains disabled, four Generic controls are Static with no
-pending activation, and Crypto SOR remains retired/paused. Older dated snapshots
+The current production identity and posture are exclusively the first
+2026-10-12 repair table above. Schema is `0009_capacity_policy_v0`, Policy version
+is `18`, Entry runs its actual Python loop with no maintenance Fence, but new
+ENTRY Policy remains disabled. Four Generic controls are Static with no pending
+activation, and Crypto SOR remains retired/paused. Older dated snapshots
 and historical acceptance records do not resume trading or authorize activation.

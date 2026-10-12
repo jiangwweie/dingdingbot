@@ -1,8 +1,8 @@
 ---
 title: ENTRY_RESTORATION_CURRENT_UNIVERSE_REPAIR
-status: RELEASE_CERTIFICATION_PENDING
+status: SERVER_SOFTWARE_REPAIR_COMPLETE
 implementation_authority: CODE_TEST_AND_AUTHORIZED_SOFTWARE_DEPLOYMENT
-production_modified: NO
+production_modified: YES_SOFTWARE_ONLY
 ---
 
 # Entry Restoration Current-Universe Repair
@@ -34,8 +34,10 @@ existing Ticket lifecycle are unchanged.
 2. Current member cardinality is derived, not fixed. The external probe and
    rule rows must match every current member once; no supplied subset exists.
 3. Wrong account/mode/leverage, absent/expired/future certification, missing
-   rules, unresolved incidents/activity, wrong Runtime Capability and missing
-   Owner proof cannot remove the Fence.
+   rules, unresolved incidents/activity and wrong Runtime Capability cannot
+   remove the Fence. Positive trading restoration requires exact Owner proof;
+   operational preparation permits only an unchanged paused Policy and grants
+   no new ENTRY authority.
 4. Scope, Universe/version/digest, Policy, Strategy Control, runtime or Resume
    identity drift between preflight/postflight invalidates the whole attempt.
 5. Certification validity is checked again after the external probe; expiry
@@ -68,11 +70,13 @@ existing Ticket lifecycle are unchanged.
   46 PASS. Final promotion/architecture focused rerun: 39 PASS.
   Ruff, Mypy (193 source files) and diff PASS.
 
-## Release boundary / remaining work
+## Release Completion / Remaining Owner Boundary
 
-This repair is local, not deployed. It requires an exact clean candidate's
-same-schema Kernel release certification before installation. A whole-suite
-Release manifest is not claimed from targeted/Full-chain evidence.
+The exact clean candidate completed the whole same-Schema R3 portfolio and was
+installed through the official stopped-flat release path; API/static exact
+certification and deployment also completed. Actual production evidence and
+release identity are exclusively in MAIN_CONTROL_ROADMAP. Targeted evidence was
+not substituted for the full Release manifest.
 The regular-deployment wrapper is now aligned with current member evidence:
 no automatic Entry enable, no Batch refresh/write, stop every Writer including
 Owner API, repeat fresh-flat/source identity after stop, preserve current
@@ -80,7 +84,9 @@ Universe/Selection history and Policy/strategy/selection-control posture,
 and poll only Reconciliation-owned current certification after startup. Unknown
 identity-write outcomes keep old Writers stopped. Unit RED/GREEN and an actual
 22-member Docker PG identity-rotation/preservation rehearsal cover this path.
-Do not bypass the exact release certification or claim local code is installed.
+The formal paused-Policy preparation and production postflight completed; no
+Policy/TOTP bypass or exchange write occurred. Owner performs the remaining
+Console Resume/TOTP action without additional server assembly.
 
 The first frozen-candidate preflight exposed that an all-member serial readonly
 probe could outlive its default five-second single-instrument fact TTL. Its
