@@ -3861,8 +3861,33 @@ class PostgresStrategyUniverseRepository:
               AND (g.selection_control_version IS NULL OR g.selection_control_version=selection_control.control_version)
               AND (g.selection_snapshot_id IS NULL OR snapshot.expires_at_ms>:now)
               AND g.materialization_generation_id IS DISTINCT FROM :replace
+              AND (g.selection_epoch_id='sor-v0' OR g.selection_mode='static_baseline' OR NOT EXISTS (
+                SELECT 1 FROM brc_instrument_selection_member_decisions member
+                JOIN brc_instrument_selection_spec_events event ON event.selection_spec_id=g.selection_spec_id
+                JOIN brc_exposure_episode_current episode ON episode.event_spec_id=event.event_spec_id
+                  AND episode.exchange_instrument_id=member.exchange_instrument_id
+                WHERE member.selection_snapshot_id=g.selection_snapshot_id AND member.selected
+                  AND greatest(episode.last_observed_at_ms,episode.comparison_last_observed_at_ms,
+                    episode.authority_recovery_last_observed_at_ms)>=:close
+              ))
+              AND (g.selection_epoch_id='sor-v0' OR g.selection_mode='static_baseline' OR NOT EXISTS (
+                SELECT 1 FROM brc_selection_authority_current pointer
+                JOIN brc_selection_session_authorities authority USING(selection_authority_id)
+                JOIN brc_instrument_selection_spec_events event ON event.selection_spec_id=g.selection_spec_id
+                JOIN brc_instrument_selection_member_decisions member ON member.selection_snapshot_id=g.selection_snapshot_id AND member.selected
+                JOIN brc_selection_authority_event_bindings binding ON binding.selection_authority_id=authority.selection_authority_id
+                  AND binding.event_spec_id=event.event_spec_id
+                JOIN brc_strategy_universe_members previous_member ON previous_member.universe_version_id=binding.universe_version_id
+                  AND previous_member.exchange_instrument_id=member.exchange_instrument_id
+                JOIN brc_exposure_episode_current episode ON episode.event_spec_id=event.event_spec_id
+                  AND episode.exchange_instrument_id=member.exchange_instrument_id
+                WHERE pointer.selection_spec_id=g.selection_spec_id
+                  AND (authority.recovery_grant_proof IS NOT NULL OR authority.continued_from_selection_authority_id IS NOT NULL
+                    OR authority.current_close_proof->>'origin_recovery_authority_id' IS NOT NULL)
+                  AND episode.authority_recovery_id IS NOT NULL AND episode.authority_recovery_armed_at_ms IS NULL
+              ))
             ORDER BY g.desired_at_ms,g.created_at_ms,g.materialization_generation_id LIMIT 1
-        """),{"replace":replacing_generation_id,"now":queued_at_ms})
+        """),{"replace":replacing_generation_id,"now":queued_at_ms,"close":queued_at_ms//3_600_000*3_600_000})
         if not replacing_holder and oldest is not None and oldest!=materialization_generation_id:
             return False
         return not bool(await self._connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING') AND materialization_generation_id<>:gid AND materialization_generation_id IS DISTINCT FROM :replace) OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE lifecycle_state='warming' AND materialization_generation_id IS DISTINCT FROM :gid AND (:replace IS NULL OR materialization_generation_id IS DISTINCT FROM :replace))"),{"gid":materialization_generation_id,"replace":replacing_generation_id}))

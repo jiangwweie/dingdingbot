@@ -3389,7 +3389,7 @@ async def test_due_static_owner_intent_creates_exact_generation_not_selection_sn
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("head_condition,target_stage",[(condition,"warming") for condition in
-    ("expired","expired_live_lease","owner_paused","control_drift","target_timeout","target_pause","target_first_expiry")]+[("target_timeout","staged"),("target_pause","staged"),("target_first_expiry","staged")])
+    ("expired","expired_live_lease","owner_paused","control_drift","close_consumed","target_timeout","target_pause","target_first_expiry")]+[("target_timeout","staged"),("target_pause","staged"),("target_first_expiry","staged")])
 @pytest.mark.parametrize("groups",[("MI-001","CPM-RO-001"),("MPG-001","BRF2-001")])
 async def test_generic_global_queue_skips_ineligible_head_before_cleanup(database: AsyncEngine,tmp_path: Path,head_condition: str,target_stage: str,groups: tuple[str,str]) -> None:
     import os
@@ -3529,6 +3529,13 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
                 lease=await uow.instrument_selection.claim_generic_materialization_generation(head.materialization_generation_id,
                     worker_id="crashed-head",now_ms=now-2,lease_duration_ms=30_000)
                 assert lease.generation is not None
+    elif head_condition=="close_consumed":
+        source=inputs(groups[0])
+        state=advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),current=None,
+            detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=now//HOUR*HOUR,
+            exchange_instrument_id=snapshots[groups[0]].selected_members[0]).current
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.save_exposure_episode(state,expected_version=0)
     elif head_condition=="control_drift":
         # Negative source drift fixture; no runtime/Owner repair by SQL.
         async with database.begin() as connection:
