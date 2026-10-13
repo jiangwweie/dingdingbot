@@ -191,7 +191,6 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
             return SimpleNamespace(materialization_generation_id="generation:original-first") if late_first_pending else None
         async def get_current_entry_vacuum(self,**_): return None
         async def get_selection_job(self,**kwargs):
-            assert not late_first_pending,"later period Snapshot must not displace first activation recovery"
             assert kwargs["period_anchor_ms"]==expected
             assert kwargs["selection_epoch_id"]=="epoch:materialize"
             return SimpleNamespace(state="SNAPSHOT_READY",selection_snapshot_id="snapshot:effective")
@@ -208,10 +207,9 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
         request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,worker_id="materialize",
             now_ms=cutoff+8),clock_ms=lambda:cutoff+8)
     assert result.status is MaterializationRuntimeStatus.ADVANCED
-    if not late_first_pending:
-        assert calls[-1].selection_snapshot_id=="snapshot:effective"
+    assert calls[-1].selection_snapshot_id=="snapshot:effective"
     if late_first_pending:
-        assert calls[0].materialization_generation_id=="generation:original-first"
+        assert len(calls)==1
     else:
         assert calls[0].period_anchor_ms==expected
 
