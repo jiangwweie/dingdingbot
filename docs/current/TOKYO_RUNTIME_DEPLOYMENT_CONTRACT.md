@@ -795,7 +795,7 @@ flat and forward-only; use the existing compatible deployment path with the exac
 do not revoke Owner Dynamic intent. Later attempts require current snapshots and
 all existing closed-bar, certification, warming, Vacuum and atomic activation gates.
 
-Resource-constrained resident long soak belongs to the Periodic audit portfolio,
+Resource-constrained resident long soak and Docker resource-load scenarios belong to the Periodic audit portfolio,
 not every repair release. The Release portfolio retains Unit/Architecture,
-Integration excluding that long soak, Full-chain, Ruff, Mypy and exact migration
+Integration excluding those resource audits, Full-chain, Ruff, Mypy and exact migration
 preservation; R4 also retains Golden/core parity. Exclusion is not soak PASS.

@@ -167,7 +167,8 @@ async def database(request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]
     parameters = getattr(request.node, "callspec", None)
     excluded = (parameters.params.get("group") if parameters is not None
         and parameters.params.get("target_mode") == "not_installed" else None)
-    if request.node.originalname == "test_resource_constrained_resident_soak":
+    if request.node.originalname == "test_resource_constrained_resident_soak" or (
+        parameters is not None and parameters.params.get("fault_stage") in {"capacity_v0", "capacity_v0_resource_safety"}):
         # Capacity B was installed at its exact 0009 release, before 0010.
         # This periodic scenario must not ask a later identity rotation to
         # silently expand a freshly seeded policy.
