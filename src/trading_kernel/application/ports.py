@@ -129,7 +129,11 @@ from src.trading_kernel.domain.owner_control import (
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.orb_session_selection import (
-    InstalledOrbSessionSelectionSpec, OrbSessionSelectionSpec, OrbSessionSelectionSnapshot, OrbSessionSelectionComputation,
+    InstalledOrbSessionSelectionSpec,
+    OrbSessionSelectionSpec,
+    OrbSessionSelectionSnapshot,
+    OrbSessionSelectionComputation,
+    OrbStaticRollbackBaseline,
 )
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
@@ -1714,6 +1718,13 @@ class InstrumentSelectionRepository(Protocol):
     async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim,
         computation: OrbSessionSelectionComputation, completed_at_ms: int) -> None: ...
 
+    async def capture_orb_static_baseline(
+        self, *, captured_at_ms: int
+    ) -> OrbStaticRollbackBaseline: ...
+    async def get_orb_static_baseline(
+        self, baseline_id: str
+    ) -> OrbStaticRollbackBaseline: ...
+
     async def get_active_spec(
         self,
         selection_spec_id: str,
@@ -2091,6 +2102,9 @@ class InstrumentSelectionRepository(Protocol):
         self,
         audit: AuthorityGapAudit,
     ) -> None: ...
+
+    async def resolve_orb_owner_pause_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        authority: SelectionSessionAuthority, resolved_at_ms: int) -> None: ...
 
     async def get_authority_gap_audit(
         self,

@@ -22,8 +22,10 @@ from src.trading_kernel.domain.generic_materialization import (
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     HOUR_MS,
-    SOR_LONG_EVENT_SPEC_ID,
-    SOR_SHORT_EVENT_SPEC_ID,
+)
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID,
+    daily_event_spec_ids,
 )
 from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
@@ -175,6 +177,13 @@ def evaluate_selection_entry_authority(
         )
 
     assert current is not None
+    if control.selection_spec_id == ORB_SELECTION_SPEC_ID and (
+        current.selection_spec_id != control.selection_spec_id
+        or current.selection_epoch_id != control.selection_epoch_id
+        or current.selection_control_version != control.control_version
+    ):
+        return _selection_refused(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
+            "selection_control_authority_epoch_mismatch",current)
     if current.selection_mode is not control.selection_mode:
         return _selection_refused(
             SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
@@ -374,7 +383,7 @@ async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: 
             allow_current_as_birth=allow_current_as_birth,
         )
 
-    if control.strategy_group_id != "SOR-001":
+    if control.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
         return await _resolve_generic_selection_authority(uow,control=control,runtime_scope=runtime_scope,
             birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current,
             observed_close_time_ms=observed_close_time_ms,allow_current_as_birth=allow_current_as_birth,recovery_observation=recovery_observation)
@@ -394,10 +403,10 @@ async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: 
         runtime_scope.owner_policy_id
     )
     long_current = await uow.strategy_universes.get_current(
-        SOR_LONG_EVENT_SPEC_ID
+        daily_event_spec_ids(control.selection_spec_id)[0]
     )
     short_current = await uow.strategy_universes.get_current(
-        SOR_SHORT_EVENT_SPEC_ID
+        daily_event_spec_ids(control.selection_spec_id)[1]
     )
     current_pair = (
         None

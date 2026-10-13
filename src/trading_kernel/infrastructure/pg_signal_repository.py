@@ -1815,7 +1815,7 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
 
 
 def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
-    pair = sor_authority_pair_from_bindings(row["event_bindings"])
+    pair = sor_authority_pair_from_bindings(row["event_bindings"],selection_spec_id=str(row["selection_spec_id"]))
     proof_kind = row["grant_proof_kind"]
     proof = (
         None
@@ -1829,6 +1829,9 @@ def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
+        selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
+        selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
+        activation_authorization_id=row["activation_authorization_id"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
         session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),

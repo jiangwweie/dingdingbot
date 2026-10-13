@@ -368,3 +368,22 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - 首次fast inventory 1640 PASS、2个catalog/migration清单断言需同步；它不是最终认证。
 - Job/Static基线/runtime materialization/小时Audit/Owner接入、完整migration preservation/
   release tooling仍在开发，H1-11 exact R4尚未执行。当前分支不可部署。
+
+### 本地链路接线证据（2026-10-14，仍未部署）
+
+- 新 Static 双边基线可正式安装/激活；Owner 原始 intent 与同 epoch 在后续日领取 Job，源失败完成后原控制不变。
+- 真实 PG 的成功 Job/Attempt/Snapshot 路径已接到独立 pair Coordinator，正常 NO_CHANGE 与 changed-member ACTIVE_NEW 跑通；新两侧 current、旧成员退休、Vacuum 与 Authority/模式切换原子提交。
+- first post-fence timeout 恢复实际 previous pair，保留 Static 与原 Dynamic 授权/epoch/control，未清空原 intent；合法 VALID_EMPTY 完成 drain 后不补币。
+- 小时 Gap Audit 使用 exact 新 pair/detector digest 和真实 1h 行情路径；01:00 准备可证明零 eligible gap，迟到使用严格未来小时，23:00 后不跨 Session 授予入场。
+- 已验证 next-day PRE_FENCE_CONTINUITY、Owner pause negative fence。Entry resolver 已按新 pair 精确解码；local seed 仍关闭全局 ENTRY，未宣称真实 Ticket 链通过。
+- 中间定向检查 126 passed（日志 `/tmp/brc-orb-incremental-validation.log`），后续修改仍需重新验证；不是最终 Release/R4。
+- 仍需完成：generation-free pause/resume、EMPTY→nonempty、Static rollback control、数据库 Audit/Owner proof/direct-SQL negative coverage、staged-hour freshness、宿主及 Owner API/UI、migration preservation/source0010/release tooling、双方向完整 Ticket 链和最终 exact candidate 审查。
+- 本轮所有操作仅限本地工作树/disposable PostgreSQL。服务器部署、数据库升级、启用与交易所写入均未执行；候选仍不可部署。
+
+### 接线阶段检查点（2026-10-14）
+
+- 无 Generation Owner pause →正式 resume →小时审计→RESOLVED_CONTINUITY 已完成真实 PG 正向验证；直接 SQL 伪造 Audit COMPLETE、无 Audit 解除暂停围栏均被拒绝。
+- Audit ledger 校验 exact 新 Event、每成员结果、scope/result digest、Session/1h window与suppression；Generation来源要求实际成功 Job/Attempt及24成员。
+- 新 NO_CHANGE 接管前正式 CERTIFY_CURRENT：过期当前 pair 不授予 Authority，刷新后恢复推进。
+- 共享旧 pair PG 回归加上述新路径：204 passed / 48.14s，日志 `/tmp/brc-orb-pair-regression.log`。
+- 改动的7个生产模块 Mypy PASS；局部 Ruff与diff check PASS。此检查点不含全部QA/Release，也不代表部署候选已完成。

@@ -63,12 +63,13 @@ class InstalledOrbSessionSelectionSpec(OrbSessionSelectionSpec):
     installed_at_ms: int = Field(gt=0, exclude=True)
 
     @property
-    def candidate_exchange_instrument_ids(self) -> tuple[str,...]:
+    def candidate_exchange_instrument_ids(self) -> tuple[str, ...]:
         return self.candidate_ids
 
     @property
     def algorithm_semantic_digest(self) -> str:
         from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+
         return canonical_digest(self.model_dump(mode="json"))
 
     @property
@@ -313,4 +314,110 @@ def compute_orb_selection(
 
 def orb_spec_semantic_digest(spec: OrbSessionSelectionSpec) -> str:
     from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-    return canonical_digest(spec.model_dump(mode='json'))
+
+    return canonical_digest(spec.model_dump(mode="json"))
+
+
+def daily_event_spec_ids(selection_spec_id: str) -> tuple[str, str]:
+    if selection_spec_id == ORB_SELECTION_SPEC_ID:
+        return ORB_LONG_EVENT_SPEC_ID, ORB_SHORT_EVENT_SPEC_ID
+    if selection_spec_id == "sor-dynamic-selection-v0":
+        return "event_spec:SOR-001:SOR-LONG:v4", "event_spec:SOR-001:SOR-SHORT:v4"
+    raise ValueError("daily ORB requires an exact installed Selection identity")
+
+
+def daily_entry_interval_ms(selection_spec_id: str) -> int:
+    daily_event_spec_ids(selection_spec_id)
+    return HOUR_MS if selection_spec_id == ORB_SELECTION_SPEC_ID else 900000
+
+
+def daily_first_offset_ms(selection_spec_id: str) -> int:
+    return (
+        2 * HOUR_MS
+        if daily_entry_interval_ms(selection_spec_id) == HOUR_MS
+        else 5 * 900000
+    )
+
+
+def daily_authority_expires_at(selection_spec_id: str, session_start_ms: int) -> int:
+    daily_event_spec_ids(selection_spec_id)
+    return (
+        session_start_ms
+        + DAY_MS
+        + (0 if selection_spec_id == ORB_SELECTION_SPEC_ID else HOUR_MS)
+    )
+
+
+def next_daily_eligible_close(
+    *, selection_spec_id: str, session_start_ms: int, now_ms: int
+) -> int:
+    interval = daily_entry_interval_ms(selection_spec_id)
+    first = max(
+        session_start_ms + daily_first_offset_ms(selection_spec_id),
+        (now_ms // interval + 1) * interval,
+    )
+    if (
+        selection_spec_id == ORB_SELECTION_SPEC_ID
+        and first >= session_start_ms + DAY_MS
+    ):
+        raise ValueError("NO_ELIGIBLE_CLOSE_BEFORE_SESSION_END")
+    return first
+
+
+class OrbStaticSourceEvent(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    event_spec_id: str
+    position_side: Literal["long", "short"]
+    universe_version_id: str
+    universe_semantic_digest: str
+    member_set_digest: str
+
+    @model_validator(mode="after")
+    def _exact_side(self) -> OrbStaticSourceEvent:
+        if (
+            self.event_spec_id
+            != ORB_EVENT_SPEC_IDS[0 if self.position_side == "long" else 1]
+            or not self.universe_version_id.strip()
+        ):
+            raise ValueError(
+                "ORB Static source must reference its own exact Event and Universe"
+            )
+        return self
+
+
+class OrbStaticRollbackBaseline(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    rollback_baseline_id: str
+    strategy_group_id: Literal["SOR-1H-001"] = ORB_STRATEGY_GROUP_ID
+    strategy_version_id: Literal["sgv:SOR-1H-001:v1"] = ORB_STRATEGY_VERSION_ID
+    selection_spec_id: Literal["SOR_1H_OR_ATR_DYNAMIC_V1"] = ORB_SELECTION_SPEC_ID
+    source_events: tuple[OrbStaticSourceEvent, ...]
+    captured_at_ms: int
+    semantic_digest: str
+
+    @classmethod
+    def build(
+        cls, *, source_events: tuple[OrbStaticSourceEvent, ...], captured_at_ms: int
+    ) -> OrbStaticRollbackBaseline:
+        from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+
+        if (
+            tuple(e.event_spec_id for e in source_events) != ORB_EVENT_SPEC_IDS
+            or captured_at_ms <= 0
+        ):
+            raise ValueError("ORB Static baseline requires exact LONG/SHORT references")
+        digest = canonical_digest(
+            {
+                "selection_spec_id": ORB_SELECTION_SPEC_ID,
+                "strategy_group_id": ORB_STRATEGY_GROUP_ID,
+                "strategy_version_id": ORB_STRATEGY_VERSION_ID,
+                "source_events": [e.model_dump() for e in source_events],
+                "captured_at_ms": captured_at_ms,
+            }
+        )
+        return cls(
+            rollback_baseline_id="rollback:orb:" + digest[7:],
+            source_events=source_events,
+            captured_at_ms=captured_at_ms,
+            semantic_digest=digest,
+        )

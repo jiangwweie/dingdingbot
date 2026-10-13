@@ -89,7 +89,12 @@ from src.trading_kernel.domain.instrument_selection import (
     build_sor_dynamic_selection_spec_v0,
 )
 from src.trading_kernel.domain.orb_session_selection import (
-    InstalledOrbSessionSelectionSpec, OrbSessionSelectionSpec, OrbSessionSelectionSnapshot, OrbSessionSelectionComputation,
+    ORB_SELECTION_SPEC_ID,
+    InstalledOrbSessionSelectionSpec,
+    OrbSessionSelectionComputation,
+    OrbSessionSelectionSnapshot,
+    OrbSessionSelectionSpec,
+    daily_event_spec_ids,
 )
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
@@ -459,35 +464,108 @@ class PostgresInstrumentSelectionRepository:
     def lease_namespace(cls, lease_kind: LeaseKind) -> str:
         return cls._LEASE_NAMESPACES[lease_kind]
 
-    async def install_orb_spec(self, spec: OrbSessionSelectionSpec, *, installed_at_ms: int) -> None:
-        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
-        from src.trading_kernel.infrastructure.pg_models import orb_session_selection_specs_v1
-        spec=OrbSessionSelectionSpec.model_validate(spec.model_dump())
-        if installed_at_ms<=0: raise ValueError("ORB install time must be positive")
-        existing=await self._connection.scalar(sa.select(orb_session_selection_specs_v1.c.payload).where(
-            orb_session_selection_specs_v1.c.selection_spec_id==spec.selection_spec_id))
+    async def install_orb_spec(
+        self, spec: OrbSessionSelectionSpec, *, installed_at_ms: int
+    ) -> None:
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionSpec,
+        )
+        from src.trading_kernel.infrastructure.pg_models import (
+            orb_session_selection_specs_v1,
+        )
+
+        spec = OrbSessionSelectionSpec.model_validate(spec.model_dump())
+        if installed_at_ms <= 0:
+            raise ValueError("ORB install time must be positive")
+        existing = await self._connection.scalar(
+            sa.select(orb_session_selection_specs_v1.c.payload).where(
+                orb_session_selection_specs_v1.c.selection_spec_id
+                == spec.selection_spec_id
+            )
+        )
         if existing is not None:
-            if existing!=spec.model_dump(mode="json"): raise SelectionJobConflict("ORB Spec install identity drift")
+            if existing != spec.model_dump(mode="json"):
+                raise SelectionJobConflict("ORB Spec install identity drift")
             return
-        await self._connection.execute(sa.insert(instrument_selection_specs).values(selection_spec_id=spec.selection_spec_id,
-            strategy_group_id=spec.strategy_group_id,strategy_version_id=spec.strategy_version_id,selection_version=1,
-            selection_kind=spec.selection_kind,algorithm_semantic_digest=canonical_digest(spec.model_dump(mode="json")),
-            status="active",installed_at_ms=installed_at_ms))
-        await self._connection.execute(sa.insert(orb_session_selection_specs_v1).values(selection_spec_id=spec.selection_spec_id,
-            payload=spec.model_dump(mode="json")))
+        await self._connection.execute(
+            sa.insert(instrument_selection_specs).values(
+                selection_spec_id=spec.selection_spec_id,
+                strategy_group_id=spec.strategy_group_id,
+                strategy_version_id=spec.strategy_version_id,
+                selection_version=1,
+                selection_kind=spec.selection_kind,
+                algorithm_semantic_digest=canonical_digest(
+                    spec.model_dump(mode="json")
+                ),
+                status="active",
+                installed_at_ms=installed_at_ms,
+            )
+        )
+        await self._connection.execute(
+            sa.insert(orb_session_selection_specs_v1).values(
+                selection_spec_id=spec.selection_spec_id,
+                payload=spec.model_dump(mode="json"),
+            )
+        )
         for member in spec.candidate_ids:
-            await self._connection.execute(pg_insert(instruments).values(exchange_instrument_id=member,venue_id="binance-usdm",
-                asset_class="crypto",venue_symbol=member.split(":")[1],contract_kind="perpetual",status="pending_certification")
-                .on_conflict_do_nothing(index_elements=[instruments.c.exchange_instrument_id]))
-        await self._connection.execute(sa.insert(instrument_selection_spec_members),[
-            {"selection_spec_id":spec.selection_spec_id,"exchange_instrument_id":m} for m in spec.candidate_ids])
-        await self._connection.execute(sa.insert(instrument_selection_spec_events),[
-            {"selection_spec_id":spec.selection_spec_id,"event_spec_id":e,"position_side":side}
-            for e,side in zip(spec.event_spec_ids,("long","short"),strict=True)])
+            await self._connection.execute(
+                pg_insert(instruments)
+                .values(
+                    exchange_instrument_id=member,
+                    venue_id="binance-usdm",
+                    asset_class="crypto",
+                    venue_symbol=member.split(":")[1],
+                    contract_kind="perpetual",
+                    status="pending_certification",
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[instruments.c.exchange_instrument_id]
+                )
+            )
+        await self._connection.execute(
+            sa.insert(instrument_selection_spec_members),
+            [
+                {
+                    "selection_spec_id": spec.selection_spec_id,
+                    "exchange_instrument_id": m,
+                }
+                for m in spec.candidate_ids
+            ],
+        )
+        await self._connection.execute(
+            sa.insert(instrument_selection_spec_events),
+            [
+                {
+                    "selection_spec_id": spec.selection_spec_id,
+                    "event_spec_id": e,
+                    "position_side": side,
+                }
+                for e, side in zip(spec.event_spec_ids, ("long", "short"), strict=True)
+            ],
+        )
+        await self._connection.execute(
+            sa.insert(strategy_selection_control_current).values(
+                strategy_group_id=spec.strategy_group_id,
+                selection_spec_id=spec.selection_spec_id,
+                selection_mode="static_baseline",
+                pending_selection_mode=None,
+                pending_effective_period_anchor_ms=None,
+                pending_authorization_id=None,
+                control_version=1,
+                rollback_baseline_id=None,
+                selection_epoch_id=None,
+                updated_at_ms=installed_at_ms,
+            )
+        )
 
     async def get_orb_spec(self, selection_spec_id: str) -> OrbSessionSelectionSpec:
-        from src.trading_kernel.domain.orb_session_selection import ORB_SELECTION_SPEC_ID, OrbSessionSelectionSpec
-        from src.trading_kernel.infrastructure.pg_models import orb_session_selection_specs_v1
+        from src.trading_kernel.domain.orb_session_selection import (
+            ORB_SELECTION_SPEC_ID,
+            OrbSessionSelectionSpec,
+        )
+        from src.trading_kernel.infrastructure.pg_models import (
+            orb_session_selection_specs_v1,
+        )
         if selection_spec_id!=ORB_SELECTION_SPEC_ID: raise LookupError("independent ORB Spec required")
         row=(await self._connection.execute(sa.select(instrument_selection_specs,orb_session_selection_specs_v1).join(
             orb_session_selection_specs_v1,instrument_selection_specs.c.selection_spec_id==orb_session_selection_specs_v1.c.selection_spec_id)
@@ -500,7 +578,9 @@ class PostgresInstrumentSelectionRepository:
         return spec
 
     async def save_orb_snapshot(self, computation: OrbSessionSelectionComputation) -> None:
-        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionComputation
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionComputation,
+        )
         computation=OrbSessionSelectionComputation.model_validate(computation.model_dump(mode="python"))
         snapshot=computation.snapshot
         await self.get_orb_spec(snapshot.selection_spec_id)
@@ -526,25 +606,72 @@ class PostgresInstrumentSelectionRepository:
              "member_state":m.member_state.value,"secondary_reasons":[r.value for r in m.secondary_reasons]}
              for m in computation.member_decisions])
 
-    async def get_orb_snapshot(self, selection_snapshot_id: str) -> OrbSessionSelectionComputation:
-        from src.trading_kernel.domain.instrument_selection import SelectionMemberDecision
-        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSnapshot,OrbSessionSelectionComputation
-        row=(await self._connection.execute(sa.select(instrument_selection_snapshots).where(
-            instrument_selection_snapshots.c.selection_snapshot_id==selection_snapshot_id))).mappings().one_or_none()
-        if row is None or row["selection_family"]!="orb_session_dynamic_v1":raise SelectionJobConflict("independent hourly ORB Snapshot required")
-        snapshot=OrbSessionSelectionSnapshot.model_validate({key:row["period_anchor_ms" if key=="session_start_ms" else key]
-            for key in OrbSessionSelectionSnapshot.model_fields})
-        members=(await self._connection.execute(sa.select(instrument_selection_member_decisions).where(
-            instrument_selection_member_decisions.c.selection_snapshot_id==selection_snapshot_id).order_by(
-                instrument_selection_member_decisions.c.exchange_instrument_id))).mappings().all()
-        decisions=tuple(SelectionMemberDecision.model_validate({key:m["period_anchor_ms" if key=="session_start_ms" else key]
-            for key in SelectionMemberDecision.model_fields}) for m in members)
-        return OrbSessionSelectionComputation(snapshot=snapshot,member_decisions=decisions)
+    async def get_orb_snapshot(
+        self, selection_snapshot_id: str
+    ) -> OrbSessionSelectionComputation:
+        from src.trading_kernel.domain.instrument_selection import (
+            SelectionMemberDecision,
+        )
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionComputation,
+            OrbSessionSelectionSnapshot,
+        )
+
+        row = (
+            (
+                await self._connection.execute(
+                    sa.select(instrument_selection_snapshots).where(
+                        instrument_selection_snapshots.c.selection_snapshot_id
+                        == selection_snapshot_id
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None or row["selection_family"] != "orb_session_dynamic_v1":
+            raise SelectionJobConflict("independent hourly ORB Snapshot required")
+        snapshot = OrbSessionSelectionSnapshot.model_validate(
+            {
+                key: row["period_anchor_ms" if key == "session_start_ms" else key]
+                for key in OrbSessionSelectionSnapshot.model_fields
+            }
+        )
+        members = (
+            (
+                await self._connection.execute(
+                    sa.select(instrument_selection_member_decisions)
+                    .where(
+                        instrument_selection_member_decisions.c.selection_snapshot_id
+                        == selection_snapshot_id
+                    )
+                    .order_by(
+                        instrument_selection_member_decisions.c.exchange_instrument_id
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        decisions = tuple(
+            SelectionMemberDecision.model_validate(
+                {
+                    key: m["period_anchor_ms" if key == "session_start_ms" else key]
+                    for key in SelectionMemberDecision.model_fields
+                }
+            )
+            for m in members
+        )
+        return OrbSessionSelectionComputation(
+            snapshot=snapshot, member_decisions=decisions
+        )
 
     async def claim_orb_selection_job(self, *, selection_spec_id: str, selection_epoch_id: str,
         session_start_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int
     ) -> GenericSelectionJobClaim | SelectionJobFailure | OrbSessionSelectionSnapshot | None:
-        from src.trading_kernel.domain.orb_session_selection import build_orb_session_period
+        from src.trading_kernel.domain.orb_session_selection import (
+            build_orb_session_period,
+        )
         spec=await self.get_orb_spec(selection_spec_id)
         period=build_orb_session_period(session_start_ms)
         control=await self.get_selection_control(spec.strategy_group_id,for_update=True)
@@ -560,7 +687,9 @@ class PostgresInstrumentSelectionRepository:
 
     async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim, computation,
         completed_at_ms: int) -> None:
-        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionComputation
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionComputation,
+        )
         computation=OrbSessionSelectionComputation.model_validate(computation.model_dump())
         snapshot=computation.snapshot
         control=await self.get_selection_control(snapshot.strategy_group_id,for_update=True)
@@ -577,12 +706,166 @@ class PostgresInstrumentSelectionRepository:
             source_member_count=24,source_digest=snapshot.source_semantic_digest,completed_at_ms=completed_at_ms)
         await self._mark_snapshot_ready(claim,snapshot.selection_snapshot_id,completed_at_ms)
 
+    async def capture_orb_static_baseline(self, *, captured_at_ms: int):
+        from src.trading_kernel.domain.orb_session_selection import (
+            ORB_EVENT_SPEC_IDS,
+            ORB_STATIC_MEMBERS,
+            OrbStaticRollbackBaseline,
+            OrbStaticSourceEvent,
+        )
+
+        await self.get_orb_spec("SOR_1H_OR_ATR_DYNAMIC_V1")
+        control = await self.get_selection_control("SOR-1H-001", for_update=True)
+        if (
+            control is None
+            or control.selection_mode is not SelectionMode.STATIC_BASELINE
+        ):
+            raise SelectionJobConflict("ORB baseline requires exact Static control")
+        sources = []
+        for event, side in zip(ORB_EVENT_SPEC_IDS, ("long", "short"), strict=True):
+            current = (
+                (
+                    await self._connection.execute(
+                        sa.select(strategy_universe_current)
+                        .where(strategy_universe_current.c.event_spec_id == event)
+                        .with_for_update()
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if current is None or current["lifecycle_state"] != "active":
+                raise SelectionJobConflict("ORB Static current is not ready")
+            universe = await self._read_static_baseline_universe(
+                current["universe_version_id"], require_active=True
+            )
+            if (
+                universe.exchange_instrument_ids != ORB_STATIC_MEMBERS
+                or universe.event_spec_id != event
+            ):
+                raise SelectionJobConflict(
+                    "ORB Static baseline members or Event differ"
+                )
+            sources.append(
+                OrbStaticSourceEvent(
+                    event_spec_id=event,
+                    position_side=cast(Literal["long", "short"], side),
+                    universe_version_id=universe.universe_version_id,
+                    universe_semantic_digest=universe.semantic_digest,
+                    member_set_digest=selected_member_set_digest(
+                        universe.exchange_instrument_ids
+                    ),
+                )
+            )
+        baseline = OrbStaticRollbackBaseline.build(
+            source_events=tuple(sources), captured_at_ms=captured_at_ms
+        )
+        existing = control.rollback_baseline_id
+        if existing is not None:
+            return await self.get_orb_static_baseline(existing)
+        await self._connection.execute(
+            sa.insert(strategy_selection_rollback_baselines).values(
+                rollback_baseline_id=baseline.rollback_baseline_id,
+                strategy_group_id=baseline.strategy_group_id,
+                strategy_version_id=baseline.strategy_version_id,
+                semantic_digest=baseline.semantic_digest,
+                captured_at_ms=captured_at_ms,
+            )
+        )
+        await self._connection.execute(
+            sa.insert(selection_rollback_baseline_events),
+            [
+                {
+                    "rollback_baseline_id": baseline.rollback_baseline_id,
+                    "event_spec_id": e.event_spec_id,
+                    "position_side": e.position_side,
+                    "universe_version_id": e.universe_version_id,
+                    "comparison_universe_id": None,
+                }
+                for e in baseline.source_events
+            ],
+        )
+        await self._connection.execute(
+            sa.update(strategy_selection_control_current)
+            .where(
+                strategy_selection_control_current.c.strategy_group_id
+                == baseline.strategy_group_id
+            )
+            .values(
+                rollback_baseline_id=baseline.rollback_baseline_id,
+                updated_at_ms=captured_at_ms,
+            )
+        )
+        return baseline
+
+    async def get_orb_static_baseline(self, baseline_id: str):
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbStaticRollbackBaseline,
+            OrbStaticSourceEvent,
+        )
+
+        parent = (
+            (
+                await self._connection.execute(
+                    sa.select(strategy_selection_rollback_baselines).where(
+                        strategy_selection_rollback_baselines.c.rollback_baseline_id
+                        == baseline_id
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if parent is None or parent["strategy_group_id"] != "SOR-1H-001":
+            raise SelectionJobConflict("independent ORB baseline required")
+        events = (
+            (
+                await self._connection.execute(
+                    sa.select(selection_rollback_baseline_events)
+                    .where(
+                        selection_rollback_baseline_events.c.rollback_baseline_id
+                        == baseline_id
+                    )
+                    .order_by(selection_rollback_baseline_events.c.event_spec_id)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        sources = []
+        for e in events:
+            universe = await self._read_static_baseline_universe(
+                e["universe_version_id"]
+            )
+            sources.append(
+                OrbStaticSourceEvent(
+                    event_spec_id=e["event_spec_id"],
+                    position_side=e["position_side"],
+                    universe_version_id=universe.universe_version_id,
+                    universe_semantic_digest=universe.semantic_digest,
+                    member_set_digest=selected_member_set_digest(
+                        universe.exchange_instrument_ids
+                    ),
+                )
+            )
+        result = OrbStaticRollbackBaseline.build(
+            source_events=tuple(sources), captured_at_ms=parent["captured_at_ms"]
+        )
+        if (
+            result.rollback_baseline_id != baseline_id
+            or result.semantic_digest != parent["semantic_digest"]
+        ):
+            raise SelectionJobConflict("ORB baseline source identity changed")
+        return result
+
     async def get_active_spec(
         self,
         selection_spec_id: str,
     ) -> SorDynamicSelectionSpecV0 | InstalledOrbSessionSelectionSpec:
         if selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1":
-            from src.trading_kernel.domain.orb_session_selection import InstalledOrbSessionSelectionSpec
+            from src.trading_kernel.domain.orb_session_selection import (
+                InstalledOrbSessionSelectionSpec,
+            )
             orb_spec=await self.get_orb_spec(selection_spec_id)
             installed=await self._connection.scalar(sa.select(instrument_selection_specs.c.installed_at_ms).where(
                 instrument_selection_specs.c.selection_spec_id==selection_spec_id))
@@ -1164,46 +1447,77 @@ class PostgresInstrumentSelectionRepository:
         if not normalized_reason:
             raise ValueError("Selection failure requires a reason code")
         if isinstance(claim, GenericSelectionJobClaim):
-            spec = await self.get_generic_spec(claim.selection_spec_id)
-            control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
+            group_id = (
+                (await self.get_orb_spec(claim.selection_spec_id)).strategy_group_id
+                if claim.selection_spec_id == ORB_SELECTION_SPEC_ID
+                else (
+                    await self.get_generic_spec(claim.selection_spec_id)
+                ).strategy_group_id
+            )
+            control = await self.get_selection_control(group_id, for_update=True)
             if (
                 not self._generic_control_allows(
-                    control, claim.selection_spec_id, claim.selection_epoch_id,
+                    control,
+                    claim.selection_spec_id,
+                    claim.selection_epoch_id,
                     claim.period_anchor_ms,
                 )
                 or control is None
                 or control.control_version != claim.selection_control_version
             ):
-                raise SelectionJobConflict("Generic Selection control or epoch changed before failure completion")
+                raise SelectionJobConflict(
+                    "Generic Selection control or epoch changed before failure completion"
+                )
             newer_job_exists = await self._connection.scalar(
                 sa.select(instrument_selection_jobs_current.c.selection_job_id)
                 .where(
-                    instrument_selection_jobs_current.c.selection_spec_id == claim.selection_spec_id,
-                    instrument_selection_jobs_current.c.selection_epoch_id == claim.selection_epoch_id,
-                    instrument_selection_jobs_current.c.period_anchor_ms > claim.period_anchor_ms,
+                    instrument_selection_jobs_current.c.selection_spec_id
+                    == claim.selection_spec_id,
+                    instrument_selection_jobs_current.c.selection_epoch_id
+                    == claim.selection_epoch_id,
+                    instrument_selection_jobs_current.c.period_anchor_ms
+                    > claim.period_anchor_ms,
                 )
                 .order_by(instrument_selection_jobs_current.c.period_anchor_ms)
                 .limit(1)
             )
             if newer_job_exists is not None:
-                raise SelectionJobConflict("newer Generic Selection Job supersedes failure attempt")
+                raise SelectionJobConflict(
+                    "newer Generic Selection Job supersedes failure attempt"
+                )
         row = await self._locked_job(claim)
         self._require_live_claim(row, claim, completed_at_ms=completed_at_ms)
-        if isinstance(claim, GenericSelectionJobClaim):
+        if (
+            isinstance(claim, GenericSelectionJobClaim)
+            and claim.selection_spec_id == ORB_SELECTION_SPEC_ID
+        ):
+            if completed_at_ms >= claim.period_anchor_ms + 86_400_000:
+                raise SelectionJobConflict(
+                    "hourly ORB session expired before failure completion"
+                )
+            if next_retry_at_ms is not None:
+                raise SelectionJobConflict(
+                    "hourly ORB failure cannot use Generic source retry"
+                )
+        elif isinstance(claim, GenericSelectionJobClaim):
             spec = await self.get_generic_spec(claim.selection_spec_id)
             period = build_generic_selection_period(
                 feature_cutoff_at_ms=claim.period_anchor_ms,
                 cadence_hours=spec.cadence_hours,
             )
             if completed_at_ms >= period.period_expires_at_ms:
-                raise SelectionJobConflict("Generic Selection period expired before failure completion")
+                raise SelectionJobConflict(
+                    "Generic Selection period expired before failure completion"
+                )
             if next_retry_at_ms is not None and (
                 outcome is not SelectionAttemptOutcome.SOURCE_FAILED
                 or claim.attempt_number >= GENERIC_SOURCE_MAX_ATTEMPTS
                 or next_retry_at_ms < completed_at_ms + GENERIC_SOURCE_RETRY_BACKOFF_MS
                 or next_retry_at_ms >= period.period_expires_at_ms
             ):
-                raise SelectionJobConflict("Generic Selection source retry budget is invalid")
+                raise SelectionJobConflict(
+                    "Generic Selection source retry budget is invalid"
+                )
         elif next_retry_at_ms is not None:
             raise SelectionJobConflict("SOR failure cannot use Generic source retry")
         await self._append_attempt(
@@ -1445,21 +1759,35 @@ class PostgresInstrumentSelectionRepository:
         rollback_baseline_id: str,
         updated_at_ms: int,
     ) -> SelectionControl | None:
-        baseline = await self.get_generic_static_rollback_baseline(rollback_baseline_id)
-        if baseline.strategy_group_id != strategy_group_id or baseline.selection_spec_id != selection_spec_id:
-            raise SelectionJobConflict("Generic rollback baseline does not match Control")
+        baseline = (
+            await self.get_orb_static_baseline(rollback_baseline_id)
+            if selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1"
+            else await self.get_generic_static_rollback_baseline(rollback_baseline_id)
+        )
+        if (
+            baseline.strategy_group_id != strategy_group_id
+            or baseline.selection_spec_id != selection_spec_id
+        ):
+            raise SelectionJobConflict(
+                "Generic rollback baseline does not match Control"
+            )
         result = await self._connection.execute(
             sa.update(strategy_selection_control_current)
             .where(
-                strategy_selection_control_current.c.strategy_group_id == strategy_group_id,
-                strategy_selection_control_current.c.selection_spec_id == selection_spec_id,
-                strategy_selection_control_current.c.control_version == expected_control_version,
-                strategy_selection_control_current.c.selection_mode == "static_baseline",
+                strategy_selection_control_current.c.strategy_group_id
+                == strategy_group_id,
+                strategy_selection_control_current.c.selection_spec_id
+                == selection_spec_id,
+                strategy_selection_control_current.c.control_version
+                == expected_control_version,
+                strategy_selection_control_current.c.selection_mode
+                == "static_baseline",
                 strategy_selection_control_current.c.pending_selection_mode.is_(None),
                 strategy_selection_control_current.c.selection_epoch_id.is_(None),
                 sa.or_(
                     strategy_selection_control_current.c.rollback_baseline_id.is_(None),
-                    strategy_selection_control_current.c.rollback_baseline_id == rollback_baseline_id,
+                    strategy_selection_control_current.c.rollback_baseline_id
+                    == rollback_baseline_id,
                 ),
             )
             .values(
@@ -1934,16 +2262,34 @@ class PostgresInstrumentSelectionRepository:
             instrument_selection_snapshots.c.selection_spec_id == selection_spec_id,
             instrument_selection_snapshots.c.period_anchor_ms == session_start_ms,
         )
+        if selection_spec_id == ORB_SELECTION_SPEC_ID:
+            spec = await self.get_orb_spec(selection_spec_id)
+            control = await self.get_selection_control(
+                spec.strategy_group_id, for_update=for_update
+            )
+            if control is None or control.selection_epoch_id is None:
+                return None
+            statement = statement.where(
+                instrument_selection_snapshots.c.selection_epoch_id
+                == control.selection_epoch_id
+            )
         if for_update:
             statement = statement.with_for_update(of=instrument_selection_snapshots)
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         if row is None:
             return None
         snapshot: SelectionSnapshot
-        if row["selection_family"]=="orb_session_dynamic_v1":
-            snapshot=(await self.get_orb_snapshot(str(row["selection_snapshot_id"]))).snapshot
+        if row["selection_family"] == "orb_session_dynamic_v1":
+            snapshot = (
+                await self.get_orb_snapshot(str(row["selection_snapshot_id"]))
+            ).snapshot
         else:
-            snapshot = SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
+            snapshot = SelectionSnapshot.model_validate(
+                {
+                    key: row["period_anchor_ms" if key == "session_start_ms" else key]
+                    for key in SelectionSnapshot.model_fields
+                }
+            )
         members = tuple(
             str(item)
             for item in (
@@ -1985,8 +2331,8 @@ class PostgresInstrumentSelectionRepository:
             )
         )
         for event_id, side, universe_id in (
-            (SOR_LONG_EVENT_SPEC_ID, "long", generation.previous_long_universe_version_id),
-            (SOR_SHORT_EVENT_SPEC_ID, "short", generation.previous_short_universe_version_id),
+            (daily_event_spec_ids(generation.selection_spec_id)[0], "long", generation.previous_long_universe_version_id),
+            (daily_event_spec_ids(generation.selection_spec_id)[1], "short", generation.previous_short_universe_version_id),
         ):
             members = tuple((await self._connection.execute(sa.select(strategy_universe_members.c.exchange_instrument_id).where(
                 strategy_universe_members.c.universe_version_id == universe_id,
@@ -5538,7 +5884,7 @@ class PostgresInstrumentSelectionRepository:
             )
         generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
         anchor: int | None
-        if vacuum.strategy_group_id != "SOR-001":
+        if vacuum.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
             if worker_id is None or lease_epoch is None:
                 raise SelectionJobConflict("Generic Generation fence requires lease authority")
             source_mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
@@ -5803,7 +6149,7 @@ class PostgresInstrumentSelectionRepository:
     async def open_generic_authority_gap_vacuum(self, vacuum: StrategyEntryVacuum, *,
         source_selection_authority_id: str, expected_current_version: int) -> None:
         """Fence a provably late Generic continuity before any recovery grant."""
-        if vacuum.strategy_group_id == "SOR-001" or vacuum.state is not StrategyEntryVacuumState.OPEN or (
+        if vacuum.strategy_group_id in {"SOR-001", "SOR-1H-001"} or vacuum.state is not StrategyEntryVacuumState.OPEN or (
             vacuum.source_generation_id is not None or vacuum.first_blocker != "AUTHORITY_GAP"
         ):
             raise SelectionJobConflict("Generic authority gap requires an open scoped Vacuum")
@@ -5943,7 +6289,7 @@ class PostgresInstrumentSelectionRepository:
         ):
             raise ValueError("Owner Pause drain requires its exact Vacuum")
         completion_payload: dict[str, bool | int | str | None] = {"entry_drain_complete": True}
-        if vacuum.strategy_group_id!="SOR-001":
+        if vacuum.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
             owner=(await self._connection.execute(sa.select(strategy_entry_controls_current).where(
                 strategy_entry_controls_current.c.strategy_group_id==vacuum.strategy_group_id).with_for_update())).mappings().one_or_none()
             if owner is None:
@@ -5957,7 +6303,7 @@ class PostgresInstrumentSelectionRepository:
                 completion_payload.update({"resumed_before_drain":True,"owner_control_version":owner["control_version"],"owner_resume_authorization_id":resume})
         if vacuum.source_generation_id is not None:
             generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
-            if vacuum.strategy_group_id=="SOR-001":
+            if vacuum.strategy_group_id in {"SOR-001", "SOR-1H-001"}:
                 generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
             else:
                 mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
@@ -6105,7 +6451,7 @@ class PostgresInstrumentSelectionRepository:
             vacuum.model_copy(
                 update={
                     "state": target,
-                    "drained_at_ms": vacuum.drained_at_ms if vacuum.strategy_group_id!="SOR-001" and vacuum.drained_at_ms is not None else drained_at_ms,
+                    "drained_at_ms": vacuum.drained_at_ms if vacuum.strategy_group_id not in {"SOR-001", "SOR-1H-001"} and vacuum.drained_at_ms is not None else drained_at_ms,
                     "resolved_at_ms": resolved_at_ms,
                     "projection_version": vacuum.projection_version + 1,
                 }
@@ -6117,7 +6463,7 @@ class PostgresInstrumentSelectionRepository:
         ):
             raise ValueError("RECONFIGURING requires source Generation")
         if target is StrategyEntryVacuumState.RECOVERY_PENDING and (
-            vacuum.strategy_group_id == "SOR-001" or vacuum.source_generation_id is not None
+            vacuum.strategy_group_id in {"SOR-001", "SOR-1H-001"} or vacuum.source_generation_id is not None
             or vacuum.first_blocker != "AUTHORITY_GAP"
         ):
             raise ValueError("RECOVERY_PENDING requires generation-free Generic authority gap")
@@ -6171,7 +6517,7 @@ class PostgresInstrumentSelectionRepository:
             return drained
         assert vacuum.source_generation_id is not None
         generation: MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration | None
-        if vacuum.strategy_group_id == "SOR-001":
+        if vacuum.strategy_group_id in {"SOR-001", "SOR-1H-001"}:
             generation = await self.get_materialization_generation(vacuum.source_generation_id,for_update=True)
         else:
             source_mode = await self._connection.scalar(sa.select(strategy_universe_materialization_generations.c.selection_mode).where(
@@ -6220,6 +6566,29 @@ class PostgresInstrumentSelectionRepository:
             )
         )
         return drained
+
+    async def resolve_orb_owner_pause_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        authority: SelectionSessionAuthority, resolved_at_ms: int) -> None:
+        if vacuum.selection_spec_id != ORB_SELECTION_SPEC_ID or authority.selection_spec_id != ORB_SELECTION_SPEC_ID or (
+            vacuum.state is not StrategyEntryVacuumState.OWNER_PAUSED or vacuum.source_generation_id is not None
+            or vacuum.drained_at_ms is None or authority.created_at_ms != resolved_at_ms
+            or authority.authority_outcome is not AuthorityOutcome.PRE_FENCE_CONTINUITY):
+            raise SelectionJobConflict("ORB Owner pause recovery source differs")
+        if not await self._connection.scalar(sa.text('SELECT brc_orb_owner_resume_matches(:vid,:at)'),
+            {'vid':vacuum.entry_vacuum_id,'at':resolved_at_ms}):
+            raise SelectionJobConflict("ORB Owner resume proof missing")
+        changed=await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version,
+            strategy_entry_vacuums_current.c.state=='OWNER_PAUSED').values(state='RESOLVED_CONTINUITY',
+                resolved_at_ms=resolved_at_ms,projection_version=vacuum.projection_version+1))
+        if changed.rowcount != 1:
+            raise SelectionJobConflict("ORB Owner pause recovery CAS changed")
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f'vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}',
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type='RESOLVED_CONTINUITY',
+            payload={'selection_authority_id':authority.selection_authority_id,'authority_gap_audit_id':authority.authority_gap_audit_id},
+            occurred_at_ms=resolved_at_ms))
 
     async def add_pending_authority_gap_audit(
         self,
@@ -6880,6 +7249,9 @@ def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]
     return {
         "selection_authority_id": authority.selection_authority_id,
         "selection_spec_id": authority.selection_spec_id,
+        "selection_epoch_id": authority.selection_epoch_id or "sor-v0",
+        "selection_control_version": authority.selection_control_version,
+        "activation_authorization_id": authority.activation_authorization_id,
         "period_anchor_ms": authority.session_start_ms,
         "decision_boundary_ms": authority.decision_boundary_ms,
         "authority_sequence": authority.authority_sequence,
@@ -6909,7 +7281,9 @@ def _authority_values(authority: SelectionSessionAuthority) -> dict[str, object]
 
 
 def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
-    pair = sor_authority_pair_from_bindings(row["event_bindings"])
+    pair = sor_authority_pair_from_bindings(
+        row["event_bindings"], selection_spec_id=str(row["selection_spec_id"])
+    )
     proof_kind = row["grant_proof_kind"]
     proof = (
         None
@@ -6923,6 +7297,9 @@ def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
+        selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
+        selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
+        activation_authorization_id=row["activation_authorization_id"] if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
         session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),
@@ -6931,9 +7308,7 @@ def _authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
         continued_from_selection_authority_id=row[
             "continued_from_selection_authority_id"
         ],
-        continuity_source_kind=ContinuitySourceKind(
-            str(row["continuity_source_kind"])
-        ),
+        continuity_source_kind=ContinuitySourceKind(str(row["continuity_source_kind"])),
         authority_gap_audit_id=row["authority_gap_audit_id"],
         materialization_generation_id=row["materialization_generation_id"],
         owner_control_version=int(row["owner_control_version"]),
@@ -6980,6 +7355,8 @@ def _materialization_generation_values(
     return {
         "materialization_generation_id": generation.materialization_generation_id,
         "selection_spec_id": generation.selection_spec_id,
+        "selection_epoch_id": generation.selection_epoch_id or "sor-v0",
+        "selection_control_version": generation.selection_control_version,
         "strategy_group_id": generation.strategy_group_id,
         "strategy_version_id": generation.strategy_version_id,
         "selection_mode": generation.selection_mode.value,
@@ -7005,11 +7382,13 @@ def _materialization_generation_values(
 def _materialization_generation_from_row(
     row: RowMapping,
 ) -> MaterializationGeneration:
-    if row["strategy_group_id"] != "SOR-001":
+    if row["strategy_group_id"] not in {"SOR-001", "SOR-1H-001"}:
         raise SelectionJobConflict("Generic Generation requires Event-set runtime decoding")
     return MaterializationGeneration(
         materialization_generation_id=str(row["materialization_generation_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
+        selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
+        selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_version_id=str(row["strategy_version_id"]),
         selection_mode=SelectionMode(str(row["selection_mode"])),

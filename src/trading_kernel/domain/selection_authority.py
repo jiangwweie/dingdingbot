@@ -37,6 +37,12 @@ from src.trading_kernel.domain.instrument_selection import (
     INTERVAL_MS,
     SelectionSnapshot,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID,
+    OrbSessionSelectionSnapshot,
+    daily_entry_interval_ms,
+    daily_first_offset_ms,
+)
 from src.trading_kernel.domain.strategy_universe import StrategyUniverseSourceKind
 
 
@@ -222,12 +228,20 @@ class AuthorityGapAudit(BaseModel):
 
     @model_validator(mode="after")
     def _validate_gap_audit(self) -> AuthorityGapAudit:
+        interval = daily_entry_interval_ms(self.selection_spec_id)
+        first_close = self.session_start_ms + daily_first_offset_ms(
+            self.selection_spec_id
+        )
         if self.session_start_ms <= 0 or self.session_start_ms % DAY_MS != 0:
             raise ValueError("Authority Gap Audit session must be exact 00:00 UTC")
         if (
-            self.unauthorized_from_close_time_ms % INTERVAL_MS != 0
-            or self.unauthorized_from_close_time_ms
-            < self.session_start_ms + 5 * INTERVAL_MS
+            self.unauthorized_from_close_time_ms % interval != 0
+            or self.unauthorized_from_close_time_ms < first_close
+            or (
+                self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                and self.unauthorized_from_close_time_ms
+                >= self.session_start_ms + DAY_MS
+            )
         ):
             raise ValueError("Authority Gap Audit must start at an eligible close")
         if self.projection_version <= 0:
@@ -258,12 +272,23 @@ class AuthorityGapAudit(BaseModel):
         ):
             raise ValueError("complete Authority Gap Audit requires exact result proof")
         if (
-            self.audited_through_close_time_ms % INTERVAL_MS != 0
-            or self.first_eligible_close_time_ms % INTERVAL_MS != 0
+            self.audited_through_close_time_ms % interval != 0
+            or self.first_eligible_close_time_ms % interval != 0
             or self.first_eligible_close_time_ms
-            != self.audited_through_close_time_ms + INTERVAL_MS
-            or self.audited_through_close_time_ms
-            < self.unauthorized_from_close_time_ms
+            != self.audited_through_close_time_ms + interval
+            or (
+                self.audited_through_close_time_ms
+                < self.unauthorized_from_close_time_ms
+                and not (
+                    self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                    and self.unauthorized_from_close_time_ms == first_close
+                    and self.first_eligible_close_time_ms == first_close
+                )
+            )
+            or (
+                self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                and self.first_eligible_close_time_ms >= self.session_start_ms + DAY_MS
+            )
         ):
             raise ValueError("Authority Gap Audit close window is not canonical")
         return self
@@ -367,7 +392,7 @@ class SelectionControl(BaseModel):
 class SelectionSnapshotDisposition(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    snapshot: SelectionSnapshot
+    snapshot: OrbSessionSelectionSnapshot | SelectionSnapshot
     selected_members: tuple[str, ...]
     selected_member_set_digest: str
 
@@ -457,6 +482,16 @@ class MaterializationGeneration(BaseModel):
     projection_version: int
     created_at_ms: int
     desired_at_ms: int | None
+    selection_epoch_id: str | None = None
+    selection_control_version: int | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_generation(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        values = handler(self)
+        if self.selection_spec_id != ORB_SELECTION_SPEC_ID:
+            values.pop("selection_epoch_id", None)
+            values.pop("selection_control_version", None)
+        return values
 
     @field_validator(
         "materialization_generation_id",
@@ -492,6 +527,15 @@ class MaterializationGeneration(BaseModel):
 
     @model_validator(mode="after")
     def _validate_generation(self) -> MaterializationGeneration:
+        if self.selection_spec_id == ORB_SELECTION_SPEC_ID:
+            from src.trading_kernel.domain.orb_session_selection import (
+                require_orb_epoch,
+            )
+            if self.strategy_group_id != "SOR-1H-001" or self.strategy_version_id != "sgv:SOR-1H-001:v1" or self.selection_epoch_id is None or self.selection_control_version is None or self.selection_control_version <= 0:
+                raise ValueError("hourly ORB Generation requires exact strategy epoch/control")
+            require_orb_epoch(self.selection_epoch_id)
+        elif self.selection_epoch_id is not None or self.selection_control_version is not None:
+            raise ValueError("legacy Generation forbids hourly ORB lineage")
         if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
             raise ValueError("DS-04 Generation requires dynamic_selection mode")
         if (
@@ -1830,7 +1874,9 @@ def complete_authority_gap_audit(
     if audit.state is not AuthorityGapAuditState.PENDING:
         raise ValueError("only pending Authority Gap Audit may complete")
     canonical_scopes = tuple(
-        sorted(scopes, key=lambda item: (item.event_spec_id, item.exchange_instrument_id))
+        sorted(
+            scopes, key=lambda item: (item.event_spec_id, item.exchange_instrument_id)
+        )
     )
     canonical_results = tuple(
         sorted(
@@ -1841,8 +1887,13 @@ def complete_authority_gap_audit(
             ),
         )
     )
-    if not canonical_scopes or tuple(item.scope for item in canonical_results) != canonical_scopes:
-        raise ValueError("Authority Gap Audit requires one result for every exact scope")
+    if (
+        not canonical_scopes
+        or tuple(item.scope for item in canonical_results) != canonical_scopes
+    ):
+        raise ValueError(
+            "Authority Gap Audit requires one result for every exact scope"
+        )
     if any(
         item.first_natural_trigger_at_ms is not None
         and not (
@@ -1864,7 +1915,8 @@ def complete_authority_gap_audit(
         {
             "audited_through_close_time_ms": audited_through_close_time_ms,
             "first_eligible_close_time_ms": (
-                audited_through_close_time_ms + INTERVAL_MS
+                audited_through_close_time_ms
+                + daily_entry_interval_ms(audit.selection_spec_id)
             ),
             "audit_scope_digest": scope_digest,
             "audit_result_digest": result_digest,

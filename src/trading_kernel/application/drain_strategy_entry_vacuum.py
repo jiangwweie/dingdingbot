@@ -37,6 +37,10 @@ from src.trading_kernel.domain.incident_blocking import (
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.instrument_selection import INTERVAL_MS
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID,
+    daily_authority_expires_at,
+)
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
@@ -584,7 +588,7 @@ async def _complete_entry_drain(
         )
         if (
             owner_control is None
-            or (owner_control.entry_state.value != "paused" and vacuum.strategy_group_id=="SOR-001")
+            or (owner_control.entry_state.value != "paused" and vacuum.strategy_group_id in {"SOR-001", "SOR-1H-001"})
         ):
             return DrainStrategyEntryVacuumResult(
                 status=VacuumDrainStatus.BLOCKED,
@@ -612,7 +616,7 @@ async def _complete_entry_drain(
             reason_code="GENERATION_READY_FOR_MATERIALIZATION",
         )
 
-    if vacuum.first_blocker == "AUTHORITY_GAP" and request.strategy_group_id != "SOR-001":
+    if vacuum.first_blocker == "AUTHORITY_GAP" and request.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
         drained = await uow.instrument_selection.mark_entry_vacuum_drained(
             vacuum, target_state="RECOVERY_PENDING", drained_at_ms=request.now_ms,
         )
@@ -629,7 +633,7 @@ async def _complete_entry_drain(
             reason_code="VALID_EMPTY_VACUUM_INTENT_INVALID",
         )
 
-    if request.strategy_group_id != "SOR-001":
+    if request.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
         # Generic EMPTY Authority belongs to the Coordinator's atomic commit.
         # A Ticket can finish between its initial read and this drain tick;
         # do not fall through into the SOR-only Snapshot/Authority decoder.
@@ -680,6 +684,10 @@ async def _complete_entry_drain(
             f"{vacuum.period_anchor_ms}:{sequence}"
         ),
         selection_spec_id=request.selection_spec_id,
+        selection_epoch_id=control.selection_epoch_id if request.selection_spec_id==ORB_SELECTION_SPEC_ID else None,
+        selection_control_version=(control.control_version+int(control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION)
+            if request.selection_spec_id==ORB_SELECTION_SPEC_ID else None),
+        activation_authorization_id=(control.pending_authorization_id if request.selection_spec_id==ORB_SELECTION_SPEC_ID else None),
         session_start_ms=vacuum.period_anchor_ms,
         decision_boundary_ms=vacuum.period_anchor_ms + 4 * INTERVAL_MS,
         authority_sequence=sequence,
@@ -697,7 +705,7 @@ async def _complete_entry_drain(
         grant_proof=None,
         effective_from_ms=request.now_ms,
         first_eligible_close_time_ms=None,
-        expires_at_ms=vacuum.period_anchor_ms + 100 * INTERVAL_MS,
+        expires_at_ms=daily_authority_expires_at(request.selection_spec_id,vacuum.period_anchor_ms),
         reason_code="NO_SELECTION_READY_MEMBERS",
         created_at_ms=request.now_ms,
     )
@@ -715,7 +723,9 @@ async def _complete_entry_drain(
     if (
         control.selection_mode is SelectionMode.STATIC_BASELINE
         and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-        and control.pending_effective_period_anchor_ms == vacuum.period_anchor_ms
+        and control.pending_effective_period_anchor_ms is not None
+        and (control.pending_effective_period_anchor_ms <= vacuum.period_anchor_ms
+             if request.selection_spec_id==ORB_SELECTION_SPEC_ID else control.pending_effective_period_anchor_ms == vacuum.period_anchor_ms)
     ):
         await uow.instrument_selection.activate_pending_selection_mode(
             strategy_group_id=request.strategy_group_id,

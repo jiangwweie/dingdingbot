@@ -1214,3 +1214,96 @@ def _snapshot_digest(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
     )
+
+
+async def stage_orb_dynamic_selection_mode(
+    uow: KernelUnitOfWork,
+    *,
+    effective_session_start_ms: int,
+    request: ControlMutationRequest,
+    authentication_strength: Literal["totp_step_up"],
+) -> SelectionControl:
+    from src.trading_kernel.domain.orb_session_selection import (
+        ORB_SELECTION_SPEC_ID,
+        ORB_STRATEGY_GROUP_ID,
+    )
+
+    if authentication_strength != "totp_step_up":
+        raise OwnerControlBlocked("selection_mode_change_requires_step_up")
+    spec = await uow.instrument_selection.get_orb_spec(ORB_SELECTION_SPEC_ID)
+    current = await uow.instrument_selection.get_selection_control(
+        ORB_STRATEGY_GROUP_ID, for_update=True
+    )
+    if current is None:
+        raise OwnerControlBlocked("selection_control_missing")
+    epoch = (
+        "epoch:orb:"
+        + sha256(
+            json.dumps(
+                {
+                    "strategy_group_id": ORB_STRATEGY_GROUP_ID,
+                    "selection_spec_id": spec.selection_spec_id,
+                    "idempotency_key": request.idempotency_key,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+    )
+    target_scope: dict[str, JsonValue] = {
+        "strategy_group_id": ORB_STRATEGY_GROUP_ID,
+        "selection_spec_id": spec.selection_spec_id,
+        "target_selection_mode": "dynamic_selection",
+        "effective_period_anchor_ms": effective_session_start_ms,
+        "selection_epoch_id": epoch,
+    }
+    existing = await uow.owner_controls.get_authorization_by_idempotency_key(
+        request.idempotency_key
+    )
+    if existing is not None:
+        _require_matching_authorization(
+            existing,
+            purpose="selection_mode_change",
+            request=request,
+            target_scope=target_scope,
+        )
+        if (
+            existing.authentication_strength != "totp_step_up"
+            or current.selection_epoch_id != epoch
+        ):
+            raise OwnerControlConflict("selection_authorization_no_longer_current")
+        return current
+    if current.control_version != request.expected_version:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    if (
+        current.selection_mode is not SelectionMode.STATIC_BASELINE
+        or current.pending_selection_mode is not None
+    ):
+        raise OwnerControlBlocked("selection_mode_transition_already_pending")
+    if effective_session_start_ms != _next_dynamic_selection_session_start_ms(
+        request.now_ms
+    ):
+        raise OwnerControlBlocked("selection_effective_session_not_next")
+    baseline = await uow.instrument_selection.capture_orb_static_baseline(
+        captured_at_ms=request.now_ms
+    )
+    authorization = _authorization(
+        purpose="selection_mode_change",
+        request=request,
+        authentication_strength=authentication_strength,
+        target_scope=target_scope,
+    )
+    await uow.owner_controls.add_authorization(authorization)
+    staged = await uow.instrument_selection.stage_pending_generic_selection_mode(
+        strategy_group_id=ORB_STRATEGY_GROUP_ID,
+        selection_spec_id=spec.selection_spec_id,
+        expected_control_version=current.control_version,
+        selection_epoch_id=epoch,
+        effective_period_anchor_ms=effective_session_start_ms,
+        authorization_id=authorization.authorization_id,
+        rollback_baseline_id=baseline.rollback_baseline_id,
+        updated_at_ms=request.now_ms,
+    )
+    if staged is None:
+        raise OwnerControlConflict("selection_control_version_conflict")
+    return staged

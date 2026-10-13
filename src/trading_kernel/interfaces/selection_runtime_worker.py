@@ -42,6 +42,10 @@ from src.trading_kernel.application.run_instrument_selection import (
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID,
+    ORB_STRATEGY_GROUP_ID,
+)
 from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
     SelectionMode,
@@ -212,6 +216,9 @@ async def run_selection_runtime_once(
             session_start_ms=session_start_ms,
             reason_code="SELECTION_CONTROL_MISSING_OR_DRIFTED",
         )
+    hourly = request.strategy_group_id == ORB_STRATEGY_GROUP_ID
+    if hourly and (request.selection_spec_id != ORB_SELECTION_SPEC_ID or control.selection_epoch_id is None):
+        return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="ORB_SELECTION_IDENTITY_OR_EPOCH_MISSING")
     if control.selection_mode is SelectionMode.DISABLED:
         return SelectionRuntimeResult(
             status=SelectionRuntimeStatus.NOT_DUE,
@@ -227,7 +234,9 @@ async def run_selection_runtime_once(
             )
         if (
             control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
-            or control.pending_effective_period_anchor_ms != session_start_ms
+            or control.pending_effective_period_anchor_ms is None
+            or (control.pending_effective_period_anchor_ms > session_start_ms if hourly
+                else control.pending_effective_period_anchor_ms != session_start_ms)
         ):
             return SelectionRuntimeResult(
                 status=SelectionRuntimeStatus.BLOCKED,
@@ -244,9 +253,11 @@ async def run_selection_runtime_once(
         market_source=market_source,
         request=RunInstrumentSelectionRequest(
             selection_spec_id=request.selection_spec_id,
+            selection_epoch_id=(control.selection_epoch_id or "") if hourly else "sor-v0",
             period_anchor_ms=session_start_ms,
             worker_id=request.worker_id,
             max_concurrency=request.max_concurrency,
+            lease_duration_ms=request.lease_duration_ms,
         ),
         clock_ms=clock_ms,
     )

@@ -1288,7 +1288,7 @@ class PostgresStrategyUniverseRepository:
             ).order_by(instrument_selection_spec_events.c.event_spec_id).limit(3))).scalars())
         if spec is None or spec["status"] != "active" or target["event_spec_id"] not in expected_events or (
             (spec["selection_kind"] == "generic_dynamic_v1" and len(expected_events) != 1)
-            or (spec["selection_kind"] == "sor_dynamic_v0" and len(expected_events) != 2)
+            or (spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"} and len(expected_events) != 2)
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if target["source_kind"]=="static_baseline" and spec["selection_kind"]!="generic_dynamic_v1":
@@ -1435,7 +1435,7 @@ class PostgresStrategyUniverseRepository:
                 strategy_universe_materialization_events.c.event_sequence).where(
                     strategy_universe_materialization_events.c.materialization_generation_id == generation_id,
                 ).order_by(strategy_universe_materialization_events.c.event_sequence.desc()).limit(1)) or 0) + 1
-            if spec["selection_kind"] == "sor_dynamic_v0":
+            if spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"}:
                 # SOR activation still owns its frozen sequence-6 event.
                 event_sequence = 5
             await self._connection.execute(
@@ -2107,7 +2107,7 @@ class PostgresStrategyUniverseRepository:
                 else int(current_selection_version)
             ),
         )
-        if pending_static_transition:
+        if pending_static_transition and authority.selection_spec_id != "SOR_1H_OR_ATR_DYNAMIC_V1":
             control_update = await self._connection.execute(
                 sa.update(strategy_selection_control_current)
                 .where(
@@ -4196,7 +4196,7 @@ class PostgresStrategyUniverseRepository:
             if static_source.fenced_at_ms is None or request.installed_at_ms>=static_source.fenced_at_ms+static_spec.materialization_timeout_ms:
                 raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
         if request.source_kind=="dynamic_selection":
-            if spec["selection_kind"]=="sor_dynamic_v0":
+            if spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"}:
                 limit = 7
             elif spec["selection_kind"]=="generic_dynamic_v1":
                 payload = (await self._connection.execute(sa.select(generic_dynamic_selection_specs_v1).where(
