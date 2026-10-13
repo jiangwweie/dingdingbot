@@ -53,6 +53,10 @@ from src.trading_kernel.domain.market import (
     MarketSnapshot,
     Timeframe,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
+    ORB_SELECTION_SPEC_ID,
+)
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationState,
@@ -94,7 +98,7 @@ class ObservationRequest(BaseModel):
     trigger_candle_close_time_ms: int
     observation_generation: int | None = None
     attempted_at_ms: int | None = None
-    operation: Literal["observe","refresh_current_facts"] = "observe"
+    operation: Literal["observe","refresh_current_facts","refresh_staged_facts","refresh_orb_facts"] = "observe"
 
     @field_validator(
         "runtime_scope_id",
@@ -150,6 +154,8 @@ class CurrentFactsRefreshSource(BaseModel):
     observation_generation: int
     entry_vacuum_id: str | None
     entry_vacuum_version: int | None
+    materialization_generation_id: str | None = None
+    materialization_generation_version: int | None = None
 
 
 async def current_facts_refresh_vacuum_allowed(uow: KernelUnitOfWork, *, vacuum: StrategyEntryVacuum,
@@ -175,13 +181,14 @@ def build_warm_readiness(
     expected_fact_definition_ids: tuple[str, ...],
     warm_closed_bar_time_ms: int,
     warm_completed_at_ms: int,
-    source_lifecycle: Literal["warming","active"] = "warming",
+    source_lifecycle: Literal["warming","active","staged"] = "warming",
 ) -> WarmReadiness:
     """Bind one complete, fresh typed Fact bundle to one Warming scope."""
 
     if (
         scope.lifecycle_state != source_lifecycle
-        or not scope.observation_enabled
+        or (source_lifecycle != "staged" and not scope.observation_enabled)
+        or (source_lifecycle == "staged" and (scope.event_spec_id not in ORB_EVENT_SPEC_IDS or scope.observation_enabled or scope.entry_enabled))
         or (source_lifecycle=="warming" and scope.entry_enabled)
     ):
         raise ValueError("warm readiness requires a warming-only scope")
@@ -245,7 +252,7 @@ async def observe_strategy_scope(
         or request.trigger_candle_close_time_ms
     )
     async with uow_factory() as uow:
-        if request.operation=="refresh_current_facts":
+        if request.operation in {"refresh_current_facts","refresh_staged_facts","refresh_orb_facts"}:
             scope=await uow.signals.get_runtime_scope(request.runtime_scope_id)
         elif request.observation_generation is None:
             scope = await uow.signals.claim_observation_generation(
@@ -276,7 +283,9 @@ async def observe_strategy_scope(
             if scope.lifecycle_state == "warming"
             else request.trigger_candle_close_time_ms
         )
-        if not _scope_observation_permissions_are_valid(scope):
+        if not (_scope_observation_permissions_are_valid(scope) or (request.operation == "refresh_staged_facts"
+            and scope.lifecycle_state == "staged" and scope.event_spec_id in ORB_EVENT_SPEC_IDS
+            and not scope.observation_enabled and not scope.entry_enabled)):
             if scope.lifecycle_state == "warming":
                 await _save_observation_blocker(
                     uow,
@@ -365,8 +374,8 @@ async def observe_strategy_scope(
         selection_authority_id = None
         recovery_observation = False
         static_recovery_observation = False
-        if request.operation=="refresh_current_facts":
-            if scope.lifecycle_state!="active" or scope.strategy_group_id not in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}:
+        if request.operation in {"refresh_current_facts","refresh_staged_facts","refresh_orb_facts"}:
+            if request.operation == "refresh_current_facts" and (scope.lifecycle_state!="active" or scope.strategy_group_id not in {"CPM-RO-001","MPG-001","MI-001","BRF2-001"}):
                 return _invalid_observation(request,event_spec_id=scope.event_spec_id,reason="current_facts_refresh_scope_invalid")
             refresh_authority=await _capture_current_facts_refresh_source(uow,scope,request,attempted_at_ms)
             if refresh_authority is None:
@@ -561,7 +570,7 @@ async def observe_strategy_scope(
                 reason="warm_facts_invalid",
             )
     async with uow_factory() as uow:
-        if request.operation=="refresh_current_facts":
+        if request.operation in {"refresh_current_facts","refresh_staged_facts","refresh_orb_facts"}:
             again=await _capture_current_facts_refresh_source(uow,scope,request,attempted_at_ms,for_update=True)
             if again is None or again!=refresh_authority:
                 return _invalid_observation(request,event_spec_id=scope.event_spec_id,reason="current_facts_refresh_authority_changed")
@@ -604,14 +613,14 @@ async def observe_strategy_scope(
                 current_fact_count=0,
             )
 
-        if request.operation=="refresh_current_facts":
+        if request.operation in {"refresh_current_facts","refresh_staged_facts","refresh_orb_facts"}:
             completed_at_ms=await uow.instrument_selection.read_authority_clock_ms()
             if completed_at_ms<attempted_at_ms or completed_at_ms//3600000*3600000!=request.trigger_candle_close_time_ms:
                 return _invalid_observation(request,event_spec_id=scope.event_spec_id,reason="current_facts_refresh_close_changed")
             persisted_facts=await uow.signals.upsert_current_facts(runtime_scope_id=scope.runtime_scope_id,facts=detector_result.facts)
             readiness=build_warm_readiness(scope=scope,facts=persisted_facts,
                 expected_fact_definition_ids=tuple(item.fact_definition_id for item in (*contract.required_facts,*contract.disable_facts)),
-                warm_closed_bar_time_ms=request.trigger_candle_close_time_ms,warm_completed_at_ms=completed_at_ms,source_lifecycle="active")
+                warm_closed_bar_time_ms=request.trigger_candle_close_time_ms,warm_completed_at_ms=completed_at_ms,source_lifecycle="staged" if request.operation=="refresh_staged_facts" else "active")
             await uow.signals.save_current_fact_readiness(readiness)
             finished_at_ms=await uow.instrument_selection.read_authority_clock_ms()
             if finished_at_ms<completed_at_ms or finished_at_ms//3600000*3600000!=request.trigger_candle_close_time_ms:
@@ -822,8 +831,58 @@ async def observe_strategy_scope(
         )
 
 
+async def _capture_orb_fact_refresh_source(uow: KernelUnitOfWork,scope: RuntimeScopeSnapshot,
+    request: ObservationRequest,now_ms: int,*,for_update: bool=False) -> CurrentFactsRefreshSource | None:
+    authoritative_now=await uow.instrument_selection.read_authority_clock_ms()
+    staged=request.operation=="refresh_staged_facts"
+    if (scope.event_spec_id not in ORB_EVENT_SPEC_IDS or scope.lifecycle_state!=("staged" if staged else "active")
+        or scope.observation_enabled==staged or scope.entry_enabled==staged or scope.strategy_group_id!="SOR-1H-001"
+        or now_ms<request.trigger_candle_close_time_ms or authoritative_now<now_ms
+        or request.trigger_candle_close_time_ms!=authoritative_now//3600000*3600000):
+        return None
+    owner=await uow.owner_controls.get_strategy_control(scope.strategy_group_id,for_update=for_update)
+    control=await uow.instrument_selection.get_selection_control(scope.strategy_group_id,for_update=for_update)
+    if owner is None or owner.entry_state!="enabled" or control is None or control.selection_spec_id!=ORB_SELECTION_SPEC_ID:
+        return None
+    vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=scope.strategy_group_id,
+        selection_spec_id=control.selection_spec_id,for_update=for_update)
+    generation=None
+    if staged:
+        if vacuum is None or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None or vacuum.source_generation_id is None:
+            return None
+        generation=await uow.instrument_selection.get_materialization_generation(vacuum.source_generation_id,for_update=for_update)
+        if generation is None or generation.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED} or (
+            generation.selection_spec_id!=control.selection_spec_id or generation.selection_epoch_id!=control.selection_epoch_id
+            or generation.selection_control_version!=control.control_version
+            or not control.permits_dynamic_period(generation.session_start_ms or 0)
+            or authoritative_now>=max(vacuum.fenced_at_ms,generation.desired_at_ms or generation.created_at_ms)+1800000):
+            return None
+        targets=await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id,for_update=for_update)
+        if not any(t.universe_version_id==scope.universe_version_id and t.event_spec_id==scope.event_spec_id and t.lifecycle_state.value=="staged" for t in targets):
+            return None
+    else:
+        if vacuum is not None and vacuum.state in {StrategyEntryVacuumState.OPEN,StrategyEntryVacuumState.DRAINING_ENTRY,StrategyEntryVacuumState.OWNER_PAUSED}:
+            return None
+        active=await uow.signals.get_active_universe_member(event_spec_id=scope.event_spec_id,exchange_instrument_id=scope.exchange_instrument_id,for_update=for_update)
+        if active is None or active.universe_version_id!=scope.universe_version_id or active.semantic_digest!=scope.universe_semantic_digest:
+            return None
+    actual=await uow.signals.get_runtime_scope(scope.runtime_scope_id,for_update=for_update)
+    capability=await uow.signals.get_runtime_capability("strategy_signal_ingest")
+    if actual!=scope or capability is None or not capability.enabled or capability.certified_commit!=request.runtime_commit or capability.schema_revision!=request.schema_revision:
+        return None
+    spec=await uow.instrument_selection.get_active_spec(control.selection_spec_id)
+    return CurrentFactsRefreshSource(owner_control_version=owner.control_version,selection_control_version=control.control_version,
+        selection_spec_id=control.selection_spec_id,algorithm_semantic_digest=spec.algorithm_semantic_digest,
+        selection_epoch_id=control.selection_epoch_id,universe_version_id=scope.universe_version_id,
+        scope_version=scope.scope_version,observation_generation=scope.observation_generation,
+        entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,entry_vacuum_version=None if vacuum is None else vacuum.projection_version,
+        materialization_generation_id=None if generation is None else generation.materialization_generation_id,materialization_generation_version=None if generation is None else generation.projection_version)
+
+
 async def _capture_current_facts_refresh_source(uow: KernelUnitOfWork,scope: RuntimeScopeSnapshot,
     request: ObservationRequest,now_ms: int,*,for_update: bool=False) -> CurrentFactsRefreshSource | None:
+    if request.operation in {"refresh_staged_facts","refresh_orb_facts"}:
+        return await _capture_orb_fact_refresh_source(uow,scope,request,now_ms,for_update=for_update)
     authoritative_now=await uow.instrument_selection.read_authority_clock_ms()
     owner=await uow.owner_controls.get_strategy_control(scope.strategy_group_id,for_update=for_update)
     control=await uow.instrument_selection.get_selection_control(scope.strategy_group_id,for_update=for_update)

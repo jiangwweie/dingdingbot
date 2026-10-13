@@ -1039,3 +1039,62 @@ def _settings(**overrides: object) -> OwnerConsoleSettings:
     }
     values.update(overrides)
     return OwnerConsoleSettings(**values)  # type: ignore[arg-type]
+
+
+async def test_hourly_dynamic_owner_http_routes_exact_new_strategy(owner_console_client,monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.domain.selection_authority import (
+        SelectionControl,
+        SelectionMode,
+    )
+    from src.trading_kernel.interfaces.owner_console_http.routes import (
+        controls as routes,
+    )
+    control=SelectionControl(strategy_group_id='SOR-1H-001',selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',
+        selection_mode=SelectionMode.STATIC_BASELINE,pending_selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        pending_effective_period_anchor_ms=BASE_MS//86400000*86400000+86400000,pending_authorization_id='owner:orb',
+        control_version=2,rollback_baseline_id='baseline:orb',selection_epoch_id='epoch:orb',updated_at_ms=BASE_MS)
+    class Uow:
+        async def __aenter__(self):
+            return SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control)))
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(routes,'PostgresKernelUnitOfWork',lambda engine:Uow())
+    monkeypatch.setattr(routes,'get_control_engine',lambda request:object())
+    staged=AsyncMock(return_value=control)
+    monkeypatch.setattr(routes,'stage_orb_dynamic_selection_mode',staged,raising=False)
+    monkeypatch.setattr(routes,'_require_step_up',AsyncMock())
+    response=await owner_console_client.post('/api/owner/v1/controls/strategies/SOR-1H-001/selection/dynamic/activate',
+        headers={'Origin':'https://owner.example.test'},json={'expected_version':2,'reason':'hourly','idempotency_key':'orb:http',
+            'effective_session_start_ms':control.pending_effective_period_anchor_ms,'totp_code':'000000'})
+    assert response.status_code==200,response.text
+    staged.assert_awaited_once()
+    assert response.json()['strategy_group_id']=='SOR-1H-001'
+
+
+async def test_hourly_selection_preview_keeps_daily_preparation_and_entry_times_distinct(owner_console_client,monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
+    from src.trading_kernel.interfaces.owner_console_http.routes import (
+        controls as routes,
+    )
+    from src.trading_kernel.interfaces.readonly_api import SelectionRuntimeReadonlyView
+    session=BASE_MS//86400000*86400000
+    view=SelectionRuntimeReadonlyView(strategy_group_id='SOR-1H-001',selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',session_start_ms=session,
+        selection_control=None,selection_job=None,snapshot_disposition=None,materialization_generation=None,entry_vacuums=(),authority_gap_audits=(),current_authority=None,first_eligible_close_time_ms=None,release_compatibility_fact=None)
+    class Uow:
+        async def __aenter__(self):
+            return SimpleNamespace(_connection=SimpleNamespace(execute=AsyncMock()),instrument_selection=SimpleNamespace(get_orb_spec=AsyncMock(return_value=OrbSessionSelectionSpec())))
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(routes,'PostgresKernelUnitOfWork',lambda engine:Uow())
+    monkeypatch.setattr(routes,'get_selection_runtime_view',AsyncMock(return_value=view),raising=False)
+    response=await owner_console_client.get('/api/owner/v1/controls/strategies/SOR-1H-001/selection')
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data['strategy_label']=='SOR-1H（1h 入场 / 15m 退出）'
+    assert data['next_eligibility_not_before_ms']-data['next_effective_period_anchor_ms']==7200000
+    assert data['next_prepare_not_before_ms']-data['next_effective_period_anchor_ms']==3600000
+    assert 'consecutive_missed_periods' not in data['runtime']

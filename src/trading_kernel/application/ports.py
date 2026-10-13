@@ -120,6 +120,13 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSnapshot,
     SorDynamicSelectionSpecV0,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    InstalledOrbSessionSelectionSpec,
+    OrbSessionSelectionComputation,
+    OrbSessionSelectionSnapshot,
+    OrbSessionSelectionSpec,
+    OrbStaticRollbackBaseline,
+)
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.owner_control import (
     OwnerAuthorization,
@@ -128,13 +135,6 @@ from src.trading_kernel.domain.owner_control import (
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.position import PositionSnapshot
-from src.trading_kernel.domain.orb_session_selection import (
-    InstalledOrbSessionSelectionSpec,
-    OrbSessionSelectionSpec,
-    OrbSessionSelectionSnapshot,
-    OrbSessionSelectionComputation,
-    OrbStaticRollbackBaseline,
-)
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -406,7 +406,7 @@ class RuntimeScopeSnapshot(BaseModel):
     position_side: Literal["long", "short"]
     universe_version_id: str
     universe_semantic_digest: str
-    lifecycle_state: Literal["warming", "active", "retired", "abandoned"]
+    lifecycle_state: Literal["warming", "staged", "active", "retired", "abandoned"]
     observation_enabled: bool
     entry_enabled: bool
     scope_version: int
@@ -541,7 +541,7 @@ class ObservationUniverseMembershipSnapshot(BaseModel):
     event_spec_id: str
     universe_version_id: str
     semantic_digest: str
-    lifecycle_state: Literal["warming", "active"]
+    lifecycle_state: Literal["warming", "staged", "active"]
     exchange_instrument_ids: tuple[str, ...]
 
 
@@ -1266,7 +1266,7 @@ class SignalRepository(Protocol):
 
     async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
         universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
-        limit: int) -> tuple[RuntimeScopeSnapshot,...]: ...
+        limit: int, staged: bool=False) -> tuple[RuntimeScopeSnapshot,...]: ...
 
     async def list_generic_selection_member_status(self, *, event_spec_id: str) -> tuple[GenericSelectionMemberRuntimeStatus, ...]: ...
 

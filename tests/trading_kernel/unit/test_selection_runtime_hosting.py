@@ -255,7 +255,7 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(mon
     monkeypatch.setattr(script,"run_current_fact_refresh_runtime_once",refresh)
     monkeypatch.setattr(script,"run_worker_process_group",group)
     assert await script._run(args)==0
-    expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001"}
+    expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001","SOR-1H-001"}
     assert {item[1] for item in calls if item[0]=="selection"}==expected
     assert {item[1] for item in calls if item[0]=="materialization"}==expected
     for strategy in expected-{"SOR-001"}:

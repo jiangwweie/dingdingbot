@@ -677,13 +677,43 @@ class PostgresInstrumentSelectionRepository:
         control=await self.get_selection_control(spec.strategy_group_id,for_update=True)
         if not self._generic_control_allows(control,selection_spec_id,selection_epoch_id,session_start_ms):return None
         if control is None: return None
-        if now_ms>=period.snapshot_expires_at_ms:return None
+        await self._supersede_daily_selection_jobs(selection_spec_id=selection_spec_id,selection_epoch_id=selection_epoch_id,
+            period_anchor_ms=session_start_ms,now_ms=now_ms)
+        newer=await self._connection.scalar(sa.select(instrument_selection_jobs_current.c.selection_job_id).where(
+            instrument_selection_jobs_current.c.selection_spec_id==selection_spec_id,
+            instrument_selection_jobs_current.c.selection_epoch_id==selection_epoch_id,
+            instrument_selection_jobs_current.c.period_anchor_ms>session_start_ms).limit(1))
+        if newer is not None:
+            return None
+        if now_ms>=period.trading_expires_at_ms:
+            await self._connection.execute(sa.update(instrument_selection_jobs_current).where(
+                instrument_selection_jobs_current.c.selection_spec_id==selection_spec_id,
+                instrument_selection_jobs_current.c.selection_epoch_id==selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms==session_start_ms,
+                instrument_selection_jobs_current.c.state.in_(('DUE','CLAIMED'))).values(state='EXPIRED',first_blocker='ORB_SESSION_EXPIRED',
+                    lease_owner=None,lease_expires_at_ms=None,projection_version=instrument_selection_jobs_current.c.projection_version+1,updated_at_ms=now_ms))
+            return None
         result=await self._claim_selection_job_row(selection_spec_id=selection_spec_id,period_anchor_ms=session_start_ms,
             scheduled_at_ms=period.feature_cutoff_at_ms,feature_cutoff_at_ms=period.feature_cutoff_at_ms,worker_id=worker_id,
             now_ms=now_ms,lease_duration_ms=lease_duration_ms,selection_epoch_id=selection_epoch_id,
             selection_control_version=control.control_version)
         if isinstance(result,SelectionJobClaim):raise SelectionJobConflict("ORB cannot consume legacy SOR claim")
         return (await self.get_orb_snapshot(result)).snapshot if isinstance(result,str) else result
+
+    async def _supersede_daily_selection_jobs(self, *, selection_spec_id: str,selection_epoch_id: str,
+        period_anchor_ms: int,now_ms: int) -> None:
+        rows=(await self._connection.execute(sa.select(instrument_selection_jobs_current).where(
+            instrument_selection_jobs_current.c.selection_spec_id==selection_spec_id,
+            instrument_selection_jobs_current.c.state.in_(('DUE','CLAIMED')),
+            sa.or_(instrument_selection_jobs_current.c.selection_epoch_id!=selection_epoch_id,
+                instrument_selection_jobs_current.c.period_anchor_ms<period_anchor_ms)).order_by(
+                    instrument_selection_jobs_current.c.period_anchor_ms.desc()).limit(2).with_for_update())).mappings().all()
+        for row in rows:
+            await self._connection.execute(sa.update(instrument_selection_jobs_current).where(
+                instrument_selection_jobs_current.c.selection_job_id==row['selection_job_id'],
+                instrument_selection_jobs_current.c.projection_version==row['projection_version']).values(state='SUPERSEDED',
+                    first_blocker='SUPERSEDED_BY_SELECTION_EPOCH' if row['selection_epoch_id']!=selection_epoch_id else 'SUPERSEDED_BY_NEWER_DUE_PERIOD',
+                    next_retry_at_ms=None,lease_owner=None,lease_expires_at_ms=None,projection_version=row['projection_version']+1,updated_at_ms=now_ms))
 
     async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim, computation,
         completed_at_ms: int) -> None:

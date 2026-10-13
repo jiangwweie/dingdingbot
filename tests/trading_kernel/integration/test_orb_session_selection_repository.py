@@ -312,6 +312,13 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
         )
         assert isinstance(next_claim, GenericSelectionJobClaim)
         assert next_claim.selection_epoch_id == c.selection_epoch_id
+        replacement=await uow.instrument_selection.claim_orb_selection_job(selection_spec_id=spec.selection_spec_id,
+            selection_epoch_id=c.selection_epoch_id,session_start_ms=D+4*86400000,worker_id='orb:next',now_ms=D+4*86400000+3600000,lease_duration_ms=120000)
+        assert isinstance(replacement,GenericSelectionJobClaim)
+        old=await uow.instrument_selection.get_selection_job(selection_spec_id=spec.selection_spec_id,
+            selection_epoch_id=c.selection_epoch_id,period_anchor_ms=next_claim.period_anchor_ms)
+        assert old.state=='SUPERSEDED'
+
     async with head_template_engine.connect() as connection:
         assert (
             await connection.scalar(
@@ -322,8 +329,8 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed,failed", [(False,False),(True,False),(True,True),(None,False)])
-async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(head_template_engine, changed, failed):
+@pytest.mark.parametrize("changed,failed,late", [(False,False,False),(True,False,False),(True,True,False),(None,False,False),(False,False,True)])
+async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(head_template_engine, changed, failed, late, monkeypatch):
     from decimal import Decimal
 
     from src.trading_kernel.application.coordinate_selection_materialization import (
@@ -375,10 +382,10 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
         async with head_template_engine.connect() as connection:
             current_ids=tuple((await connection.execute(sa.text("SELECT p.universe_version_id FROM brc_strategy_universe_current p JOIN brc_strategy_universe_versions u USING(universe_version_id) WHERE u.strategy_group_id='SOR-1H-001'"))).scalars())
         for uid in current_ids:
-            await make_warming_ready(head_template_engine,universe_version_id=uid,warm_closed_bar_time_ms=session+h,valid_until_ms=session+2*h)
+            await make_warming_ready(head_template_engine,universe_version_id=uid,warm_closed_bar_time_ms=session+(2*h if late else h),valid_until_ms=session+(3*h if late else 2*h))
     result=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(head_template_engine),
         request=CoordinateSelectionMaterializationRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,
-            session_start_ms=session,worker_id='orb:materializer'),clock_ms=lambda:session+h+3)
+            session_start_ms=session,worker_id='orb:materializer'),clock_ms=lambda:session+(2*h+1 if late else h+3))
     if changed is None:
         assert result.disposition=='VALID_EMPTY_INTENT'
         from src.trading_kernel.application.drain_strategy_entry_vacuum import (
@@ -394,6 +401,7 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
             final=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
             assert final.authority.authority_outcome=='VALID_EMPTY' and final.authority.authorized_pair is None
             assert final.authority.activation_authorization_id==control.pending_authorization_id
+        await assert_empty_waits_for_nonempty_snapshot(head_template_engine,spec,session)
         return
     if changed:
         assert result.disposition=='GENERATION_PENDING'
@@ -432,6 +440,8 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
             progress=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(head_template_engine),request=request,clock_ms=lambda tick=tick:session+h+tick)
             if progress.disposition=='GAP_AUDIT_PENDING':break
         assert progress.disposition=='GAP_AUDIT_PENDING'
+        if not failed:
+            await assert_staged_facts_refresh(head_template_engine,spec,session,monkeypatch)
         from src.trading_kernel.application.coordinate_selection_materialization import (
             complete_pending_authority_gap_audit,
         )
@@ -459,6 +469,22 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
         await assert_pair_entry_authority(head_template_engine,spec,session,active.selection_authority_id)
         await assert_next_day_continuity(head_template_engine,spec,session)
         return
+    if late:
+        assert result.disposition=='GAP_AUDIT_PENDING'
+        from src.trading_kernel.application.coordinate_selection_materialization import (
+            complete_pending_authority_gap_audit,
+        )
+        from src.trading_kernel.domain.market import ClosedCandle
+        from src.trading_kernel.interfaces.authority_gap_audit_source import (
+            PublicMarketAuthorityGapAuditSource,
+        )
+        class LateMarket:
+            async def fetch_closed_candles(self,request):
+                assert request.timeframe=='1h' and request.limit==2
+                return tuple(ClosedCandle(open_time_ms=session+i*h,close_time_ms=session+(i+1)*h,
+                    open=Decimal(100),high=Decimal(103 if i else 101),low=Decimal(99),close=Decimal(102 if i else 100),volume=Decimal(100)) for i in range(2))
+        result=await complete_pending_authority_gap_audit(uow_factory=lambda:PostgresKernelUnitOfWork(head_template_engine),authority_gap_audit_id=result.authority_gap_audit_id,
+            audit_source=PublicMarketAuthorityGapAuditSource(LateMarket()),clock_ms=lambda:session+2*h+2)
     assert result.disposition=='NO_CHANGE'
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
         authority=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
@@ -466,7 +492,7 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
         assert authority.authority.selection_epoch_id==control.selection_epoch_id
         assert authority.authority.activation_authorization_id==control.pending_authorization_id
         assert authority.authority.selection_control_version==current_control.control_version==3
-        assert authority.authority.first_eligible_close_time_ms==session+2*h
+        assert authority.authority.first_eligible_close_time_ms==session+(3*h if late else 2*h)
         assert current_control.pending_authorization_id is None
 
     await assert_pair_entry_authority(head_template_engine,spec,session,result.selection_authority_id)
@@ -481,12 +507,14 @@ async def assert_pair_entry_authority(engine,spec,session,authority_id):
         scopes=tuple((await connection.execute(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE strategy_group_id='SOR-1H-001' AND lifecycle_state='active' ORDER BY event_spec_id LIMIT 14"))).scalars())
     assert len(scopes)==14
     async with PostgresKernelUnitOfWork(engine) as uow:
+        current=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
+        close=current.authority.first_eligible_close_time_ms
         sides=set()
         for scope_id in scopes:
             scope=await uow.signals.get_runtime_scope(scope_id)
             sides.add(scope.position_side)
             decision=await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=authority_id,
-                observed_close_time_ms=session+7200000,now_ms=session+7200001,allow_current_as_birth=False)
+                observed_close_time_ms=close,now_ms=close+1,allow_current_as_birth=False)
             assert decision.reason_code=="selection_owner_or_policy_blocked"
             assert decision.current_selection_authority_id==authority_id
         assert sides=={'long','short'}
@@ -572,3 +600,65 @@ async def assert_owner_pause(engine,spec,session):
     async with PostgresKernelUnitOfWork(engine) as uow:
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id)
         assert vacuum is None or not vacuum.blocks_new_entry
+
+
+async def assert_empty_waits_for_nonempty_snapshot(engine,spec,session):
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateSelectionMaterializationRequest,
+        coordinate_selection_materialization_once,
+    )
+    result=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),
+        request=CoordinateSelectionMaterializationRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,session_start_ms=session+86400000,worker_id='orb:empty'),clock_ms=lambda:session+90000001)
+    assert result.disposition=='WAITING_SELECTION'
+
+
+@pytest.mark.asyncio
+async def test_orb_readonly_view_loads_current_epoch_job(head_template_engine):
+    from src.trading_kernel.application.owner_control import (
+        ControlMutationRequest,
+        stage_orb_dynamic_selection_mode,
+    )
+    from src.trading_kernel.interfaces.readonly_api import (
+        SelectionRuntimeReadonlyRequest,
+        get_selection_runtime_view,
+    )
+    spec=OrbSessionSelectionSpec();day=D+86400000
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-test',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=D))
+        await uow.instrument_selection.install_orb_spec(spec,installed_at_ms=D+1)
+    await install_static_pair(head_template_engine)
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        control=await stage_orb_dynamic_selection_mode(uow,effective_session_start_ms=day,request=ControlMutationRequest(expected_version=1,reason='test',idempotency_key='orb:read',owner_identity='owner',now_ms=D+3600100),authentication_strength='totp_step_up')
+        claim=await uow.instrument_selection.claim_orb_selection_job(selection_spec_id=spec.selection_spec_id,selection_epoch_id=control.selection_epoch_id,session_start_ms=day,worker_id='orb:read',now_ms=day+3600000,lease_duration_ms=30000)
+    async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        view=await get_selection_runtime_view(uow,SelectionRuntimeReadonlyRequest(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,session_start_ms=day))
+        assert view.selection_job.selection_job_id==claim.selection_job_id
+
+
+async def assert_staged_facts_refresh(engine,spec,session,monkeypatch):
+    from decimal import Decimal
+
+    from src.trading_kernel.application.observe_strategy_scope import (
+        ObservationRequest,
+        observe_strategy_scope,
+    )
+    from src.trading_kernel.domain.market import ClosedCandle
+    from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+        PostgresInstrumentSelectionRepository,
+    )
+    async with engine.connect() as connection:
+        ids=tuple((await connection.execute(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE strategy_group_id='SOR-1H-001' AND lifecycle_state='staged' ORDER BY runtime_scope_id"))).scalars())
+    assert len(ids)==14
+    async def clock(self):return session+3600014
+    monkeypatch.setattr(PostgresInstrumentSelectionRepository,'read_authority_clock_ms',clock)
+    class Market:
+        async def fetch_closed_candles(self,request):
+            assert request.timeframe=='1h'
+            return (ClosedCandle(open_time_ms=session,close_time_ms=session+3600000,open=Decimal(100),high=Decimal(101),low=Decimal(99),close=Decimal(100),volume=Decimal(100)),)
+    for sid in ids:
+        refreshed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(engine),Market(),ObservationRequest(runtime_scope_id=sid,
+            runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=session+3600000,attempted_at_ms=session+3600014,
+            operation='refresh_staged_facts'))
+        assert refreshed.status=='facts_refreshed' and refreshed.signal_event_id is None
+    async with engine.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0

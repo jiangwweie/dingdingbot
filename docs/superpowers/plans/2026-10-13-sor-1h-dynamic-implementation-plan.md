@@ -387,3 +387,12 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - 新 NO_CHANGE 接管前正式 CERTIFY_CURRENT：过期当前 pair 不授予 Authority，刷新后恢复推进。
 - 共享旧 pair PG 回归加上述新路径：204 passed / 48.14s，日志 `/tmp/brc-orb-pair-regression.log`。
 - 改动的7个生产模块 Mypy PASS；局部 Ruff与diff check PASS。此检查点不含全部QA/Release，也不代表部署候选已完成。
+
+### 宿主与只读/Owner 接线检查点（2026-10-14，未部署）
+
+- 新 group 的 Selection/Materialization/Facts 常驻逻辑循环接入既有 Observation service，不增加systemd进程或冷启动timer。
+- exact staged 1h readiness refresh 复用Observation事实链；完整新pair14 scope正向验证不生成Signal/ENTRY，前后重新核验epoch/Generation/Vacuum/Owner/runtime identity，原30min deadline不延长。
+- 当前pair NO_CHANGE须CERTIFY_CURRENT；过期pair拒绝，正式刷新后继续。迟到首次NO_CHANGE由小时Audit接管，未来close与suppression落库。
+- API Dynamic activate新身份单独路由；旧SOR仍拒绝。新只读Job使用当前epoch，独立Preview明确UTC01准备/UTC02资格与1h入场/15m退出，不套Generic missed/staleness字段。
+- 历史CLAIMED Job被当前日正式Job supersede，保留原Owner intent；Session过期禁止源读取，错误计算记录失败。
+- 相关Slice 152 passed / 15.23s，`/tmp/brc-orb-host-final-slice.log`；8个生产/宿主模块Mypy通过。仍不含最终Release/R4、Frontend/R2、source0010 preservation或新Ticket完整链。

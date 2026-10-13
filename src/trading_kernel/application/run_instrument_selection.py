@@ -14,7 +14,11 @@ from src.trading_kernel.application.market_ports import (
     InstrumentSelectionMarketSource,
     SelectionKlineRequest,
 )
-from src.trading_kernel.application.ports import SelectionPersistenceConflict, SelectionJobRecord, UnitOfWorkFactory
+from src.trading_kernel.application.ports import (
+    SelectionJobRecord,
+    SelectionPersistenceConflict,
+    UnitOfWorkFactory,
+)
 from src.trading_kernel.domain.dynamic_selection_numeric import (
     DynamicSelectionNumericError,
 )
@@ -41,9 +45,9 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionAttemptOutcome,
     SelectionJobFailure,
     SelectionSnapshot,
-    SorDynamicSelectionSpecV0,
     SelectionSourceIntegrityError,
     SelectionSourceWindow,
+    SorDynamicSelectionSpecV0,
     build_sor_dynamic_selection_period,
     run_sor_dynamic_selection_v0,
 )
@@ -503,10 +507,16 @@ def _failure_result(
 
 async def _run_orb_selection_once(*,uow_factory:UnitOfWorkFactory,market_source:InstrumentSelectionMarketSource,
     request:RunInstrumentSelectionRequest,clock_ms:Callable[[],int]) -> RunInstrumentSelectionResult:
-    from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSnapshot, build_orb_session_period,compute_orb_selection
+    from src.trading_kernel.domain.orb_session_selection import (
+        OrbSessionSelectionSnapshot,
+        build_orb_session_period,
+        compute_orb_selection,
+    )
     period=build_orb_session_period(request.period_anchor_ms)
     job_id=selection_job_identity(request.selection_spec_id,request.period_anchor_ms,request.selection_epoch_id)
     now=clock_ms()
+    if now>=period.trading_expires_at_ms:
+        return RunInstrumentSelectionResult(outcome='EXPIRED',selection_job_id=job_id,reason_code='ORB_SESSION_EXPIRED')
     if now<period.feature_cutoff_at_ms:
         return RunInstrumentSelectionResult(outcome="NOT_DUE",selection_job_id=job_id)
     async with uow_factory() as uow:
@@ -522,14 +532,27 @@ async def _run_orb_selection_once(*,uow_factory:UnitOfWorkFactory,market_source:
     windows,errors=await _read_source_windows(market_source=market_source,candidate_ids=spec.candidate_ids,
         window_start_ms=period.session_start_ms-23*HOUR_MS,feature_cutoff_at_ms=period.feature_cutoff_at_ms,
         max_concurrency=request.max_concurrency)
+    if clock_ms()>=period.trading_expires_at_ms:
+        async with uow_factory() as uow:
+            await uow.instrument_selection.claim_orb_selection_job(selection_spec_id=request.selection_spec_id,
+                selection_epoch_id=request.selection_epoch_id,session_start_ms=request.period_anchor_ms,
+                worker_id=request.worker_id,now_ms=clock_ms(),lease_duration_ms=request.lease_duration_ms)
+        return RunInstrumentSelectionResult(outcome='EXPIRED',selection_job_id=job_id,reason_code='ORB_SESSION_EXPIRED')
     if errors:
         await _persist_failure(uow_factory=uow_factory,claim=claim,outcome=SelectionAttemptOutcome.SOURCE_FAILED,
             reason_code=_source_failure_reason(errors),source_member_count=len(windows),completed_at_ms=clock_ms())
         return RunInstrumentSelectionResult(outcome="SOURCE_FAILED",selection_job_id=job_id,reason_code=_source_failure_reason(errors))
     observed=clock_ms();completed=clock_ms()
-    computation=compute_orb_selection(spec=spec,period=period,selection_epoch_id=request.selection_epoch_id,
-        source_windows=tuple(windows[m] for m in spec.candidate_ids),decision_at_ms=claim.started_at_ms,
-        source_observed_at_ms=observed,created_at_ms=completed)
+    try:
+        computation=compute_orb_selection(spec=spec,period=period,selection_epoch_id=request.selection_epoch_id,
+            source_windows=tuple(windows[m] for m in spec.candidate_ids),decision_at_ms=claim.started_at_ms,
+            source_observed_at_ms=observed,created_at_ms=completed)
+    except (ArithmeticError,ValueError,SelectionSourceIntegrityError) as exc:
+        outcome=SelectionAttemptOutcome.SOURCE_FAILED if isinstance(exc,SelectionSourceIntegrityError) else SelectionAttemptOutcome.COMPUTE_FAILED
+        reason=('SOURCE_INTEGRITY:' if outcome is SelectionAttemptOutcome.SOURCE_FAILED else 'COMPUTE_REJECTED:')+type(exc).__name__
+        await _persist_failure(uow_factory=uow_factory,claim=claim,outcome=outcome,reason_code=reason,
+            source_member_count=len(windows),completed_at_ms=clock_ms())
+        return RunInstrumentSelectionResult(outcome=outcome.value,selection_job_id=job_id,reason_code=reason)
     async with uow_factory() as uow:
         await uow.instrument_selection.complete_orb_selection_snapshot(claim=claim,computation=computation,completed_at_ms=completed)
     return RunInstrumentSelectionResult(outcome="SNAPSHOT_READY",selection_job_id=job_id,

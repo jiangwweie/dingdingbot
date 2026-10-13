@@ -82,3 +82,47 @@ async def test_hourly_runtime_dispatch_preserves_owner_epoch_on_later_day(monkey
     assert result.status=='snapshot_ready'
     sent=run.call_args.kwargs['request']
     assert sent.selection_epoch_id==control.selection_epoch_id and sent.period_anchor_ms==session
+
+
+@pytest.mark.asyncio
+async def test_hourly_readiness_host_refreshes_staged_pair_without_generic_identity(monkeypatch):
+    from src.trading_kernel.application.ports import RuntimeScopeSnapshot
+    from src.trading_kernel.domain.selection_authority import (
+        SelectionControl,
+        SelectionMode,
+    )
+    from src.trading_kernel.interfaces.selection_runtime_worker import (
+        CurrentFactRefreshRuntimeRequest,
+        run_current_fact_refresh_runtime_once,
+    )
+    spec=OrbSessionSelectionSpec()
+    control=SelectionControl(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,control_version=3,rollback_baseline_id='baseline:orb',selection_epoch_id='epoch:orb',updated_at_ms=D)
+    scope=RuntimeScopeSnapshot(runtime_scope_id='scope:orb:staged',strategy_group_id=spec.strategy_group_id,strategy_version_id=spec.strategy_version_id,event_spec_id=spec.event_spec_ids[0],
+        runtime_profile_id='tiny-live-v1',owner_policy_id='policy-main',exchange_instrument_id=spec.candidate_ids[0],position_side='long',universe_version_id='orb:staged',
+        universe_semantic_digest='sha256:'+'a'*64,lifecycle_state='staged',observation_enabled=False,entry_enabled=False,scope_version=2,observation_generation=3)
+    repo=SimpleNamespace(get_selection_control=AsyncMock(return_value=control),get_current_entry_vacuum=AsyncMock(return_value=SimpleNamespace(source_generation_id='generation:orb',state='RECONFIGURING',drained_at_ms=D+H)))
+    universes=SimpleNamespace(get_current=AsyncMock(return_value=None),get_generation_universe_targets=AsyncMock(return_value=(SimpleNamespace(universe_version_id=scope.universe_version_id,event_spec_id=scope.event_spec_id,lifecycle_state=SimpleNamespace(value='staged')),)))
+    @asynccontextmanager
+    async def factory():
+        yield SimpleNamespace(instrument_selection=repo,strategy_universes=universes,signals=SimpleNamespace(list_current_fact_refresh_scopes=AsyncMock(return_value=(scope,))),owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=SimpleNamespace(entry_state='enabled'))))
+    observe=AsyncMock(return_value=SimpleNamespace(status=SimpleNamespace(value='facts_refreshed'),detector_reason='orb'))
+    monkeypatch.setattr('src.trading_kernel.interfaces.selection_runtime_worker.observe_strategy_scope',observe)
+    result=await run_current_fact_refresh_runtime_once(uow_factory=factory,market_source=object(),request=CurrentFactRefreshRuntimeRequest(strategy_group_id=spec.strategy_group_id,
+        selection_spec_id=spec.selection_spec_id,worker_id='orb',now_ms=D+2*H+1,runtime_commit='orb',schema_revision='schema'))
+    assert result.status=='facts_refreshed'
+    assert observe.call_args.args[2].operation=='refresh_staged_facts'
+
+
+@pytest.mark.asyncio
+async def test_hourly_runner_expired_session_does_not_read_source_or_compute():
+    spec=OrbSessionSelectionSpec()
+    @asynccontextmanager
+    async def factory():
+        raise AssertionError('expired runner cannot start source transaction')
+        yield
+    class Market:
+        async def fetch_selection_klines(self,request):raise AssertionError('expired source read')
+    result=await run_instrument_selection_once(uow_factory=factory,market_source=Market(),request=RunInstrumentSelectionRequest(selection_spec_id=spec.selection_spec_id,
+        selection_epoch_id='epoch:orb',period_anchor_ms=D,worker_id='orb'),clock_ms=lambda:D+24*H)
+    assert result.outcome=='EXPIRED'

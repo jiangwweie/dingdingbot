@@ -35,7 +35,11 @@ from src.trading_kernel.application.observe_strategy_scope import (
     current_facts_refresh_vacuum_allowed,
     observe_strategy_scope,
 )
-from src.trading_kernel.application.ports import SelectionLeaseHeld, UnitOfWorkFactory
+from src.trading_kernel.application.ports import (
+    RuntimeScopeSnapshot,
+    SelectionLeaseHeld,
+    UnitOfWorkFactory,
+)
 from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
@@ -43,6 +47,7 @@ from src.trading_kernel.application.run_instrument_selection import (
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
     ORB_SELECTION_SPEC_ID,
     ORB_STRATEGY_GROUP_ID,
 )
@@ -148,6 +153,8 @@ class CurrentFactRefreshRuntimeResult(BaseModel):
 
 async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
     request: CurrentFactRefreshRuntimeRequest) -> CurrentFactRefreshRuntimeResult:
+    if request.strategy_group_id==ORB_STRATEGY_GROUP_ID:
+        return await _run_orb_staged_fact_refresh(uow_factory=uow_factory,market_source=market_source,request=request)
     family=generic_selection_spec(request.strategy_group_id)
     if family.selection_spec_id!=request.selection_spec_id:
         return CurrentFactRefreshRuntimeResult(status="blocked",reason_code="SELECTION_SPEC_DRIFT")
@@ -182,6 +189,45 @@ async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory
     return CurrentFactRefreshRuntimeResult(status=observed.status.value,reason_code=observed.detector_reason,runtime_scope_id=scope.runtime_scope_id)
 
 
+async def _run_orb_staged_fact_refresh(*,uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
+    request: CurrentFactRefreshRuntimeRequest) -> CurrentFactRefreshRuntimeResult:
+    if request.selection_spec_id!=ORB_SELECTION_SPEC_ID:
+        return CurrentFactRefreshRuntimeResult(status='blocked',reason_code='SELECTION_SPEC_DRIFT')
+    close=request.now_ms//HOUR_MS*HOUR_MS
+    async with uow_factory() as uow:
+        owner=await uow.owner_controls.get_strategy_control(ORB_STRATEGY_GROUP_ID)
+        control=await uow.instrument_selection.get_selection_control(ORB_STRATEGY_GROUP_ID)
+        vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=ORB_STRATEGY_GROUP_ID,selection_spec_id=ORB_SELECTION_SPEC_ID)
+        if owner is None or owner.entry_state!='enabled' or control is None or close<request.now_ms//DAY_MS*DAY_MS+HOUR_MS:
+            return CurrentFactRefreshRuntimeResult(status='no_work')
+        scopes: list[RuntimeScopeSnapshot]=[]
+        for event in ORB_EVENT_SPEC_IDS:
+            current=await uow.strategy_universes.get_current(event)
+            if current is not None:
+                scopes.extend(await uow.signals.list_current_fact_refresh_scopes(event_spec_id=event,
+                    universe_version_id=current.universe_version_id,closed_at_ms=close,checked_at_ms=request.now_ms,limit=7))
+        if vacuum is not None and vacuum.source_generation_id is not None and vacuum.state=='RECONFIGURING' and vacuum.drained_at_ms is not None:
+            targets=await uow.strategy_universes.get_generation_universe_targets(vacuum.source_generation_id)
+            for target in targets:
+                if target.event_spec_id not in ORB_EVENT_SPEC_IDS or target.lifecycle_state.value!='staged':
+                    continue
+                scopes.extend(await uow.signals.list_current_fact_refresh_scopes(event_spec_id=target.event_spec_id,
+                    universe_version_id=target.universe_version_id,closed_at_ms=close,checked_at_ms=request.now_ms,limit=7,staged=True))
+    if not scopes:
+        return CurrentFactRefreshRuntimeResult(status='no_work')
+    ordered=sorted(scopes,key=lambda item:item.runtime_scope_id)
+    scope=next((s for s in ordered if request.after_runtime_scope_id is None or s.runtime_scope_id>request.after_runtime_scope_id),ordered[0])
+    try:
+        result=await asyncio.wait_for(observe_strategy_scope(uow_factory,market_source,ObservationRequest(runtime_scope_id=scope.runtime_scope_id,
+            runtime_commit=request.runtime_commit,schema_revision=request.schema_revision,trigger_candle_close_time_ms=close,
+            attempted_at_ms=request.now_ms,operation='refresh_staged_facts' if scope.lifecycle_state=='staged' else 'refresh_orb_facts')),timeout=request.timeout_seconds)
+    except TimeoutError:
+        return CurrentFactRefreshRuntimeResult(status='blocked',reason_code='CURRENT_FACT_SOURCE_TIMEOUT',runtime_scope_id=scope.runtime_scope_id)
+    except CurrentFactsRefreshCloseChanged:
+        return CurrentFactRefreshRuntimeResult(status='blocked',reason_code='CURRENT_FACT_CLOSE_CHANGED',runtime_scope_id=scope.runtime_scope_id)
+    return CurrentFactRefreshRuntimeResult(status=result.status.value,reason_code=result.detector_reason,runtime_scope_id=scope.runtime_scope_id)
+
+
 def current_sor_selection_session_start_ms(now_ms: int) -> int | None:
     """Return today's UTC SOR Session only after its 01:00 decision boundary."""
 
@@ -210,6 +256,8 @@ async def run_selection_runtime_once(
         control = await uow.instrument_selection.get_selection_control(
             request.strategy_group_id
         )
+    if request.strategy_group_id == ORB_STRATEGY_GROUP_ID and control is None:
+        return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_INSTALLED,reason_code='ORB_CONTROL_NOT_INSTALLED')
     if control is None or control.selection_spec_id != request.selection_spec_id:
         return SelectionRuntimeResult(
             status=SelectionRuntimeStatus.BLOCKED,
@@ -325,6 +373,11 @@ async def run_materialization_runtime_once(
             status=MaterializationRuntimeStatus.NOT_DUE
         )
     async with uow_factory() as uow:
+        if request.strategy_group_id == ORB_STRATEGY_GROUP_ID:
+            control=await uow.instrument_selection.get_selection_control(ORB_STRATEGY_GROUP_ID)
+            if control is None or (control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is None):
+                return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.NOT_DUE,
+                    reason_code='ORB_STATIC_BASELINE_OR_NOT_INSTALLED')
         drain = await drain_strategy_entry_vacuum_once(
             uow,
             DrainStrategyEntryVacuumRequest(

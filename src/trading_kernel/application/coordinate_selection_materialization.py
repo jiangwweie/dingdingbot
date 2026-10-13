@@ -177,6 +177,7 @@ class MaterializationPlanningFacts(BaseModel):
     selected_members: tuple[str, ...]
     continuity_exists: bool
     open_vacuum: bool
+    previous_entry_authorized: bool = True
 
     @model_validator(mode="after")
     def _validate_planning_facts(self) -> MaterializationPlanningFacts:
@@ -427,6 +428,11 @@ def plan_selection_materialization(
         return MaterializationPlan(
             disposition=MaterializationDisposition.WAITING_VACUUM
         )
+    if facts.selection_spec_id == ORB_SELECTION_SPEC_ID and not facts.previous_entry_authorized:
+        if facts.snapshot is None:
+            return MaterializationPlan(disposition=MaterializationDisposition.WAITING_SELECTION)
+        return MaterializationPlan(disposition=(MaterializationDisposition.VALID_EMPTY_INTENT
+            if facts.snapshot.selected_count == 0 else MaterializationDisposition.GENERATION_PENDING))
     if first_pending_dynamic and facts.snapshot is None:
         return MaterializationPlan(
             disposition=MaterializationDisposition.KEEP_STATIC_PENDING_DYNAMIC
@@ -1143,6 +1149,8 @@ async def coordinate_selection_materialization_once(
             selected_members=() if snapshot is None else snapshot.selected_members,
             continuity_exists=continuity_exists,
             open_vacuum=bool(vacuum and vacuum.blocks_new_entry),
+            previous_entry_authorized=not (spec.selection_spec_id==ORB_SELECTION_SPEC_ID and current_authority is not None
+                and current_authority.authority.authority_outcome is AuthorityOutcome.VALID_EMPTY),
         )
         plan = plan_selection_materialization(facts)
 
@@ -2553,6 +2561,10 @@ async def _complete_pending_authority_gap_audit(
                     else current_authority.projection_version
                 ),
             )
+            if (audit.selection_spec_id == ORB_SELECTION_SPEC_ID and authority.activation_authorization_id is not None):
+                await uow.instrument_selection.activate_pending_selection_mode(strategy_group_id=spec.strategy_group_id,
+                    expected_control_version=selection_control.control_version,
+                    expected_pending_mode=SelectionMode.DYNAMIC_SELECTION,activated_at_ms=completed_at_ms)
         if (
             completed.first_eligible_close_time_ms is None
             or clock_ms() >= completed.first_eligible_close_time_ms

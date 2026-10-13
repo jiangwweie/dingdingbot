@@ -155,6 +155,11 @@ def test_hourly_materialization_retains_earliest_owner_intent_on_later_day():
     assert plan.disposition == "KEEP_STATIC_PENDING_DYNAMIC"
 
 
+def test_hourly_empty_predecessor_cannot_authorize_dormant_physical_pair():
+    facts=planning_facts(previous_entry_authorized=False)
+    assert plan_selection_materialization(facts).disposition=='WAITING_SELECTION'
+
+
 @pytest.mark.parametrize(
     "now,first,audit", [(D + H + 1, D + 2 * H, False), (D + 2 * H, D + 3 * H, True)]
 )
@@ -211,3 +216,11 @@ def test_hourly_first_no_change_freezes_owner_epoch_and_activating_control_versi
         authority.expires_at_ms == D + 24 * H
         and authority.first_eligible_close_time_ms == D + 2 * H
     )
+
+
+def test_staged_hourly_scope_can_carry_readiness_without_observation_or_entry():
+    from src.trading_kernel.application.ports import RuntimeScopeSnapshot
+    scope=RuntimeScopeSnapshot(runtime_scope_id='scope:orb:staged',strategy_group_id='SOR-1H-001',strategy_version_id='sgv:SOR-1H-001:v1',
+        event_spec_id=ORB_EVENT_SPEC_IDS[0],runtime_profile_id='tiny-live-v1',owner_policy_id='policy-main',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long',
+        universe_version_id='universe:orb:staged',universe_semantic_digest='sha256:'+'a'*64,lifecycle_state='staged',observation_enabled=False,entry_enabled=False,scope_version=1,observation_generation=1)
+    assert not scope.observation_enabled and not scope.entry_enabled
