@@ -69,3 +69,67 @@ async def test_hourly_upgrade_preserves_exact_source_0010_rows(monkeypatch):
     finally:
         await engine.dispose()
         await drop_disposable_database(name)
+
+@pytest.mark.asyncio
+async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
+    from uuid import uuid4
+
+    from scripts.trading_kernel.certify_readonly import _certify
+    from scripts.trading_kernel.deploy_tokyo_release import (
+        DeploymentBlocked,
+        _require_dynamic_selection_postflight,
+    )
+    from tests.trading_kernel.support.postgres import async_database_url
+    from tests.trading_kernel.support.promotion_rehearsal import (
+        _cleanup,
+        _seed_and_bootstrap,
+    )
+    from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
+    name = 'brc_kernel_test_'+uuid4().hex[:12]
+    url = async_database_url(name)
+    await _seed_and_bootstrap(name, url, prepare_hourly=False)
+    try:
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionSpec,
+        )
+        installing_engine = create_async_engine(url)
+        try:
+            async with PostgresKernelUnitOfWork(installing_engine) as uow:
+                await uow.instrument_selection.install_orb_spec(OrbSessionSelectionSpec(), installed_at_ms=NOW_MS)
+                from src.trading_kernel.application.owner_control import (
+                    ExitProfileBindingMutationRequest,
+                    switch_event_exit_profile,
+                )
+                from src.trading_kernel.domain.exit_policy import (
+                    registered_exit_profiles,
+                )
+                profile = next(p for p in registered_exit_profiles() if p.exit_profile_id == 'exit-profile:momentum-tail:1h:long:v1')
+                current = await uow.exit_profiles.get_current_binding('event_spec:CPM-RO-001:CPM-LONG:v3')
+                await switch_event_exit_profile(uow, strategy_group_id='CPM-RO-001', event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',
+                    request=ExitProfileBindingMutationRequest(expected_version=current.projection_version, reason='retain prior Owner selection',
+                        idempotency_key='hourly:postflight:exit', owner_identity='owner', now_ms=NOW_MS+1,
+                        expected_binding_id=current.exit_binding_id, target_exit_profile_id=profile.exit_profile_id,
+                        target_exit_profile_semantic_hash=profile.semantic_hash()), authentication_strength='totp_step_up')
+        finally:
+            await installing_engine.dispose()
+        facts = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
+        assert facts['status'] == 'pass'
+        assert facts['hourly_pair_preparation']['status'] == 'pass'
+        assert facts['entry_recovery_ready'] is False
+        assert facts['exit_profile_authority']['current_binding_count'] == 10
+        assert facts['exit_profile_authority']['binding_fact_count'] == 11
+        _require_dynamic_selection_postflight(facts, seed_identity=facts['runtime_identity']['seed_identity'],
+            preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
+        engine = create_async_engine(url)
+        try:
+            async with engine.begin() as c:
+                await c.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id='SOR-1H-001'"))
+            unpaused = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
+            assert unpaused['hourly_pair_preparation']['status'] == 'fail'
+            with pytest.raises(DeploymentBlocked):
+                _require_dynamic_selection_postflight(unpaused, seed_identity=facts['runtime_identity']['seed_identity'],
+                    preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
+        finally:
+            await engine.dispose()
+    finally:
+        await _cleanup(name)

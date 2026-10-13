@@ -647,6 +647,17 @@ async def _certify(
                     )
                 ).scalar_one()
             )
+            hourly_control = (await connection.execute(text("""
+                SELECT o.entry_state,s.selection_mode,s.pending_selection_mode,s.selection_epoch_id,
+                       EXISTS(SELECT 1 FROM brc_instrument_selection_specs spec
+                         WHERE spec.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
+                           AND spec.strategy_group_id='SOR-1H-001'
+                           AND spec.selection_kind='orb_session_dynamic_v1' AND spec.status='active') AS installed
+                  FROM brc_strategy_entry_controls_current o
+                  JOIN brc_strategy_selection_control_current s USING(strategy_group_id)
+                 WHERE o.strategy_group_id='SOR-1H-001'
+                   AND s.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
+            """))).mappings().one_or_none()
             preserved_runtime = await read_preserved_runtime_state(connection)
             entry_restoration = await read_entry_restoration_state(
                 connection, now_ms=effective_now_ms,
@@ -1427,6 +1438,23 @@ async def _certify(
             expected_event_specs=expected_groups,
             expected_member_ids=member_ids,
         )
+    hourly_pair_preparation = {
+        "status": "pass" if (
+            hourly_control is not None and hourly_control["installed"]
+            and hourly_control["entry_state"] == "paused"
+            and hourly_control["selection_mode"] == "static_baseline"
+            and hourly_control["pending_selection_mode"] is None
+            and hourly_control["selection_epoch_id"] is None
+            and owner_policy_row is not None and owner_policy_row["new_entry_submit_enabled"] is False
+            and not warming_universe_rows
+            and _universe_manifest_matches(active_universe_manifest,
+                expected_event_specs=tuple(item for item in expected_event_specs if item[1] not in ORB_EVENT_SPEC_IDS),
+                expected_member_ids=None)
+        ) else "fail",
+        "strategy_entry_state": None if hourly_control is None else hourly_control["entry_state"],
+        "selection_mode": None if hourly_control is None else hourly_control["selection_mode"],
+        "pending_selection_mode": None if hourly_control is None else hourly_control["pending_selection_mode"],
+    }
     universe_identity_pass = _universe_manifest_matches(
         active_universe_manifest,
         expected_event_specs=expected_event_specs,
@@ -1643,6 +1671,7 @@ async def _certify(
         "active_counts": active_counts,
         "dynamic_selection_runtime_counts": dynamic_selection_runtime_counts,
         "preserved_runtime": preserved_runtime,
+        "hourly_pair_preparation": hourly_pair_preparation,
         "exit_profile_authority": exit_profile_authority,
         "owner_projection": owner_projection,
         "closure_ticket": closure_ticket,

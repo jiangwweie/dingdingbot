@@ -214,7 +214,7 @@ class RecordingPromotionBackend:
         self.entry_active = False
 
 
-async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
+async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_hourly: bool = True) -> None:
     admin = await asyncpg.connect(ADMIN_DSN)
     engine = None
     try:
@@ -263,13 +263,14 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                 runtime_profile_id=RUNTIME_PROFILE_ID,
             ),
         )
-        await bootstrap_strategy_universes(
-            database_url, runtime_profile_id=RUNTIME_PROFILE_ID,
-            strategy_group_id="SOR-1H-001", now_ms=clock.read,
-            wait_timeout_ms=60_000, poll_interval_ms=1,
-            sleep=_worker_driving_sleep_for_profile(engine=engine, clock=clock,
-                market=market, certification=certification, runtime_profile_id=RUNTIME_PROFILE_ID),
-        )
+        if prepare_hourly:
+            await bootstrap_strategy_universes(
+                database_url, runtime_profile_id=RUNTIME_PROFILE_ID,
+                strategy_group_id="SOR-1H-001", now_ms=clock.read,
+                wait_timeout_ms=60_000, poll_interval_ms=1,
+                sleep=_worker_driving_sleep_for_profile(engine=engine, clock=clock,
+                    market=market, certification=certification, runtime_profile_id=RUNTIME_PROFILE_ID),
+            )
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(

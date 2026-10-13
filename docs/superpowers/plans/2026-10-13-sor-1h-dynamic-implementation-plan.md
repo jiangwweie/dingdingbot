@@ -436,3 +436,13 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - 新SOR Dynamic/Static授权页面覆盖未知响应同意图重试、冻结baseline/epoch及409阻断；公共promotion harness复用，删除test内重复实现。
 - 组合回放采用SOR-1H-SHORT小时Session，保留三Ticket/资金/方向容量断言；新LONG/SHORT Static/Dynamic正式producer到terminalReview链无真实venue写。
 - 定向修复已GREEN；最终exactcommit认证仍待执行。生产未改动，H1-12仍NOT_STARTED。
+
+
+### 0010→0011部署后检查补齐（2026-10-14）
+
+- `2c39c798`已取得完整R4/R2/R1 PASS，但最终人工源码复核发现旧postflight固定8 Binding与全Universe假设不适合新策略首次安装，因此该候选不作为最终部署交付。
+- 官方0010 cutover现在显式识别新pair独立paused/not-prepared状态：原8个Universe完整且digest与停止时baseline一致，新Spec已安装、exact Static control无pending/epoch、策略paused、global ENTRY关闭，无warming。软件升级PASS不宣称新pair已ready，也不授予任何ENTRY。
+- 原ExitProfiles数量不增加；当前Binding精确10，允许保留Owner已产生的额外immutable Binding/Activation历史，仍要求catalog/current/reference/event完整性通过。
+- 真PG全8个来源Universe场景验证paused/not-prepared可完成软件postflight但Entry恢复仍为false；Owner退出切换后11个Binding事实保留；新策略enabled则postflight拒绝。
+- 新负向覆盖错误成员／历史digest、missing Binding、pending intent和提前enabled，维持Fence。随后只准备SOR-1H新pair，不重装Generic Dynamic。
+- 必要部署定向回归通过后重新冻结候选与exact正式认证；H1-12保持未开始。

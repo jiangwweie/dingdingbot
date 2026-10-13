@@ -810,6 +810,15 @@ only the named hourly pair, starts its Strategy Control paused, retains existing
 capital/Capacity B values, and keeps global new ENTRY disabled. Existing Selector
 intent, Universe, Authority and terminal trading lineage remain source facts.
 
+The software cutover postflight may pass while the new pair is not yet prepared
+only if the exact new Spec and Static control are installed with no epoch or
+pending intent, its Strategy Control is paused, global ENTRY is disabled, and
+all eight pre-existing Universes and Dynamic history match the stopped source
+baseline. This is an explicit paused preparation stage, not Entry readiness.
+Existing Owner ExitBinding choices and their additional immutable history are
+retained; the target has ten exact current Event bindings over the same eight
+Profiles. Normal Entry restoration remains blocked until the new pair is prepared.
+
 After Owner approval for deployment, prepare only the new pair with
 `bootstrap_strategy_universes.py --runtime-profile-id tiny-live-v1
 --strategy-group-id SOR-1H-001`; this exact batch uses the independent seven-coin

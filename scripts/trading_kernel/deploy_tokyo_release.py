@@ -39,7 +39,11 @@ from src.trading_kernel.application.runtime import (
     RuntimeCompatibilityClassification,
     RuntimeReleaseCompatibilityFact,
 )
-from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
+from src.trading_kernel.domain.exit_policy import (
+    build_exit_profile_catalog_digest,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
+)
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -956,6 +960,7 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
             preserved_runtime=baseline["preserved_runtime"],
+            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision == "0011_orb_session_1h_v1"),
         )
         policy=certification.get("owner_policy")
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
@@ -979,6 +984,7 @@ def _require_dynamic_selection_postflight(
     *,
     seed_identity: str,
     preserved_runtime: Mapping[str, object],
+    hourly_upgrade: bool = False,
 ) -> None:
     owner_policy = certification.get("owner_policy")
     if (
@@ -997,11 +1003,17 @@ def _require_dynamic_selection_postflight(
         != registry_identity.get("expected_live_semantic_hash")
     ):
         raise DeploymentBlocked("exact Registry identity differs")
+    preparation = certification.get("hourly_pair_preparation")
+    hourly_pending = bool(hourly_upgrade and isinstance(preparation, Mapping)
+        and preparation.get("status") == "pass"
+        and preparation.get("strategy_entry_state") == "paused"
+        and preparation.get("selection_mode") == "static_baseline"
+        and preparation.get("pending_selection_mode") is None)
     strategy_universe = certification.get("strategy_universe")
     if (
         not isinstance(strategy_universe, Mapping)
-        or strategy_universe.get("identity_status") != "pass"
-        or strategy_universe.get("semantic_digest_status") != "pass"
+        or (strategy_universe.get("identity_status") != "pass" and not hourly_pending)
+        or (strategy_universe.get("semantic_digest_status") != "pass" and not hourly_pending)
     ):
         raise DeploymentBlocked("exact Universe identity differs")
     actual_preserved = certification.get("preserved_runtime")
@@ -1011,6 +1023,8 @@ def _require_dynamic_selection_postflight(
         != preserved_runtime.get("active_universe_manifest_digest")
     ):
         raise DeploymentBlocked("preserved Active Universe membership differs")
+    if hourly_upgrade and not hourly_pending:
+        raise DeploymentBlocked("hourly upgrade requires independent paused pair preparation")
     if int(str(strategy_universe.get("active_current_count", -1))) != 8:
         raise DeploymentBlocked("exact eight Active Universes are missing")
     runtime_identity = certification.get("runtime_identity")
@@ -1045,15 +1059,17 @@ def _require_dynamic_selection_postflight(
             "compatible upgrade created unexpected Dynamic Selection runtime facts"
         )
     exit_profile_authority = certification.get("exit_profile_authority")
+    expected_profiles = len(registered_exit_profiles()) if hourly_upgrade else 8
+    expected_bindings = len(registered_event_exit_bindings()) if hourly_upgrade else 8
     if (
         not isinstance(exit_profile_authority, Mapping)
         or exit_profile_authority.get("status") != "pass"
         or exit_profile_authority.get("catalog_digest")
         != build_exit_profile_catalog_digest()
-        or int(str(exit_profile_authority.get("profile_count", -1))) != 8
-        or int(str(exit_profile_authority.get("binding_fact_count", -1))) != 8
-        or int(str(exit_profile_authority.get("current_binding_count", -1))) != 8
-        or int(str(exit_profile_authority.get("binding_event_count", -1))) != 8
+        or int(str(exit_profile_authority.get("profile_count", -1))) != expected_profiles
+        or (int(str(exit_profile_authority.get("binding_fact_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_fact_count", -1))) != expected_bindings)
+        or int(str(exit_profile_authority.get("current_binding_count", -1))) != expected_bindings
+        or (int(str(exit_profile_authority.get("binding_event_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_event_count", -1))) != expected_bindings)
     ):
         raise DeploymentBlocked("exact ExitProfile/Binding manifest differs")
 
