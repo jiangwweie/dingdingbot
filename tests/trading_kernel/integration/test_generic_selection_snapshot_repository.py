@@ -3497,7 +3497,7 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
             now=warming.fenced_at_ms+inputs(groups[0]).spec.materialization_timeout_ms
         failed=await child_tick(groups[0],now)
         if head_condition=="target_first_expiry":
-            assert failed["reason_code"]=="MATERIALIZATION_PERIOD_EXPIRED",failed
+            assert failed["disposition"]=="VALID_EMPTY",failed
         elif head_condition=="target_pause":
             assert failed["disposition"]=="OWNER_PAUSED",failed
         else:
@@ -3505,15 +3505,21 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
         async with PostgresKernelUnitOfWork(database) as uow:
             released=await uow.strategy_universes.get_generation_universe_targets(head.materialization_generation_id)
             terminal=await uow.instrument_selection.get_generic_materialization_generation(head.materialization_generation_id)
-            assert terminal.lifecycle_state.value==("ABANDONED" if head_condition=="target_pause" else "FAILED_CLOSED")
+            assert terminal.lifecycle_state.value==("ABANDONED" if head_condition=="target_pause" else "SUPERSEDED" if head_condition=="target_first_expiry" else "FAILED_CLOSED")
             assert all(t.lifecycle_state.value=="abandoned" for t in released)
             assert (await uow.strategy_universes.get_current(inputs(groups[0]).spec.event_spec_id)).universe_version_id==head.previous_events[0].universe_version_id
             old_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=groups[0],selection_spec_id=head.selection_spec_id)
-            assert old_vacuum is not None and old_vacuum.blocks_new_entry
+            if head_condition=="target_first_expiry":
+                assert old_vacuum is None
+            else:
+                assert old_vacuum is not None and old_vacuum.blocks_new_entry
             if head_condition=="target_first_expiry":
                 failed_control=await uow.instrument_selection.get_selection_control(groups[0])
-                assert failed_control.selection_mode.value=="static_baseline"
-                assert failed_control.pending_effective_period_anchor_ms==CUTOFF
+                assert failed_control.selection_mode.value=="dynamic_selection"
+                assert failed_control.pending_authorization_id is None
+                negative=await uow.instrument_selection.get_current_generic_authority(head.selection_spec_id)
+                assert negative.authority.authority_outcome=="VALID_EMPTY"
+                assert negative.authority.blocks_new_entry
         now+=1
     elif head_condition.startswith("expired"):
         now=snapshots[groups[0]].expires_at_ms+1
@@ -3562,7 +3568,12 @@ async def test_generic_global_queue_skips_ineligible_head_before_cleanup(databas
             assert unchanged.lifecycle_state.value=="DESIRED" and unchanged.fenced_at_ms is None
         if head_condition=="expired_live_lease":
             assert unchanged.lease_owner=="crashed-head" and unchanged.lease_expires_at_ms>now
-        assert await uow.instrument_selection.get_current_generic_authority(snapshots[groups[0]].selection_spec_id) is None
+        head_authority=await uow.instrument_selection.get_current_generic_authority(snapshots[groups[0]].selection_spec_id)
+        if head_condition=="target_first_expiry":
+            assert head_authority.authority.authority_outcome=="VALID_EMPTY"
+            assert head_authority.authority.blocks_new_entry
+        else:
+            assert head_authority is None
     async with database.connect() as connection:
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
     if head_condition.startswith("expired"):
