@@ -858,18 +858,44 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         )
 
 
+@pytest_asyncio.fixture
+async def capacity_engine():
+    from tests.trading_kernel.support.postgres import (
+        create_empty_database,
+        drop_disposable_database,
+    )
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        _run_alembic(url, "upgrade", "0009_capacity_policy_v0")
+        yield engine
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
+
+
+async def _install_capacity_then_upgrade(engine, request):
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await deploy_compatible_upgrade_identity(uow,request.model_copy(update={"seeded_at_ms":NOW_MS-8_000_000}))
+    await engine.dispose()
+    _run_alembic(engine.url.render_as_string(hide_password=False), "upgrade", CURRENT_SCHEMA_REVISION)
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await deploy_compatible_upgrade_identity(uow,request.model_copy(update={
+            "schema_revision":CURRENT_SCHEMA_REVISION,"seeded_at_ms":NOW_MS-8_000_000+1}))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("concurrent_last_slot", [False, True])
-async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(issue_engine, concurrent_last_slot) -> None:
+async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(capacity_engine, concurrent_last_slot) -> None:
+    issue_engine = capacity_engine
     source_request = RuntimeAuthoritySeedRequest(account_id="subaccount-source-test", runtime_commit="kernel-test-head",
-        schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=NOW_MS-10_000_000)
+        schema_revision="0009_capacity_policy_v0", seeded_at_ms=NOW_MS-10_000_000)
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         await seed_runtime_authority(uow, source_request)
         await set_strategy_entry_state(uow, strategy_group_id="SOR-001", target_state=StrategyEntryState.PAUSED,
             request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor", idempotency_key="capacity-natural:sor-pause",
                 owner_identity="owner",now_ms=NOW_MS-9_000_000), authentication_strength="totp_step_up")
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        await deploy_compatible_upgrade_identity(uow, source_request.model_copy(update={"seeded_at_ms": NOW_MS-8_000_000}))
+    await _install_capacity_then_upgrade(issue_engine,source_request)
     market = RecordingReplayMarketSource()
     template = cpm_long_snapshot()
     market._base_responses[(SOL,"1h")] = template.candles_1h
@@ -992,16 +1018,16 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(i
 
 
 @pytest.mark.asyncio
-async def test_capacity_v0_brf2_family_one_overrides_strategy_side_two(issue_engine) -> None:
+async def test_capacity_v0_brf2_family_one_overrides_strategy_side_two(capacity_engine) -> None:
+    issue_engine = capacity_engine
     request=RuntimeAuthoritySeedRequest(account_id="subaccount-source-test",runtime_commit="kernel-test-head",
-        schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=NOW_MS-10_000_000)
+        schema_revision="0009_capacity_policy_v0",seeded_at_ms=NOW_MS-10_000_000)
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         await seed_runtime_authority(uow,request)
         await set_strategy_entry_state(uow,strategy_group_id="SOR-001",target_state=StrategyEntryState.PAUSED,
             request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor",idempotency_key="brf2-capacity:sor-pause",
                 owner_identity="owner",now_ms=NOW_MS-9_000_000),authentication_strength="totp_step_up")
-    async with PostgresKernelUnitOfWork(issue_engine) as uow:
-        await deploy_compatible_upgrade_identity(uow,request.model_copy(update={"seeded_at_ms":NOW_MS-8_000_000}))
+    await _install_capacity_then_upgrade(issue_engine,request)
     market=RecordingReplayMarketSource()
     template=brf2_short_snapshot()
     market._base_responses[(SOL,"1h")]=template.candles_1h
