@@ -167,6 +167,42 @@ async def database(request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]
     parameters = getattr(request.node, "callspec", None)
     excluded = (parameters.params.get("group") if parameters is not None
         and parameters.params.get("target_mode") == "not_installed" else None)
+    if request.node.originalname == "test_resource_constrained_resident_soak":
+        # Capacity B was installed at its exact 0009 release, before 0010.
+        # This periodic scenario must not ask a later identity rotation to
+        # silently expand a freshly seeded policy.
+        from tests.trading_kernel.support.generic_seed_template import (
+            seed_generic_database,
+        )
+        from tests.trading_kernel.support.postgres import (
+            create_empty_database,
+            drop_disposable_database,
+            run_alembic,
+        )
+        name, url = await create_empty_database()
+        engine = create_async_engine(url)
+        try:
+            run_alembic(url, "upgrade", "0009_capacity_policy_v0")
+            with patch("tests.trading_kernel.support.generic_seed_template.CURRENT_SCHEMA_REVISION", "0009_capacity_policy_v0"):
+                await seed_generic_database(engine)
+            async with engine.begin() as conn:
+                await conn.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='paused' WHERE strategy_group_id='SOR-001'"))
+            from src.trading_kernel.infrastructure.runtime_authority_seed import (
+                deploy_compatible_upgrade_identity,
+            )
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id="generic-snapshot",runtime_commit="a"*40,
+                    schema_revision="0009_capacity_policy_v0",seeded_at_ms=CUTOFF-HOUR+1))
+            await engine.dispose()
+            run_alembic(url, "upgrade", "head")
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id="generic-snapshot",runtime_commit="a"*40,
+                    schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=CUTOFF-HOUR+2))
+            yield engine
+        finally:
+            await engine.dispose()
+            await drop_disposable_database(name)
+        return
     harness = GenericSeedTemplateHarness(excluded_group=excluded)
     name, url = await harness.create_clone()
     engine = create_async_engine(url)

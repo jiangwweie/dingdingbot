@@ -79,7 +79,7 @@ R3_SAME_SCHEMA_KERNEL_COMMANDS: Final[CommandSet] = (
         "tests/trading_kernel/architecture",
         "-q",
     ),
-    (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/integration", "-q", "--durations=30"),
+    (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/integration", "-q", "--durations=30", "-k", "not resource_constrained_resident_soak"),
     (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/full_chain", "-q"),
     (
         ".venv/bin/ruff",
@@ -112,6 +112,7 @@ R4_SCHEMA_AUTHORITY_COMMANDS: Final[CommandSet] = (
 
 PERIODIC_AUDIT_COMMANDS: Final[CommandSet] = (
     *R4_SCHEMA_AUTHORITY_COMMANDS,
+    (".venv/bin/python", "-m", "pytest", "tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py", "-q", "-k", "resource_constrained_resident_soak"),
     (
         ".venv/bin/python",
         "-m",

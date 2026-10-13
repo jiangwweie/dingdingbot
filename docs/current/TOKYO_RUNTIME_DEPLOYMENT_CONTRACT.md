@@ -794,3 +794,8 @@ flat and forward-only; use the existing compatible deployment path with the exac
 0009 source and certified 0010 target. Source failures and unfenced period expiry
 do not revoke Owner Dynamic intent. Later attempts require current snapshots and
 all existing closed-bar, certification, warming, Vacuum and atomic activation gates.
+
+Resource-constrained resident long soak belongs to the Periodic audit portfolio,
+not every repair release. The Release portfolio retains Unit/Architecture,
+Integration excluding that long soak, Full-chain, Ruff, Mypy and exact migration
+preservation; R4 also retains Golden/core parity. Exclusion is not soak PASS.
