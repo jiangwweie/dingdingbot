@@ -315,3 +315,33 @@ async def test_certification_writer_waits_on_instrument_before_locking_current_c
     finally:
         if task is not None and not task.done():
             await asyncio.wait_for(task,timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_staged_members_refresh_expired_certification_without_activating_or_trading(
+    _certification_engine: AsyncEngine,  # noqa: F811
+) -> None:
+    async with _certification_engine.begin() as connection:
+        await connection.execute(sa.text(
+            "UPDATE brc_strategy_universe_versions SET lifecycle_state='staged'"))
+        await connection.execute(sa.text(
+            "UPDATE brc_runtime_scopes_current SET lifecycle_state='staged',observation_enabled=false"))
+    source = RecordingReadonlyCertificationSource(_certification_engine)
+    factory = lambda: PostgresKernelUnitOfWork(_certification_engine)
+    first = await run_reconciliation_worker_once(factory,NoTicketVenueTruth(),NoTicketPositionSource(),
+        worker_request(NOW_MS),instrument_certification_source=source)
+    assert first.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    second = await run_reconciliation_worker_once(factory,NoTicketVenueTruth(),NoTicketPositionSource(),
+        worker_request(NOW_MS+1),instrument_certification_source=source)
+    assert second.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    refreshed = await run_reconciliation_worker_once(factory,NoTicketVenueTruth(),NoTicketPositionSource(),
+        worker_request(NOW_MS+600_001),instrument_certification_source=source)
+    assert refreshed.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
+    assert len(source.requests) == 3 and source.mutation_calls == []
+    async with _certification_engine.connect() as connection:
+        assert await connection.scalar(sa.text(
+            "SELECT lifecycle_state FROM brc_strategy_universe_versions")) == 'staged'
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_current")) == 0
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        assert await connection.scalar(sa.text(
+            "SELECT count(*) FROM brc_runtime_scopes_current WHERE observation_enabled OR entry_enabled")) == 0

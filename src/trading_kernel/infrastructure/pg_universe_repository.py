@@ -3164,9 +3164,9 @@ class PostgresStrategyUniverseRepository:
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
-                    runtime_scopes_current.c.lifecycle_state.in_(("warming", "active")),
+                    runtime_scopes_current.c.lifecycle_state.in_(("warming", "staged", "active")),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),
                         pending_batch_due,
@@ -3185,7 +3185,7 @@ class PostgresStrategyUniverseRepository:
                     sa.case(
                         (pending_batch_due, 0),
                         (
-                            strategy_universe_versions.c.lifecycle_state == "warming",
+                            strategy_universe_versions.c.lifecycle_state.in_(("warming", "staged")),
                             1,
                         ),
                         else_=2,
@@ -3356,10 +3356,10 @@ class PostgresStrategyUniverseRepository:
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
                     runtime_scopes_current.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),

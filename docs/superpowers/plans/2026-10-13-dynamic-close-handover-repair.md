@@ -44,6 +44,18 @@ before opening a new switching Vacuum.
 - Freeze exact candidate, run required R3 portfolio once; use the normal stopped,
   flat same-schema deployment and formal Entry promoter. No long resource audit.
 
+## Additional production defects confirmed during postflight
+
+- Reconciliation and activation locked Instrument/Certification in opposite
+  orders, causing the production deadlock at16:12. Both now lock Instrument
+  before Certification in canonical member order; real PostgreSQL concurrency
+  regression proves the writer cannot hold Certification while waiting.
+- STAGED scopes were excluded by both certification scheduler preview and claim.
+  Their facts expired while waiting, leaving CERTIFICATION_STALE until timeout.
+  Both queries now include STAGED, with warming/staged priority at claim time.
+  A real Worker regression refreshes expired staged facts without activation,
+  observation, Entry permission, or Exchange Commands.
+
 ## Safety and acceptance
 
 No schema change, risk/capital/leverage expansion, SQL repair, forged ARMED,
