@@ -277,7 +277,10 @@ class PostgresStrategyRegistryRepository:
                         "status",
                     ),
                 )
+            selected_event_ids={c.event_spec_id for c in contracts}
             for binding in registered_event_exit_bindings():
+                if binding.event_spec_id not in selected_event_ids:
+                    continue
                 counters["inserted_exit_binding_count"] += await self._insert_exact(
                     event_exit_profile_bindings,
                     "exit_binding_id",
@@ -699,6 +702,7 @@ def _display_name(strategy_group_id: str) -> str:
         "MPG-001": "MPG momentum persistence",
         "MI-001": "MI relative strength impulse",
         "SOR-001": "SOR opening range breakout and breakdown",
+        "SOR-1H-001": "SOR-1H hourly entry with 15m exits",
         "SOR-US-EQ-PERP-001": "SOR U.S. equity regular-session opening range",
         "BRF2-001": "BRF2 bear rally failure",
     }[strategy_group_id]

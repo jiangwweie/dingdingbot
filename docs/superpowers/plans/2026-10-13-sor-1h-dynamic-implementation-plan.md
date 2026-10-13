@@ -3,8 +3,8 @@ title: SOR-1H Dynamic Implementation Plan
 status: READY_FOR_OWNER_AUTHORIZED_IMPLEMENTATION
 created: 2026-10-13
 design_authority: ../specs/2026-10-13-sor-1h-dynamic-design.md
-active_execution_scope: DOCUMENTATION_ONLY
-implementation_status: NOT_STARTED
+active_execution_scope: LOCAL_CODE_TEST_ONLY
+implementation_status: IN_PROGRESS
 production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
 ---
 
@@ -328,12 +328,13 @@ R4已包含Golden与core parity，不在认证前后无理由再重复整跑。c
 
 ## 6. 状态台账与完成口径
 
-**所有任务目前NOT_STARTED。**本文的完成仅表示计划已交付，不能把列出测试当作已通过。
+**Owner已授权本地开发、测试和验证，要求部署前等待确认。**实现正在进行；未完成卡不标
+DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署、迁移和enable仍待Owner确认。
 
 | 阶段 | 实际证据 | 当前状态 |
 | --- | --- | --- |
 | 文档 | 修订设计、12张依赖卡、引用与diff检查、84项architecture检查通过 | COMPLETE_DOCUMENTATION_ONLY |
-| 代码/DB本地 | H1-01–10 RED/GREEN、source preservation与完整链 | NOT_STARTED |
+| 代码/DB本地 | 身份/时钟、多空Detector、共用数值、Spec/Snapshot PG已进行定向RED/GREEN；完整链未完成 | IN_PROGRESS |
 | 发布认证 | H1-11 exact R4/R2/R1 | NOT_STARTED |
 | Tokyo部署 | H1-12 hard gates、正式deploy、paused基线prepare | NOT_STARTED |
 | 新策略启用/双边接管 | 真实Owner控制、PG双current＋Authority | NOT_STARTED |
@@ -354,3 +355,16 @@ R4已包含Golden与core parity，不在认证前后无理由再重复整跑。c
 - **原授权与下一日自动态持续；正常空仓等待可接受，明确事故才让Owner处理。**
 
 本文件结束于可执行依赖与可检验完成条件，不制造新审批层或交易盈利前置要求。
+
+
+### 本地实施证据（2026-10-13，未部署）
+
+- 身份/每日时间/严格未来close/原epoch跨日，以及小时Authority拒绝旧15m证明已观察RED/GREEN。
+- 多空Detector、01:00准备、错误clock/Session/path及原15m Profile绑定有定向证据。
+- 当前核心对旧961个Snapshot、23,064成员决策完整Core parity PASS；数值csv.gz未重生成，
+  manifest仅增加前后源SHA与该次parity provenance。原Golden verify随后PASS。
+- 新0011 migration在local Docker disposable PG创建独立Spec payload；新Spec安装paused，
+  Candidate24/双Event、Snapshot完整来源/rank检查、保存/读回/immutability定向测试通过。
+- 首次fast inventory 1640 PASS、2个catalog/migration清单断言需同步；它不是最终认证。
+- Job/Static基线/runtime materialization/小时Audit/Owner接入、完整migration preservation/
+  release tooling仍在开发，H1-11 exact R4尚未执行。当前分支不可部署。

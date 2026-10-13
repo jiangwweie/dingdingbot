@@ -935,6 +935,11 @@ async def _load_market_snapshot(
     comparative_projection: ComparativeUniverseProjection | None,
     product_session: ProductSessionSnapshot | None,
 ) -> MarketSnapshot:
+    if contract.event_id in {"SOR-1H-LONG", "SOR-1H-SHORT"}:
+        session_start_ms = (trigger_ms // 86_400_000) * 86_400_000
+        raw = await _fetch(market_source,scope.exchange_instrument_id,"1h",limit=24,trigger_ms=trigger_ms)
+        return MarketSnapshot(exchange_instrument_id=scope.exchange_instrument_id,
+            trigger_candle_close_time_ms=trigger_ms,candles_1h=tuple(c for c in raw if c.open_time_ms>=session_start_ms))
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         raw = await _fetch(
             market_source,

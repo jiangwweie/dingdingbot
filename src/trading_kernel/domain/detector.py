@@ -106,6 +106,9 @@ def detector_for(event_spec_id: str) -> StrategyDetector:
         return MPGLongDetector(contract)
     if contract.event_id == "MI-LONG":
         return MILongDetector(contract)
+    if contract.event_id in {"SOR-1H-LONG", "SOR-1H-SHORT"}:
+        from src.trading_kernel.domain.detectors.sor_1h import SorHourlyDetector
+        return SorHourlyDetector(contract)
     if contract.event_id in {"SOR-LONG", "SOR-SHORT"}:
         return SORDetector(contract)
     if contract.event_id in {"SOR-US-LONG-15M", "SOR-US-SHORT-15M"}:

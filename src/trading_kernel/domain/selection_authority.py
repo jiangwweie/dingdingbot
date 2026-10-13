@@ -11,7 +11,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -283,8 +285,11 @@ class SelectionControl(BaseModel):
 
     def permits_dynamic_period(self, period_anchor_ms: int) -> bool:
         """Future Owner intent does not replace the current effective mode."""
-        if (self.pending_selection_mode is not None and self.pending_effective_period_anchor_ms is not None
-            and period_anchor_ms>=self.pending_effective_period_anchor_ms):
+        if (
+            self.pending_selection_mode is not None
+            and self.pending_effective_period_anchor_ms is not None
+            and period_anchor_ms >= self.pending_effective_period_anchor_ms
+        ):
             return self.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
         return self.selection_mode is SelectionMode.DYNAMIC_SELECTION
 
@@ -319,7 +324,23 @@ class SelectionControl(BaseModel):
             raise ValueError("Selection Control pending transition shape is incomplete")
         if self.control_version <= 0 or self.updated_at_ms <= 0:
             raise ValueError("Selection Control version and time must be positive")
-        cadence = DAY_MS if self.strategy_group_id == "SOR-001" else generic_selection_spec(self.strategy_group_id).cadence_hours * HOUR_MS
+        if self.strategy_group_id == "SOR-1H-001":
+            from src.trading_kernel.domain.orb_session_selection import (
+                ORB_SELECTION_SPEC_ID,
+            )
+
+            if self.selection_spec_id != ORB_SELECTION_SPEC_ID:
+                raise ValueError(
+                    "hourly ORB control requires its independent Selection Spec"
+                )
+            cadence = DAY_MS
+        else:
+            cadence = (
+                DAY_MS
+                if self.strategy_group_id == "SOR-001"
+                else generic_selection_spec(self.strategy_group_id).cadence_hours
+                * HOUR_MS
+            )
         if (
             self.pending_effective_period_anchor_ms is not None
             and self.pending_effective_period_anchor_ms % cadence != 0
@@ -328,8 +349,15 @@ class SelectionControl(BaseModel):
         if self.strategy_group_id == "SOR-001":
             if self.selection_epoch_id is not None:
                 raise ValueError("SOR Control keeps frozen Session identity")
-        elif self.selection_mode is SelectionMode.DYNAMIC_SELECTION or self.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION:
-            if not self.selection_epoch_id or not self.selection_epoch_id.strip() or self.selection_epoch_id == "sor-v0":
+        elif (
+            self.selection_mode is SelectionMode.DYNAMIC_SELECTION
+            or self.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+        ):
+            if (
+                not self.selection_epoch_id
+                or not self.selection_epoch_id.strip()
+                or self.selection_epoch_id == "sor-v0"
+            ):
                 raise ValueError("Generic Dynamic Control requires explicit epoch")
         elif self.selection_epoch_id is not None:
             raise ValueError("Static Generic Control cannot retain Dynamic epoch")
@@ -740,6 +768,8 @@ def build_event_universe_set(
 _DYNAMIC_UNIVERSE_MEMBER_LIMITS: dict[tuple[str, str], int] = {
     ("SOR-001", "event_spec:SOR-001:SOR-LONG:v4"): 7,
     ("SOR-001", "event_spec:SOR-001:SOR-SHORT:v4"): 7,
+    ("SOR-1H-001", "event_spec:SOR-1H-001:SOR-1H-LONG:v1"): 7,
+    ("SOR-1H-001", "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"): 7,
     ("CPM-RO-001", "event_spec:CPM-RO-001:CPM-LONG:v3"): 16,
     ("MPG-001", "event_spec:MPG-001:MPG-LONG:v3"): 16,
     ("MI-001", "event_spec:MI-001:MI-LONG:v3"): 16,
@@ -1317,6 +1347,24 @@ class SelectionSessionAuthority(BaseModel):
 
     selection_authority_id: str
     selection_spec_id: str
+    selection_epoch_id: str | None = None
+    selection_control_version: int | None = None
+    activation_authorization_id: str | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_session(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, object]:
+        result = handler(self)
+        if self.selection_spec_id != "SOR_1H_OR_ATR_DYNAMIC_V1":
+            for name in (
+                "selection_epoch_id",
+                "selection_control_version",
+                "activation_authorization_id",
+            ):
+                result.pop(name, None)
+        return result
+
     session_start_ms: int
     decision_boundary_ms: int
     authority_sequence: int
@@ -1336,12 +1384,16 @@ class SelectionSessionAuthority(BaseModel):
     reason_code: str
     created_at_ms: int
 
-    @field_validator("selection_authority_id", "selection_spec_id", "reason_code", mode="before")
+    @field_validator(
+        "selection_authority_id", "selection_spec_id", "reason_code", mode="before"
+    )
     @classmethod
     def _require_identity(cls, value: object) -> str:
         normalized = str(value or "").strip()
         if not normalized:
-            raise ValueError("Selection Authority identity and reason must be non-blank")
+            raise ValueError(
+                "Selection Authority identity and reason must be non-blank"
+            )
         return normalized
 
     @field_validator(
@@ -1381,9 +1433,48 @@ class SelectionSessionAuthority(BaseModel):
 
     @model_validator(mode="after")
     def _validate_authority(self) -> SelectionSessionAuthority:
+        if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1":
+            from src.trading_kernel.domain.orb_session_selection import (
+                require_orb_epoch,
+            )
+
+            if (
+                self.selection_epoch_id is None
+                or self.selection_control_version is None
+                or self.selection_control_version <= 0
+            ):
+                raise ValueError(
+                    "hourly ORB Authority requires exact epoch and control version"
+                )
+            require_orb_epoch(self.selection_epoch_id)
+            if (
+                self.activation_authorization_id is not None
+                and self.authority_outcome
+                not in {
+                    AuthorityOutcome.ACTIVE_NEW,
+                    AuthorityOutcome.NO_CHANGE,
+                    AuthorityOutcome.VALID_EMPTY,
+                }
+            ):
+                raise ValueError(
+                    "hourly ORB activation Owner proof cannot attach to this outcome"
+                )
+        elif any(
+            value is not None
+            for value in (
+                self.selection_epoch_id,
+                self.selection_control_version,
+                self.activation_authorization_id,
+            )
+        ):
+            raise ValueError(
+                "legacy SOR Authority cannot accept hourly ORB epoch or authorization"
+            )
         self._validate_period_and_time()
         if self.authority_sequence <= 0 or self.owner_control_version <= 0:
-            raise ValueError("Authority sequence and Owner control version must be positive")
+            raise ValueError(
+                "Authority sequence and Owner control version must be positive"
+            )
         self._validate_outcome_shape()
         if self.authority_outcome in _TRADING_OUTCOMES:
             self._validate_trading_grant()
@@ -1395,27 +1486,49 @@ class SelectionSessionAuthority(BaseModel):
         if self.session_start_ms <= 0 or self.session_start_ms % DAY_MS != 0:
             raise ValueError("Authority session identity must be exact 00:00 UTC")
         if self.decision_boundary_ms != self.session_start_ms + HOUR_MS:
-            raise ValueError("Authority period must start at the 01:00 UTC decision boundary")
-        if self.expires_at_ms != self.session_start_ms + DAY_MS + HOUR_MS:
+            raise ValueError(
+                "Authority period must start at the 01:00 UTC decision boundary"
+            )
+        if self.expires_at_ms != self.session_start_ms + DAY_MS + (
+            0 if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1" else HOUR_MS
+        ):
             raise ValueError("Authority must expire at the next decision boundary")
         if not self.decision_boundary_ms <= self.effective_from_ms < self.expires_at_ms:
-            raise ValueError("Authority effective time cannot precede its decision boundary")
+            raise ValueError(
+                "Authority effective time cannot precede its decision boundary"
+            )
         if not self.effective_from_ms <= self.created_at_ms < self.expires_at_ms:
-            raise ValueError("Authority creation time must be within its effective period")
+            raise ValueError(
+                "Authority creation time must be within its effective period"
+            )
 
     def _validate_trading_grant(self) -> None:
         if self.authorized_pair is None:
-            raise ValueError("trading Authority requires exact LONG and SHORT Universe pair")
+            raise ValueError(
+                "trading Authority requires exact LONG and SHORT Universe pair"
+            )
         if self.grant_proof is None:
             raise ValueError("trading Authority requires one grant proof")
         if self.first_eligible_close_time_ms is None:
             raise ValueError("trading Authority requires first eligible close")
-        if self.first_eligible_close_time_ms % INTERVAL_MS != 0:
+        interval = (
+            HOUR_MS
+            if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1"
+            else INTERVAL_MS
+        )
+        first_offset = 2 * HOUR_MS if interval == HOUR_MS else 5 * INTERVAL_MS
+        if self.first_eligible_close_time_ms % interval != 0:
             raise ValueError("first eligible close must be canonical 15m close")
-        if self.first_eligible_close_time_ms < self.session_start_ms + 5 * INTERVAL_MS:
+        if self.first_eligible_close_time_ms < self.session_start_ms + first_offset:
             raise ValueError("first eligible close cannot precede SOR eligibility")
-        if not self.created_at_ms < self.first_eligible_close_time_ms < self.expires_at_ms:
-            raise ValueError("first eligible close must be a future close within Authority period")
+        if (
+            not self.created_at_ms
+            < self.first_eligible_close_time_ms
+            < self.expires_at_ms
+        ):
+            raise ValueError(
+                "first eligible close must be a future close within Authority period"
+            )
         if self.grant_proof.kind is AuthorityGrantProofKind.CONTINUOUS_ELIGIBLE_CLOSES:
             if self.authority_gap_audit_id is not None:
                 raise ValueError("continuous Authority cannot reference a Gap Audit")
@@ -1433,7 +1546,9 @@ class SelectionSessionAuthority(BaseModel):
                         "Static continuity cannot invent Selection Authority predecessor"
                     )
             else:
-                raise ValueError("continuous Authority proof must match predecessor lineage")
+                raise ValueError(
+                    "continuous Authority proof must match predecessor lineage"
+                )
         else:
             if (
                 self.authority_gap_audit_id is None
@@ -1442,10 +1557,17 @@ class SelectionSessionAuthority(BaseModel):
             ):
                 raise ValueError("audited Authority proof must match exact Gap Audit")
             if (
-                self.authority_outcome is not AuthorityOutcome.FALLBACK_PREVIOUS
-                or self.continuity_source_kind is not ContinuitySourceKind.STATIC_BASELINE
-            ) and self.continuity_source_kind is not ContinuitySourceKind.AUTHORITY_GAP_AUDIT:
-                raise ValueError("audited Authority requires AUTHORITY_GAP_AUDIT source")
+                (
+                    self.authority_outcome is not AuthorityOutcome.FALLBACK_PREVIOUS
+                    or self.continuity_source_kind
+                    is not ContinuitySourceKind.STATIC_BASELINE
+                )
+                and self.continuity_source_kind
+                is not ContinuitySourceKind.AUTHORITY_GAP_AUDIT
+            ):
+                raise ValueError(
+                    "audited Authority requires AUTHORITY_GAP_AUDIT source"
+                )
 
     def _validate_non_trading_outcome(self) -> None:
         if self.authorized_pair is not None:
@@ -1469,15 +1591,21 @@ class SelectionSessionAuthority(BaseModel):
                 ContinuitySourceKind.SELECTION_AUTHORITY,
                 ContinuitySourceKind.AUTHORITY_GAP_AUDIT,
             }:
-                raise ValueError("PRE_FENCE_CONTINUITY requires Dynamic continuity lineage")
+                raise ValueError(
+                    "PRE_FENCE_CONTINUITY requires Dynamic continuity lineage"
+                )
         elif self.authority_outcome is AuthorityOutcome.ACTIVE_NEW:
             if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
                 raise ValueError("ACTIVE_NEW requires dynamic_selection mode")
-            if self.selection_snapshot_id is None or self.materialization_generation_id is None:
+            if (
+                self.selection_snapshot_id is None
+                or self.materialization_generation_id is None
+            ):
                 raise ValueError("ACTIVE_NEW requires Snapshot and Generation")
             if (
                 self.grant_proof is None
-                or self.grant_proof.kind is not AuthorityGrantProofKind.AUDITED_AUTHORITY_GAP
+                or self.grant_proof.kind
+                is not AuthorityGrantProofKind.AUDITED_AUTHORITY_GAP
             ):
                 raise ValueError("ACTIVE_NEW requires audited post-Vacuum grant proof")
         elif self.authority_outcome is AuthorityOutcome.NO_CHANGE:
@@ -1493,17 +1621,23 @@ class SelectionSessionAuthority(BaseModel):
                 or self.materialization_generation_id is None
                 or self.authority_gap_audit_id is None
                 or self.grant_proof is None
-                or self.grant_proof.kind is not AuthorityGrantProofKind.AUDITED_AUTHORITY_GAP
+                or self.grant_proof.kind
+                is not AuthorityGrantProofKind.AUDITED_AUTHORITY_GAP
             ):
                 raise ValueError("fallback requires generation and audited gap proof")
             if self.continuity_source_kind is ContinuitySourceKind.STATIC_BASELINE:
                 if self.selection_mode is not SelectionMode.STATIC_BASELINE:
-                    raise ValueError("first Static fallback must keep static_baseline mode")
+                    raise ValueError(
+                        "first Static fallback must keep static_baseline mode"
+                    )
                 if self.continued_from_selection_authority_id is not None:
-                    raise ValueError("first Static fallback cannot invent Dynamic predecessor")
+                    raise ValueError(
+                        "first Static fallback cannot invent Dynamic predecessor"
+                    )
             elif (
                 self.selection_mode is not SelectionMode.DYNAMIC_SELECTION
-                or self.continuity_source_kind is not ContinuitySourceKind.AUTHORITY_GAP_AUDIT
+                or self.continuity_source_kind
+                is not ContinuitySourceKind.AUTHORITY_GAP_AUDIT
             ):
                 raise ValueError("Dynamic fallback requires audited Dynamic authority")
         elif self.authority_outcome is AuthorityOutcome.VALID_EMPTY:

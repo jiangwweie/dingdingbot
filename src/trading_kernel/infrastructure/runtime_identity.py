@@ -12,7 +12,8 @@ TradingKernelSchemaRevision = Literal[
     "0008_generic_dynamic_selection_v1",
     "0009_capacity_policy_v0",
     "0010_dynamic_intent_v1",
+    "0011_orb_session_1h_v1",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0010_dynamic_intent_v1"
+    "0011_orb_session_1h_v1"
 )

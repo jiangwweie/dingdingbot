@@ -551,6 +551,12 @@ instrument_selection_specs = sa.Table(
     ),
 )
 
+orb_session_selection_specs_v1 = sa.Table(
+    "brc_orb_session_selection_specs_v1", metadata,
+    _id("selection_spec_id",primary_key=True),_json("payload"),
+    sa.ForeignKeyConstraint(["selection_spec_id"],["brc_instrument_selection_specs.selection_spec_id"]),
+)
+
 sor_dynamic_selection_specs_v0 = sa.Table(
     "brc_sor_dynamic_selection_specs_v0",
     metadata,

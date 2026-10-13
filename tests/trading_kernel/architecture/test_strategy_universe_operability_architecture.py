@@ -35,6 +35,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0008_generic_dynamic_selection_v1.py",
         "0009_capacity_policy_v0.py",
         "0010_dynamic_intent_v1.py",
+        "0011_orb_session_1h_v1.py",
     )
 
     revisions: dict[str, str | None] = {}

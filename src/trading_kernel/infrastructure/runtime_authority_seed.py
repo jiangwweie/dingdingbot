@@ -263,6 +263,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
             }
             else None
         ),
@@ -289,6 +290,7 @@ async def seed_runtime_authority(
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
             }
         ),
     )
@@ -302,6 +304,7 @@ async def seed_runtime_authority(
         "0008_generic_dynamic_selection_v1",
         "0009_capacity_policy_v0",
         "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -325,6 +328,7 @@ async def seed_runtime_authority(
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
             }
             else None
         ),
@@ -546,6 +550,7 @@ async def deploy_compatible_upgrade_identity(
             "0008_generic_dynamic_selection_v1",
             "0009_capacity_policy_v0",
             "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -718,6 +723,7 @@ async def deploy_compatible_upgrade_identity(
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
             }
             else None
         ),
@@ -975,6 +981,7 @@ async def _deploy_capability_compatible_identity(
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
             }
             else None
         ),
@@ -1380,9 +1387,9 @@ def _crypto_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
 def _contracts_for_schema(
     schema_revision: TradingKernelSchemaRevision,
 ) -> tuple[RegisteredStrategyContract, ...]:
-    if _schema_includes_tradfi(schema_revision):
-        return registered_strategy_contracts()
-    return _crypto_strategy_contracts()
+    contracts = registered_strategy_contracts() if _schema_includes_tradfi(schema_revision) else _crypto_strategy_contracts()
+    return contracts if schema_revision=="0011_orb_session_1h_v1" else tuple(
+        c for c in contracts if c.strategy_group_id!="SOR-1H-001")
 
 
 def _schema_includes_tradfi(schema_revision: str) -> bool:
@@ -1393,6 +1400,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0008_generic_dynamic_selection_v1",
         "0009_capacity_policy_v0",
         "0010_dynamic_intent_v1",
+                "0011_orb_session_1h_v1",
     }
 
 
@@ -1562,7 +1570,7 @@ def _seed_identity(
     }
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
-    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
+    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,
             "long_continuation": 2,
@@ -2323,7 +2331,7 @@ async def _seed_strategy_entry_controls(
     )
     inserted = 0
     for strategy_group_id in selected_group_ids:
-        paused = strategy_group_id == "SOR-US-EQ-PERP-001"
+        paused = strategy_group_id in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
         authorization_id = f"owner-authorization:seed:{strategy_group_id}"
         event_id = f"strategy-control-event:seed:{strategy_group_id}"
         inserted += await _insert_exact(

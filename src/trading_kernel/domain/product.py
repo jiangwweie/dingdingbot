@@ -336,6 +336,8 @@ def registered_product_compatibilities() -> tuple[ProductCompatibility, ...]:
         "event_spec:MI-001:MI-LONG:v3",
         "event_spec:SOR-001:SOR-LONG:v4",
         "event_spec:SOR-001:SOR-SHORT:v4",
+        "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
+        "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
         "event_spec:BRF2-001:BRF2-SHORT:v3",
     )
     tradfi_events = (

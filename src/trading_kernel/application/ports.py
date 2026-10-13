@@ -128,6 +128,9 @@ from src.trading_kernel.domain.owner_control import (
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.orb_session_selection import (
+    InstalledOrbSessionSelectionSpec, OrbSessionSelectionSpec, OrbSessionSelectionSnapshot, OrbSessionSelectionComputation,
+)
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -1701,10 +1704,20 @@ class InstrumentSelectionRepository(Protocol):
         lease_kind: Literal["selection", "materialization", "observation"],
     ) -> str: ...
 
+    async def install_orb_spec(self, spec: OrbSessionSelectionSpec, *, installed_at_ms: int) -> None: ...
+    async def get_orb_spec(self, selection_spec_id: str) -> OrbSessionSelectionSpec: ...
+    async def save_orb_snapshot(self, computation: OrbSessionSelectionComputation) -> None: ...
+    async def get_orb_snapshot(self, selection_snapshot_id: str) -> OrbSessionSelectionComputation: ...
+    async def claim_orb_selection_job(self, *, selection_spec_id: str, selection_epoch_id: str,
+        session_start_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int
+    ) -> GenericSelectionJobClaim | SelectionJobFailure | OrbSessionSelectionSnapshot | None: ...
+    async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim,
+        computation: OrbSessionSelectionComputation, completed_at_ms: int) -> None: ...
+
     async def get_active_spec(
         self,
         selection_spec_id: str,
-    ) -> SorDynamicSelectionSpecV0: ...
+    ) -> SorDynamicSelectionSpecV0 | InstalledOrbSessionSelectionSpec: ...
 
     async def claim_selection_job(
         self,

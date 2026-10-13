@@ -88,6 +88,9 @@ from src.trading_kernel.domain.instrument_selection import (
     SorDynamicSelectionSpecV0,
     build_sor_dynamic_selection_spec_v0,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    InstalledOrbSessionSelectionSpec, OrbSessionSelectionSpec, OrbSessionSelectionSnapshot, OrbSessionSelectionComputation,
+)
 from src.trading_kernel.domain.product import InstrumentProductProfile
 from src.trading_kernel.domain.selection_authority import (
     AuthorityEventBinding,
@@ -456,10 +459,134 @@ class PostgresInstrumentSelectionRepository:
     def lease_namespace(cls, lease_kind: LeaseKind) -> str:
         return cls._LEASE_NAMESPACES[lease_kind]
 
+    async def install_orb_spec(self, spec: OrbSessionSelectionSpec, *, installed_at_ms: int) -> None:
+        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
+        from src.trading_kernel.infrastructure.pg_models import orb_session_selection_specs_v1
+        spec=OrbSessionSelectionSpec.model_validate(spec.model_dump())
+        if installed_at_ms<=0: raise ValueError("ORB install time must be positive")
+        existing=await self._connection.scalar(sa.select(orb_session_selection_specs_v1.c.payload).where(
+            orb_session_selection_specs_v1.c.selection_spec_id==spec.selection_spec_id))
+        if existing is not None:
+            if existing!=spec.model_dump(mode="json"): raise SelectionJobConflict("ORB Spec install identity drift")
+            return
+        await self._connection.execute(sa.insert(instrument_selection_specs).values(selection_spec_id=spec.selection_spec_id,
+            strategy_group_id=spec.strategy_group_id,strategy_version_id=spec.strategy_version_id,selection_version=1,
+            selection_kind=spec.selection_kind,algorithm_semantic_digest=canonical_digest(spec.model_dump(mode="json")),
+            status="active",installed_at_ms=installed_at_ms))
+        await self._connection.execute(sa.insert(orb_session_selection_specs_v1).values(selection_spec_id=spec.selection_spec_id,
+            payload=spec.model_dump(mode="json")))
+        for member in spec.candidate_ids:
+            await self._connection.execute(pg_insert(instruments).values(exchange_instrument_id=member,venue_id="binance-usdm",
+                asset_class="crypto",venue_symbol=member.split(":")[1],contract_kind="perpetual",status="pending_certification")
+                .on_conflict_do_nothing(index_elements=[instruments.c.exchange_instrument_id]))
+        await self._connection.execute(sa.insert(instrument_selection_spec_members),[
+            {"selection_spec_id":spec.selection_spec_id,"exchange_instrument_id":m} for m in spec.candidate_ids])
+        await self._connection.execute(sa.insert(instrument_selection_spec_events),[
+            {"selection_spec_id":spec.selection_spec_id,"event_spec_id":e,"position_side":side}
+            for e,side in zip(spec.event_spec_ids,("long","short"),strict=True)])
+
+    async def get_orb_spec(self, selection_spec_id: str) -> OrbSessionSelectionSpec:
+        from src.trading_kernel.domain.orb_session_selection import ORB_SELECTION_SPEC_ID, OrbSessionSelectionSpec
+        from src.trading_kernel.infrastructure.pg_models import orb_session_selection_specs_v1
+        if selection_spec_id!=ORB_SELECTION_SPEC_ID: raise LookupError("independent ORB Spec required")
+        row=(await self._connection.execute(sa.select(instrument_selection_specs,orb_session_selection_specs_v1).join(
+            orb_session_selection_specs_v1,instrument_selection_specs.c.selection_spec_id==orb_session_selection_specs_v1.c.selection_spec_id)
+            .where(instrument_selection_specs.c.selection_spec_id==selection_spec_id))).mappings().one_or_none()
+        if row is None or row["selection_kind"]!="orb_session_dynamic_v1" or row["status"]!="active":
+            raise LookupError("active ORB Spec is not installed")
+        spec=OrbSessionSelectionSpec.model_validate(row["payload"])
+        if row["algorithm_semantic_digest"]!=canonical_digest(spec.model_dump(mode="json")):
+            raise SelectionJobConflict("ORB Spec digest differs from its immutable payload")
+        return spec
+
+    async def save_orb_snapshot(self, computation: OrbSessionSelectionComputation) -> None:
+        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionComputation
+        computation=OrbSessionSelectionComputation.model_validate(computation.model_dump(mode="python"))
+        snapshot=computation.snapshot
+        await self.get_orb_spec(snapshot.selection_spec_id)
+        await self._connection.execute(sa.select(instrument_selection_specs.c.selection_spec_id).where(
+            instrument_selection_specs.c.selection_spec_id==snapshot.selection_spec_id).with_for_update())
+        prior= (await self._connection.execute(sa.select(instrument_selection_snapshots.c.selection_snapshot_id).where(
+            instrument_selection_snapshots.c.selection_spec_id==snapshot.selection_spec_id,
+            instrument_selection_snapshots.c.selection_epoch_id==snapshot.selection_epoch_id,
+            instrument_selection_snapshots.c.period_anchor_ms<snapshot.session_start_ms).order_by(
+                instrument_selection_snapshots.c.period_anchor_ms.desc()).limit(1))).scalar_one_or_none()
+        previous_members=() if prior is None else tuple((await self._connection.execute(sa.select(
+            instrument_selection_member_decisions.c.exchange_instrument_id).where(
+                instrument_selection_member_decisions.c.selection_snapshot_id==prior,instrument_selection_member_decisions.c.selected)
+            .order_by(instrument_selection_member_decisions.c.exchange_instrument_id))).scalars())
+        await self._connection.execute(sa.insert(instrument_selection_snapshots).values(
+            **snapshot.model_dump(exclude={"session_start_ms"}),period_anchor_ms=snapshot.session_start_ms,
+            selection_family="orb_session_dynamic_v1",predecessor_snapshot_id=prior,
+            predecessor_member_digest=None if prior is None else selected_member_set_digest(previous_members)))
+        await self._connection.execute(sa.insert(instrument_selection_member_decisions),[
+            {**m.model_dump(mode="python",exclude={"session_start_ms","primary_reason","member_state","secondary_reasons"}),
+             "period_anchor_ms":m.session_start_ms,"selection_family":"orb_session_dynamic_v1",
+             "primary_reason":None if m.primary_reason is None else m.primary_reason.value,
+             "member_state":m.member_state.value,"secondary_reasons":[r.value for r in m.secondary_reasons]}
+             for m in computation.member_decisions])
+
+    async def get_orb_snapshot(self, selection_snapshot_id: str) -> OrbSessionSelectionComputation:
+        from src.trading_kernel.domain.instrument_selection import SelectionMemberDecision
+        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSnapshot,OrbSessionSelectionComputation
+        row=(await self._connection.execute(sa.select(instrument_selection_snapshots).where(
+            instrument_selection_snapshots.c.selection_snapshot_id==selection_snapshot_id))).mappings().one_or_none()
+        if row is None or row["selection_family"]!="orb_session_dynamic_v1":raise SelectionJobConflict("independent hourly ORB Snapshot required")
+        snapshot=OrbSessionSelectionSnapshot.model_validate({key:row["period_anchor_ms" if key=="session_start_ms" else key]
+            for key in OrbSessionSelectionSnapshot.model_fields})
+        members=(await self._connection.execute(sa.select(instrument_selection_member_decisions).where(
+            instrument_selection_member_decisions.c.selection_snapshot_id==selection_snapshot_id).order_by(
+                instrument_selection_member_decisions.c.exchange_instrument_id))).mappings().all()
+        decisions=tuple(SelectionMemberDecision.model_validate({key:m["period_anchor_ms" if key=="session_start_ms" else key]
+            for key in SelectionMemberDecision.model_fields}) for m in members)
+        return OrbSessionSelectionComputation(snapshot=snapshot,member_decisions=decisions)
+
+    async def claim_orb_selection_job(self, *, selection_spec_id: str, selection_epoch_id: str,
+        session_start_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int
+    ) -> GenericSelectionJobClaim | SelectionJobFailure | OrbSessionSelectionSnapshot | None:
+        from src.trading_kernel.domain.orb_session_selection import build_orb_session_period
+        spec=await self.get_orb_spec(selection_spec_id)
+        period=build_orb_session_period(session_start_ms)
+        control=await self.get_selection_control(spec.strategy_group_id,for_update=True)
+        if not self._generic_control_allows(control,selection_spec_id,selection_epoch_id,session_start_ms):return None
+        if control is None: return None
+        if now_ms>=period.snapshot_expires_at_ms:return None
+        result=await self._claim_selection_job_row(selection_spec_id=selection_spec_id,period_anchor_ms=session_start_ms,
+            scheduled_at_ms=period.feature_cutoff_at_ms,feature_cutoff_at_ms=period.feature_cutoff_at_ms,worker_id=worker_id,
+            now_ms=now_ms,lease_duration_ms=lease_duration_ms,selection_epoch_id=selection_epoch_id,
+            selection_control_version=control.control_version)
+        if isinstance(result,SelectionJobClaim):raise SelectionJobConflict("ORB cannot consume legacy SOR claim")
+        return (await self.get_orb_snapshot(result)).snapshot if isinstance(result,str) else result
+
+    async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim, computation,
+        completed_at_ms: int) -> None:
+        from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionComputation
+        computation=OrbSessionSelectionComputation.model_validate(computation.model_dump())
+        snapshot=computation.snapshot
+        control=await self.get_selection_control(snapshot.strategy_group_id,for_update=True)
+        if control is None or not self._generic_control_allows(control,snapshot.selection_spec_id,snapshot.selection_epoch_id,
+            snapshot.session_start_ms) or control.control_version!=claim.selection_control_version:
+            raise SelectionJobConflict("ORB control or epoch changed during source read")
+        if (snapshot.selection_spec_id,snapshot.selection_epoch_id,snapshot.session_start_ms,snapshot.created_at_ms)!=(
+            claim.selection_spec_id,claim.selection_epoch_id,claim.period_anchor_ms,completed_at_ms):
+            raise SelectionJobConflict("ORB Snapshot does not belong to claimed source identity")
+        row=await self._locked_job(claim)
+        self._require_live_claim(row,claim,completed_at_ms=completed_at_ms)
+        await self.save_orb_snapshot(computation)
+        await self._append_attempt(claim=claim,outcome=SelectionAttemptOutcome.SNAPSHOT_READY,reason_code=None,
+            source_member_count=24,source_digest=snapshot.source_semantic_digest,completed_at_ms=completed_at_ms)
+        await self._mark_snapshot_ready(claim,snapshot.selection_snapshot_id,completed_at_ms)
+
     async def get_active_spec(
         self,
         selection_spec_id: str,
-    ) -> SorDynamicSelectionSpecV0:
+    ) -> SorDynamicSelectionSpecV0 | InstalledOrbSessionSelectionSpec:
+        if selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1":
+            from src.trading_kernel.domain.orb_session_selection import InstalledOrbSessionSelectionSpec
+            orb_spec=await self.get_orb_spec(selection_spec_id)
+            installed=await self._connection.scalar(sa.select(instrument_selection_specs.c.installed_at_ms).where(
+                instrument_selection_specs.c.selection_spec_id==selection_spec_id))
+            return InstalledOrbSessionSelectionSpec.model_validate({**orb_spec.model_dump(),"installed_at_ms":installed})
         row = (
             await self._connection.execute(
                 sa.select(
@@ -1220,6 +1347,8 @@ class PostgresInstrumentSelectionRepository:
         ).mappings().one_or_none()
         if row is None:
             raise SelectionJobConflict("Selection Snapshot does not exist")
+        if row["selection_family"]=="orb_session_dynamic_v1":
+            return (await self.get_orb_snapshot(selection_snapshot_id)).snapshot
         return SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
 
     async def get_selection_control(
@@ -1810,7 +1939,11 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         if row is None:
             return None
-        snapshot = SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
+        snapshot: SelectionSnapshot
+        if row["selection_family"]=="orb_session_dynamic_v1":
+            snapshot=(await self.get_orb_snapshot(str(row["selection_snapshot_id"]))).snapshot
+        else:
+            snapshot = SelectionSnapshot.model_validate({key:row["period_anchor_ms" if key == "session_start_ms" else key] for key in SelectionSnapshot.model_fields})
         members = tuple(
             str(item)
             for item in (
