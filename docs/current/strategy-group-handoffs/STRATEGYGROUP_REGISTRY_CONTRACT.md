@@ -57,3 +57,14 @@ own a member pool, member ordering, member weight, or runtime activation.
 USD-M USDT-perpetual members for one Event. A current pointer is the sole
 authority for new Signal eligibility; a Ticket freezes the selected Universe
 version and digest so later pool replacement cannot rewrite its lifecycle.
+
+
+## Independent SOR-1H Registry contract
+
+`SOR-1H-001 / sgv:SOR-1H-001:v1` binds only
+`event_spec:SOR-1H-001:SOR-1H-LONG:v1` and
+`event_spec:SOR-1H-001:SOR-1H-SHORT:v1`. Both use hourly close authority and
+Session-scoped Exposure Episodes, independent long/short domains, max seven
+Selection members per pair and the existing same-side `orb-crypto:15m` exit
+binding. It never resumes or aliases retired `SOR-001/v4`. The new group starts
+paused; an installed Registry or Selection Spec is not live ENTRY authority.

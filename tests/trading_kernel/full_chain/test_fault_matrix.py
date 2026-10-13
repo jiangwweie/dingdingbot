@@ -380,7 +380,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 scope={
                     "event_runtime_profiles": [
                         {
-                            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                             "runtime_profile_id": "tiny-live-v1",
                         }
                     ]

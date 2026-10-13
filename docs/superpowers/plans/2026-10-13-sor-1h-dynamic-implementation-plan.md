@@ -1,6 +1,6 @@
 ---
 title: SOR-1H Dynamic Implementation Plan
-status: READY_FOR_OWNER_AUTHORIZED_IMPLEMENTATION
+status: LOCAL_IMPLEMENTATION_PENDING_RELEASE_CERTIFICATION
 created: 2026-10-13
 design_authority: ../specs/2026-10-13-sor-1h-dynamic-design.md
 active_execution_scope: LOCAL_CODE_TEST_ONLY
@@ -16,8 +16,9 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
 首次基线、continuity/previous fallback、Session审计及原15m退出，持续原Dynamic意图，
 普通失败自动恢复/次日重试，条件不满足允许空仓等待。
 
-**本文件只拆解后续获授权工作。**本轮Owner要求修订设计并写执行文档，未开始代码、
-数据库迁移、部署或策略enable。此前四Generic修复的上线授权不能视为新Event交易权限。
+**Owner已授权本地开发、测试与验证，并明确要求部署前等待确认。**本地已实施代码和
+disposable PostgreSQL演练，正式部署和策略enable未执行。此前Generic上线授权不替代
+本次部署确认，也不视为新Event实时交易权限。
 执行前以Owner当时明确指令、AGENTS Standing Authorization与action-time facts为准，
 不因计划写了部署步骤就执行交易。Owner不负责挑表字段、锁序、算法抽取或测试框架。
 
@@ -404,3 +405,23 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - 正式brc_owner_control按发布role SQL可冻结独立双边Static基线；lock-only SECURITY DEFINER函数限exact新Spec/Static状态，仅锁两current，不授权Owner更新Universe/交易表。直接更新current被拒绝。
 - Owner HTTP＋真实PG Slice 55 passed / 15.32s，`/tmp/brc-orb-owner-pg-slice.log`；控制页相关19 tests passed；前端TypeScript typecheck通过。
 - 本地未执行部署/迁移/启用/真实订单。仍需完成手动Static rollback、完整1h源到Ticket保护/退出链、cross-hour deadline与source0010 preservation、official release验证与最终审查。
+
+### 本地候选冻结前证据（2026-10-14，未部署）
+
+- 已完成手动Static rollback的独立Owner intent、frozen baseline、新双边materialization、cert/warm/小时Audit及atomic mode commit；旧UID不复活。Static失败恢复实际previous，保留original Static intent在下一日重试；再次Dynamic创建新epoch。
+- 已覆盖EMPTY→nonempty的重新物化；失败不能复活dormant physical members。Generation冻结previous grant disposition/Authority引用，negative recovery保留EMPTY与fence，新日结果合法重定向而不重写FAILED terminal事实。
+- Audit ID包含epoch/Generation/Vacuum来源；UTC23后不创建新交易grant。Selector宿主lease至少120s，物化原1800s deadline不延长。
+- 新LONG/SHORT的Static与Dynamic生产形状链，从真实closed market/Selector至Ticket、初始保护、TP1、runner、reconciliation、settlement、Review均有本地定向证据；未使用真实交易所写。
+- core admission/dispatch共同拒绝永久retired SOR-001；当前入场基础fixtures迁到活跃新策略，历史数值与源schema probes保留。
+- exact0010 source真实terminal Generic Ticket与Owner修改的ExitProfile Binding参与保留验证；DDL前后原行digest一致。identity初始化只新增指定pair，保持新group/globalENTRY paused，保留已有Exit选择。
+- 新pair-only bootstrap经正式Reconciliation certification与Observation warming验证，仅安装两个new current、zero Command；现有Dynamic组不重装。
+- 生产readonly刷新仍为原0010版本；本分支包含其commit，主工作区未改。本地full静态检查Ruff/Mypy通过（195 sources），Fast1664通过，接线/Admission/chain affected Slice89通过，Frontend控制19通过。最终exact R4/R2/R1尚未执行，不能将这些Slice作为Release PASS。
+
+
+### exact Release 候选冻结（2026-10-14）
+
+- H1-01..H1-10的本地实现已有目标边界RED/GREEN和PG/producer/full-chain证据；新Static/Dynamic双侧复用原15m退出，永久旧SOR ENTRY core/dispatch禁止，正常恢复沿原授权。
+- 源0010含真实terminal Generic Ticket、Owner变更后的ExitBinding；DDL前后旧行hash一致，identity只扩指定新pair、保持global/newgroup paused、保留其他Owner退出选择。
+- pair-only bootstrap通过正式certification/warming producer，zero Command；仓库全静态Ruff/Mypy（195文件）及Fast1664通过，前端相关19 tests通过。
+- 本次冻结后执行official exact R4 / R2 / R1。任何失败都修复后重新冻结；不得把定向数字视为最终认证。
+- H1-12未开始。没有部署、生产升级、策略启用或exchange写。最终结果必须与生产自然Dynamic/交易证据分开声明。

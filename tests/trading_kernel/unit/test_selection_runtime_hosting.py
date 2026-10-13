@@ -1104,3 +1104,11 @@ class _SelectionControlUow:
 
     async def __aexit__(self, _exc_type, _exc, _traceback) -> None:
         return None
+
+
+def test_hourly_bootstrap_manifest_targets_only_new_pair():
+    import scripts.trading_kernel.bootstrap_strategy_universes as bootstrap
+    events,members=bootstrap._manifest_for_profile('tiny-live-v1',strategy_group_id='SOR-1H-001')
+    assert tuple(e for e,_ in events)==('SOR-1H-LONG','SOR-1H-SHORT')
+    assert len(members)==7
+    assert all('SOR-1H-001' in eid for _,eid in events)

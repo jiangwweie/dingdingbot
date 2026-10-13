@@ -24,9 +24,9 @@ from src.trading_kernel.domain.ticket import (
 def make_ticket_identity() -> TicketIdentity:
     runtime = RuntimeIdentity(
         runtime_profile_id="tiny-live-v1",
-        strategy_group_id="SOR-001",
-        strategy_version_id="SOR-001:v3",
-        event_spec_id="sor-long-v2",
+        strategy_group_id="SOR-1H-001",
+        strategy_version_id="sgv:SOR-1H-001:v1",
+        event_spec_id="event_spec:SOR-1H-001:SOR-1H-LONG:v1",
     )
     domain = NettingDomain(
         venue_id="binance-usdm",
@@ -99,6 +99,10 @@ def make_ticket(**updates: object) -> TradeTicket:
         ).hexdigest()
     identity = payload["identity"]
     assert isinstance(identity, TicketIdentity)
+    registered=next((b for b in registered_event_exit_bindings() if b.event_spec_id==identity.runtime.event_spec_id),None)
+    if registered is not None and 'exit_policy_id' not in updates and 'exit_policy_semantic_hash' not in updates:
+        payload['exit_policy_id']=registered.exit_profile_id
+        payload['exit_policy_semantic_hash']=registered.exit_profile_semantic_hash
     if not all(
         name in updates
         for name in (
@@ -107,11 +111,8 @@ def make_ticket(**updates: object) -> TradeTicket:
             "exit_binding_authority_version",
         )
     ):
-        binding = fixture_binding_for(
-            event_spec_id=identity.runtime.event_spec_id,
-            exit_profile_id=str(payload["exit_policy_id"]),
-            exit_profile_semantic_hash=str(payload["exit_policy_semantic_hash"]),
-        )
+        binding = registered if registered is not None and registered.exit_profile_id==payload['exit_policy_id'] and registered.exit_profile_semantic_hash==payload['exit_policy_semantic_hash'] else fixture_binding_for(
+            event_spec_id=identity.runtime.event_spec_id,exit_profile_id=str(payload['exit_policy_id']),exit_profile_semantic_hash=str(payload['exit_policy_semantic_hash']))
         payload.update(
             {
                 "exit_binding_id": binding.exit_binding_id,

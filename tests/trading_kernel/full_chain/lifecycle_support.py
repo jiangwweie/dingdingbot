@@ -23,12 +23,14 @@ from src.trading_kernel.infrastructure.runtime_identity import (
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
     seed_strategy_registry,
 )
-from tests.trading_kernel.integration.test_command_dispatch import (
+from tests.trading_kernel.support.command_dispatch import (
+    commit_passed_post_fill_stress_if_pending as _commit_passed_post_fill_stress_if_pending,
+)
+from tests.trading_kernel.support.command_dispatch import issue as _issue
+from tests.trading_kernel.support.command_dispatch import seed_policy as _seed_policy
+from tests.trading_kernel.support.dispatch_venues import (
     KindAwareAcceptingVenue,
     PreflightFacts,
-    _commit_passed_post_fill_stress_if_pending,
-    _issue,
-    _seed_policy,
 )
 
 

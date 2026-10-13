@@ -117,6 +117,7 @@ def test_prepare_only_cli_creates_the_batch_without_running_full_bootstrap(
         database_url: str,
         *,
         runtime_profile_id: str,
+        strategy_group_id: str | None=None,
         now_ms,
     ) -> str:
         assert now_ms() > 0
@@ -160,6 +161,7 @@ def test_refresh_only_cli_uses_the_exact_active_manifest(
         database_url: str,
         *,
         runtime_profile_id: str,
+        strategy_group_id: str | None=None,
         now_ms,
     ) -> str:
         assert now_ms() > 0

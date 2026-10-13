@@ -568,6 +568,7 @@ async def deploy_compatible_upgrade_identity(
         GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
         "0008_generic_dynamic_selection_v1",
         "0009_capacity_policy_v0",
+        "0010_dynamic_intent_v1",
     }:
         return await _deploy_capability_compatible_identity(
             uow,
@@ -846,6 +847,24 @@ async def deploy_compatible_upgrade_identity(
     )
 
 
+async def _prepare_orb_policy_scope(connection: AsyncConnection,*,current_policy: Mapping[str,object],
+    allowed_event_spec_ids: tuple[str,...],occurred_at_ms: int) -> dict[str,object]:
+    """Install only the named hourly pair; the new control and global ENTRY remain paused."""
+    version=int(str(current_policy['policy_version']))
+    target=dict(current_policy)
+    target.update({'policy_version':version+1,'new_entry_submit_enabled':False,'updated_at_ms':occurred_at_ms,
+        'scope':{'event_runtime_profiles':[{'event_spec_id':eid,'runtime_profile_id':TRADFI_RUNTIME_PROFILE_ID if eid in _tradfi_event_spec_ids() else RUNTIME_PROFILE_ID} for eid in allowed_event_spec_ids]}})
+    await _insert_exact(connection,_ExactRow(owner_policy_events,'owner_policy_event_id',
+        _policy_event(version=version+1,operation='orb_hourly_policy_scope_prepared',policy=target,occurred_at_ms=occurred_at_ms),
+        ('owner_policy_id','policy_version','operation','payload')))
+    updated=await connection.execute(sa.update(owner_policy_current).where(owner_policy_current.c.owner_policy_id==OWNER_POLICY_ID,
+        owner_policy_current.c.policy_version==version,owner_policy_current.c.new_entry_submit_enabled.is_(False)).values(
+            **{k:v for k,v in target.items() if k in owner_policy_current.c}).returning(owner_policy_current))
+    row=updated.mappings().one_or_none()
+    if row is None:raise RuntimeAuthorityTransitionRefused('ORB paused scope preparation lost authority')
+    return dict(row)
+
+
 async def _deploy_capability_compatible_identity(
     uow: PostgresKernelUnitOfWork,
     *,
@@ -868,7 +887,10 @@ async def _deploy_capability_compatible_identity(
         allow_compatible_runtime_fence=True,
     )
     current_policy = dict(await _lock_policy(connection))
+    orb_upgrade=request.schema_revision=='0011_orb_session_1h_v1' and source_schema_revision!='0011_orb_session_1h_v1'
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    source_contracts=tuple(c for c in registered_strategy_contracts() if c.strategy_group_id!='SOR-1H-001') if orb_upgrade else registered_strategy_contracts()
+    source_event_spec_ids=_allowed_event_spec_ids(source_contracts)
     source_entry_enabled = bool(current_policy["new_entry_submit_enabled"])
     source_policy_updated_at_ms = int(str(current_policy["updated_at_ms"]))
     current_policy_version = int(str(current_policy["policy_version"]))
@@ -876,7 +898,7 @@ async def _deploy_capability_compatible_identity(
         current_policy,
         version=current_policy_version,
         new_entry_submit_enabled=source_entry_enabled,
-        allowed_event_spec_ids=target_event_spec_ids,
+        allowed_event_spec_ids=source_event_spec_ids,
     ):
         raise RuntimeAuthorityTransitionRefused(
             "capability identity requires exact full source Policy"
@@ -917,6 +939,8 @@ async def _deploy_capability_compatible_identity(
     registry = await seed_strategy_registry(
         uow,
         seeded_at_ms=request.seeded_at_ms,
+        compatible_source_registry_semantic_hash=build_registry_semantic_hash(source_contracts) if orb_upgrade else None,
+        preserve_existing_exit_authority=orb_upgrade,
         include_exit_profile_authority=(
             source_schema_revision
             in {
@@ -924,9 +948,18 @@ async def _deploy_capability_compatible_identity(
                 GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
         ),
     )
+    if orb_upgrade:
+        current_policy=await _prepare_orb_policy_scope(connection,current_policy=current_policy,
+            allowed_event_spec_ids=target_event_spec_ids,occurred_at_ms=request.seeded_at_ms)
+        await _seed_strategy_entry_controls(connection,seeded_at_ms=request.seeded_at_ms,strategy_group_ids=('SOR-1H-001',),assert_exact_identity_set=False)
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionSpec,
+        )
+        await uow.instrument_selection.install_orb_spec(OrbSessionSelectionSpec(),installed_at_ms=request.seeded_at_ms)
     expected_policy_version = int(str(current_policy["policy_version"]))
     if not _policy_matches(
         current_policy,
@@ -1292,11 +1325,7 @@ async def _transition_policy(
         )
     )
     include_tradfi = _schema_includes_tradfi(str(schema_revision))
-    allowed_event_spec_ids = _allowed_event_spec_ids(
-        registered_strategy_contracts()
-        if include_tradfi
-        else _crypto_strategy_contracts()
-    )
+    allowed_event_spec_ids = _allowed_event_spec_ids(_contracts_for_schema(cast(TradingKernelSchemaRevision,str(schema_revision))))
     current = dict(await _lock_policy(connection))
     current_version = int(str(current["policy_version"]))
     matcher = _policy_matches if include_tradfi else _crypto_source_policy_matches

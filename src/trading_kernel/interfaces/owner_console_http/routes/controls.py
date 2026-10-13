@@ -27,6 +27,7 @@ from src.trading_kernel.application.owner_control import (
     stage_generic_dynamic_selection_mode,
     stage_generic_static_selection_mode,
     stage_orb_dynamic_selection_mode,
+    stage_orb_static_selection_mode,
     switch_event_exit_profile,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
@@ -619,6 +620,10 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
         existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
         if existing is not None:
+            if strategy_group_id=='SOR-1H-001':
+                return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+                    selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
+                    request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
             return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
                 rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
                 effective_period_anchor_ms=body.effective_period_anchor_ms,
@@ -629,6 +634,10 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         if current.control_version!=body.expected_version:
             raise OwnerControlConflict("selection_control_version_conflict")
         await _require_step_up(body,request)
+        if strategy_group_id=='SOR-1H-001':
+            return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+                selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
         return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
             rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
             effective_period_anchor_ms=body.effective_period_anchor_ms,

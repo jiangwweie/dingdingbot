@@ -55,6 +55,7 @@ async def seed_strategy_registry(
     include_product_compatibility: bool = True,
     include_exit_profile_authority: bool = True,
     compatible_source_registry_semantic_hash: str | None = None,
+    preserve_existing_exit_authority: bool = False,
 ) -> RegistrySeedResult:
     if seeded_at_ms <= 0:
         raise ValueError("strategy Registry seed time must be positive")
@@ -70,6 +71,7 @@ async def seed_strategy_registry(
         compatible_source_registry_semantic_hash=(
             compatible_source_registry_semantic_hash
         ),
+        preserve_existing_exit_authority=preserve_existing_exit_authority,
     )
 
 
@@ -86,6 +88,7 @@ class PostgresStrategyRegistryRepository:
         include_product_compatibility: bool = True,
         include_exit_profile_authority: bool = True,
         compatible_source_registry_semantic_hash: str | None = None,
+        preserve_existing_exit_authority: bool = False,
     ) -> RegistrySeedResult:
         counters = {
             "inserted_strategy_group_count": 0,
@@ -274,7 +277,7 @@ class PostgresStrategyRegistryRepository:
                         "position_side",
                         "policy",
                         "semantic_hash",
-                        "status",
+                        *(() if preserve_existing_exit_authority else ("status",)),
                     ),
                 )
             selected_event_ids={c.event_spec_id for c in contracts}
@@ -305,6 +308,9 @@ class PostgresStrategyRegistryRepository:
                         "activation_reason",
                     ),
                 )
+                if preserve_existing_exit_authority and await self._connection.scalar(sa.select(event_exit_profile_binding_current.c.exit_binding_id).where(
+                    event_exit_profile_binding_current.c.event_spec_id==binding.event_spec_id)) is not None:
+                    continue
                 counters[
                     "inserted_exit_binding_current_count"
                 ] += await self._insert_exact(

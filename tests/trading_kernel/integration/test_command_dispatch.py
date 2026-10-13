@@ -393,7 +393,10 @@ async def test_action_time_entry_authority_drift_causes_zero_venue_mutations(
 async def test_unregistered_event_at_dispatch_is_terminally_fenced_before_venue(
     dispatch_engine: AsyncEngine,
 ) -> None:
-    ticket = _retired_ticket()
+    base=_retired_ticket()
+    runtime=base.identity.runtime.model_copy(update={'event_spec_id':'unregistered-long-event'})
+    identity=base.identity.model_copy(update={'runtime':runtime,'ticket_id':build_ticket_id(signal_event_id=base.identity.signal_event_id,runtime=runtime,netting_domain=base.identity.netting_domain)})
+    ticket=base.model_copy(update={'identity':identity})
     await _seed_policy(
         dispatch_engine,
         event_spec_id=ticket.identity.runtime.event_spec_id,
@@ -1780,7 +1783,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
 async def _seed_policy(
     engine: AsyncEngine,
     *,
-    event_spec_id: str = "event_spec:SOR-001:SOR-LONG:v4",
+    event_spec_id: str = "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
     event_spec_ids: tuple[str, ...] | None = None,
 ) -> None:
     authorized_event_spec_ids = event_spec_ids or (event_spec_id,)
@@ -1831,9 +1834,9 @@ def _registered_sor_ticket():
     base = _retired_ticket()
     runtime = base.identity.runtime.model_copy(
         update={
-            "strategy_group_id": "SOR-001",
-            "strategy_version_id": "sgv:SOR-001:v4",
-            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+            "strategy_group_id": "SOR-1H-001",
+            "strategy_version_id": "sgv:SOR-1H-001:v1",
+            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
         }
     )
     identity = TicketIdentity(

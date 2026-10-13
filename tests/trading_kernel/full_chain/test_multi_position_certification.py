@@ -131,7 +131,7 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
         runtime=long_ticket.identity.runtime.model_copy(
-            update={"event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4"}
+            update={"event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"}
         ),
     )
 
@@ -238,7 +238,7 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
         runtime=btc_long.identity.runtime.model_copy(
-            update={"event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4"}
+            update={"event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"}
         ),
     )
     cpm_runtime = btc_long.identity.runtime.model_copy(
@@ -515,7 +515,7 @@ def _ticket_for_domain(
         "runtime_scope_id": runtime_scope_id,
         "fact_digest": "sha256:" + "3" * 64,
     }
-    if runtime.strategy_group_id == "SOR-001":
+    if runtime.strategy_group_id == "SOR-1H-001":
         terms.update(exposure_family="opening_range", family_ticket_limit=2)
     elif runtime.strategy_group_id == "BRF2-001":
         terms.update(exposure_family="rally_failure_short", family_ticket_limit=1)
@@ -574,8 +574,8 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                             "event_spec:BRF2-001:BRF2-SHORT:v3",
                             "event_spec:CPM-RO-001:CPM-LONG:v3",
                             "event_spec:MI-001:MI-LONG:v3",
-                            "event_spec:SOR-001:SOR-LONG:v4",
-                            "event_spec:SOR-001:SOR-SHORT:v4",
+                            "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
+                            "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
                         )
                     ]
                 },

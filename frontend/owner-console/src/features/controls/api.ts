@@ -101,3 +101,9 @@ export async function submitOrbDynamicIntent(body: components['schemas']['Dynami
   });
   if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
 }
+export async function submitOrbStaticIntent(body: components['schemas']['GenericStaticSelectionActivationBody']): Promise<void> {
+  const result = await apiClient.POST('/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate', {
+    params: { path: { strategy_group_id: 'SOR-1H-001' } }, body,
+  });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+}

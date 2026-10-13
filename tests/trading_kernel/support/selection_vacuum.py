@@ -55,6 +55,30 @@ async def open_strategy_entry_vacuum(
 ) -> StrategyEntryVacuum:
     """Install a scoped Vacuum without requiring a pre-existing Ticket."""
 
+    if strategy_group_id=='SOR-1H-001':
+        from src.trading_kernel.domain.orb_session_selection import (
+            OrbSessionSelectionSpec,
+        )
+        from src.trading_kernel.infrastructure.pg_models import event_specs
+        from src.trading_kernel.infrastructure.pg_unit_of_work import (
+            PostgresKernelUnitOfWork,
+        )
+        async with engine.begin() as connection:
+            existing=(await connection.execute(sa.select(event_specs).where(event_specs.c.event_spec_id=='event_spec:SOR-1H-001:SOR-1H-LONG:v1'))).mappings().one()
+            values=dict(existing)
+            values.update({'event_spec_id':'event_spec:SOR-1H-001:SOR-1H-SHORT:v1','event_id':'SOR-1H-SHORT','position_side':'short'})
+            await connection.execute(pg_insert(event_specs).values(**values).on_conflict_do_nothing(index_elements=[event_specs.c.event_spec_id]))
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            await uow.instrument_selection.install_orb_spec(OrbSessionSelectionSpec(),installed_at_ms=fenced_at_ms)
+        vacuum=StrategyEntryVacuum(entry_vacuum_id=entry_vacuum_id,strategy_group_id=strategy_group_id,selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',
+            period_anchor_ms=SESSION_START_MS,source_generation_id=None,state=state,fenced_at_ms=fenced_at_ms,drained_at_ms=None,resolved_at_ms=None,
+            first_blocker=first_blocker,projection_version=1)
+        async with engine.begin() as connection:
+            await connection.execute(sa.insert(strategy_entry_vacuums_current).values(**vacuum.model_dump(mode='json')))
+            await connection.execute(sa.insert(strategy_entry_vacuum_events).values(entry_vacuum_event_id='vacuum-event:'+entry_vacuum_id+':1',entry_vacuum_id=entry_vacuum_id,
+                event_sequence=1,event_type='OPEN',payload={'first_blocker':first_blocker},occurred_at_ms=fenced_at_ms))
+        return vacuum
+
     vacuum = StrategyEntryVacuum(
         entry_vacuum_id=entry_vacuum_id,
         strategy_group_id=strategy_group_id,

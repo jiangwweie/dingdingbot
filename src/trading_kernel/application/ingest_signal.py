@@ -162,7 +162,9 @@ def evaluate_selection_entry_authority(
         assert current is not None
         if (
             current.selection_mode is not SelectionMode.STATIC_BASELINE
-            or current.authority_outcome is not AuthorityOutcome.FALLBACK_PREVIOUS
+            or (current.authority_outcome is not AuthorityOutcome.FALLBACK_PREVIOUS
+                and not (control.selection_spec_id==ORB_SELECTION_SPEC_ID and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
+                    and current.activation_authorization_id is not None))
         ):
             return _selection_refused(
                 SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
@@ -177,10 +179,19 @@ def evaluate_selection_entry_authority(
         )
 
     assert current is not None
+    orb_static_grant=bool(control.selection_spec_id==ORB_SELECTION_SPEC_ID and control.selection_mode is SelectionMode.STATIC_BASELINE
+        and current.selection_mode is SelectionMode.STATIC_BASELINE and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
+        and current.activation_authorization_id is not None)
+    orb_static_pending=bool(orb_static_grant and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
+        and control.pending_authorization_id is not None and control.pending_effective_period_anchor_ms is not None
+        and current.selection_control_version is not None and current.selection_control_version+1==control.control_version
+        and current.created_at_ms<=control.updated_at_ms)
     if control.selection_spec_id == ORB_SELECTION_SPEC_ID and (
         current.selection_spec_id != control.selection_spec_id
-        or current.selection_epoch_id != control.selection_epoch_id
-        or current.selection_control_version != control.control_version
+        or (current.selection_epoch_id != control.selection_epoch_id and not (control.selection_mode is SelectionMode.STATIC_BASELINE
+            and current.selection_mode is SelectionMode.STATIC_BASELINE and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
+            and current.activation_authorization_id is not None and (control.selection_epoch_id is None or orb_static_pending)))
+        or (current.selection_control_version != control.control_version and not orb_static_pending)
     ):
         return _selection_refused(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
             "selection_control_authority_epoch_mismatch",current)

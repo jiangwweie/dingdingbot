@@ -265,7 +265,7 @@ async def run_selection_runtime_once(
             reason_code="SELECTION_CONTROL_MISSING_OR_DRIFTED",
         )
     hourly = request.strategy_group_id == ORB_STRATEGY_GROUP_ID
-    if hourly and (request.selection_spec_id != ORB_SELECTION_SPEC_ID or control.selection_epoch_id is None):
+    if hourly and request.selection_spec_id != ORB_SELECTION_SPEC_ID:
         return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code="ORB_SELECTION_IDENTITY_OR_EPOCH_MISSING")
     if control.selection_mode is SelectionMode.DISABLED:
         return SelectionRuntimeResult(
@@ -296,6 +296,8 @@ async def run_selection_runtime_once(
         if owner is None or owner.entry_state!="enabled":
             return SelectionRuntimeResult(status=SelectionRuntimeStatus.NOT_DUE,
                 session_start_ms=session_start_ms,reason_code="OWNER_PAUSED")
+    if hourly and control.selection_epoch_id is None:
+        return SelectionRuntimeResult(status=SelectionRuntimeStatus.BLOCKED,reason_code='ORB_SELECTION_EPOCH_MISSING')
     result = await run_instrument_selection_once(
         uow_factory=uow_factory,
         market_source=market_source,
@@ -305,7 +307,7 @@ async def run_selection_runtime_once(
             period_anchor_ms=session_start_ms,
             worker_id=request.worker_id,
             max_concurrency=request.max_concurrency,
-            lease_duration_ms=request.lease_duration_ms,
+            lease_duration_ms=max(request.lease_duration_ms,120_000) if hourly else request.lease_duration_ms,
         ),
         clock_ms=clock_ms,
     )

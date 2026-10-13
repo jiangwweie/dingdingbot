@@ -224,3 +224,29 @@ def test_staged_hourly_scope_can_carry_readiness_without_observation_or_entry():
         event_spec_id=ORB_EVENT_SPEC_IDS[0],runtime_profile_id='tiny-live-v1',owner_policy_id='policy-main',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long',
         universe_version_id='universe:orb:staged',universe_semantic_digest='sha256:'+'a'*64,lifecycle_state='staged',observation_enabled=False,entry_enabled=False,scope_version=1,observation_generation=1)
     assert not scope.observation_enabled and not scope.entry_enabled
+
+
+def test_hourly_manual_static_generation_has_frozen_baseline_and_own_source_epoch():
+    from src.trading_kernel.domain.selection_authority import (
+        MaterializationGeneration,
+        MaterializationGenerationState,
+    )
+    generation=MaterializationGeneration(materialization_generation_id='generation:orb:static',selection_spec_id=ORB_SELECTION_SPEC_ID,
+        strategy_group_id='SOR-1H-001',strategy_version_id='sgv:SOR-1H-001:v1',selection_mode=SelectionMode.STATIC_BASELINE,
+        selection_snapshot_id=None,rollback_baseline_id='baseline:orb',session_start_ms=D,previous_long_universe_version_id='orb:long',previous_short_universe_version_id='orb:short',
+        desired_member_count=7,semantic_digest='sha256:'+'a'*64,lifecycle_state=MaterializationGenerationState.PENDING,fallback_reason_code=None,projection_version=1,created_at_ms=D+H,
+        desired_at_ms=None,selection_epoch_id='epoch:orb:previous',selection_control_version=4,activation_authorization_id='owner:orb:static')
+    assert generation.rollback_baseline_id=='baseline:orb' and generation.selection_snapshot_id is None
+
+
+def test_hourly_audit_identity_separates_epoch_generation_and_repeated_owner_resume():
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        _gap_audit_id,
+    )
+    common={"spec_id": ORB_SELECTION_SPEC_ID,"session_start_ms": D,"gap_kind": AuthorityGapAuditKind.OWNER_PAUSE,"proposed_outcome": AuthorityOutcome.PRE_FENCE_CONTINUITY}
+    ids={_gap_audit_id(**common,selection_epoch_id='epoch:orb:'+str(i),source_generation_id='generation:'+str(i),source_entry_vacuum_id='vacuum:'+str(i)) for i in range(2)}
+    assert len(ids)==2
+
+
+def test_hourly_last_entry_hour_waits_for_next_session_without_a_new_grant():
+    assert plan_selection_materialization(planning_facts(now_ms=D+23*H)).disposition=='WAITING_SELECTION'

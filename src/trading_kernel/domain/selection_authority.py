@@ -484,6 +484,9 @@ class MaterializationGeneration(BaseModel):
     desired_at_ms: int | None
     selection_epoch_id: str | None = None
     selection_control_version: int | None = None
+    activation_authorization_id: str | None = None
+    previous_entry_authorized: bool = True
+    previous_selection_authority_id: str | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_generation(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
@@ -491,6 +494,9 @@ class MaterializationGeneration(BaseModel):
         if self.selection_spec_id != ORB_SELECTION_SPEC_ID:
             values.pop("selection_epoch_id", None)
             values.pop("selection_control_version", None)
+            values.pop("activation_authorization_id", None)
+            values.pop("previous_entry_authorized", None)
+            values.pop("previous_selection_authority_id", None)
         return values
 
     @field_validator(
@@ -536,7 +542,12 @@ class MaterializationGeneration(BaseModel):
             require_orb_epoch(self.selection_epoch_id)
         elif self.selection_epoch_id is not None or self.selection_control_version is not None:
             raise ValueError("legacy Generation forbids hourly ORB lineage")
-        if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
+        orb_static=(self.selection_spec_id==ORB_SELECTION_SPEC_ID and self.selection_mode is SelectionMode.STATIC_BASELINE)
+        if orb_static and self.activation_authorization_id is None:
+            raise ValueError("ORB Static Generation requires frozen Owner authorization")
+        if not orb_static and self.activation_authorization_id is not None:
+            raise ValueError("Dynamic Generation cannot use Static authorization")
+        if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not orb_static:
             raise ValueError("DS-04 Generation requires dynamic_selection mode")
         if (
             self.previous_long_universe_version_id
@@ -544,8 +555,8 @@ class MaterializationGeneration(BaseModel):
         ):
             raise ValueError("Generation previous LONG/SHORT pair must be distinct")
         if (
-            self.selection_snapshot_id is None
-            or self.rollback_baseline_id is not None
+            ((self.selection_snapshot_id is not None or self.rollback_baseline_id is None)
+              if orb_static else (self.selection_snapshot_id is None or self.rollback_baseline_id is not None))
             or self.session_start_ms is None
             or self.session_start_ms % DAY_MS != 0
             or not 1 <= self.desired_member_count <= 7
@@ -1639,13 +1650,13 @@ class SelectionSessionAuthority(BaseModel):
                     "PRE_FENCE_CONTINUITY requires Dynamic continuity lineage"
                 )
         elif self.authority_outcome is AuthorityOutcome.ACTIVE_NEW:
-            if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION:
-                raise ValueError("ACTIVE_NEW requires dynamic_selection mode")
+            if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not (self.selection_spec_id==ORB_SELECTION_SPEC_ID and self.selection_mode is SelectionMode.STATIC_BASELINE and self.activation_authorization_id is not None):
+                raise ValueError("ACTIVE_NEW requires exact dynamic or authorized ORB Static mode")
             if (
-                self.selection_snapshot_id is None
+                (self.selection_snapshot_id is None and self.selection_mode is not SelectionMode.STATIC_BASELINE)
                 or self.materialization_generation_id is None
             ):
-                raise ValueError("ACTIVE_NEW requires Snapshot and Generation")
+                raise ValueError("ACTIVE_NEW requires exact source and Generation")
             if (
                 self.grant_proof is None
                 or self.grant_proof.kind
@@ -1661,7 +1672,7 @@ class SelectionSessionAuthority(BaseModel):
                 raise ValueError("NO_CHANGE cannot own a new Generation")
         elif self.authority_outcome is AuthorityOutcome.FALLBACK_PREVIOUS:
             if (
-                self.selection_snapshot_id is None
+                (self.selection_snapshot_id is None and self.selection_spec_id!=ORB_SELECTION_SPEC_ID)
                 or self.materialization_generation_id is None
                 or self.authority_gap_audit_id is None
                 or self.grant_proof is None

@@ -2361,3 +2361,13 @@ def test_dynamic_intent_upgrade_uses_exact_0009_source(monkeypatch) -> None:
     assert result.status == "pass"
     assert ("migrate_schema", TARGET_RELEASE, "0009_capacity_policy_v0", TARGET_SCHEMA_REVISION) in backend.calls
     assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_hourly_upgrade_uses_exact_source0010_and_keeps_entry_fenced(monkeypatch):
+    import sys
+    monkeypatch.setattr(sys.modules[__name__],'SOURCE_SCHEMA_REVISION','0010_dynamic_intent_v1')
+    backend=FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    result=deploy_tokyo_release(backend,_compatible_plan(enable_entry=False))
+    assert result.status=='pass'
+    assert ('migrate_schema',TARGET_RELEASE,'0010_dynamic_intent_v1',TARGET_SCHEMA_REVISION) in backend.calls
+    assert backend.entry_is_inactive_disabled_and_fenced()

@@ -49,6 +49,7 @@ async def test_hourly_selector_claims_exact_day_epoch_then_reads_outside_transac
     assert result.outcome=='SNAPSHOT_READY' and result.ready_count==24 and result.selected_count==7
     assert len(calls)==24
     repo.complete_orb_selection_snapshot.assert_awaited_once()
+    assert repo.claim_orb_selection_job.call_args.kwargs["lease_duration_ms"]>=120000
     c=repo.complete_orb_selection_snapshot.call_args.kwargs['computation']
     assert c.snapshot.selection_epoch_id==epoch and c.snapshot.eligibility_not_before_ms==D+2*H
 
@@ -82,6 +83,7 @@ async def test_hourly_runtime_dispatch_preserves_owner_epoch_on_later_day(monkey
     assert result.status=='snapshot_ready'
     sent=run.call_args.kwargs['request']
     assert sent.selection_epoch_id==control.selection_epoch_id and sent.period_anchor_ms==session
+    assert sent.lease_duration_ms>=120000
 
 
 @pytest.mark.asyncio

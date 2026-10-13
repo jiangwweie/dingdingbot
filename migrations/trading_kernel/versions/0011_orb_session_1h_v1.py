@@ -83,6 +83,13 @@ def upgrade() -> None:
     _hourly_generation_guard()
     _hourly_owner_resume()
     _hourly_audit_ledger()
+    _hourly_static_commit_guard()
+    _hourly_previous_authority_guard()
+    definition=bind.scalar(sa.text("SELECT pg_get_functiondef(to_regprocedure('brc_validate_selection_control_epoch_v1()'))"))
+    old="SELECT cadence_hours INTO cadence FROM brc_generic_dynamic_selection_specs_v1 WHERE selection_spec_id=NEW.selection_spec_id;"
+    if not isinstance(definition,str) or definition.count(old)!=2:
+        raise RuntimeError('0011 exact Control cadence source differs')
+    bind.execute(sa.text(definition.replace(old,"IF kind='orb_session_dynamic_v1' THEN cadence:=24; ELSE "+old+" END IF;")))
     op.execute(sa.text("""CREATE FUNCTION brc_lock_owner_orb_static_source() RETURNS void LANGUAGE plpgsql
       SECURITY DEFINER SET search_path=pg_catalog,public AS $$
     BEGIN
@@ -147,6 +154,8 @@ def _snapshot_family() -> None:
       IF NOT FOUND OR s.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' OR s.strategy_group_id<>'SOR-1H-001'
         OR s.strategy_version_id<>'sgv:SOR-1H-001:v1' OR s.selection_family<>'orb_session_dynamic_v1'
         OR s.selection_epoch_id='sor-v0' OR length(trim(s.selection_epoch_id))=0
+        OR s.selection_snapshot_id<>'selection:orb:'||encode(sha256(convert_to(
+          '{"selection_epoch_id":'||to_json(s.selection_epoch_id)::text||',"selection_spec_id":"SOR_1H_OR_ATR_DYNAMIC_V1","session_start_ms":'||s.period_anchor_ms::text||'}','UTF8')),'hex')
         OR s.period_anchor_ms<=0 OR s.period_anchor_ms%86400000<>0
         OR s.feature_cutoff_at_ms<>s.period_anchor_ms+3600000 OR s.eligibility_not_before_ms<>s.period_anchor_ms+7200000
         OR s.expires_at_ms<>s.period_anchor_ms+90000000 OR s.decision_at_ms<s.feature_cutoff_at_ms
@@ -165,6 +174,11 @@ def _snapshot_family() -> None:
       IF EXISTS(SELECT 1 FROM (SELECT stable_rank,row_number() OVER(ORDER BY pre_or_width_atr14, trailing_24h_quote_volume DESC, exchange_instrument_id COLLATE "C") AS expected
         FROM brc_instrument_selection_member_decisions WHERE selection_snapshot_id=sid AND selection_ready) ranked WHERE stable_rank<>expected)
       THEN RAISE EXCEPTION 'ORB Snapshot rank differs from frozen OR ATR order'; END IF;
+      IF EXISTS(SELECT 1 FROM brc_instrument_selection_member_decisions m WHERE m.selection_snapshot_id=sid
+        AND (m.selected IS DISTINCT FROM (m.selection_ready AND m.stable_rank<=7)
+          OR m.member_state IS DISTINCT FROM CASE WHEN NOT m.selection_ready THEN 'INELIGIBLE'
+            WHEN m.stable_rank<=7 THEN 'SELECTED' WHEN m.stable_rank<=14 THEN 'NEAR_THRESHOLD' ELSE 'NOT_SELECTED' END)) THEN
+        RAISE EXCEPTION 'ORB Snapshot selected and near members must match exact frozen ranks'; END IF;
     END; $$"""))
     _replace_function("brc_validate_typed_selection_snapshot_v1()",
         "IF s.selection_family='sor_dynamic_v0' THEN RETURN NULL; END IF;",
@@ -202,6 +216,8 @@ def _hourly_authority_family() -> None:
     BEGIN
       SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=NEW.selection_authority_id;
       IF NOT FOUND OR a.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' THEN RETURN NULL; END IF;
+      IF a.authority_outcome='ACTIVE_NEW' AND a.selection_mode='static_baseline' THEN
+        PERFORM brc_validate_orb_static_authority(a.selection_authority_id); RETURN NULL; END IF;
       SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id='SOR-1H-001';
       IF NOT FOUND OR c.selection_spec_id<>a.selection_spec_id OR c.selection_epoch_id IS DISTINCT FROM a.selection_epoch_id
         OR c.control_version IS DISTINCT FROM a.selection_control_version THEN
@@ -289,7 +305,11 @@ def _hourly_authority_family() -> None:
               OR r.entry_enabled OR r.observation_enabled)) THEN
           RAISE EXCEPTION 'ORB ACTIVE_NEW retains previous writer'; END IF;
       ELSIF a.authority_outcome='FALLBACK_PREVIOUS' THEN
-        IF a.selection_snapshot_id IS NULL OR a.grant_proof_kind<>'AUDITED_AUTHORITY_GAP'
+        IF EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e
+          WHERE e.materialization_generation_id=a.materialization_generation_id AND e.event_sequence=1
+            AND e.payload->'previous_entry_authorized'='false'::jsonb) THEN
+          RAISE EXCEPTION 'ORB cannot restore dormant members after negative Authority'; END IF;
+        IF (a.selection_snapshot_id IS NULL AND NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations source WHERE source.materialization_generation_id=a.materialization_generation_id AND source.selection_mode='static_baseline' AND source.rollback_baseline_id IS NOT NULL)) OR a.grant_proof_kind<>'AUDITED_AUTHORITY_GAP'
           OR a.activation_authorization_id IS NOT NULL OR c.selection_mode<>a.selection_mode THEN
           RAISE EXCEPTION 'ORB fallback requires exact unchanged Owner intent'; END IF;
         IF NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations g
@@ -298,7 +318,7 @@ def _hourly_authority_family() -> None:
             AND audit.source_entry_vacuum_id=v.entry_vacuum_id
           WHERE g.materialization_generation_id=a.materialization_generation_id
             AND g.selection_spec_id=a.selection_spec_id AND g.selection_epoch_id=a.selection_epoch_id
-            AND g.selection_snapshot_id=a.selection_snapshot_id AND g.period_anchor_ms=a.period_anchor_ms
+            AND g.selection_snapshot_id IS NOT DISTINCT FROM a.selection_snapshot_id AND g.period_anchor_ms=a.period_anchor_ms
             AND g.selection_control_version=a.selection_control_version AND g.lifecycle_state='FALLBACK_PREVIOUS'
             AND g.fallback_at_ms=a.created_at_ms AND g.terminal_at_ms=a.created_at_ms
             AND v.state='RESOLVED_FALLBACK' AND v.drained_at_ms IS NOT NULL AND v.resolved_at_ms=a.created_at_ms
@@ -381,11 +401,19 @@ def _hourly_authority_family() -> None:
 
 
 def _hourly_generation_guard() -> None:
+    table='brc_strategy_universe_materialization_generations'
+    constraints={c['name']:c['sqltext'] for c in sa.inspect(op.get_bind()).get_check_constraints(table)}
+    name='ck_brc_materialization_generation_source_shape'
+    op.drop_constraint(name,table,type_='check')
+    op.create_check_constraint(name,table,"(selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1' AND selection_mode='static_baseline' "
+        "AND selection_snapshot_id IS NULL AND rollback_baseline_id IS NOT NULL AND period_anchor_ms%86400000=0 "
+        "AND desired_member_count=7) OR ("+constraints[name]+")")
     op.execute(sa.text("""CREATE FUNCTION brc_validate_orb_generation(gid text) RETURNS void LANGUAGE plpgsql AS $$
     DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE;
       s brc_instrument_selection_snapshots%ROWTYPE; c brc_strategy_selection_control_current%ROWTYPE;
     BEGIN
       SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
+      IF g.selection_mode='static_baseline' THEN PERFORM brc_validate_orb_static_generation(gid); RETURN; END IF;
       SELECT * INTO s FROM brc_instrument_selection_snapshots WHERE selection_snapshot_id=g.selection_snapshot_id;
       IF NOT FOUND OR g.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' OR g.strategy_group_id<>'SOR-1H-001'
         OR g.strategy_version_id<>'sgv:SOR-1H-001:v1' OR g.selection_mode<>'dynamic_selection'
@@ -416,6 +444,41 @@ def _hourly_generation_guard() -> None:
     _replace_function('brc_validate_generation_baseline_v1()',
         "IF spec.selection_kind='generic_dynamic_v1' AND g.selection_mode='dynamic_selection' THEN",
         "IF spec.selection_kind='orb_session_dynamic_v1' THEN PERFORM brc_validate_orb_generation(gid); END IF;\n          IF spec.selection_kind='generic_dynamic_v1' AND g.selection_mode='dynamic_selection' THEN")
+    op.execute(sa.text("""CREATE FUNCTION brc_validate_orb_static_generation(gid text) RETURNS void LANGUAGE plpgsql AS $$
+    DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE; p jsonb; o brc_owner_authorizations%ROWTYPE;
+      c brc_strategy_selection_control_current%ROWTYPE;
+    BEGIN
+      SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=gid;
+      SELECT payload INTO p FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=gid AND event_sequence=1 AND event_type='PENDING';
+      SELECT * INTO o FROM brc_owner_authorizations WHERE authorization_id=p->>'activation_authorization_id';
+      IF NOT FOUND OR o.purpose<>'selection_mode_change' OR o.authentication_strength<>'totp_step_up'
+        OR o.authorized_at_ms>g.created_at_ms OR g.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1'
+        OR g.selection_epoch_id='sor-v0' OR g.selection_mode<>'static_baseline' OR g.selection_snapshot_id IS NOT NULL
+        OR g.desired_member_count<>7 OR g.created_at_ms<g.period_anchor_ms+3600000 OR g.created_at_ms>=g.period_anchor_ms+82800000
+        OR o.target_scope IS DISTINCT FROM jsonb_build_object('strategy_group_id','SOR-1H-001','selection_spec_id',g.selection_spec_id,
+          'target_selection_mode','static_baseline','rollback_baseline_id',g.rollback_baseline_id,'selection_epoch_id',g.selection_epoch_id,
+          'effective_period_anchor_ms',(o.target_scope->>'effective_period_anchor_ms')::bigint)
+        OR (o.target_scope->>'effective_period_anchor_ms')::bigint>g.period_anchor_ms
+        OR NOT EXISTS(SELECT 1 FROM brc_strategy_selection_rollback_baselines b WHERE b.rollback_baseline_id=g.rollback_baseline_id
+          AND b.strategy_group_id=g.strategy_group_id AND b.strategy_version_id=g.strategy_version_id)
+        OR g.materialization_generation_id<>'generation:orb:static:'||encode(sha256(convert_to(
+          '{"authorization":'||to_json(o.authorization_id)::text||',"session":'||g.period_anchor_ms::text||'}','UTF8')),'hex') THEN
+        RAISE EXCEPTION 'ORB Static Generation requires exact frozen baseline and Owner source'; END IF;
+      SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id=g.strategy_group_id;
+      IF g.lifecycle_state='ACTIVE' AND c.selection_mode='static_baseline' AND c.selection_epoch_id IS NULL
+        AND c.control_version=g.selection_control_version+1 THEN
+        PERFORM brc_validate_orb_static_authority((SELECT selection_authority_id FROM brc_selection_authority_current WHERE selection_spec_id=g.selection_spec_id));
+        RETURN;
+      END IF;
+      IF c.control_version IS DISTINCT FROM g.selection_control_version OR c.selection_epoch_id IS DISTINCT FROM g.selection_epoch_id
+        OR c.pending_authorization_id IS DISTINCT FROM o.authorization_id OR c.pending_selection_mode IS DISTINCT FROM 'static_baseline'
+        OR c.pending_effective_period_anchor_ms IS DISTINCT FROM (o.target_scope->>'effective_period_anchor_ms')::bigint THEN
+        RAISE EXCEPTION 'ORB Static Generation current intent differs'; END IF;
+      IF EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_targets t WHERE t.materialization_generation_id=gid
+        AND t.expected_member_set_digest<>brc_selected_universe_member_digest_v1((SELECT universe_version_id FROM brc_selection_rollback_baseline_events b
+          WHERE b.rollback_baseline_id=g.rollback_baseline_id AND b.event_spec_id=t.event_spec_id))) THEN
+        RAISE EXCEPTION 'ORB Static targets differ from frozen baseline'; END IF;
+    END; $$"""))
 
 
 def _hourly_owner_resume() -> None:
@@ -514,6 +577,11 @@ def _hourly_audit_ledger() -> None:
           JOIN brc_instrument_selection_spec_events e ON e.selection_spec_id=g.selection_spec_id
           JOIN brc_instrument_selection_member_decisions m ON m.selection_snapshot_id=g.selection_snapshot_id AND m.selected
           WHERE g.materialization_generation_id=audit.source_generation_id
+        UNION
+        SELECT b.event_spec_id,m.exchange_instrument_id FROM brc_strategy_universe_materialization_generations g
+          JOIN brc_selection_rollback_baseline_events b ON b.rollback_baseline_id=g.rollback_baseline_id
+          JOIN brc_strategy_universe_members m ON m.universe_version_id=b.universe_version_id
+          WHERE g.materialization_generation_id=audit.source_generation_id AND g.selection_mode='static_baseline'
       ) SELECT count(*) INTO expected_count FROM expected;
       SELECT count(*), '['||string_agg('{"event_spec_id":'||to_json(e.payload->'scope'->>'event_spec_id')::text||
         ',"exchange_instrument_id":'||to_json(e.payload->'scope'->>'exchange_instrument_id')::text||'}',','
@@ -549,6 +617,10 @@ def _hourly_audit_ledger() -> None:
                 AND m.exchange_instrument_id=e.payload->'scope'->>'exchange_instrument_id')
             OR EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations g JOIN brc_instrument_selection_member_decisions m
               ON m.selection_snapshot_id=g.selection_snapshot_id AND m.selected WHERE g.materialization_generation_id=audit.source_generation_id
+                AND m.exchange_instrument_id=e.payload->'scope'->>'exchange_instrument_id')
+            OR EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations g JOIN brc_selection_rollback_baseline_events b
+              ON b.rollback_baseline_id=g.rollback_baseline_id JOIN brc_strategy_universe_members m ON m.universe_version_id=b.universe_version_id
+              WHERE g.materialization_generation_id=audit.source_generation_id AND b.event_spec_id=e.payload->'scope'->>'event_spec_id'
                 AND m.exchange_instrument_id=e.payload->'scope'->>'exchange_instrument_id'))
           OR (e.event_type='CHECKED_NEGATIVE' AND e.payload->'first_natural_trigger_at_ms' IS DISTINCT FROM 'null'::jsonb)
           OR (e.event_type='TRIGGER_SUPPRESSED' AND ((e.payload->>'first_natural_trigger_at_ms')::bigint%3600000<>0
@@ -564,6 +636,107 @@ def _hourly_audit_ledger() -> None:
     for table in ('brc_selection_authority_gap_audits_current','brc_selection_authority_gap_audit_events'):
         op.execute(sa.text(f'CREATE CONSTRAINT TRIGGER trg_{table}_orb_ledger AFTER INSERT OR UPDATE ON {table} '
             'DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_orb_audit_ledger()'))
+
+
+def _hourly_static_commit_guard() -> None:
+    _replace_function('brc_preserve_generation_source_identity_v1()',
+        "IF OLD.selection_epoch_id<>'sor-v0' AND OLD.selection_mode='static_baseline'",
+        "IF OLD.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' AND OLD.selection_epoch_id<>'sor-v0' AND OLD.selection_mode='static_baseline'")
+    op.execute(sa.text("""CREATE FUNCTION brc_validate_orb_static_authority(aid text) RETURNS void LANGUAGE plpgsql AS $$
+    DECLARE a brc_selection_session_authorities%ROWTYPE; g brc_strategy_universe_materialization_generations%ROWTYPE;
+      c brc_strategy_selection_control_current%ROWTYPE; o brc_owner_authorizations%ROWTYPE; n integer;
+    BEGIN
+      SELECT * INTO a FROM brc_selection_session_authorities WHERE selection_authority_id=aid;
+      SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=a.materialization_generation_id;
+      SELECT * INTO c FROM brc_strategy_selection_control_current WHERE strategy_group_id='SOR-1H-001';
+      SELECT * INTO o FROM brc_owner_authorizations WHERE authorization_id=a.activation_authorization_id;
+      IF NOT FOUND OR a.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' OR a.selection_snapshot_id IS NOT NULL
+        OR a.selection_mode<>'static_baseline' OR a.authority_outcome<>'ACTIVE_NEW'
+        OR a.grant_proof_kind<>'AUDITED_AUTHORITY_GAP' OR g.lifecycle_state<>'ACTIVE' OR g.selection_mode<>'static_baseline'
+        OR g.selection_spec_id<>a.selection_spec_id OR g.selection_epoch_id<>a.selection_epoch_id OR g.period_anchor_ms<>a.period_anchor_ms
+        OR g.selection_control_version+1<>a.selection_control_version OR g.activated_at_ms<>a.created_at_ms
+        OR g.terminal_at_ms<>a.created_at_ms OR g.desired_member_count<>7 OR g.rollback_baseline_id IS NULL
+        OR c.selection_mode<>'static_baseline' OR c.selection_epoch_id IS NOT NULL OR c.control_version<>a.selection_control_version
+        OR c.pending_selection_mode IS NOT NULL OR c.pending_authorization_id IS NOT NULL OR c.pending_effective_period_anchor_ms IS NOT NULL
+        OR c.updated_at_ms<>a.created_at_ms OR o.purpose<>'selection_mode_change' OR o.authentication_strength<>'totp_step_up'
+        OR o.target_scope IS DISTINCT FROM jsonb_build_object('strategy_group_id','SOR-1H-001','selection_spec_id',a.selection_spec_id,
+          'target_selection_mode','static_baseline','rollback_baseline_id',g.rollback_baseline_id,'selection_epoch_id',a.selection_epoch_id,
+          'effective_period_anchor_ms',(o.target_scope->>'effective_period_anchor_ms')::bigint)
+        OR (o.target_scope->>'effective_period_anchor_ms')::bigint>a.period_anchor_ms
+        OR NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e WHERE e.materialization_generation_id=g.materialization_generation_id
+          AND e.event_sequence=1 AND e.event_type='PENDING' AND e.payload->>'activation_authorization_id'=o.authorization_id)
+        OR NOT EXISTS(SELECT 1 FROM brc_selection_authority_current p WHERE p.selection_authority_id=aid AND p.selection_spec_id=a.selection_spec_id)
+        OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_controls_current owner_control WHERE owner_control.strategy_group_id='SOR-1H-001'
+          AND owner_control.entry_state='enabled' AND owner_control.control_version=a.owner_control_version)
+        OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuums_current v JOIN brc_selection_authority_gap_audits_current audit
+          ON audit.source_entry_vacuum_id=v.entry_vacuum_id AND audit.source_generation_id=v.source_generation_id
+          WHERE v.source_generation_id=g.materialization_generation_id AND v.state='RESOLVED_ACTIVE' AND v.drained_at_ms IS NOT NULL
+            AND v.resolved_at_ms=a.created_at_ms AND a.created_at_ms<v.fenced_at_ms+1800000
+            AND audit.authority_gap_audit_id=a.authority_gap_audit_id AND audit.state='COMPLETE' AND audit.proposed_authority_outcome='ACTIVE_NEW'
+            AND audit.first_eligible_close_time_ms=a.first_eligible_close_time_ms AND audit.audited_through_close_time_ms+3600000=a.first_eligible_close_time_ms)
+      THEN RAISE EXCEPTION 'ORB Static commit requires exact Owner baseline audit and atomic mode'; END IF;
+      SELECT count(*) INTO n FROM brc_selection_authority_event_bindings b
+        JOIN brc_strategy_universe_current p ON p.event_spec_id=b.event_spec_id AND p.universe_version_id=b.universe_version_id
+        JOIN brc_strategy_universe_versions u ON u.universe_version_id=b.universe_version_id
+        JOIN brc_selection_rollback_baseline_events frozen ON frozen.rollback_baseline_id=g.rollback_baseline_id AND frozen.event_spec_id=b.event_spec_id
+        WHERE b.selection_authority_id=aid AND b.grant_state='ACTIVE' AND p.lifecycle_state='active' AND u.lifecycle_state='active'
+          AND u.source_kind='static_baseline' AND u.materialization_generation_id=g.materialization_generation_id
+          AND u.universe_version_id<>frozen.universe_version_id AND b.member_set_digest=brc_selected_universe_member_digest_v1(frozen.universe_version_id);
+      IF n<>2 OR EXISTS(SELECT 1 FROM brc_materialization_generation_event_baselines b JOIN brc_strategy_universe_versions u USING(universe_version_id)
+        WHERE b.materialization_generation_id=g.materialization_generation_id AND u.lifecycle_state<>'retired') THEN
+        RAISE EXCEPTION 'ORB Static commit requires new pair and retirement of actual previous pair'; END IF;
+    END; $$"""))
+
+
+def _hourly_previous_authority_guard() -> None:
+    op.execute(sa.text("""CREATE FUNCTION brc_validate_orb_previous_authority() RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE g brc_strategy_universe_materialization_generations%ROWTYPE; p jsonb; prior brc_selection_session_authorities%ROWTYPE;
+      expected_positive boolean;
+    BEGIN
+      SELECT * INTO g FROM brc_strategy_universe_materialization_generations WHERE materialization_generation_id=NEW.materialization_generation_id;
+      IF NOT FOUND OR g.selection_spec_id<>'SOR_1H_OR_ATR_DYNAMIC_V1' THEN RETURN NULL; END IF;
+      SELECT payload INTO p FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=g.materialization_generation_id AND event_sequence=1 AND event_type='PENDING';
+      IF p IS NULL OR jsonb_typeof(p->'previous_entry_authorized')<>'boolean' THEN
+        RAISE EXCEPTION 'ORB Generation requires frozen previous grant disposition'; END IF;
+      IF p->>'previous_selection_authority_id' IS NULL THEN
+        IF p->'previous_entry_authorized'<>'true'::jsonb OR g.selection_mode<>'dynamic_selection'
+          OR NOT EXISTS(SELECT 1 FROM brc_strategy_selection_control_current c WHERE c.selection_spec_id=g.selection_spec_id
+            AND c.rollback_baseline_id IS NOT NULL AND c.selection_epoch_id=g.selection_epoch_id) THEN
+          RAISE EXCEPTION 'ORB initial source requires captured Static basis'; END IF;
+      ELSE
+        SELECT * INTO prior FROM brc_selection_session_authorities WHERE selection_authority_id=p->>'previous_selection_authority_id';
+        expected_positive:=prior.authority_outcome IN ('ACTIVE_NEW','NO_CHANGE','PRE_FENCE_CONTINUITY','FALLBACK_PREVIOUS');
+        IF NOT FOUND OR prior.selection_spec_id<>g.selection_spec_id OR prior.created_at_ms>g.created_at_ms
+          OR p->'previous_entry_authorized' IS DISTINCT FROM to_jsonb(expected_positive) THEN
+          RAISE EXCEPTION 'ORB previous grant identity or disposition differs'; END IF;
+        IF expected_positive AND EXISTS(SELECT 1 FROM brc_materialization_generation_event_baselines b
+          LEFT JOIN brc_selection_authority_event_bindings source ON source.selection_authority_id=prior.selection_authority_id
+            AND source.event_spec_id=b.event_spec_id AND source.universe_version_id=b.universe_version_id AND source.member_set_digest=b.member_set_digest
+          WHERE b.materialization_generation_id=g.materialization_generation_id AND source.event_spec_id IS NULL) THEN
+          RAISE EXCEPTION 'ORB previous grant differs from actual frozen pair'; END IF;
+      END IF;
+      IF g.lifecycle_state='FAILED_CLOSED' AND EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events e
+        WHERE e.materialization_generation_id=g.materialization_generation_id AND e.event_type='FAILED_CLOSED'
+          AND e.payload->>'reason_code'='NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY') AND (
+        p->'previous_entry_authorized'<>'false'::jsonb OR prior.authority_outcome<>'VALID_EMPTY'
+        OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions u WHERE u.materialization_generation_id=g.materialization_generation_id AND u.lifecycle_state<>'abandoned')
+        OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuums_current v WHERE v.source_generation_id=g.materialization_generation_id
+          AND v.state='RECONFIGURING' AND v.resolved_at_ms IS NULL AND v.first_blocker='NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY')
+          AND NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events handoff
+            JOIN brc_strategy_universe_materialization_generations replacement ON replacement.materialization_generation_id=handoff.payload->>'replacement_generation_id'
+            JOIN brc_strategy_entry_vacuums_current v ON v.source_generation_id=replacement.materialization_generation_id
+            JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=replacement.selection_snapshot_id
+            WHERE handoff.materialization_generation_id=g.materialization_generation_id AND handoff.event_type='SUPERSEDED'
+              AND replacement.selection_spec_id=g.selection_spec_id AND replacement.selection_epoch_id=g.selection_epoch_id
+              AND replacement.selection_control_version=g.selection_control_version AND replacement.period_anchor_ms>g.period_anchor_ms
+              AND replacement.lifecycle_state='MATERIALIZING' AND s.selected_count>0 AND s.created_at_ms<=handoff.occurred_at_ms
+              AND v.state='RECONFIGURING' AND v.resolved_at_ms IS NULL AND v.drained_at_ms IS NOT NULL)) THEN
+        RAISE EXCEPTION 'ORB negative recovery must retain fence and immutable EMPTY'; END IF;
+      RETURN NULL;
+    END; $$"""))
+    for table in ('brc_strategy_universe_materialization_generations','brc_materialization_generation_event_baselines','brc_strategy_universe_materialization_events'):
+        op.execute(sa.text(f'CREATE CONSTRAINT TRIGGER trg_{table}_orb_previous AFTER INSERT OR UPDATE ON {table} '
+            'DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION brc_validate_orb_previous_authority()'))
 
 
 def downgrade() -> None:

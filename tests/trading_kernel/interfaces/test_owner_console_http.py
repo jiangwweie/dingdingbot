@@ -1099,3 +1099,32 @@ async def test_hourly_selection_preview_keeps_daily_preparation_and_entry_times_
     assert data['next_eligibility_not_before_ms']-data['next_effective_period_anchor_ms']==7200000
     assert data['next_prepare_not_before_ms']-data['next_effective_period_anchor_ms']==3600000
     assert 'consecutive_missed_periods' not in data['runtime']
+
+
+async def test_hourly_static_owner_http_uses_independent_baseline_intent(owner_console_client,monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.domain.selection_authority import (
+        SelectionControl,
+        SelectionMode,
+    )
+    from src.trading_kernel.interfaces.owner_console_http.routes import (
+        controls as routes,
+    )
+    control=SelectionControl(strategy_group_id='SOR-1H-001',selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',selection_mode=SelectionMode.DYNAMIC_SELECTION,
+        pending_selection_mode=SelectionMode.STATIC_BASELINE,pending_effective_period_anchor_ms=BASE_MS//86400000*86400000+86400000,
+        pending_authorization_id='owner:static',control_version=3,rollback_baseline_id='baseline:orb',selection_epoch_id='epoch:orb',updated_at_ms=BASE_MS)
+    class Uow:
+        async def __aenter__(self):return SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control)),owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(),get_authorization_by_idempotency_key=AsyncMock(return_value=None)))
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(routes,'get_control_engine',lambda request:object())
+    monkeypatch.setattr(routes,'PostgresKernelUnitOfWork',lambda engine:Uow())
+    mutation=AsyncMock(return_value=control)
+    monkeypatch.setattr(routes,'stage_orb_static_selection_mode',mutation,raising=False)
+    monkeypatch.setattr(routes,'_require_step_up',AsyncMock())
+    response=await owner_console_client.post('/api/owner/v1/controls/strategies/SOR-1H-001/selection/static/activate',headers={'Origin':'https://owner.example.test'},json={
+        'expected_version':3,'reason':'Static rollback','idempotency_key':'orb:static:http','totp_code':'000000','rollback_baseline_id':'baseline:orb','selection_epoch_id':'epoch:orb',
+        'effective_period_anchor_ms':control.pending_effective_period_anchor_ms})
+    assert response.status_code==200,response.text
+    mutation.assert_awaited_once()

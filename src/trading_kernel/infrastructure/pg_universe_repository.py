@@ -1291,7 +1291,7 @@ class PostgresStrategyUniverseRepository:
             or (spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"} and len(expected_events) != 2)
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
-        if target["source_kind"]=="static_baseline" and spec["selection_kind"]!="generic_dynamic_v1":
+        if target["source_kind"]=="static_baseline" and spec["selection_kind"] not in {"generic_dynamic_v1","orb_session_dynamic_v1"}:
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if spec["selection_kind"] == "generic_dynamic_v1":
             from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
@@ -1568,8 +1568,8 @@ class PostgresStrategyUniverseRepository:
         ):
             raise UniverseInstallConflict("DYNAMIC_PAIR_AUTHORITY_CONFLICT")
         if (
-            long_target["source_kind"] != "dynamic_selection"
-            or short_target["source_kind"] != "dynamic_selection"
+            long_target["source_kind"] != authority.selection_mode.value
+            or short_target["source_kind"] != authority.selection_mode.value
             or long_target["materialization_generation_id"] != generation_id
             or short_target["materialization_generation_id"] != generation_id
             or long_target["lifecycle_state"] != "staged"
@@ -1808,7 +1808,11 @@ class PostgresStrategyUniverseRepository:
                 else int(current_selection_version)
             ),
         )
-        if selection_control["pending_selection_mode"] == "dynamic_selection":
+        if authority.selection_mode is SelectionMode.STATIC_BASELINE:
+            await selection_repository.commit_orb_static_selection_mode(strategy_group_id=generation['strategy_group_id'],
+                expected_control_version=selection_control['control_version'],activation_authorization_id=authority.activation_authorization_id or '',
+                activated_at_ms=request.attempted_at_ms)
+        elif selection_control["pending_selection_mode"] == "dynamic_selection":
             await selection_repository.activate_pending_selection_mode(
                 strategy_group_id=str(selection_control["strategy_group_id"]),
                 expected_control_version=int(selection_control["control_version"]),
@@ -1953,13 +1957,14 @@ class PostgresStrategyUniverseRepository:
             and selection_control["selection_mode"] == "static_baseline"
             and selection_control["pending_selection_mode"] == "dynamic_selection"
             and selection_control["pending_effective_period_anchor_ms"]
-            == generation["period_anchor_ms"]
+            is not None
+            and (selection_control["pending_effective_period_anchor_ms"] <= generation["period_anchor_ms"] if authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" else selection_control["pending_effective_period_anchor_ms"]==generation["period_anchor_ms"])
             and selection_control["pending_authorization_id"] is not None
         )
         dynamic_previous_restore = bool(
             selection_control is not None
             and selection_control["selection_mode"] == "dynamic_selection"
-            and selection_control["pending_selection_mode"] is None
+            and (selection_control["pending_selection_mode"] is None or (authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" and generation["selection_mode"]=="static_baseline" and selection_control["pending_selection_mode"]=="static_baseline"))
         )
         if (
             previous_short is None

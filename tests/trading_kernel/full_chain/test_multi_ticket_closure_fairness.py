@@ -75,7 +75,7 @@ def _active_ticket(
     *,
     instrument: str,
     signal_event_id: str,
-    event_id: str = "SOR-LONG",
+    event_id: str = "SOR-1H-LONG",
 ):
     original = _registered_sor_long_ticket()
     contract = next(
@@ -311,7 +311,7 @@ async def test_two_due_active_positions_cannot_starve_btc_like_settlement(
         dispatch_engine,
         event_spec_ids=(
             "event_spec:MI-001:MI-LONG:v3",
-            "event_spec:SOR-001:SOR-LONG:v4",
+            "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
         ),
     )
     sol_ticket = _active_ticket(instrument="SOLUSDT", signal_event_id="signal-sol")

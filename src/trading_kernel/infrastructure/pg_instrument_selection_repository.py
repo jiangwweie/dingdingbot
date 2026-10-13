@@ -751,6 +751,8 @@ class PostgresInstrumentSelectionRepository:
             or control.selection_mode is not SelectionMode.STATIC_BASELINE
         ):
             raise SelectionJobConflict("ORB baseline requires exact Static control")
+        if control.rollback_baseline_id is not None:
+            return await self.get_orb_static_baseline(control.rollback_baseline_id)
         sources = []
         await self._connection.execute(sa.text('SELECT brc_lock_owner_orb_static_source()'))
         for event, side in zip(ORB_EVENT_SPEC_IDS, ("long", "short"), strict=True):
@@ -1710,6 +1712,18 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _selection_control_from_row(row)
 
+    async def commit_orb_static_selection_mode(self, *, strategy_group_id: str,expected_control_version: int,
+        activation_authorization_id: str,activated_at_ms: int) -> None:
+        if strategy_group_id!='SOR-1H-001':raise SelectionJobConflict('ORB Static commit requires exact group')
+        changed=await self._connection.execute(sa.update(strategy_selection_control_current).where(
+            strategy_selection_control_current.c.strategy_group_id==strategy_group_id,
+            strategy_selection_control_current.c.control_version==expected_control_version,
+            strategy_selection_control_current.c.pending_selection_mode=='static_baseline',
+            strategy_selection_control_current.c.pending_authorization_id==activation_authorization_id).values(selection_mode='static_baseline',selection_epoch_id=None,
+                pending_selection_mode=None,pending_authorization_id=None,pending_effective_period_anchor_ms=None,
+                control_version=expected_control_version+1,updated_at_ms=activated_at_ms))
+        if changed.rowcount!=1:raise SelectionJobConflict('ORB Static Owner intent changed before commit')
+
     async def activate_pending_selection_mode(
         self,
         *,
@@ -2353,6 +2367,12 @@ class PostgresInstrumentSelectionRepository:
     ) -> None:
         if generation.lifecycle_state is not MaterializationGenerationState.PENDING:
             raise ValueError("new Materialization Generation must be PENDING")
+        orb_prior=None
+        if generation.selection_spec_id==ORB_SELECTION_SPEC_ID:
+            orb_prior=await self.get_current_authority_projection(ORB_SELECTION_SPEC_ID)
+            if (generation.previous_entry_authorized != (orb_prior is None or not orb_prior.authority.blocks_new_entry)
+                or generation.previous_selection_authority_id != (None if orb_prior is None else orb_prior.authority.selection_authority_id)):
+                raise SelectionJobConflict('ORB Generation previous authority changed before freeze')
         if tuple(item.materialization_order for item in targets) != (1, 2):
             raise ValueError("Materialization Generation requires exact LONG/SHORT targets")
         await self._connection.execute(
@@ -2395,6 +2415,10 @@ class PostgresInstrumentSelectionRepository:
                 payload={
                     "selection_snapshot_id": generation.selection_snapshot_id,
                     "desired_member_count": generation.desired_member_count,
+                    **({"activation_authorization_id": generation.activation_authorization_id} if generation.selection_spec_id==ORB_SELECTION_SPEC_ID and generation.selection_mode is SelectionMode.STATIC_BASELINE else {}),
+                    **({'previous_entry_authorized':orb_prior is None or not orb_prior.authority.blocks_new_entry,
+                        'previous_selection_authority_id':None if orb_prior is None else orb_prior.authority.selection_authority_id}
+                        if generation.selection_spec_id==ORB_SELECTION_SPEC_ID else {}),
                 },
                 occurred_at_ms=generation.created_at_ms,
             )
@@ -3850,12 +3874,14 @@ class PostgresInstrumentSelectionRepository:
         vacuum: StrategyEntryVacuum,
         superseded_at_ms: int,
     ) -> MaterializationGeneration:
+        previous_failed=(previous_generation.selection_spec_id==ORB_SELECTION_SPEC_ID and previous_generation.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED
+            and vacuum.first_blocker=="NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY")
         if (
-            previous_generation.lifecycle_state
+            (not previous_failed and previous_generation.lifecycle_state
             not in {
                 MaterializationGenerationState.MATERIALIZING,
                 MaterializationGenerationState.STAGED,
-            }
+            })
             or replacement_generation.lifecycle_state
             is not MaterializationGenerationState.PENDING
             or replacement_generation.session_start_ms is None
@@ -3892,26 +3918,27 @@ class PostgresInstrumentSelectionRepository:
             targets=replacement_targets,
         )
         previous_next_version = previous_generation.projection_version + 1
-        previous_update = await self._connection.execute(
-            sa.update(strategy_universe_materialization_generations)
-            .where(
-                strategy_universe_materialization_generations.c.materialization_generation_id
-                == previous_generation.materialization_generation_id,
-                strategy_universe_materialization_generations.c.lifecycle_state
-                == previous_generation.lifecycle_state.value,
-                strategy_universe_materialization_generations.c.projection_version
-                == previous_generation.projection_version,
+        if not previous_failed:
+            previous_update = await self._connection.execute(
+                sa.update(strategy_universe_materialization_generations)
+                .where(
+                    strategy_universe_materialization_generations.c.materialization_generation_id
+                    == previous_generation.materialization_generation_id,
+                    strategy_universe_materialization_generations.c.lifecycle_state
+                    == previous_generation.lifecycle_state.value,
+                    strategy_universe_materialization_generations.c.projection_version
+                    == previous_generation.projection_version,
+                )
+                .values(
+                    lifecycle_state="SUPERSEDED",
+                    terminal_at_ms=superseded_at_ms,
+                    lease_owner=None,
+                    lease_expires_at_ms=None,
+                    projection_version=previous_next_version,
+                )
             )
-            .values(
-                lifecycle_state="SUPERSEDED",
-                terminal_at_ms=superseded_at_ms,
-                lease_owner=None,
-                lease_expires_at_ms=None,
-                projection_version=previous_next_version,
-            )
-        )
-        if previous_update.rowcount != 1:
-            raise SelectionJobConflict("previous Generation changed during supersession")
+            if previous_update.rowcount != 1:
+                raise SelectionJobConflict("previous Generation changed during supersession")
         await self._connection.execute(
             sa.insert(strategy_universe_materialization_events).values(
                 materialization_event_id=(
@@ -4513,6 +4540,33 @@ class PostgresInstrumentSelectionRepository:
                 occurred_at_ms=superseded_at_ms,
             )
         )
+
+    async def mark_orb_failed_without_previous_authority(self, *, generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,failed_at_ms: int) -> None:
+        current=await self.get_current_authority_projection(ORB_SELECTION_SPEC_ID)
+        if current is None or current.authority.authority_outcome is not AuthorityOutcome.VALID_EMPTY or (
+            generation.previous_entry_authorized or generation.previous_selection_authority_id!=current.authority.selection_authority_id
+            or
+            generation.selection_spec_id!=ORB_SELECTION_SPEC_ID or vacuum.source_generation_id!=generation.materialization_generation_id
+            or vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.drained_at_ms is None):
+            raise SelectionJobConflict('ORB negative previous authority source changed')
+        if generation.lifecycle_state is MaterializationGenerationState.FAILED_CLOSED:
+            return
+        seq=int(await self._connection.scalar(sa.select(sa.func.max(strategy_universe_materialization_events.c.event_sequence)).where(
+            strategy_universe_materialization_events.c.materialization_generation_id==generation.materialization_generation_id)) or 0)+1
+        updated=await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+            strategy_universe_materialization_generations.c.materialization_generation_id==generation.materialization_generation_id,
+            strategy_universe_materialization_generations.c.projection_version==generation.projection_version).values(lifecycle_state='FAILED_CLOSED',
+                terminal_at_ms=failed_at_ms,lease_owner=None,lease_expires_at_ms=None,projection_version=generation.projection_version+1))
+        if updated.rowcount!=1:raise SelectionJobConflict('ORB failed Generation changed')
+        await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(materialization_event_id=f'materialization-event:{generation.materialization_generation_id}:{seq}',
+            materialization_generation_id=generation.materialization_generation_id,event_sequence=seq,event_type='FAILED_CLOSED',
+            payload={'reason_code':'NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY','previous_selection_authority_id':current.authority.selection_authority_id},occurred_at_ms=failed_at_ms))
+        await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(strategy_entry_vacuums_current.c.entry_vacuum_id==vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version==vacuum.projection_version).values(first_blocker='NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY',projection_version=vacuum.projection_version+1))
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(entry_vacuum_event_id=f'vacuum-event:{vacuum.entry_vacuum_id}:{vacuum.projection_version+1}',
+            entry_vacuum_id=vacuum.entry_vacuum_id,event_sequence=vacuum.projection_version+1,event_type='RECOVERY_REQUIRED',
+            payload={'reason_code':'NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY','source_generation_id':generation.materialization_generation_id},occurred_at_ms=failed_at_ms))
 
     async def mark_generation_fallback_previous_pending(
         self,
@@ -7419,6 +7473,9 @@ def _materialization_generation_from_row(
         selection_spec_id=str(row["selection_spec_id"]),
         selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
         selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == ORB_SELECTION_SPEC_ID else None,
+        activation_authorization_id=row["activation_authorization_id"] if row["selection_spec_id"]==ORB_SELECTION_SPEC_ID and row["selection_mode"]=="static_baseline" else None,
+        previous_entry_authorized=bool(row['previous_entry_authorized']) if row['selection_spec_id']==ORB_SELECTION_SPEC_ID else True,
+        previous_selection_authority_id=row['previous_selection_authority_id'] if row['selection_spec_id']==ORB_SELECTION_SPEC_ID else None,
         strategy_group_id=str(row["strategy_group_id"]),
         strategy_version_id=str(row["strategy_version_id"]),
         selection_mode=SelectionMode(str(row["selection_mode"])),

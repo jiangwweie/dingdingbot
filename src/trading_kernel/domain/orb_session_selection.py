@@ -421,3 +421,22 @@ class OrbStaticRollbackBaseline(BaseModel):
             captured_at_ms=captured_at_ms,
             semantic_digest=digest,
         )
+
+
+class OrbStaticMaterializationSource(BaseModel):
+    """Frozen Static baseline source for the shared pair materializer, never a Snapshot."""
+    model_config=ConfigDict(frozen=True,extra='forbid')
+    selection_spec_id: Literal['SOR_1H_OR_ATR_DYNAMIC_V1']=ORB_SELECTION_SPEC_ID
+    strategy_group_id: Literal['SOR-1H-001']=ORB_STRATEGY_GROUP_ID
+    strategy_version_id: Literal['sgv:SOR-1H-001:v1']=ORB_STRATEGY_VERSION_ID
+    selection_snapshot_id: None = None
+    session_start_ms: int
+    selection_epoch_id: str
+    rollback_baseline_id: str
+    selected_count: Literal[7]=7
+    @model_validator(mode='after')
+    def _validate_static_source(self):
+        build_orb_session_period(self.session_start_ms)
+        require_orb_epoch(self.selection_epoch_id)
+        if not self.rollback_baseline_id.strip():raise ValueError('ORB Static source requires frozen baseline')
+        return self

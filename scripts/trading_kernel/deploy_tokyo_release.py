@@ -119,7 +119,7 @@ class DeploymentPlan:
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0"}:
+            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
                 raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
@@ -1685,7 +1685,7 @@ class SshTokyoReleaseBackend:
         source_schema_revision: str,
         target_schema_revision: str,
     ) -> None:
-        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0"}:
+        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
             raise ValueError("compatible migration source revision differs")
         self._release_command(
             release,

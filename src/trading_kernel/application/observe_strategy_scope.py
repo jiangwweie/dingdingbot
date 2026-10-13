@@ -854,7 +854,7 @@ async def _capture_orb_fact_refresh_source(uow: KernelUnitOfWork,scope: RuntimeS
         if generation is None or generation.lifecycle_state not in {MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED} or (
             generation.selection_spec_id!=control.selection_spec_id or generation.selection_epoch_id!=control.selection_epoch_id
             or generation.selection_control_version!=control.control_version
-            or not control.permits_dynamic_period(generation.session_start_ms or 0)
+            or (not control.permits_dynamic_period(generation.session_start_ms or 0) and not (generation.selection_mode.value=="static_baseline" and control.pending_selection_mode is not None and control.pending_selection_mode.value=="static_baseline" and generation.activation_authorization_id==control.pending_authorization_id))
             or authoritative_now>=max(vacuum.fenced_at_ms,generation.desired_at_ms or generation.created_at_ms)+1800000):
             return None
         targets=await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id,for_update=for_update)

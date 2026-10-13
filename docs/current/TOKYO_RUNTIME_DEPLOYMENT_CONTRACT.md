@@ -799,3 +799,23 @@ Resource-constrained resident long soak and Docker resource-load scenarios belon
 not every repair release. The Release portfolio retains Unit/Architecture,
 Integration excluding those resource audits, Full-chain, Ruff, Mypy and exact migration
 preservation; R4 also retains Golden/core parity. Exclusion is not soak PASS.
+
+
+## Hourly ORB source upgrade
+
+The current target extension supports exact stopped, flat `0010 -> 0011`
+preservation. The readonly source verifier hashes every pre-existing source row;
+post-DDL preservation precedes identity rotation. The identity transaction adds
+only the named hourly pair, starts its Strategy Control paused, retains existing
+capital/Capacity B values, and keeps global new ENTRY disabled. Existing Selector
+intent, Universe, Authority and terminal trading lineage remain source facts.
+
+After Owner approval for deployment, prepare only the new pair with
+`bootstrap_strategy_universes.py --runtime-profile-id tiny-live-v1
+--strategy-group-id SOR-1H-001`; this exact batch uses the independent seven-coin
+Static baseline. It must not reinstall existing Dynamic groups. New strategy
+activation and global ENTRY restoration use the official Owner/Kernel path after
+current certificates, readiness, runtime identity, source preservation and
+exchange readonly facts pass. Deployment does not prove Dynamic activation or a
+natural Ticket. The calling task's explicit pre-deployment confirmation boundary
+still takes precedence over standing server authorization.

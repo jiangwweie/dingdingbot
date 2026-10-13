@@ -151,6 +151,9 @@ from tests.trading_kernel.support.generic_selection import (
     qualify_window,
     shift_window,
 )
+from tests.trading_kernel.support.owner_roles import (
+    apply_owner_control_grants as _apply_owner_control_grants,
+)
 from tests.trading_kernel.unit.detectors.fixtures import (
     brf2_short_snapshot,
     cpm_flat_snapshot,
@@ -1755,18 +1758,6 @@ async def test_comparative_cache_writer_locks_owner_before_universe_during_cutov
         if writer is not None and not writer.done():
             writer.cancel()
             await asyncio.gather(writer,return_exceptions=True)
-
-
-async def _apply_owner_control_grants(database: AsyncEngine) -> None:
-    role_sql=(Path(__file__).resolve().parents[3]/"deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
-    grants="GRANT USAGE ON SCHEMA public TO brc_owner_control;"+role_sql.split("GRANT USAGE ON SCHEMA public TO brc_owner_control;",1)[1]
-    async with database.begin() as conn:
-        role_exists=await conn.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_control')"))
-        if not role_exists:
-            await conn.execute(sa.text("CREATE ROLE brc_owner_control NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT"))
-        for statement in grants.split(";"):
-            if statement.strip():
-                await conn.execute(sa.text(statement))
 
 
 @pytest.mark.asyncio

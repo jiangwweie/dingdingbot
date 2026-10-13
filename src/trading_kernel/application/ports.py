@@ -1450,6 +1450,7 @@ class StrategyRegistryRepository(Protocol):
         include_product_compatibility: bool = True,
         include_exit_profile_authority: bool = True,
         compatible_source_registry_semantic_hash: str | None = None,
+        preserve_existing_exit_authority: bool = False,
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
@@ -2105,6 +2106,12 @@ class InstrumentSelectionRepository(Protocol):
 
     async def resolve_orb_owner_pause_vacuum(self, vacuum: StrategyEntryVacuum, *,
         authority: SelectionSessionAuthority, resolved_at_ms: int) -> None: ...
+
+    async def commit_orb_static_selection_mode(self, *, strategy_group_id: str,expected_control_version: int,
+        activation_authorization_id: str,activated_at_ms: int) -> None: ...
+
+    async def mark_orb_failed_without_previous_authority(self, *, generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,failed_at_ms: int) -> None: ...
 
     async def get_authority_gap_audit(
         self,

@@ -263,3 +263,13 @@ def test_hourly_authority_rejects_legacy_clock_epoch_and_accepts_explicit_new_pa
         SelectionSessionAuthority.model_validate(
             {**payload, "selection_spec_id": "sor-dynamic-selection-v0"}
         )
+
+
+def test_retired_sor_never_gets_entry_from_an_enabled_control():
+    from src.trading_kernel.application.owner_control import strategy_entry_is_enabled
+    from src.trading_kernel.domain.owner_control import (
+        StrategyEntryControl,
+        StrategyEntryState,
+    )
+    control=StrategyEntryControl(strategy_group_id='SOR-001',entry_state=StrategyEntryState.ENABLED,control_version=1,last_event_id='historical:enabled',reason='historical',updated_at_ms=D)
+    assert not strategy_entry_is_enabled(control)

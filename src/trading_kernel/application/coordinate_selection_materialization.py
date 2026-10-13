@@ -59,8 +59,10 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSnapshot,
 )
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
     ORB_SELECTION_SPEC_ID,
     OrbSessionSelectionSnapshot,
+    OrbStaticMaterializationSource,
     daily_authority_expires_at,
     daily_entry_interval_ms,
     daily_event_spec_ids,
@@ -409,6 +411,8 @@ def plan_selection_materialization(
         return MaterializationPlan(disposition=MaterializationDisposition.OWNER_PAUSED)
     if facts.selection_mode is SelectionMode.DISABLED:
         return MaterializationPlan(disposition=MaterializationDisposition.DISABLED)
+    if facts.selection_spec_id==ORB_SELECTION_SPEC_ID and facts.now_ms>=facts.session_start_ms+23*HOUR_MS:
+        return MaterializationPlan(disposition=MaterializationDisposition.WAITING_SELECTION)
 
     first_pending_dynamic = (
         facts.selection_mode is SelectionMode.STATIC_BASELINE
@@ -732,6 +736,12 @@ async def coordinate_selection_materialization_once(
         short_members = await uow.strategy_universes.get_members(
             short_current.universe_version_id
         )
+        if (spec.selection_spec_id==ORB_SELECTION_SPEC_ID and selection_control.pending_selection_mode is SelectionMode.STATIC_BASELINE
+            and selection_control.pending_effective_period_anchor_ms is not None and request.session_start_ms>=selection_control.pending_effective_period_anchor_ms
+            and owner_control.entry_state is StrategyEntryState.ENABLED):
+            return await _coordinate_orb_static_selection(uow=uow,request=request,control=selection_control,
+                pair=UniverseAuthorityPair(long_universe_version_id=long_current.universe_version_id,short_universe_version_id=short_current.universe_version_id),
+                long_members=long_members,short_members=short_members,now_ms=now_ms)
         snapshot = await uow.instrument_selection.get_snapshot_disposition(
             selection_spec_id=spec.selection_spec_id,
             session_start_ms=request.session_start_ms,
@@ -955,6 +965,7 @@ async def coordinate_selection_materialization_once(
                 previous_pair=current_pair,
                 created_at_ms=now_ms,
                 selection_control=selection_control,
+                previous_authority=None if current_authority is None else current_authority.authority,
 )
             materializing = (
                 await uow.instrument_selection.supersede_owner_paused_vacuum_with_generation(
@@ -1079,6 +1090,7 @@ async def coordinate_selection_materialization_once(
                 previous_pair=current_pair,
                 created_at_ms=now_ms,
                 selection_control=selection_control,
+                previous_authority=None if current_authority is None else current_authority.authority,
 )
             materializing = (
                 await uow.instrument_selection.supersede_generation_and_retarget_vacuum(
@@ -1312,6 +1324,7 @@ async def coordinate_selection_materialization_once(
                     previous_pair=current_pair,
                     created_at_ms=now_ms,
                     selection_control=selection_control,
+                    previous_authority=None if current_authority is None else current_authority.authority,
 )
                 await uow.instrument_selection.add_pending_materialization_generation(
                     generation,
@@ -2487,9 +2500,8 @@ async def _complete_pending_authority_gap_audit(
             created_at_ms=completed_at_ms,
             selection_mode=(
                 SelectionMode.STATIC_BASELINE
-                if selection_control.selection_mode is SelectionMode.STATIC_BASELINE
-                and audit.proposed_authority_outcome
-                is AuthorityOutcome.FALLBACK_PREVIOUS
+                if ((selection_control.pending_selection_mode is SelectionMode.STATIC_BASELINE and audit.proposed_authority_outcome is AuthorityOutcome.ACTIVE_NEW)
+                    or (selection_control.selection_mode is SelectionMode.STATIC_BASELINE and audit.proposed_authority_outcome is AuthorityOutcome.FALLBACK_PREVIOUS))
                 else SelectionMode.DYNAMIC_SELECTION
             ),
             reason_code=(
@@ -2609,11 +2621,13 @@ async def _prepare_gap_audit(
     source_entry_vacuum_id: str | None = None,
     source_generation_id: str | None = None,
 ) -> CoordinateSelectionMaterializationResult:
+    control=await uow.instrument_selection.get_selection_control("SOR-1H-001") if spec_id==ORB_SELECTION_SPEC_ID else None
     audit_id = _gap_audit_id(
         spec_id=spec_id,
         session_start_ms=session_start_ms,
         gap_kind=gap_kind,
         proposed_outcome=proposed_outcome,
+        selection_epoch_id=None if control is None else control.selection_epoch_id,source_generation_id=source_generation_id,source_entry_vacuum_id=source_entry_vacuum_id,
     )
     existing = await uow.instrument_selection.get_authority_gap_audit(
         audit_id,
@@ -2656,11 +2670,61 @@ def _gap_audit_id(
     session_start_ms: int,
     gap_kind: AuthorityGapAuditKind,
     proposed_outcome: AuthorityOutcome,
+    selection_epoch_id: str | None=None,
+    source_generation_id: str | None=None,
+    source_entry_vacuum_id: str | None=None,
 ) -> str:
+    if spec_id==ORB_SELECTION_SPEC_ID:
+        return "gap-audit:orb:"+canonical_digest({"spec":spec_id,"session":session_start_ms,"epoch":selection_epoch_id,
+            "generation":source_generation_id,"vacuum":source_entry_vacuum_id,"kind":gap_kind.value,"outcome":proposed_outcome.value})[7:]
     return (
         f"gap-audit:{spec_id}:{session_start_ms}:"
         f"{gap_kind.value}:{proposed_outcome.value}"
     )
+
+
+async def _coordinate_orb_static_selection(*,uow: KernelUnitOfWork,request: CoordinateSelectionMaterializationRequest,
+    control: SelectionControl,pair: UniverseAuthorityPair,long_members: tuple[str,...],short_members: tuple[str,...],now_ms: int) -> CoordinateSelectionMaterializationResult:
+    if now_ms<request.session_start_ms+HOUR_MS:
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NOT_DUE)
+    if control.pending_authorization_id is None or control.rollback_baseline_id is None or control.selection_epoch_id is None:
+        return _blocked('ORB_STATIC_SOURCE_MISSING')
+    baseline=await uow.instrument_selection.get_orb_static_baseline(control.rollback_baseline_id)
+    members=await uow.strategy_universes.get_members(baseline.source_events[0].universe_version_id)
+    source=OrbStaticMaterializationSource(session_start_ms=request.session_start_ms,selection_epoch_id=control.selection_epoch_id,rollback_baseline_id=baseline.rollback_baseline_id)
+    gid='generation:orb:static:'+canonical_digest({'authorization':control.pending_authorization_id,'session':request.session_start_ms})[7:]
+    generation=await uow.instrument_selection.get_materialization_generation(gid,for_update=True)
+    if generation is None:
+        previous=await uow.instrument_selection.get_current_authority_projection(control.selection_spec_id)
+        digest=selected_member_set_digest(members)
+        generation=MaterializationGeneration(materialization_generation_id=gid,selection_spec_id=control.selection_spec_id,
+            strategy_group_id=control.strategy_group_id,strategy_version_id=baseline.strategy_version_id,selection_mode=SelectionMode.STATIC_BASELINE,
+            selection_snapshot_id=None,rollback_baseline_id=baseline.rollback_baseline_id,session_start_ms=request.session_start_ms,
+            previous_long_universe_version_id=pair.long_universe_version_id,previous_short_universe_version_id=pair.short_universe_version_id,
+            desired_member_count=len(members),semantic_digest=canonical_digest({'static_owner':control.pending_authorization_id,'baseline':baseline.semantic_digest,'session':request.session_start_ms,'previous_pair':pair.model_dump()}),
+            lifecycle_state=MaterializationGenerationState.PENDING,fallback_reason_code=None,projection_version=1,created_at_ms=now_ms,desired_at_ms=None,
+            selection_epoch_id=control.selection_epoch_id,selection_control_version=control.control_version,activation_authorization_id=control.pending_authorization_id,previous_entry_authorized=previous is None or not previous.authority.blocks_new_entry,
+            previous_selection_authority_id=None if previous is None else previous.authority.selection_authority_id)
+        targets=tuple(MaterializationTarget(event_spec_id=e,position_side="long" if i==1 else "short",expected_member_set_digest=digest,materialization_order=i)
+            for i,e,side in ((1,ORB_EVENT_SPEC_IDS[0],'long'),(2,ORB_EVENT_SPEC_IDS[1],'short')))
+        await uow.instrument_selection.add_pending_materialization_generation(generation,targets=targets)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,materialization_generation_id=gid)
+    if generation.lifecycle_state is MaterializationGenerationState.PENDING:
+        await uow.instrument_selection.mark_materialization_generation_desired(gid,expected_projection_version=generation.projection_version,desired_at_ms=now_ms)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,materialization_generation_id=gid)
+    vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=control.strategy_group_id,selection_spec_id=control.selection_spec_id,for_update=True)
+    if generation.lifecycle_state is MaterializationGenerationState.DESIRED and vacuum is None:
+        if not await uow.strategy_universes.materialization_slot_available(gid):
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,materialization_generation_id=gid,reason_code='GLOBAL_WARMING_SLOT_BUSY')
+        vacuum=StrategyEntryVacuum(entry_vacuum_id='vacuum:orb:static:'+gid.rsplit(':',1)[1],strategy_group_id=control.strategy_group_id,
+            selection_spec_id=control.selection_spec_id,period_anchor_ms=request.session_start_ms,source_generation_id=gid,state=StrategyEntryVacuumState.DRAINING_ENTRY,
+            fenced_at_ms=now_ms,drained_at_ms=None,resolved_at_ms=None,first_blocker='OWNER_STATIC_ROLLBACK',projection_version=2)
+        await uow.instrument_selection.open_generation_entry_vacuum(vacuum,expected_generation_version=generation.projection_version)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,materialization_generation_id=gid,entry_vacuum_id=vacuum.entry_vacuum_id)
+    if vacuum is not None and vacuum.source_generation_id==gid and vacuum.state is StrategyEntryVacuumState.RECONFIGURING:
+        return await _coordinate_generation_materialization(uow=uow,generation=generation,vacuum=vacuum,snapshot=source,selected_members=members,
+            previous_long_members=long_members,previous_short_members=short_members,now_ms=now_ms,materialization_timeout_ms=_MATERIALIZATION_TIMEOUT_MS)
+    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,materialization_generation_id=gid)
 
 
 async def _coordinate_generation_materialization(
@@ -2668,7 +2732,7 @@ async def _coordinate_generation_materialization(
     uow: KernelUnitOfWork,
     generation: MaterializationGeneration,
     vacuum: StrategyEntryVacuum,
-    snapshot: SelectionSnapshot,
+    snapshot: SelectionSnapshot | OrbStaticMaterializationSource,
     selected_members: tuple[str, ...],
     previous_long_members: tuple[str, ...],
     previous_short_members: tuple[str, ...],
@@ -2690,7 +2754,8 @@ async def _coordinate_generation_materialization(
         spec_id=generation.selection_spec_id,
         session_start_ms=snapshot.session_start_ms,
         gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
-        proposed_outcome=AuthorityOutcome.FALLBACK_PREVIOUS,
+        proposed_outcome=AuthorityOutcome.FALLBACK_PREVIOUS,selection_epoch_id=generation.selection_epoch_id,
+        source_generation_id=generation.materialization_generation_id,source_entry_vacuum_id=vacuum.entry_vacuum_id,
     )
     fallback_previous_audit = await uow.instrument_selection.get_authority_gap_audit(
         fallback_previous_audit_id,
@@ -2743,7 +2808,7 @@ async def _coordinate_generation_materialization(
         runtime_profile_id="tiny-live-v1",
         owner_policy_id=context.owner_policy_id,
         exchange_instrument_ids=selected_members,
-        source_kind="dynamic_selection",
+        source_kind="static_baseline" if generation.selection_mode is SelectionMode.STATIC_BASELINE else "dynamic_selection",
         materialization_generation_id=generation.materialization_generation_id,
         expected_member_set_digest=member_digest,
         installed_at_ms=now_ms,
@@ -2807,7 +2872,7 @@ async def _coordinate_generation_materialization(
         runtime_profile_id="tiny-live-v1",
         owner_policy_id=short_context.owner_policy_id,
         exchange_instrument_ids=selected_members,
-        source_kind="dynamic_selection",
+        source_kind="static_baseline" if generation.selection_mode is SelectionMode.STATIC_BASELINE else "dynamic_selection",
         materialization_generation_id=generation.materialization_generation_id,
         expected_member_set_digest=member_digest,
         installed_at_ms=now_ms,
@@ -2883,19 +2948,29 @@ async def _prepare_generation_fallback_previous(
     uow: KernelUnitOfWork,
     generation: MaterializationGeneration,
     vacuum: StrategyEntryVacuum,
-    snapshot: SelectionSnapshot,
+    snapshot: SelectionSnapshot | OrbStaticMaterializationSource,
     selected_members: tuple[str, ...],
     previous_long_members: tuple[str, ...],
     previous_short_members: tuple[str, ...],
     now_ms: int,
     reason_code: str,
 ) -> CoordinateSelectionMaterializationResult:
+    if generation.selection_spec_id==ORB_SELECTION_SPEC_ID:
+        previous=await uow.instrument_selection.get_current_authority_projection(generation.selection_spec_id)
+        if previous is not None and previous.authority.authority_outcome is AuthorityOutcome.VALID_EMPTY:
+            await _abandon_generation_targets(uow=uow,generation_id=generation.materialization_generation_id,
+                reason_code='no_previous_entry_authority_after_empty',attempted_at_ms=now_ms)
+            await uow.instrument_selection.mark_orb_failed_without_previous_authority(generation=generation,vacuum=vacuum,failed_at_ms=now_ms)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_SELECTION,
+                materialization_generation_id=generation.materialization_generation_id,entry_vacuum_id=vacuum.entry_vacuum_id,
+                reason_code='NO_PREVIOUS_ENTRY_AUTHORITY_AFTER_EMPTY')
     activation_audit = await uow.instrument_selection.get_authority_gap_audit(
         _gap_audit_id(
             spec_id=generation.selection_spec_id,
             session_start_ms=snapshot.session_start_ms,
             gap_kind=AuthorityGapAuditKind.ENTRY_VACUUM,
-            proposed_outcome=AuthorityOutcome.ACTIVE_NEW,
+            proposed_outcome=AuthorityOutcome.ACTIVE_NEW,selection_epoch_id=generation.selection_epoch_id,
+            source_generation_id=generation.materialization_generation_id,source_entry_vacuum_id=vacuum.entry_vacuum_id,
         ),
         for_update=True,
     )
@@ -2992,11 +3067,12 @@ def _daily_control_lineage(
             AuthorityOutcome.VALID_EMPTY,
         }
     )
+    static_activates=control.pending_selection_mode is SelectionMode.STATIC_BASELINE and outcome is AuthorityOutcome.ACTIVE_NEW
     return {
         "selection_epoch_id": control.selection_epoch_id,
-        "selection_control_version": control.control_version + int(activates),
+        "selection_control_version": control.control_version + int(activates or static_activates),
         "activation_authorization_id": control.pending_authorization_id
-        if activates
+        if activates or static_activates
         else None,
     }
 
@@ -3315,21 +3391,18 @@ async def _resolve_staged_generation_target(
         generation is None
         or generation.lifecycle_state is not MaterializationGenerationState.STAGED
         or generation.session_start_ms != audit.session_start_ms
-        or generation.selection_snapshot_id is None
+        or (generation.selection_snapshot_id is None and generation.selection_mode is not SelectionMode.STATIC_BASELINE)
     ):
         return None
-    snapshot = await uow.instrument_selection.get_snapshot_disposition(
-        selection_spec_id=audit.selection_spec_id,
-        session_start_ms=audit.session_start_ms,
-        for_update=True,
-    )
-    if (
-        snapshot is None
-        or snapshot.snapshot.selection_snapshot_id
-        != generation.selection_snapshot_id
-    ):
-        return None
-    member_digest = selected_member_set_digest(snapshot.selected_members)
+    if generation.selection_mode is SelectionMode.STATIC_BASELINE:
+        if generation.rollback_baseline_id is None:return None
+        baseline=await uow.instrument_selection.get_orb_static_baseline(generation.rollback_baseline_id)
+        members=await uow.strategy_universes.get_members(baseline.source_events[0].universe_version_id)
+    else:
+        snapshot=await uow.instrument_selection.get_snapshot_disposition(selection_spec_id=audit.selection_spec_id,session_start_ms=audit.session_start_ms,for_update=True)
+        if snapshot is None or snapshot.snapshot.selection_snapshot_id!=generation.selection_snapshot_id:return None
+        members=snapshot.selected_members
+    member_digest=selected_member_set_digest(members)
     long_context = await uow.strategy_universes.resolve_install_context(
         runtime_profile_id="tiny-live-v1",
         event_id=strategy_contract_for(
@@ -3348,8 +3421,8 @@ async def _resolve_staged_generation_target(
             event_spec_id=daily_event_spec_ids(audit.selection_spec_id)[0],
             runtime_profile_id="tiny-live-v1",
             owner_policy_id=long_context.owner_policy_id,
-            exchange_instrument_ids=snapshot.selected_members,
-            source_kind="dynamic_selection",
+            exchange_instrument_ids=members,
+            source_kind="static_baseline" if generation.selection_mode is SelectionMode.STATIC_BASELINE else "dynamic_selection",
             materialization_generation_id=generation_id,
             expected_member_set_digest=member_digest,
             installed_at_ms=now_ms,
@@ -3361,8 +3434,8 @@ async def _resolve_staged_generation_target(
             event_spec_id=daily_event_spec_ids(audit.selection_spec_id)[1],
             runtime_profile_id="tiny-live-v1",
             owner_policy_id=short_context.owner_policy_id,
-            exchange_instrument_ids=snapshot.selected_members,
-            source_kind="dynamic_selection",
+            exchange_instrument_ids=members,
+            source_kind="static_baseline" if generation.selection_mode is SelectionMode.STATIC_BASELINE else "dynamic_selection",
             materialization_generation_id=generation_id,
             expected_member_set_digest=member_digest,
             installed_at_ms=now_ms,
@@ -3380,7 +3453,7 @@ async def _resolve_staged_generation_target(
             long_universe_version_id=long.universe.universe_version_id,
             short_universe_version_id=short.universe.universe_version_id,
         ),
-        snapshot.selected_members,
+        members,
     )
 
 
@@ -3404,20 +3477,17 @@ async def _resolve_fallback_previous_generation_source(
             MaterializationGenerationState.STAGED,
         }
         or generation.session_start_ms != audit.session_start_ms
-        or generation.selection_snapshot_id is None
+        or (generation.selection_snapshot_id is None and generation.selection_mode is not SelectionMode.STATIC_BASELINE)
     ):
         return None
-    snapshot = await uow.instrument_selection.get_snapshot_disposition(
-        selection_spec_id=audit.selection_spec_id,
-        session_start_ms=audit.session_start_ms,
-        for_update=True,
-    )
-    if (
-        snapshot is None
-        or snapshot.snapshot.selection_snapshot_id
-        != generation.selection_snapshot_id
-    ):
-        return None
+    if generation.selection_mode is SelectionMode.STATIC_BASELINE:
+        if generation.rollback_baseline_id is None:return None
+        baseline=await uow.instrument_selection.get_orb_static_baseline(generation.rollback_baseline_id)
+        members=await uow.strategy_universes.get_members(baseline.source_events[0].universe_version_id)
+    else:
+        snapshot=await uow.instrument_selection.get_snapshot_disposition(selection_spec_id=audit.selection_spec_id,session_start_ms=audit.session_start_ms,for_update=True)
+        if snapshot is None or snapshot.snapshot.selection_snapshot_id!=generation.selection_snapshot_id:return None
+        members=snapshot.selected_members
     return (
         UniverseAuthorityPair(
             long_universe_version_id=(
@@ -3427,7 +3497,7 @@ async def _resolve_fallback_previous_generation_source(
                 generation.previous_short_universe_version_id
             ),
         ),
-        snapshot.selected_members,
+        members,
     )
 
 
@@ -3475,6 +3545,7 @@ def _build_pending_generation(
     previous_pair: UniverseAuthorityPair,
     created_at_ms: int,
     selection_control: SelectionControl | None = None,
+    previous_authority: SelectionSessionAuthority | None = None,
 ) -> tuple[MaterializationGeneration, tuple[MaterializationTarget, ...]]:
     member_digest = selected_member_set_digest(selected_members)
     generation_id = f"generation:{snapshot.selection_spec_id}:{snapshot.session_start_ms}"
@@ -3482,17 +3553,22 @@ def _build_pending_generation(
         generation_id = "generation:orb:" + canonical_digest({"snapshot": snapshot.selection_snapshot_id})[7:]
         if selection_control is None or selection_control.selection_epoch_id != snapshot.selection_epoch_id:
             raise ValueError("hourly ORB Generation requires exact current epoch")
-    payload = {
+    payload: dict[str,object] = {
         "materialization_generation_id": generation_id,
         "selection_snapshot_id": snapshot.selection_snapshot_id,
         "previous_pair": previous_pair.model_dump(mode="json"),
         "selected_member_set_digest": member_digest,
     }
+    if snapshot.selection_spec_id==ORB_SELECTION_SPEC_ID:
+        payload.update({"previous_entry_authorized":previous_authority is None or not previous_authority.blocks_new_entry,
+            "previous_selection_authority_id":None if previous_authority is None else previous_authority.selection_authority_id})
     semantic_digest = "sha256:" + sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     generation = MaterializationGeneration(
         materialization_generation_id=generation_id,
+        previous_entry_authorized=previous_authority is None or not previous_authority.blocks_new_entry,
+        previous_selection_authority_id=None if previous_authority is None else previous_authority.selection_authority_id,
         selection_spec_id=snapshot.selection_spec_id,
         selection_epoch_id=snapshot.selection_epoch_id if isinstance(snapshot, OrbSessionSelectionSnapshot) else None,
         selection_control_version=selection_control.control_version if isinstance(snapshot, OrbSessionSelectionSnapshot) and selection_control is not None else None,

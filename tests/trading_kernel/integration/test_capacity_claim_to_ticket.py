@@ -277,7 +277,7 @@ async def test_selection_owner_pause_uses_scope_policy_blocker_not_lineage_error
     async with issue_engine.begin() as connection:
         await connection.execute(
             sa.update(strategy_entry_controls_current)
-            .where(strategy_entry_controls_current.c.strategy_group_id == "SOR-001")
+            .where(strategy_entry_controls_current.c.strategy_group_id == "SOR-1H-001")
             .values(
                 entry_state="paused",
                 control_version=2,
@@ -402,7 +402,7 @@ async def test_dispatch_authority_drift_rejects_before_any_venue_mutation(
     async with issue_engine.begin() as connection:
         await connection.execute(
             sa.update(strategy_selection_control_current)
-            .where(strategy_selection_control_current.c.strategy_group_id == "SOR-001")
+            .where(strategy_selection_control_current.c.strategy_group_id == "SOR-1H-001")
             .values(
                 selection_mode="disabled",
                 control_version=2,
