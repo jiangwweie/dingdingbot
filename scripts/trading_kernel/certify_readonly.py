@@ -33,6 +33,10 @@ from src.trading_kernel.domain.exit_policy import (
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
+    ORB_STATIC_MEMBERS,
+)
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -1495,8 +1499,16 @@ async def _certify(
             for member_id in member_ids
         }
     )
+    orb_bootstrap_pass = _universe_manifest_matches(
+        [active_by_event[e] for e in ORB_EVENT_SPEC_IDS if e in active_by_event],
+        expected_event_specs=tuple(("SOR-1H-001", e) for e in ORB_EVENT_SPEC_IDS),
+        expected_member_ids=ORB_STATIC_MEMBERS,
+    )
+    expected_active_universes += len(ORB_EVENT_SPEC_IDS)
+    expected_active_scopes += len(ORB_EVENT_SPEC_IDS) * len(ORB_STATIC_MEMBERS)
     universe_bootstrap_pass = (
-        database_integrity_pass
+        orb_bootstrap_pass
+        and database_integrity_pass
         and active_current_count == expected_active_universes
         and active_scope_count == expected_active_scopes
         and warming_scope_count == 0

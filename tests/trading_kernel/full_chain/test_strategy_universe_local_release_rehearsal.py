@@ -12,6 +12,10 @@ from scripts.trading_kernel.promote_entry import promote_entry
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
+    ORB_STATIC_MEMBERS,
+)
 from tests.trading_kernel.support.postgres import (
     SAFE_TEST_DATABASE as SAFE_DATABASE,
 )
@@ -65,17 +69,19 @@ def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry
         assert isinstance(universe, Mapping)
         assert owner_policy["new_entry_submit_enabled"] is True
         assert capabilities["exchange_commands"] is True
-        assert universe["current_count"] == 8
+        assert universe["current_count"] == 10
         assert universe["scope_lifecycle_counts"] == {
-            "active": 58,
+            "active": 72,
             "warming": 0,
             "retired": 0,
         }
-        assert universe_identities == {
+        expected_identities = {
             event_spec_id: len(member_ids)
             for event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
             for _event_id, event_spec_id in event_specs
         }
+        expected_identities.update({e: len(ORB_STATIC_MEMBERS) for e in ORB_EVENT_SPEC_IDS})
+        assert universe_identities == expected_identities
         assert backend.exchange_mutations == []
         assert backend.calls == [
             "preflight",

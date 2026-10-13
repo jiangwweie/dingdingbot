@@ -31,18 +31,18 @@ disposable PostgreSQL演练，正式部署和策略enable未执行。此前Gener
 1. **已有能力：**旧SOR Selector、数值Golden、双边物化、Session Audit、previous recovery、
    Static rollback、四常驻Worker、Ticket/Command/保护/结算链均存在，可从当前代码复用。
 2. **历史证据：**旧SOR已实际完成Dynamic pair activation和真实Ticket交易；证据与范围见
-   设计§2。新1h功能仍不存在，不能借历史成功宣称新功能PASS。
+   设计§2。新1h功能已有本地实现，不能借历史成功宣称新功能生产PASS。
 3. **实现基线：**从[当前运行路线图](../../current/MAIN_CONTROL_ROADMAP.md)所指exact生产
    Kernel/Schema及已完成修复衔接，执行时刷新git、PG、systemd/exchange；不得把主目录
    较旧dev直接当runtime source。volatile版本仅在该路线图记录。
 4. 文档当前在独立`codex/sor-1h-design`工作树；代码工作使用聚焦`codex/*`分支，保留主
    工作区与其他产品线。Registry、shared Selection及schema共享文件顺序修改，不并行抢写。
-5. **最早缺口：**新typed strategy/kind/timing和精确Registry/PG proof尚未定义。先解决此
-   边界，再接Detector、真实来源、Authority和runtime，不先造直接下单demo。
+5. **当前缺口：**本地typed identity、Registry/PG proof、来源、Authority与runtime已接通；
+   当前剩余正式发布认证，生产部署和激活未开始。
 
 **分支基线规则：**代码开始前验证本分支包含当时exact production commit，检查差异文件。
 dev/main若落后，不为了名字是integration就丢弃生产修复；生产若又前进，则先纳入最新
-已认证变更再实施。设计分支目前只有文档任务，不声称代码已与未来生产版本自动同步。
+已认证变更再实施。当前聚焦分支已包含实施时的生产基线；部署前仍需刷新实际生产版本。
 
 ## 3. 依赖与交付阶段
 
@@ -335,8 +335,8 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 | 阶段 | 实际证据 | 当前状态 |
 | --- | --- | --- |
 | 文档 | 修订设计、12张依赖卡、引用与diff检查、84项architecture检查通过 | COMPLETE_DOCUMENTATION_ONLY |
-| 代码/DB本地 | 身份/时钟、多空Detector、共用数值、Spec/Snapshot PG已进行定向RED/GREEN；完整链未完成 | IN_PROGRESS |
-| 发布认证 | H1-11 exact R4/R2/R1 | NOT_STARTED |
+| 代码/DB本地 | 身份/时钟、多空Detector、共用数值、Spec/Snapshot、恢复与完整交易链已有本地证据 | LOCAL_IMPLEMENTED |
+| 发布认证 | H1-11 exact R4/R2/R1；首轮R4失败已定位并修复，等待最终候选认证 | IN_PROGRESS |
 | Tokyo部署 | H1-12 hard gates、正式deploy、paused基线prepare | NOT_STARTED |
 | 新策略启用/双边接管 | 真实Owner控制、PG双current＋Authority | NOT_STARTED |
 | 自然交易终态 | 实际Ticket保护、flat/settlement/review、释放证据 | NOT_STARTED |
@@ -425,3 +425,14 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - pair-only bootstrap通过正式certification/warming producer，zero Command；仓库全静态Ruff/Mypy（195文件）及Fast1664通过，前端相关19 tests通过。
 - 本次冻结后执行official exact R4 / R2 / R1。任何失败都修复后重新冻结；不得把定向数字视为最终认证。
 - H1-12未开始。没有部署、生产升级、策略启用或exchange写。最终结果必须与生产自然Dynamic/交易证据分开声明。
+
+
+### 正式认证失败收敛（2026-10-14）
+
+- 首轮R4 Integration返回91 failed / 2 errors，候选未通过。按根因修复，不将该次部分通过记录解释为认证通过。
+- 来源Registry/Policy/shape按exact来源版本，旧0003/0004/0008 inventory排除0011新表；0009历史capacity安装和同schemaidentity不隐含新增策略。
+- 修复readonly bootstrap核验，将新独立双Event/七成员纳入初装清单，同时保留原批次认证、Registry/Policy/seed、flat和Ownerproof守卫。
+- 当前ENTRY fixture使用SOR-1H；历史SOR的bounded chain/unknown birth/Owner pause测试仍保留只读语义，禁止新ENTRY。原旧SOR dispatch-acceptance测试删除，其运行中Authority变更拒绝由Generic真实rebase/dispatch回归及新SOR完整链覆盖。
+- 新SOR Dynamic/Static授权页面覆盖未知响应同意图重试、冻结baseline/epoch及409阻断；公共promotion harness复用，删除test内重复实现。
+- 组合回放采用SOR-1H-SHORT小时Session，保留三Ticket/资金/方向容量断言；新LONG/SHORT Static/Dynamic正式producer到terminalReview链无真实venue写。
+- 定向修复已GREEN；最终exactcommit认证仍待执行。生产未改动，H1-12仍NOT_STARTED。

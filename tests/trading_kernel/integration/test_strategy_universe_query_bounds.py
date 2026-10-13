@@ -145,7 +145,7 @@ async def test_observation_selector_claims_one_from_real_70_scope_lifecycle(
     contracts = tuple(
         contract
         for contract in registered_strategy_contracts()
-        if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+        if contract.strategy_group_id not in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
     )
     assert len(contracts) == 6
     for contract in contracts:

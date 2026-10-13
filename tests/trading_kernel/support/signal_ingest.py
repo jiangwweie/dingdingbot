@@ -20,6 +20,7 @@ from src.trading_kernel.domain.signal import (
     StrategySignal,
     build_signal_fact_digest,
 )
+from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.pg_models import (
     facts_current,
     instrument_certification_current,
@@ -52,6 +53,7 @@ def signal(
     exchange_instrument_id: str = "binance-usdm:BTCUSDT:perpetual",
     occurred_at_ms: int = 1_000,
     selection_authority_id: str | None = None,
+    hourly: bool = False,
 ) -> StrategySignal:
     event_spec_id = (
         "event_spec:SOR-001:SOR-LONG:v4"
@@ -62,17 +64,20 @@ def signal(
         position_side=position_side,
         observed_at_ms=occurred_at_ms,
         valid_until_ms=occurred_at_ms + 9_000,
+        hourly=hourly,
     )
+    if hourly:
+        event_spec_id = f"event_spec:SOR-1H-001:SOR-1H-{position_side.upper()}:v1"
     return StrategySignal(
         signal_event_id=signal_event_id,
         exposure_episode_id=f"episode:{signal_event_id}",
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
-        strategy_group_id="SOR-001",
-        strategy_version_id="sgv:SOR-001:v4",
+        strategy_group_id="SOR-1H-001" if hourly else "SOR-001",
+        strategy_version_id="sgv:SOR-1H-001:v1" if hourly else "sgv:SOR-001:v4",
         event_spec_id=event_spec_id,
         universe_version_id="universe:sor-long:4",
-        universe_semantic_digest="sha256:" + "a" * 64,
+        universe_semantic_digest=hourly_universe_digest(position_side, exchange_instrument_id) if hourly else "sha256:" + "a" * 64,
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
         fact_digest=build_signal_fact_digest(facts),
@@ -89,6 +94,7 @@ def signal_facts(
     position_side: Literal["long", "short"],
     observed_at_ms: int = 1_000,
     valid_until_ms: int = 10_000,
+    hourly: bool = False,
 ) -> tuple[SignalFactSnapshot, ...]:
     values: tuple[tuple[str, str, JsonValue, bool], ...]
     if position_side == "long":
@@ -129,6 +135,9 @@ def signal_facts(
             ("fact:session_start_ms_v3:v3", "identity_reference", "1000", True),
             ("fact:session_end_ms_v3:v3", "lifecycle_reference", "86401000", True),
         )
+    if hourly:
+        values = tuple((name.replace("_v3:v3", "_1h_v1:v1"), role, value, satisfied)
+            for name, role, value, satisfied in values) + (("fact:entry_hour_eligible_1h_v1:v1", "condition", True, True),)
     return tuple(
         SignalFactSnapshot(
             fact_definition_id=fact_definition_id,
@@ -177,7 +186,7 @@ def admission_snapshot(
     )
 
 
-async def seed_runtime_authority(engine: AsyncEngine) -> None:
+async def seed_runtime_authority(engine: AsyncEngine, *, hourly: bool = False) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
     brackets = (
@@ -199,6 +208,10 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
         entry_session_policy="continuous",
         status="candidate",
     )
+    group = "SOR-1H-001" if hourly else "SOR-001"
+    version = "sgv:SOR-1H-001:v1" if hourly else "sgv:SOR-001:v4"
+    long_event = "event_spec:SOR-1H-001:SOR-1H-LONG:v1" if hourly else "event_spec:SOR-001:SOR-LONG:v4"
+    short_event = "event_spec:SOR-1H-001:SOR-1H-SHORT:v1" if hourly else "event_spec:SOR-001:SOR-SHORT:v4"
     async with engine.begin() as connection:
         for table, values, keys in (
             (
@@ -219,7 +232,7 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
                 strategy_entry_control_events,
                 {
                     "strategy_entry_control_event_id": "strategy-control-event:seed:SOR-001",
-                    "strategy_group_id": "SOR-001",
+                    "strategy_group_id": group,
                     "control_version": 1,
                     "operation": "resume",
                     "target_state": "enabled",
@@ -233,7 +246,7 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
             (
                 strategy_entry_controls_current,
                 {
-                    "strategy_group_id": "SOR-001",
+                    "strategy_group_id": group,
                     "entry_state": "enabled",
                     "control_version": 1,
                     "last_event_id": "strategy-control-event:seed:SOR-001",
@@ -270,8 +283,8 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
         await connection.execute(
             pg_insert(strategy_universe_versions).values(
                 universe_version_id="universe:sor-long:4",
-                strategy_group_id="SOR-001",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                strategy_group_id=group,
+                event_spec_id=long_event,
                 universe_version=4,
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -287,7 +300,7 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             pg_insert(strategy_universe_current).values(
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                event_spec_id=long_event,
                 universe_version_id="universe:sor-long:4",
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -343,11 +356,11 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
                 scope={
                     "event_runtime_profiles": [
                         {
-                            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                            "event_spec_id": long_event,
                             "runtime_profile_id": "tiny-live-v1",
                         },
                         {
-                            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4",
+                            "event_spec_id": short_event,
                             "runtime_profile_id": "tiny-live-v1",
                         },
                     ]
@@ -389,9 +402,9 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
         await connection.execute(
             pg_insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
-                strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v4",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                strategy_group_id=group,
+                strategy_version_id=version,
+                event_spec_id=long_event,
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -409,7 +422,7 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
                 updated_at_ms=1_000,
             )
         )
-        for fact in signal_facts(position_side="long"):
+        for fact in signal_facts(position_side="long", hourly=hourly):
             await connection.execute(
                 pg_insert(facts_current).values(
                     fact_current_id=f"fact-current:scope-sor-btc-long:{fact.fact_definition_id}",
@@ -432,3 +445,17 @@ async def seed_runtime_authority(engine: AsyncEngine) -> None:
                 updated_at_ms=1_000,
             )
         )
+
+    if hourly:
+        import sqlalchemy as sa
+        digest = hourly_universe_digest("long", "binance-usdm:BTCUSDT:perpetual")
+        async with engine.begin() as c:
+            await c.execute(sa.update(strategy_universe_versions).values(semantic_digest=digest))
+            await c.execute(sa.update(strategy_universe_current).values(semantic_digest=digest))
+            await c.execute(sa.update(runtime_scopes_current).values(universe_semantic_digest=digest))
+
+
+def hourly_universe_digest(side: str, instrument_id: str) -> str:
+    return build_strategy_universe(universe_version_id="hourly:fixture", strategy_group_id="SOR-1H-001",
+        event_spec_id=f"event_spec:SOR-1H-001:SOR-1H-{side.upper()}:v1", universe_version=4,
+        exchange_instrument_ids=(instrument_id,), installed_at_ms=900).semantic_digest

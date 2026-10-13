@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from decimal import Decimal
+from functools import partial
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -67,6 +68,9 @@ from tests.trading_kernel.support.signal_ingest import (
 from tests.trading_kernel.support.signal_ingest import (
     signal as _runtime_signal,
 )
+
+_seed_runtime_authority = partial(_seed_runtime_authority, hourly=True)
+_runtime_signal = partial(_runtime_signal, hourly=True)
 
 
 @pytest_asyncio.fixture

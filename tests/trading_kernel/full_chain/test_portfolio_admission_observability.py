@@ -150,7 +150,7 @@ DOGE = "binance-usdm:DOGEUSDT:perpetual"
 REPLAY_WALLET_BALANCE = Decimal(1_000_000)
 TWO_HOURS_MS = 2 * 3_600_000
 SEVEN_HOURS_MS = 7 * 3_600_000
-NINE_HOURS_FIFTEEN_MINUTES_MS = 9 * 3_600_000 + 15 * 60_000
+NINE_HOURS_MS = 9 * 3_600_000
 CERTIFIED_0002_REGISTRY_MANIFEST_HASH = str(
     importlib.import_module(
         "migrations.trading_kernel.versions.0003_portfolio_admission_observability"
@@ -291,6 +291,11 @@ class RecordingReplayMarketSource:
         request: ClosedCandleRequest,
     ) -> tuple[ClosedCandle, ...]:
         self.calls.append(request)
+        if request.exchange_instrument_id == BTC and request.timeframe == "1h":
+            day = request.closed_at_ms // 86_400_000 * 86_400_000
+            times = range(day, request.closed_at_ms, 3_600_000)
+            return tuple(candle.model_copy(update={"open_time_ms":t,"close_time_ms":t+3_600_000})
+                for t,candle in ((t,self._sor_trigger if t+3_600_000==request.closed_at_ms else self._sor_filler if t>day else self._sor_opening[0]) for t in times))
         if request.exchange_instrument_id == BTC and request.timeframe == "15m":
             return self._sor_session_candles(request.closed_at_ms)
         return tuple(
@@ -472,14 +477,14 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         replay_engine,
         brf2_positions,
         exchange_instrument_id=BTC,
-        now_ms=NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS - 1,
+        now_ms=NOW_MS + NINE_HOURS_MS - 1,
     )
     sor = await _observe_and_admit(
         replay_engine,
         source,
         venue,
         runtime_scope_id=await _active_scope_id(replay_engine, BTC),
-        offset_ms=NINE_HOURS_FIFTEEN_MINUTES_MS,
+        offset_ms=NINE_HOURS_MS,
     )
 
     assert bnb[0] is ObservationStatus.SIGNAL_CREATED
@@ -514,7 +519,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     )
     assert sor_signal is not None
     sor_session_start_ms = (
-        (expected_sor_time := NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS)
+        (expected_sor_time := NOW_MS + NINE_HOURS_MS)
         // 86_400_000
         * 86_400_000
     )
@@ -522,12 +527,12 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     assert next(
         value
         for fact_id, value in sor_fact_values.items()
-        if "session_start_ms_v3" in fact_id
+        if "session_start_ms_1h_v1" in fact_id
     ) == str(sor_session_start_ms)
     assert next(
         value
         for fact_id, value in sor_fact_values.items()
-        if "session_end_ms_v3" in fact_id
+        if "session_end_ms_1h_v1" in fact_id
     ) == str(sor_session_start_ms + 86_400_000)
     assert sor_signal.occurred_at_ms == expected_sor_time
     async with replay_engine.connect() as connection:
@@ -633,7 +638,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
         NOW_MS,
         NOW_MS + TWO_HOURS_MS,
         NOW_MS + SEVEN_HOURS_MS,
-        NOW_MS + NINE_HOURS_FIFTEEN_MINUTES_MS,
+        NOW_MS + NINE_HOURS_MS,
     )
     expected_decision_times = tuple(value + 1_000 for value in expected_signal_times)
     assert tuple(row["exchange_instrument_id"] for row in signal_rows) == (
@@ -1060,7 +1065,7 @@ async def _seed_replay_runtime(
     for event_id, members in (
         ("CPM-LONG", (BNB, DOGE)),
         ("BRF2-SHORT", (ETH,)),
-        ("SOR-SHORT", (BTC,)),
+        ("SOR-1H-SHORT", (BTC,)),
     ):
         await _install_and_activate(
             engine,
@@ -1070,6 +1075,8 @@ async def _seed_replay_runtime(
         )
 
     async with PostgresKernelUnitOfWork(engine) as uow:
+        await set_strategy_entry_state(uow,strategy_group_id="SOR-1H-001",target_state=StrategyEntryState.ENABLED,
+            request=ControlMutationRequest(expected_version=1,reason="hourly replay",idempotency_key="replay:hourly:resume",owner_identity="owner",now_ms=NOW_MS-2),authentication_strength="totp_step_up")
         await arm_acceptance_policy(
             uow,
             ArmAcceptancePolicyRequest(armed_at_ms=NOW_MS - 1),

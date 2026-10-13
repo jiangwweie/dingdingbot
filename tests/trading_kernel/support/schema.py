@@ -28,6 +28,7 @@ EXPECTED_KERNEL_TABLES = frozenset(
         "brc_instrument_selection_spec_events",
         "brc_instrument_selection_spec_members",
         "brc_instrument_selection_specs",
+        "brc_orb_session_selection_specs_v1",
         "brc_instrument_certification_batch_members",
         "brc_instrument_certification_batches",
         "brc_instrument_certification_current",

@@ -140,7 +140,7 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
             mappings = policies["policy-main"]["scope"][
                 "event_runtime_profiles"
             ]
-            assert len(mappings) == 8
+            assert len(mappings) == 10
             assert {
                 item["runtime_profile_id"] for item in mappings
             } == {"tiny-live-v1", "tradfi-equity-usdm-v1"}
@@ -155,7 +155,8 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                     )
                 ).mappings()
             }
-            assert len(controls) == 6
+            assert len(controls) == 7
+            assert controls["SOR-1H-001"]["entry_state"] == "paused"
             assert controls["SOR-001"]["entry_state"] == "paused"
             assert controls["SOR-001"]["control_version"] == 2
             assert controls["SOR-US-EQ-PERP-001"]["entry_state"] == "paused"

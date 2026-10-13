@@ -116,17 +116,17 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         second = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001)
         event_ids = await uow.strategy_registry.list_current_event_ids()
 
-    assert first.inserted_strategy_group_count == 6
-    assert first.inserted_strategy_version_count == 6
-    assert first.inserted_event_count == 8
-    assert first.inserted_product_compatibility_count == 8
+    assert first.inserted_strategy_group_count == 7
+    assert first.inserted_strategy_version_count == 7
+    assert first.inserted_event_count == 10
+    assert first.inserted_product_compatibility_count == 10
     assert first.inserted_exit_policy_count == 0
     assert first.inserted_exit_profile_count == 8
-    assert first.inserted_exit_binding_count == 8
-    assert first.inserted_exit_binding_current_count == 8
-    assert first.inserted_exit_binding_event_count == 8
-    assert first.inserted_fact_definition_count == 29
-    assert first.inserted_event_fact_count == 39
+    assert first.inserted_exit_binding_count == 10
+    assert first.inserted_exit_binding_current_count == 10
+    assert first.inserted_exit_binding_event_count == 10
+    assert first.inserted_fact_definition_count == 37
+    assert first.inserted_event_fact_count == 53
     assert "inserted_instrument_count" not in type(first).model_fields
     assert "inserted_candidate_scope_count" not in type(first).model_fields
     assert second.total_inserted_count == 0
@@ -135,6 +135,8 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
         "CPM-LONG",
         "MI-LONG",
         "MPG-LONG",
+        "SOR-1H-LONG",
+        "SOR-1H-SHORT",
         "SOR-LONG",
         "SOR-SHORT",
         "SOR-US-LONG-15M",
@@ -166,6 +168,7 @@ async def test_strategy_seed_is_exact_idempotent_and_does_not_grant_live_authori
             "MI-001": "sgv:MI-001:v3",
             "MPG-001": "sgv:MPG-001:v3",
             "SOR-001": "sgv:SOR-001:v4",
+            "SOR-1H-001": "sgv:SOR-1H-001:v1",
             "SOR-US-EQ-PERP-001": "sgv:SOR-US-EQ-PERP-001:v1",
         }
 
@@ -307,9 +310,9 @@ async def test_strategy_seed_monotonically_retires_source_sor_v3_and_activates_v
         ("exit-policy:SOR-001:SOR-LONG:sor-v3-right-tail-v1", "active"),
         ("exit-policy:SOR-001:SOR-SHORT:sor-v3-right-tail-v1", "active"),
     ]
-    assert first.inserted_strategy_group_count == 5
-    assert first.inserted_strategy_version_count == 6
-    assert first.inserted_event_count == 8
+    assert first.inserted_strategy_group_count == 6
+    assert first.inserted_strategy_version_count == 7
+    assert first.inserted_event_count == 10
     assert second.total_inserted_count == 0
 
 
@@ -384,13 +387,13 @@ async def test_registry_seed_installs_exit_profile_catalog_and_initial_bindings(
     assert len(profiles) == 8
     assert all(row.profile_schema_version == "exit_profile_v1" for row in profiles)
     assert all(row.event_spec_id is None for row in profiles)
-    assert len(bindings) == 8
-    assert len(current) == 8
+    assert len(bindings) == 10
+    assert len(current) == 10
     assert {row.projection_version for row in current} == {1}
     assert first.inserted_exit_profile_count == 8
-    assert first.inserted_exit_binding_count == 8
-    assert first.inserted_exit_binding_current_count == 8
-    assert first.inserted_exit_binding_event_count == 8
+    assert first.inserted_exit_binding_count == 10
+    assert first.inserted_exit_binding_current_count == 10
+    assert first.inserted_exit_binding_event_count == 10
     assert second.total_inserted_count == 0
 
 

@@ -661,6 +661,7 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
     expected={"resident" ,"resident:selection","resident:materialization"}
     for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
         expected.update(f"resident:{plane}:{group}" for plane in ("selection","materialization","facts"))
+    expected.update(f"resident:{plane}:SOR-1H-001" for plane in ("selection", "materialization", "facts"))
     for _ in range(2):
         process=await asyncio.create_subprocess_exec(sys.executable,str(script),
             "--market-source-factory","tests.trading_kernel.support.resident_no_network:NoNetworkMarket",
@@ -678,6 +679,8 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
                     result=json.loads(line)
                     if result["component_id"]=="resident:selection" and result["status"]=="blocked":
                         assert result["reason_code"]=="SELECTION_CONTROL_MISSING_OR_DRIFTED",result
+                    elif result["component_id"] == "resident:selection:SOR-1H-001":
+                        assert result["status"] == "not_installed" and result["reason_code"] == "ORB_CONTROL_NOT_INSTALLED", result
                     else:
                         assert result["status"] in {"not_due","no_work"},result
                     seen.add(result["component_id"])

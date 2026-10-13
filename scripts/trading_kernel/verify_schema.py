@@ -793,10 +793,10 @@ async def _verify_dynamic_selection_source(
             migration_gate = await _migration_gate(connection)
             manifest = await _dynamic_selection_preservation_manifest(connection)
             runtime_identity = await _runtime_identity(connection)
-            registry_identity = await _target_registry_identity(connection)
+            registry_identity = await _target_registry_identity(connection, contracts=_registry_contracts_for_revision(source_revision))
             owner_policy = await _current_owner_policy(connection)
             runtime_profile = await _current_runtime_profile(connection)
-            controls = await _target_strategy_controls(connection)
+            controls = await _target_strategy_controls(connection, contracts=_registry_contracts_for_revision(source_revision))
             capabilities = await _current_capabilities(
                 connection,
                 runtime_identity=runtime_identity,
@@ -863,10 +863,10 @@ async def _verify_exit_profile_source(
             migration_gate = await _migration_gate(connection)
             manifest = await _exit_profile_source_preservation_manifest(connection)
             runtime_identity = await _runtime_identity(connection)
-            registry_identity = await _target_registry_identity(connection)
+            registry_identity = await _target_registry_identity(connection, contracts=_registry_contracts_for_revision(source_revision))
             owner_policy = await _current_owner_policy(connection)
             runtime_profile = await _current_runtime_profile(connection)
-            controls = await _target_strategy_controls(connection)
+            controls = await _target_strategy_controls(connection, contracts=_registry_contracts_for_revision(source_revision))
             capabilities = await _current_capabilities(
                 connection,
                 runtime_identity=runtime_identity,
@@ -1632,14 +1632,15 @@ _CAPACITY_V0_ADDED_COLUMNS = {
 def _source_0008_table_columns() -> dict[str, tuple[str, ...]]:
     return {table.name: tuple(column.name for column in table.c
         if column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ()))
-        for table in sorted(metadata.tables.values(), key=lambda item: item.name)}
+        for table in sorted(metadata.tables.values(), key=lambda item: item.name)
+        if table.name != "brc_orb_session_selection_specs_v1"}
 
 
 def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
     return {
         table.name: _source_columns_before_dynamic_selection(table)
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
-        if table.name
+        if table.name != "brc_orb_session_selection_specs_v1" and table.name
         not in _OWNER_CONTROL_TABLES
         | _TRADFI_INSTRUMENT_TABLES
         | _DYNAMIC_SELECTION_TABLES
@@ -1652,7 +1653,7 @@ def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
     return {
         table.name: _source_columns_before_dynamic_selection(table)
         for table in sorted(metadata.tables.values(), key=lambda item: item.name)
-        if table.name
+        if table.name != "brc_orb_session_selection_specs_v1" and table.name
         not in _TRADFI_INSTRUMENT_TABLES
         | _DYNAMIC_SELECTION_TABLES
         | _EXIT_PROFILE_TABLES

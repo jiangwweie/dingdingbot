@@ -335,7 +335,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
                 sa.update(facts_current)
                 .where(
                     facts_current.c.fact_definition_id
-                    == "fact:breakout_edge_crossed_v3:v3"
+                    == "fact:breakout_edge_crossed_1h_v1:v1"
                 )
                 .values(value=False, satisfied=False)
             )
@@ -2081,28 +2081,29 @@ def _signal_facts(
             ],
             ...,
         ] = (
-            ("fact:opening_range_defined_v3:v3", "condition", True, True),
-            ("fact:breakout_edge_crossed_v3:v3", "condition", True, True),
+            ("fact:opening_range_defined_1h_v1:v1", "condition", True, True),
+            ("fact:entry_hour_eligible_1h_v1:v1", "condition", True, True),
+            ("fact:breakout_edge_crossed_1h_v1:v1", "condition", True, True),
             (
-                "fact:opening_range_high_reference_v3:v3",
+                "fact:opening_range_high_reference_1h_v1:v1",
                 "lifecycle_reference",
                 "10050.0",
                 True,
             ),
             (
-                "fact:opening_range_low_reference_v3:v3",
+                "fact:opening_range_low_reference_1h_v1:v1",
                 "protection_reference",
                 "9900.0",
                 True,
             ),
             (
-                "fact:session_start_ms_v3:v3",
+                "fact:session_start_ms_1h_v1:v1",
                 "identity_reference",
                 "1000",
                 True,
             ),
             (
-                "fact:session_end_ms_v3:v3",
+                "fact:session_end_ms_1h_v1:v1",
                 "lifecycle_reference",
                 "86401000",
                 True,
@@ -2110,28 +2111,29 @@ def _signal_facts(
         )
     else:
         values = (
-            ("fact:opening_range_defined_v3:v3", "condition", True, True),
-            ("fact:breakdown_edge_crossed_v3:v3", "condition", True, True),
+            ("fact:opening_range_defined_1h_v1:v1", "condition", True, True),
+            ("fact:entry_hour_eligible_1h_v1:v1", "condition", True, True),
+            ("fact:breakdown_edge_crossed_1h_v1:v1", "condition", True, True),
             (
-                "fact:opening_range_low_reference_v3:v3",
+                "fact:opening_range_low_reference_1h_v1:v1",
                 "lifecycle_reference",
                 "9950.0",
                 True,
             ),
             (
-                "fact:opening_range_high_reference_v3:v3",
+                "fact:opening_range_high_reference_1h_v1:v1",
                 "protection_reference",
                 "10100.0",
                 True,
             ),
             (
-                "fact:session_start_ms_v3:v3",
+                "fact:session_start_ms_1h_v1:v1",
                 "identity_reference",
                 "1000",
                 True,
             ),
             (
-                "fact:session_end_ms_v3:v3",
+                "fact:session_end_ms_1h_v1:v1",
                 "lifecycle_reference",
                 "86401000",
                 True,

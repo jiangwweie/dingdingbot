@@ -591,7 +591,7 @@ async def deploy_compatible_upgrade_identity(
     )
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
-    source_event_spec_ids = _allowed_event_spec_ids(_crypto_strategy_contracts())
+    source_event_spec_ids = _allowed_event_spec_ids(_contracts_for_schema(source_schema_revision))
     current_policy_version = int(str(current_policy["policy_version"]))
     expected_policy_version = (
         4
@@ -629,7 +629,7 @@ async def deploy_compatible_upgrade_identity(
         )
 
     compatible_registry_hash = build_registry_semantic_hash(
-        _crypto_strategy_contracts()
+        _contracts_for_schema(source_schema_revision)
     )
     registry = await seed_strategy_registry(
         uow,
@@ -657,7 +657,7 @@ async def deploy_compatible_upgrade_identity(
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
-            strategy_group_ids=("SOR-US-EQ-PERP-001",),
+            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001") if request.schema_revision == "0011_orb_session_1h_v1" else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
         )
     if source_entry_enabled:
@@ -888,8 +888,9 @@ async def _deploy_capability_compatible_identity(
     )
     current_policy = dict(await _lock_policy(connection))
     orb_upgrade=request.schema_revision=='0011_orb_session_1h_v1' and source_schema_revision!='0011_orb_session_1h_v1'
-    target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
-    source_contracts=tuple(c for c in registered_strategy_contracts() if c.strategy_group_id!='SOR-1H-001') if orb_upgrade else registered_strategy_contracts()
+    target_contracts = _contracts_for_schema(request.schema_revision)
+    target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
+    source_contracts = _contracts_for_schema(source_schema_revision)
     source_event_spec_ids=_allowed_event_spec_ids(source_contracts)
     source_entry_enabled = bool(current_policy["new_entry_submit_enabled"])
     source_policy_updated_at_ms = int(str(current_policy["updated_at_ms"]))
@@ -939,6 +940,7 @@ async def _deploy_capability_compatible_identity(
     registry = await seed_strategy_registry(
         uow,
         seeded_at_ms=request.seeded_at_ms,
+        contracts=target_contracts,
         compatible_source_registry_semantic_hash=build_registry_semantic_hash(source_contracts) if orb_upgrade else None,
         preserve_existing_exit_authority=orb_upgrade,
         include_exit_profile_authority=(
@@ -980,7 +982,7 @@ async def _deploy_capability_compatible_identity(
         connection,
         strategy_entry_controls_current,
         "strategy_group_id",
-        {contract.strategy_group_id for contract in registered_strategy_contracts()},
+        {contract.strategy_group_id for contract in target_contracts},
     )
     capabilities = (
         (
@@ -1178,7 +1180,7 @@ async def _deploy_runtime_identity(
             recovery_ticket_id=recovery_ticket_id,
         )
     expected_registry_hash = build_registry_semantic_hash(
-        registered_strategy_contracts()
+        _contracts_for_schema(request.schema_revision)
     )
     expected_seed_identity = build_runtime_seed_identity(request)
     metadata_rows = {
@@ -1414,7 +1416,7 @@ def _crypto_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
 
 
 def _contracts_for_schema(
-    schema_revision: TradingKernelSchemaRevision,
+    schema_revision: str,
 ) -> tuple[RegisteredStrategyContract, ...]:
     contracts = registered_strategy_contracts() if _schema_includes_tradfi(schema_revision) else _crypto_strategy_contracts()
     return contracts if schema_revision=="0011_orb_session_1h_v1" else tuple(
@@ -1721,7 +1723,7 @@ async def _require_capacity_release_source(
         policy,
         version=int(policy["policy_version"]),
         new_entry_submit_enabled=False,
-        allowed_event_spec_ids=_allowed_event_spec_ids(registered_strategy_contracts()),
+        allowed_event_spec_ids=_allowed_event_spec_ids(_contracts_for_schema("0009_capacity_policy_v0")),
     ):
         raise RuntimeAuthorityTransitionRefused(
             "Capacity release requires exact frozen source Policy"
