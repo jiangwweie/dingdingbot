@@ -105,3 +105,22 @@ authorize migration, restart, strategy activation or risk expansion.
 Prior measured states and superseded task claims are preserved in
 [historical roadmap](../archive/2026-10-12-main-control-roadmap-history.md).
 Historical PASS belongs only to its exact candidate, command set and scope.
+
+## Dynamic Selection repair — 2026-10-13 local candidate
+
+Production remains on the verified identity above until a separate deployment
+postflight is recorded. Readonly PG/journal inspection confirmed all four first
+Dynamic intents were pending and Selection jobs failed with the raw timestamp
+parser mismatch. CCXT quotes JSON integer timestamps; the parser required int.
+
+The focused repair normalizes exact integer timestamps, preserves the original
+Owner epoch/earliest activation boundary across failed Selection and pre-fence
+expiry, and retains that intent after protected Static recovery. Current period
+freshness, current-close/rebase, leases, Owner pause and atomic activation gates
+remain mandatory. The function-only 0009 -> 0010 migration preserves all source
+rows and requires stopped Writers, flat PG/exchange and zero residual orders.
+
+Owner authorized repair and server deployment, but asked to be informed before
+any required flatten. At the 08:52 readonly gate there was one DOGEUSDT short
+Ticket and exchange exposure/order domain count1. No flatten was dispatched.
+Release certification and production cutover are not yet claimed complete.

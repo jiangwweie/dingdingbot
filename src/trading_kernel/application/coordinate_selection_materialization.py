@@ -1503,7 +1503,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.DISABLED)
             if control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not (
                 control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-                and control.pending_effective_period_anchor_ms == snapshot.feature_cutoff_at_ms
+                and control.pending_effective_period_anchor_ms is not None
+                and control.pending_effective_period_anchor_ms <= snapshot.feature_cutoff_at_ms
             ):
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.STATIC_BASELINE)
             if control.selection_epoch_id != snapshot.selection_epoch_id:
@@ -2000,7 +2001,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 control = await uow.instrument_selection.get_selection_control(generation.strategy_group_id,for_update=True)
                 first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
                     control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-                    and control.pending_effective_period_anchor_ms == generation.period_anchor_ms
+                    and control.pending_effective_period_anchor_ms is not None
+                    and control.pending_effective_period_anchor_ms <= generation.period_anchor_ms
                     and control.pending_authorization_id is not None)
                 if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation):
                     return _blocked("GENERIC_FIRST_ACTIVATION_REQUIRED")

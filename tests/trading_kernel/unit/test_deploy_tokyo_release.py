@@ -2350,3 +2350,14 @@ def test_unknown_identity_write_never_restarts_old_workers() -> None:
     assert backend.runtime_commit==TARGET_COMMIT
     assert backend.entry_fenced and not backend.active_services
     assert not any(c[0]=="start_services" for c in backend.calls)
+
+
+def test_dynamic_intent_upgrade_uses_exact_0009_source(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys.modules[__name__], "SOURCE_SCHEMA_REVISION", "0009_capacity_policy_v0")
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    assert result.status == "pass"
+    assert ("migrate_schema", TARGET_RELEASE, "0009_capacity_policy_v0", TARGET_SCHEMA_REVISION) in backend.calls
+    assert backend.entry_is_inactive_disabled_and_fenced()

@@ -25,12 +25,26 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
-from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from tests.trading_kernel.support.postgres import (
     create_empty_database,
     drop_disposable_database,
     run_alembic,
 )
+
+# This historical release contract is exact 0009, not the later function-only head.
+CAPACITY_SCHEMA_REVISION = "0009_capacity_policy_v0"
+
+
+@pytest.fixture
+async def issue_engine():
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        run_alembic(url, "upgrade", CAPACITY_SCHEMA_REVISION)
+        yield engine
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)
 
 
 @pytest.mark.asyncio
@@ -39,7 +53,7 @@ from tests.trading_kernel.support.postgres import (
     [
         "0007_exit_profile_authority_v1",
         "0008_generic_dynamic_selection_v1",
-        CURRENT_SCHEMA_REVISION,
+        CAPACITY_SCHEMA_REVISION,
     ],
 )
 @pytest.mark.parametrize("source_entry_enabled", [False, True])
@@ -86,11 +100,11 @@ async def test_default_release_capacity_is_atomic_idempotent_and_does_not_resume
     target = source.model_copy(
         update={
             "runtime_commit": "b" * 40,
-            "schema_revision": CURRENT_SCHEMA_REVISION,
+            "schema_revision": CAPACITY_SCHEMA_REVISION,
             "seeded_at_ms": 2000,
         }
     )
-    if source_revision == CURRENT_SCHEMA_REVISION and source_entry_enabled:
+    if source_revision == CAPACITY_SCHEMA_REVISION and source_entry_enabled:
         with pytest.raises(RuntimeAuthorityTransitionRefused, match="Entry fenced"):
             async with PostgresKernelUnitOfWork(issue_engine) as uow:
                 await deploy_compatible_upgrade_identity(uow, target)
@@ -182,7 +196,7 @@ async def test_default_release_capacity_is_atomic_idempotent_and_does_not_resume
 @pytest.mark.parametrize("corruption", ["sor_enabled", "risk_changed", "entry_enabled", "time_reversed"])
 async def test_default_capacity_release_refuses_invalid_source_without_partial_revision(issue_engine, corruption) -> None:
     source = RuntimeAuthoritySeedRequest(account_id="capacity-release-test", runtime_commit="a" * 40,
-        schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=1000)
+        schema_revision=CAPACITY_SCHEMA_REVISION, seeded_at_ms=1000)
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         await seed_runtime_authority(uow, source)
     async with issue_engine.begin() as connection:
@@ -250,7 +264,7 @@ asyncio.run(main())
             for table, columns in inventory.items():
                 statement = sa.text('SELECT '+','.join('"'+col+'"' for col in columns)+' FROM "'+table+'"')
                 before[table] = tuple((await connection.execute(statement)).all())
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", CAPACITY_SCHEMA_REVISION)
         async with engine.connect() as connection:
             for table, columns in inventory.items():
                 statement = sa.text('SELECT '+','.join('"'+col+'"' for col in columns)+' FROM "'+table+'"')
@@ -261,7 +275,7 @@ asyncio.run(main())
         async with PostgresKernelUnitOfWork(engine) as uow:
             await deploy_compatible_upgrade_identity(uow, RuntimeAuthoritySeedRequest(
                 account_id="capacity-release-test", runtime_commit="b"*40,
-                schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=2000))
+                schema_revision=CAPACITY_SCHEMA_REVISION, seeded_at_ms=2000))
         async with engine.connect() as connection:
             policy = (await connection.execute(sa.select(owner_policy_current))).mappings().one()
             assert policy["max_same_strategy_side"] == 2

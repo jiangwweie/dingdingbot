@@ -342,3 +342,24 @@ async def test_product_snapshot_reuses_exact_same_bar_universe_read() -> None:
 
     assert first == second
     assert exchange.product_calls == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timestamp_kind", ["ccxt_strings", "float", "bool", "fraction", "signed"])
+async def test_generic_selection_normalizes_only_exact_timestamp_types(timestamp_kind: str) -> None:
+    rows = [[str(CUTOFF-(25-i)*HOUR), "100", "101", "99", "100", "7",
+        str(CUTOFF-(24-i)*HOUR-1), "700"] for i in range(25)]
+    if timestamp_kind == "float": rows[0][0] = float(rows[0][0])
+    elif timestamp_kind == "bool": rows[0][0] = True
+    elif timestamp_kind == "fraction": rows[0][0] += ".0"
+    elif timestamp_kind == "signed": rows[0][0] = "+" + rows[0][0]
+    source = CcxtBinancePublicMarketSource(exchange=RawKlineExchange(rows), timeout_seconds=1)
+    request = GenericSelectionKlineRequest(exchange_instrument_id=inputs("CPM-RO-001").spec.candidate_ids[0],
+        feature_cutoff_at_ms=CUTOFF, expected_bars=25)
+    if timestamp_kind != "ccxt_strings":
+        with pytest.raises(RuntimeError):
+            await source.fetch_generic_selection_klines(request)
+    else:
+        candles = await source.fetch_generic_selection_klines(request)
+        assert candles[0].open_time_ms == CUTOFF-25*HOUR
+        assert candles[-1].close_time_ms == CUTOFF

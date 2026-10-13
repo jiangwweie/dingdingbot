@@ -398,7 +398,7 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
-    if source_revision == GENERIC_SELECTION_SOURCE_REVISION:
+    if source_revision in {GENERIC_SELECTION_SOURCE_REVISION, "0009_capacity_policy_v0"}:
         return await _verify_generic_selection_source(database_url, source_revision)
     if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
         return await _verify_dynamic_selection_source(
@@ -494,6 +494,7 @@ async def _verify_preservation(
         DYNAMIC_SELECTION_SOURCE_REVISION,
         EXIT_PROFILE_SOURCE_REVISION,
         GENERIC_SELECTION_SOURCE_REVISION,
+        "0009_capacity_policy_v0",
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -505,7 +506,9 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            if source_revision == GENERIC_SELECTION_SOURCE_REVISION:
+            if source_revision == "0009_capacity_policy_v0":
+                manifest = await _dynamic_intent_source_preservation_manifest(connection)
+            elif source_revision == GENERIC_SELECTION_SOURCE_REVISION:
                 manifest = await _generic_source_preservation_manifest(connection)
             elif source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
                 manifest = await _dynamic_selection_preservation_manifest(connection)
@@ -526,6 +529,7 @@ async def _verify_preservation(
     finally:
         await engine.dispose()
     allowed_targets_by_source: dict[str, frozenset[str]] = {
+        "0009_capacity_policy_v0": frozenset({"0009_capacity_policy_v0", EXPECTED_ALEMBIC_REVISION}),
         COMPATIBLE_SOURCE_REVISION: frozenset(
             {
                 HISTORICAL_PRESERVATION_TARGET_REVISION,
@@ -911,14 +915,15 @@ async def _verify_generic_selection_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
-    """Readonly, pre-write source gate for the exact 0007 -> 0008 revision."""
+    """Readonly source gate for exact Generic or persistent-intent migration."""
     engine = _create_engine(database_url)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
             shape = await _verify_exact_metadata_shape(
-                connection, expected_columns=_source_0007_table_columns(),
+                connection, expected_columns=({table.name: tuple(table.c.keys()) for table in metadata.tables.values()}
+                    if source_revision == "0009_capacity_policy_v0" else _source_0007_table_columns()),
             )
             migration_gate = await _migration_gate(connection)
             migration_gate.update({
@@ -937,7 +942,8 @@ async def _verify_generic_selection_source(
                     count_nonquiescent_source_vacuums
                 ),
             })
-            manifest = await _generic_source_preservation_manifest(connection)
+            manifest = (await _dynamic_intent_source_preservation_manifest(connection) if source_revision == "0009_capacity_policy_v0"
+                else await _generic_source_preservation_manifest(connection))
             preserved_runtime = await read_preserved_runtime_state(connection)
             runtime_identity = await _runtime_identity(connection)
             registry_identity = await _target_registry_identity(connection)
@@ -947,11 +953,14 @@ async def _verify_generic_selection_source(
             capabilities = await _current_capabilities(
                 connection, runtime_identity=runtime_identity,
             )
-            try:
-                proofs = await certify_0007_static_comparison_sources(connection)
-                provenance = {"status": "pass", "proof_count": len(proofs)}
-            except SourceProvenanceInsufficient as exc:
-                provenance = {"status": "fail", "reason_code": str(exc)}
+            if source_revision == "0009_capacity_policy_v0":
+                provenance: dict[str, object] = {"status": "pass" if shape["status"] == "pass" and revision == source_revision else "fail", "basis": "exact unchanged 0009 authority"}
+            else:
+                try:
+                    proofs = await certify_0007_static_comparison_sources(connection)
+                    provenance = {"status": "pass", "proof_count": len(proofs)}
+                except SourceProvenanceInsufficient as exc:
+                    provenance = {"status": "fail", "reason_code": str(exc)}
             account_mode = {
                 "status": "pass" if (
                     runtime_profile["status"] == "pass"
@@ -1976,7 +1985,7 @@ async def _generic_source_preservation_manifest(
     to the source manifest.
     """
     revision = await _alembic_revision(connection)
-    if revision not in {GENERIC_SELECTION_SOURCE_REVISION, "0008_generic_dynamic_selection_v1", EXPECTED_ALEMBIC_REVISION}:
+    if revision not in {GENERIC_SELECTION_SOURCE_REVISION, "0008_generic_dynamic_selection_v1", "0009_capacity_policy_v0", EXPECTED_ALEMBIC_REVISION}:
         raise ValueError("Generic preservation requires exact 0007 or current 0008")
     target = revision != GENERIC_SELECTION_SOURCE_REVISION
     renamed = {
@@ -2651,6 +2660,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 DYNAMIC_SELECTION_SOURCE_REVISION,
                 EXIT_PROFILE_SOURCE_REVISION,
                 GENERIC_SELECTION_SOURCE_REVISION,
+                "0009_capacity_policy_v0",
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"
@@ -2837,6 +2847,24 @@ def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
         },
     }
 
+
+
+async def _dynamic_intent_source_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
+    """Full row preservation across the function-only 0009 -> 0010 migration."""
+    revision = await _alembic_revision(connection)
+    if revision not in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
+        raise ValueError("Dynamic intent preservation requires exact source/target")
+    tables = []
+    count = 0
+    for table in sorted(metadata.tables.values(), key=lambda item: item.name):
+        rows = [dict(row) for row in (await connection.execute(sa.select(table))).mappings()]
+        canonical = sorted((_canonical_value(row) for row in rows), key=lambda row: json.dumps(row, sort_keys=True))
+        payload = {"table": table.name, "columns": list(table.c.keys()), "rows": canonical, "row_count": len(rows)}
+        tables.append({**payload, "digest": _sha256_json(payload)})
+        count += len(rows)
+    payload = {"schema": "brc.trading_kernel.0009_preservation.v1", "source_revision": "0009_capacity_policy_v0",
+        "tables": tables, "table_count": len(tables), "row_count": count}
+    return {**payload, "digest": _sha256_json(payload)}
 
 if __name__ == "__main__":
     raise SystemExit(main())

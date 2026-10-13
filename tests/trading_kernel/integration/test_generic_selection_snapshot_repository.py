@@ -1360,7 +1360,8 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
         assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
         expired_control=await uow.instrument_selection.get_selection_control(group)
         assert expired_control.selection_mode.value=="static_baseline"
-        assert expired_control.pending_selection_mode is None and expired_control.selection_epoch_id is None
+        assert expired_control.pending_selection_mode.value == "dynamic_selection"
+        assert expired_control.selection_epoch_id == control.selection_epoch_id
         assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
     async with database.connect() as connection:
         scope_id=await connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid LIMIT 1"),{"uid":uid})
@@ -1376,23 +1377,14 @@ async def test_restarted_materializer_retires_expired_unfenced_generation_withou
             ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
                 trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
     assert observed.status is ObservationStatus.NO_SIGNAL,observed
-    # A resident retry cannot silently restore the expired Owner intent.
-    with pytest.raises(OwnerControlConflict,match="selection_authorization_no_longer_current"):
-        async with PostgresKernelUnitOfWork(database) as uow:
-            await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
-                request=ControlMutationRequest(expected_version=1,reason="expired_unfenced",idempotency_key="expired:unfenced",owner_identity="owner",now_ms=CUTOFF-1),
-                authentication_strength="totp_step_up")
-    next_anchor=(close//HOUR+1)*HOUR
+    # Restart/period expiry retires only the stale Generation, never Owner intent.
     async with PostgresKernelUnitOfWork(database) as uow:
-        reauthorized=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=next_anchor,
-            request=ControlMutationRequest(expected_version=expired_control.control_version,reason="explicit_retry_after_expiry",
-                idempotency_key="expired:new-owner-intent",owner_identity="owner",now_ms=close+1),authentication_strength="totp_step_up")
-        assert reauthorized.selection_epoch_id!=control.selection_epoch_id
-        assert reauthorized.pending_effective_period_anchor_ms==next_anchor
-        assert reauthorized.rollback_baseline_id==control.rollback_baseline_id
-        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id==uid
-        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
-        assert (await uow.instrument_selection.get_generic_materialization_generation(generation.materialization_generation_id)).lifecycle_state.value=="ABANDONED"
+        assert expired_control.pending_authorization_id == control.pending_authorization_id
+        assert expired_control.selection_epoch_id == control.selection_epoch_id
+        repeated = await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="expired_unfenced",idempotency_key="expired:unfenced",owner_identity="owner",now_ms=CUTOFF-1),
+            authentication_strength="totp_step_up")
+        assert repeated == expired_control
 
 
 @pytest_asyncio.fixture
@@ -2066,9 +2058,9 @@ async def test_recovery_checkpoint_is_durable_and_blocks_reuse_of_consumed_close
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group,normal_parent", [
     (group, mode) for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001") for mode in (False, True, "commit")
-] + [("CPM-RO-001", "first"), ("BRF2-001", "first")])
+] + [("CPM-RO-001", "first"), ("BRF2-001", "first"), ("CPM-RO-001", "first_delayed")])
 async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_coverage(database: AsyncEngine, group: str, normal_parent: bool | str) -> None:
-    commit_parent = normal_parent in ("commit", "first")
+    commit_parent = normal_parent in ("commit", "first", "first_delayed")
     source = inputs(group)
     async with PostgresKernelUnitOfWork(database) as uow:
         now = await uow.instrument_selection.read_authority_clock_ms()
@@ -2117,7 +2109,7 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 comparison_transition_revision=1 if cid else None,effective_from_ms=proof.authority_granted_at_ms,created_at_ms=proof.authority_granted_at_ms)
             # Storage contract only; no current pointer or trading activation.
             if commit_parent:
-                await enable_epoch(database,group,pending=normal_parent=="first",pending_anchor_ms=cutoff)
+                await enable_epoch(database,group,pending=normal_parent in {"first", "first_delayed"},pending_anchor_ms=cutoff-2*cadence if normal_parent=="first_delayed" else cutoff)
             async with database.begin() as conn:
                 if cid:
                     if commit_parent:
@@ -2147,8 +2139,8 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                     await conn.execute(sa.insert(selection_authority_event_bindings).values(selection_authority_id=authority.selection_authority_id,
                         **authority.event_binding.model_dump(mode="json")))
             if commit_parent:
-                authority = authority.model_copy(update={"selection_control_version":2+int(normal_parent=="first"),
-                    "activation_authorization_id":"owner:first:"+group if normal_parent=="first" else None})
+                authority = authority.model_copy(update={"selection_control_version":2+int(normal_parent in {"first", "first_delayed"}),
+                    "activation_authorization_id":"owner:first:"+group if normal_parent in {"first", "first_delayed"} else None})
                 async with database.begin() as conn:
                     await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
                 await make_warming_ready(database,universe_version_id=uid,warm_closed_bar_time_ms=proof.current_final_close_time_ms,
@@ -2170,7 +2162,7 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 # without releasing the outer proof's per-Episode locks.
                 assert uow._connection is not None
                 pending_control = await uow.instrument_selection.get_selection_control(group)
-                if normal_parent == "first":
+                if normal_parent in {"first", "first_delayed"}:
                     with pytest.raises(SelectionJobConflict,match="Selection control"):
                         await uow.instrument_selection.commit_generic_no_change(authority.model_copy(update={"activation_authorization_id":None}),expected_current_version=None)
                     with pytest.raises(sa.exc.DBAPIError,match="atomic authorized mode transition"):
@@ -2199,10 +2191,10 @@ async def test_prepare_generic_proof_uses_database_clock_and_complete_locked_cov
                 authority = current.authority
                 control = await uow.instrument_selection.get_selection_control(group)
                 assert control is not None and control.selection_mode.value == "dynamic_selection"
-                assert control.control_version == 2 + int(normal_parent=="first")
+                assert control.control_version == 2 + int(normal_parent in {"first", "first_delayed"})
                 assert authority.selection_control_version == control.control_version
-                assert authority.activation_authorization_id == ("owner:first:"+group if normal_parent=="first" else None)
-                if normal_parent == "first":
+                assert authority.activation_authorization_id == ("owner:first:"+group if normal_parent in {"first", "first_delayed"} else None)
+                if normal_parent in {"first", "first_delayed"}:
                     with pytest.raises(sa.exc.DBAPIError,match="atomic authorized mode transition"):
                         async with uow._connection.begin_nested():
                             await uow._connection.execute(sa.text("DELETE FROM brc_selection_authority_current WHERE selection_spec_id=:spec"),{"spec":source.spec.selection_spec_id})
@@ -3630,27 +3622,30 @@ async def test_two_materializers_serialize_before_fence_and_pause_releases_durab
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-@pytest.mark.parametrize("first_activation", [False, True])
-async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str, first_activation: bool) -> None:
+@pytest.mark.parametrize(("first_activation", "missed_periods"), [(False, 0), (True, 0), (True, 2)])
+async def test_generic_empty_snapshot_coordinator_commits_negative_authority(database: AsyncEngine, group: str, first_activation: bool, missed_periods: int) -> None:
     source = inputs(group)
+    activation_anchor = source.feature_cutoff_at_ms
+    for _ in range(missed_periods):
+        source = next_input(source).model_copy(update={"predecessor_snapshot":None})
     source = source.model_copy(update={"member_windows":tuple(qualify_window(w,False) for w in source.member_windows)})
     snapshot = compute_generic_selection(source)
     async with PostgresKernelUnitOfWork(database) as uow:
         await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,source_observed_at_ms=source.source_observed_at_ms)
         installed = await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=source.spec.event_spec_id,
             runtime_profile_id="tiny-live-v1",owner_policy_id="policy-main",exchange_instrument_ids=source.spec.candidate_ids[:1],
-            installed_at_ms=CUTOFF-1))
+            installed_at_ms=activation_anchor-1))
     assert installed.universe is not None
     uid = installed.universe.universe_version_id
     # Existing active Static scope is a migration/runtime prerequisite, not a
     # claim that the new Selector activated it.
     async with database.begin() as conn:
-        await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":CUTOFF})
+        await conn.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='active',activated_at_ms=:now WHERE universe_version_id=:uid"),{"uid":uid,"now":activation_anchor})
         await conn.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='active',entry_enabled=true,warm_closed_bar_time_ms=:now,warm_completed_at_ms=:now,warm_readiness_digest=:digest,warm_valid_until_ms=:valid WHERE universe_version_id=:uid"),
-            {"uid":uid,"now":CUTOFF,"valid":snapshot.expires_at_ms,"digest":installed.universe.semantic_digest})
+            {"uid":uid,"now":activation_anchor,"valid":snapshot.expires_at_ms,"digest":installed.universe.semantic_digest})
         await conn.execute(sa.text("INSERT INTO brc_strategy_universe_current VALUES(:event,:uid,:digest,'active',1,:now)"),
-            {"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":CUTOFF})
-    await enable_epoch(database,group,pending=first_activation)
+            {"event":source.spec.event_spec_id,"uid":uid,"digest":installed.universe.semantic_digest,"now":activation_anchor})
+    await enable_epoch(database,group,pending=first_activation,pending_anchor_ms=activation_anchor)
     request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="empty-coordinator")
     results = []
     for tick in range(4):
@@ -8078,7 +8073,7 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
     async with PostgresKernelUnitOfWork(database) as uow:
         current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         control=await uow.instrument_selection.get_selection_control(group)
-        assert control.selection_mode.value=="static_baseline" and control.pending_authorization_id is None and control.selection_epoch_id is None
+        assert control.selection_mode.value=="static_baseline" and control.pending_authorization_id == owner_selection.pending_authorization_id and control.selection_epoch_id == source.selection_epoch_id
         assert isinstance(current.authority,GenericRecoveryAuthority) and current.authority.selection_mode=="static_baseline"
         assert current.authority.first_eligible_close_time_ms>current.authority.created_at_ms
         assert current.authority.recovery_proof.recovery_close_plan.reason=="AUTHORITY_GAP"
@@ -8122,10 +8117,8 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
             cadence=source.spec.cadence_hours*HOUR
             retry_at=first_close+2
             anchor=(retry_at//cadence+1)*cadence
-            next_control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=anchor,
-                request=ControlMutationRequest(expected_version=control.control_version,reason="fresh_dynamic_after_first_pause_static_recovery",
-                    idempotency_key=f"fresh-first-pause:{group}:{old_stage}",owner_identity="owner",now_ms=retry_at),authentication_strength="totp_step_up")
-        assert next_control.selection_epoch_id!=source.selection_epoch_id and next_control.rollback_baseline_id==baseline_id
+            next_control=control
+        assert next_control.selection_epoch_id==source.selection_epoch_id and next_control.rollback_baseline_id==baseline_id
         before_activation_close=first_close+HOUR
         await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=before_activation_close,valid_until_ms=before_activation_close+HOUR)
         if group in {"MPG-001","MI-001"}:
@@ -8170,7 +8163,7 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
         assert selected.outcome=="SNAPSHOT_READY",selected
         async with PostgresKernelUnitOfWork(database) as uow:
             fresh=await uow.instrument_selection.get_generic_snapshot(selected.selection_snapshot_id)
-        assert fresh.predecessor_snapshot_id is None and len(fresh.members)==24 and fresh.selection_epoch_id==next_control.selection_epoch_id
+        assert fresh.predecessor_snapshot_id == snapshot.selection_snapshot_id and len(fresh.members)==24 and fresh.selection_epoch_id==next_control.selection_epoch_id
         fresh_request=CoordinateGenericSnapshotRequest(selection_snapshot_id=fresh.selection_snapshot_id,worker_id="fresh-first-pause-activation")
         await make_warming_ready(database,universe_version_id=static_uid,warm_closed_bar_time_ms=fresh.effective_from_ms,valid_until_ms=fresh.effective_from_ms+HOUR)
         if retry_dynamic=="unchanged" and group in {"CPM-RO-001","BRF2-001"}:
@@ -8259,7 +8252,7 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
             assert proposal.source_selection_authority_id==current.authority.selection_authority_id
             assert proposal.recovery_close_plan.recovery_revision>current.authority.recovery_proof.recovery_close_plan.recovery_revision
             for changes in ({"source_selection_authority_id":None},{"source_selection_authority_id":"authority:forged-source"},
-                            {"failed_activation_authorization_id":owner_selection.pending_authorization_id}):
+                            {"failed_activation_authorization_id":"owner:forged-authorization"}):
                 forged=proposal.model_copy(update=changes)
                 async with database.connect() as conn:
                     assert await conn.scalar(sa.text("SELECT brc_generic_static_recovery_proof_matches(CAST(:proof AS jsonb),:at)"),{"proof":forged.model_dump_json(),"at":failed_at+1}) is False
@@ -8284,7 +8277,7 @@ async def test_first_dynamic_pause_restores_static_through_transition_scoped_rec
             async with PostgresKernelUnitOfWork(database) as uow:
                 restored_current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
                 restored_control=await uow.instrument_selection.get_selection_control(group)
-                assert restored_control.selection_mode.value=="static_baseline" and restored_control.selection_epoch_id is None and restored_control.pending_authorization_id is None
+                assert restored_control.selection_mode.value=="static_baseline" and restored_control.selection_epoch_id == next_control.selection_epoch_id and restored_control.pending_authorization_id == next_control.pending_authorization_id
                 assert isinstance(restored_current.authority,GenericRecoveryAuthority) and restored_current.authority.selection_mode=="static_baseline"
                 assert restored_current.authority.materialization_generation_id==retry_gid
                 assert restored_current.authority.recovery_proof.failed_activation_authorization_id==next_control.pending_authorization_id
@@ -11643,7 +11636,9 @@ async def _issue_second_dynamic_comparative_trade(database, *, group,selection_i
         current = await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
         previous = await uow.instrument_selection.get_generic_snapshot(current.authority.selection_snapshot_id)
         epoch=current.authority.selection_epoch_id
-        assert previous.predecessor_snapshot_id is None and len(previous.members)==24
+        assert len(previous.members)==24
+        if selection_input is None:
+            assert previous.predecessor_snapshot_id is None
         uid = current.authority.event_binding.universe_version_id
         assert uow._connection is not None
         scope_id,member = (await uow._connection.execute(sa.text("SELECT runtime_scope_id,exchange_instrument_id "
@@ -12050,13 +12045,17 @@ async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_m
     return tick
 
 
-async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False):
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False, activation_delay_periods=0):
     source = inputs(group)
+    activation_anchor = source.feature_cutoff_at_ms
+    for _ in range(activation_delay_periods):
+        source = next_input(source).model_copy(update={"predecessor_snapshot":None})
+    CUTOFF = source.feature_cutoff_at_ms
     if comparison_only:
         source = source.model_copy(update={"member_windows":tuple(qualify_window(
             w.model_copy(update={"candles":source.member_windows[0].candles}),w.exchange_instrument_id==source.spec.candidate_ids[0])
             for w in source.member_windows)})
-    uid,comparison_id = await _install_static_selection_source(database,group)
+    uid,comparison_id = await _install_static_selection_source(database,group,cutoff_ms=activation_anchor)
     if failure_case is not None and failure_case.startswith("timeout_then_prepare_runtime_refresh"):
         # The previous Static source was genuinely warmed before the attempt;
         # its readiness expires naturally while the failed target owns Vacuum.
@@ -12066,10 +12065,10 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
     if first_activation and not natural_selection:
         async with PostgresKernelUnitOfWork(database) as uow:
             first_control = await stage_generic_dynamic_selection_mode(
-                uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                uow,strategy_group_id=group,effective_period_anchor_ms=activation_anchor,
                 request=ControlMutationRequest(expected_version=1,
                     reason="first_activation_fixture",idempotency_key=f"owner:fixture:first:{group}",
-                    owner_identity="owner",now_ms=CUTOFF-1),
+                    owner_identity="owner",now_ms=activation_anchor-1),
                 authentication_strength="totp_step_up",
             )
         source = source.model_copy(update={"selection_epoch_id":first_control.selection_epoch_id})
@@ -12077,10 +12076,10 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
         assert first_activation and failure_case is None
         async with PostgresKernelUnitOfWork(database) as owner_uow:
             staged = await stage_generic_dynamic_selection_mode(owner_uow,
-                strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+                strategy_group_id=group,effective_period_anchor_ms=activation_anchor,
                 request=ControlMutationRequest(expected_version=1,
                     reason="natural_first_selection",idempotency_key=f"owner:natural:first:{group}",
-                    owner_identity="owner",now_ms=CUTOFF-1),
+                    owner_identity="owner",now_ms=activation_anchor-1),
                 authentication_strength="totp_step_up")
         source = source.model_copy(update={"selection_epoch_id":staged.selection_epoch_id})
 
@@ -12093,6 +12092,23 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             async def fetch_generic_selection_klines(self, request):
                 return next(member.candles for member in source.member_windows
                     if member.exchange_instrument_id == request.exchange_instrument_id)
+
+        if activation_delay_periods:
+            from src.trading_kernel.domain.instrument_selection import (
+                SelectionSourceIntegrityError,
+            )
+            class FailedSelectionMarket(SelectionMarket):
+                async def fetch_generic_selection_klines(self, request):
+                    raise SelectionSourceIntegrityError("recorded initial parser failure")
+            failed = await run_instrument_selection_once(
+                uow_factory=lambda:PostgresKernelUnitOfWork(database), market_source=FailedSelectionMarket(),
+                request=RunInstrumentSelectionRequest(selection_spec_id=source.spec.selection_spec_id,
+                    selection_epoch_id=staged.selection_epoch_id,period_anchor_ms=activation_anchor,worker_id="initial-failed-selector"),
+                clock_ms=lambda:activation_anchor+10)
+            assert failed.outcome == "SOURCE_FAILED"
+            async with PostgresKernelUnitOfWork(database) as failed_uow:
+                assert await failed_uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
+                assert (await failed_uow.instrument_selection.get_selection_control(group)) == staged
 
         tick = CUTOFF
 
@@ -12776,7 +12792,8 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert committed is not None and committed.authority == recovered
                 recovered_control = await uow.instrument_selection.get_selection_control(source.spec.strategy_group_id)
                 assert recovered_control.selection_mode.value == "static_baseline"
-                assert recovered_control.pending_selection_mode is None and recovered_control.selection_epoch_id is None
+                assert recovered_control.pending_authorization_id == control.pending_authorization_id
+                assert recovered_control.selection_epoch_id == control.selection_epoch_id
                 assert recovered_control.control_version == proposal.selection_control_version
                 assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,
                     selection_spec_id=source.spec.selection_spec_id) is None
@@ -13908,3 +13925,85 @@ async def test_generic_runner_uses_full_source_outside_transaction_and_ends_at_s
     async with database.connect() as conn:
         for table in ("brc_strategy_universe_materialization_generations", "brc_selection_session_authorities", "brc_trade_tickets", "brc_exchange_commands"):
             assert await conn.scalar(sa.text(f"SELECT count(*) FROM {table}")) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_first_dynamic_activation_reuses_owner_intent_after_missed_period(database: AsyncEngine, group: str) -> None:
+    source, snapshot, _generation, _uid = await _exercise_generic_generation(
+        database, group, False, durable=True, first_activation=True,
+        natural_selection=True, activation_delay_periods=2)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control = await uow.instrument_selection.get_selection_control(group)
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert control.selection_mode.value == "dynamic_selection"
+        assert control.pending_authorization_id is None
+
+        assert current.authority.selection_snapshot_id == snapshot.selection_snapshot_id
+        authorization = await uow.owner_controls.get_authorization_by_idempotency_key(f"owner:natural:first:{group}")
+        assert current.authority.activation_authorization_id == authorization.authorization_id
+        assert authorization.target_scope["effective_period_anchor_ms"] == CUTOFF
+
+
+@pytest.mark.asyncio
+async def test_0010_preserves_pending_intent_and_every_source_row_then_rotates_identity() -> None:
+    from scripts.trading_kernel.verify_schema import (
+        _dynamic_intent_source_preservation_manifest,
+        _verify_compatible_source,
+        _verify_preservation,
+    )
+    from src.trading_kernel.infrastructure.runtime_authority_seed import (
+        deploy_compatible_upgrade_identity,
+    )
+    from tests.trading_kernel.support.generic_seed_template import seed_generic_database
+    from tests.trading_kernel.support.postgres import (
+        create_empty_database,
+        drop_disposable_database,
+        run_alembic,
+    )
+    name, url = await create_empty_database()
+    engine = create_async_engine(url)
+    try:
+        run_alembic(url, "upgrade", "0009_capacity_policy_v0")
+        with patch("tests.trading_kernel.support.generic_seed_template.CURRENT_SCHEMA_REVISION", "0009_capacity_policy_v0"):
+            await seed_generic_database(engine)
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET policy_version=4"))
+            await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
+        await _install_static_selection_source(engine, "MI-001")
+        await enable_epoch(engine, "MI-001", pending=True)
+        async with engine.connect() as conn:
+            before = await _dynamic_intent_source_preservation_manifest(conn)
+        source_gate = await _verify_compatible_source(url, "0009_capacity_policy_v0")
+        assert source_gate["status"] == "pass", {k:v for k,v in source_gate.items() if isinstance(v,dict) and (v.get("status") == "fail" or k == "migration_gate")}
+        async with engine.begin() as conn:
+            row = dict((await conn.execute(sa.select(strategy_universe_versions))).mappings().one())
+            await conn.execute(sa.insert(strategy_universe_versions).values(**{
+                **row, "universe_version_id":"universe:migration-gate", "universe_version":2,
+                "lifecycle_state":"warming", "activated_at_ms":None}))
+        await engine.dispose()
+        with pytest.raises(AssertionError, match="0010 requires flat quiescent source"):
+            run_alembic(url, "upgrade", "head")
+        async with engine.begin() as conn:
+            assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0009_capacity_policy_v0"
+            await conn.execute(sa.delete(strategy_universe_versions).where(strategy_universe_versions.c.universe_version_id=="universe:migration-gate"))
+        await engine.dispose()
+        run_alembic(url, "upgrade", "head")
+        async with engine.connect() as conn:
+            after = await _dynamic_intent_source_preservation_manifest(conn)
+        assert after == before
+        preserved = await _verify_preservation(url, source_revision="0009_capacity_policy_v0", expected_digest=before["digest"])
+        assert preserved["status"] == "pass"
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            result = await deploy_compatible_upgrade_identity(uow, RuntimeAuthoritySeedRequest(
+                account_id="generic-snapshot", runtime_commit="b"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION, seeded_at_ms=CUTOFF+3*HOUR))
+            assert result.schema_revision == CURRENT_SCHEMA_REVISION
+            control = await uow.instrument_selection.get_selection_control("MI-001")
+            assert control.pending_authorization_id == "owner:first:MI-001"
+            assert control.pending_effective_period_anchor_ms == CUTOFF
+        async with engine.connect() as conn:
+            assert await conn.scalar(sa.text("SELECT new_entry_submit_enabled FROM brc_owner_policy_current")) is False
+    finally:
+        await engine.dispose()
+        await drop_disposable_database(name)

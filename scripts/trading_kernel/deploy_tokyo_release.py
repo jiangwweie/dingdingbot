@@ -119,7 +119,7 @@ class DeploymentPlan:
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0"}:
                 raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
@@ -534,6 +534,7 @@ def _deploy_compatible_upgrade(
     compatibility_fact = plan.runtime_release_compatibility_fact
     if compatibility_fact is None:
         raise DeploymentBlocked("release compatibility fact is missing")
+    source_schema_revision = str(plan.source_schema_revision)
     current_release = backend.read_current_release()
     if not backend.entry_is_inactive_disabled_and_fenced():
         raise DeploymentBlocked(
@@ -545,7 +546,7 @@ def _deploy_compatible_upgrade(
     schema_state = backend.inspect_schema(plan.target_release)
     database_revision = str(schema_state.get("alembic_revision", ""))
     if schema_state.get("status") != "pass" or database_revision not in {
-        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        source_schema_revision,
         plan.schema_revision,
     }:
         raise DeploymentBlocked("compatible source schema revision differs")
@@ -553,7 +554,7 @@ def _deploy_compatible_upgrade(
     recovery_seed_identity: str
     source_certification: Mapping[str, object] | None = None
     source_identity: dict[str, str] | None = None
-    if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+    if database_revision == source_schema_revision:
         source_certification, _, source_identity = _read_compatible_source_facts(
             backend,
             plan,
@@ -574,7 +575,7 @@ def _deploy_compatible_upgrade(
             backend,
             current_release,
             ".brc-schema-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            source_schema_revision,
         )
         if (
             backend.read_release_marker(
@@ -617,7 +618,7 @@ def _deploy_compatible_upgrade(
                 backend,
                 current_release,
                 ".brc-schema-revision",
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                source_schema_revision,
             )
         recovery_seed_identity = backend.read_release_marker(
             current_release,
@@ -642,7 +643,7 @@ def _deploy_compatible_upgrade(
                 "migration writer stop prerequisite is not satisfied"
             )
 
-        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if database_revision == source_schema_revision:
             final_source, _, final_identity = _read_compatible_source_facts(
                 backend,
                 plan,
@@ -657,7 +658,7 @@ def _deploy_compatible_upgrade(
             baseline = {
                 "source_commit": compatibility_fact.from_commit,
                 "target_commit": plan.target_commit,
-                "source_schema_revision": COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                "source_schema_revision": source_schema_revision,
                 "preservation_digest": _require_preservation_digest(final_source),
                 "preserved_runtime": final_source.get("preserved_runtime"),
             }
@@ -668,7 +669,7 @@ def _deploy_compatible_upgrade(
                 migration_attempted = True
                 backend.migrate_schema(
                     plan.target_release,
-                    COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                    source_schema_revision,
                     plan.schema_revision,
                 )
             except Exception as migration_error:
@@ -686,7 +687,7 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
-        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if database_revision == source_schema_revision:
             if source_certification is None:
                 raise DeploymentBlocked("compatible source certification is missing")
             source_preservation_digest = _require_preservation_digest(
@@ -694,7 +695,7 @@ def _deploy_compatible_upgrade(
             )
             preservation = backend.verify_preservation(
                 plan.target_release,
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                source_schema_revision,
                 source_preservation_digest,
             )
             _require_preservation_verification(
@@ -772,7 +773,7 @@ def _deploy_compatible_upgrade(
                         backend,
                         current_release,
                         ".brc-schema-revision",
-                        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                        source_schema_revision,
                     )
                     backend.start_services(SAFETY_SERVICES)
                 if schema_migrated:
@@ -946,7 +947,7 @@ def _require_target_postflight(
             not isinstance(baseline, Mapping)
             or baseline.get("source_commit") != compatibility.from_commit
             or baseline.get("target_commit") != plan.target_commit
-            or baseline.get("source_schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION
+            or baseline.get("source_schema_revision") != compatibility.from_schema_revision
             or not _SEED_IDENTITY.fullmatch(str(baseline.get("preservation_digest", "")))
             or not isinstance(baseline.get("preserved_runtime"), Mapping)
         ):
@@ -1684,7 +1685,7 @@ class SshTokyoReleaseBackend:
         source_schema_revision: str,
         target_schema_revision: str,
     ) -> None:
-        if source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0"}:
             raise ValueError("compatible migration source revision differs")
         self._release_command(
             release,

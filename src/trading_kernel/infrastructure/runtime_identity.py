@@ -11,7 +11,8 @@ TradingKernelSchemaRevision = Literal[
     "0007_exit_profile_authority_v1",
     "0008_generic_dynamic_selection_v1",
     "0009_capacity_policy_v0",
+    "0010_dynamic_intent_v1",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0009_capacity_policy_v0"
+    "0010_dynamic_intent_v1"
 )

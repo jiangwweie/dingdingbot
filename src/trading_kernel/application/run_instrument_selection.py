@@ -471,7 +471,17 @@ def _generic_elapsed_result(job_id: str, terminal: SelectionJobRecord | None) ->
 def _source_failure_reason(errors: dict[str, Exception]) -> str:
     first_instrument = min(errors)
     failure = errors[first_instrument]
-    return f"SOURCE_MEMBER_FAILED:{first_instrument}:{type(failure).__name__}"[:512]
+    # Only local invariant messages are safe; transport errors can contain URLs.
+    detail = str(failure) if isinstance(failure, SelectionSourceIntegrityError) else ""
+    if detail not in {
+        "Generic raw Kline row is malformed", "Generic raw OHLCV must enter from decimal strings",
+        "Generic raw Kline close boundary is invalid", "Generic raw Kline timestamp must be an exact integer",
+        "Generic Selection source window is incomplete", "Generic Selection source has duplicate, future or irregular candles",
+        "Generic member window is incomplete at cutoff",
+    }:
+        detail = ""
+    suffix = ":" + detail if detail else ""
+    return f"SOURCE_MEMBER_FAILED:{first_instrument}:{type(failure).__name__}{suffix}"[:512]
 
 
 def _failure_result(

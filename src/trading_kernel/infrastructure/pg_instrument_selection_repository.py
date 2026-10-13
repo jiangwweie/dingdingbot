@@ -2488,18 +2488,7 @@ class PostgresInstrumentSelectionRepository:
                 "selection_control_version_before":control.control_version,
                 "expired_selection_epoch_id":generation.selection_epoch_id,
                 "pending_authorization_id":control.pending_authorization_id,
-                "first_activation_pending_cleared":control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-                    and control.pending_effective_period_anchor_ms==generation.period_anchor_ms},occurred_at_ms=now))
-        if control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and (
-            control.pending_effective_period_anchor_ms==generation.period_anchor_ms):
-            cleared=await self._connection.execute(sa.update(strategy_selection_control_current).where(
-                strategy_selection_control_current.c.strategy_group_id==generation.strategy_group_id,
-                strategy_selection_control_current.c.control_version==control.control_version,
-                strategy_selection_control_current.c.selection_epoch_id==generation.selection_epoch_id,
-            ).values(pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
-                selection_epoch_id=None,control_version=control.control_version+1,updated_at_ms=now))
-            if cleared.rowcount!=1:
-                raise SelectionJobConflict("Unfenced first activation expiry Control CAS changed")
+                "first_activation_pending_cleared":False},occurred_at_ms=now))
         result=await self.get_generic_materialization_generation(materialization_generation_id)
         assert result is not None
         return result
@@ -4576,8 +4565,10 @@ class PostgresInstrumentSelectionRepository:
                 checked_at = await self.read_authority_clock_ms()
                 if owner is None or owner["entry_state"]!="enabled" or owner["control_version"]!=proof.owner_control_version or (
                     control is None or control.selection_mode.value!=proof.selection_mode
-                    or control.control_version!=proof.selection_control_version or control.selection_epoch_id!=(None if proof.selection_mode=="static_baseline" else proof.selection_epoch_id)
-                    or control.pending_selection_mode is not None or vacuum_row is None
+                    or control.control_version!=proof.selection_control_version or control.selection_epoch_id!=proof.selection_epoch_id
+                    or (proof.selection_mode=="static_baseline" and (control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
+                        or control.pending_authorization_id!=proof.failed_activation_authorization_id))
+                    or (proof.selection_mode=="dynamic_selection" and control.pending_selection_mode is not None) or vacuum_row is None
                     or vacuum_row["state"]!="RESOLVED_FALLBACK" or vacuum_row["resolved_at_ms"]!=existing.created_at_ms
                     or not existing.created_at_ms<=checked_at<existing.expires_at_ms):
                     raise SelectionJobConflict("Static recovery idempotency authority changed")
@@ -4613,8 +4604,7 @@ class PostgresInstrumentSelectionRepository:
                     strategy_selection_control_current.c.selection_mode=="static_baseline",
                     strategy_selection_control_current.c.pending_authorization_id==proof.failed_activation_authorization_id,
                     strategy_selection_control_current.c.selection_epoch_id==proof.selection_epoch_id).values(
-                        pending_selection_mode=None,pending_effective_period_anchor_ms=None,pending_authorization_id=None,
-                        selection_epoch_id=None,control_version=proof.selection_control_version,updated_at_ms=proof.committed_at_ms))
+                        control_version=proof.selection_control_version,updated_at_ms=proof.committed_at_ms))
                 if changed.rowcount!=1:
                     raise SelectionJobConflict("Static recovery Control CAS changed")
             vacuum = await self.get_current_entry_vacuum(strategy_group_id=proof.strategy_group_id,selection_spec_id=proof.selection_spec_id,for_update=True)
@@ -4955,7 +4945,7 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Recovery Owner Control or failed Generation changed")
         static_first = control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_period_anchor_ms==generation.period_anchor_ms
+            and control.pending_effective_period_anchor_ms is not None and control.pending_effective_period_anchor_ms<=generation.period_anchor_ms
             and control.pending_authorization_id is not None)
         dynamic = control.selection_mode is SelectionMode.DYNAMIC_SELECTION and (
             control.pending_selection_mode is None and control.pending_authorization_id is None)
@@ -4988,7 +4978,7 @@ class PostgresInstrumentSelectionRepository:
                 "selection_spec_id":generation.selection_spec_id,
                 "selection_epoch_id":generation.selection_epoch_id,
                 "target_selection_mode":"dynamic_selection",
-                "effective_period_anchor_ms":generation.period_anchor_ms}
+                "effective_period_anchor_ms":control.pending_effective_period_anchor_ms}
             if authorization is None or authorization["purpose"]!="selection_mode_change" or authorization["authentication_strength"]!="totp_step_up" or (
                 authorization["target_scope"]!=expected_scope or authorization["authorized_at_ms"]>generation.created_at_ms):
                 raise SelectionJobConflict("Static recovery Owner authorization differs")
@@ -5105,11 +5095,20 @@ class PostgresInstrumentSelectionRepository:
         authorization = (await self._connection.execute(sa.text(
             "SELECT purpose,authentication_strength,target_scope,authorized_at_ms FROM brc_owner_authorizations WHERE authorization_id=:id"),
             {"id":authority.activation_authorization_id})).mappings().one_or_none()
+        control = await self.get_selection_control(authority.strategy_group_id)
+        if control is None or control.pending_authorization_id != authority.activation_authorization_id or (
+            control.selection_mode is not SelectionMode.STATIC_BASELINE
+            or control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
+            or control.selection_epoch_id != authority.selection_epoch_id
+            or control.selection_spec_id != authority.selection_spec_id
+            or control.pending_effective_period_anchor_ms is None
+            or authority.period.feature_cutoff_at_ms < control.pending_effective_period_anchor_ms):
+            return False
         expected_scope = {"strategy_group_id":authority.strategy_group_id,
             "selection_spec_id":authority.selection_spec_id,
             "selection_epoch_id":authority.selection_epoch_id,
             "target_selection_mode":"dynamic_selection",
-            "effective_period_anchor_ms":authority.period.feature_cutoff_at_ms}
+            "effective_period_anchor_ms":None if control is None else control.pending_effective_period_anchor_ms}
         return authorization is not None and authorization["purpose"]=="selection_mode_change" and authorization["authentication_strength"]=="totp_step_up" and authorization["target_scope"]==expected_scope and authorization["authorized_at_ms"]<=authority.created_at_ms
 
     async def commit_generic_no_change(self, authority: GenericSelectionAuthority, *, expected_current_version: int | None) -> None:
@@ -5134,7 +5133,8 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("NO_CHANGE Owner control changed")
         first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_effective_period_anchor_ms is not None
+            and control.pending_effective_period_anchor_ms <= authority.period.feature_cutoff_at_ms
             and control.pending_authorization_id == authority.activation_authorization_id
             and authority.activation_authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or (
@@ -5309,7 +5309,8 @@ class PostgresInstrumentSelectionRepository:
             raise SelectionJobConflict("Generic empty Owner control changed")
         first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_effective_period_anchor_ms is not None
+            and control.pending_effective_period_anchor_ms <= authority.period.feature_cutoff_at_ms
             and control.pending_authorization_id == authority.activation_authorization_id
             and authority.activation_authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version+int(first_activation) != authority.selection_control_version or not self._generic_control_allows(

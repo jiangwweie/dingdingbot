@@ -262,6 +262,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0007_exit_profile_authority_v1",
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
             else None
         ),
@@ -287,6 +288,7 @@ async def seed_runtime_authority(
                 "0007_exit_profile_authority_v1",
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
         ),
     )
@@ -299,6 +301,7 @@ async def seed_runtime_authority(
         "0007_exit_profile_authority_v1",
         "0008_generic_dynamic_selection_v1",
         "0009_capacity_policy_v0",
+        "0010_dynamic_intent_v1",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -321,6 +324,7 @@ async def seed_runtime_authority(
                 "0007_exit_profile_authority_v1",
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
             else None
         ),
@@ -541,6 +545,7 @@ async def deploy_compatible_upgrade_identity(
         if request.schema_revision not in {
             "0008_generic_dynamic_selection_v1",
             "0009_capacity_policy_v0",
+            "0010_dynamic_intent_v1",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -557,6 +562,7 @@ async def deploy_compatible_upgrade_identity(
         EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
         GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
         "0008_generic_dynamic_selection_v1",
+        "0009_capacity_policy_v0",
     }:
         return await _deploy_capability_compatible_identity(
             uow,
@@ -711,6 +717,7 @@ async def deploy_compatible_upgrade_identity(
                 "0007_exit_profile_authority_v1",
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
             else None
         ),
@@ -910,6 +917,7 @@ async def _deploy_capability_compatible_identity(
                 EXIT_PROFILE_SOURCE_SCHEMA_REVISION,
                 GENERIC_SELECTION_SOURCE_SCHEMA_REVISION,
                 "0008_generic_dynamic_selection_v1",
+                "0009_capacity_policy_v0",
             }
         ),
     )
@@ -966,6 +974,7 @@ async def _deploy_capability_compatible_identity(
                 "0007_exit_profile_authority_v1",
                 "0008_generic_dynamic_selection_v1",
                 "0009_capacity_policy_v0",
+                "0010_dynamic_intent_v1",
             }
             else None
         ),
@@ -1383,6 +1392,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0007_exit_profile_authority_v1",
         "0008_generic_dynamic_selection_v1",
         "0009_capacity_policy_v0",
+        "0010_dynamic_intent_v1",
     }
 
 
@@ -1552,7 +1562,7 @@ def _seed_identity(
     }
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
-    if schema_revision == "0009_capacity_policy_v0":
+    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,
             "long_continuation": 2,

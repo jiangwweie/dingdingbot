@@ -1258,8 +1258,8 @@ def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
     """Exact recovery eligibility only; caller must also enforce rebase and DB facts."""
     authority = GenericRecoveryAuthority.model_validate(authority.model_dump())
     proof = authority.recovery_proof
-    # Failed first activation clears the pending Dynamic epoch on Control while
-    # retaining that attempted epoch in immutable transition evidence.
+    # Static recovery retains the immutable Dynamic intent while recovery
+    # checkpoints continue to fence entry until a new closed-bar rebase.
     expected_epoch = None if proof.selection_mode=="static_baseline" else proof.selection_epoch_id
     pending_static = selection_control is not None and proof.selection_mode=="static_baseline" and static_recovery_is_first_activation_source(authority,selection_control,
         owner_control_version=owner_control_version,activation_authorization_id=selection_control.pending_authorization_id)
@@ -1290,14 +1290,19 @@ def generic_recovery_entry_rejection(*, authority: GenericRecoveryAuthority,
 
 def static_recovery_is_first_activation_source(source: GenericRecoveryAuthority, control: SelectionControl, *,
     owner_control_version: int, activation_authorization_id: str | None) -> bool:
-    """A new Owner epoch may replace historical Static transition evidence."""
+    """Continue the same intent or an explicit later Owner epoch after recovery."""
+    same_intent = (control.selection_epoch_id == source.selection_epoch_id
+        and source.selection_control_version == control.control_version
+        and source.recovery_proof.failed_activation_authorization_id == activation_authorization_id)
+    new_intent = (control.selection_epoch_id != source.selection_epoch_id
+        and source.selection_control_version+1 == control.control_version
+        and source.recovery_proof.failed_activation_authorization_id != activation_authorization_id)
     return (source.selection_mode=="static_baseline" and source.selection_spec_id==control.selection_spec_id
-        and source.owner_control_version==owner_control_version and source.selection_control_version+1==control.control_version
+        and source.owner_control_version==owner_control_version and (same_intent or new_intent)
         and control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-        and control.selection_epoch_id is not None and control.selection_epoch_id!=source.selection_epoch_id
-        and activation_authorization_id is not None and control.pending_authorization_id==activation_authorization_id
+        and control.selection_epoch_id is not None and activation_authorization_id is not None
+        and control.pending_authorization_id==activation_authorization_id
         and source.recovery_proof.failed_activation_authorization_id is not None
-        and source.recovery_proof.failed_activation_authorization_id!=activation_authorization_id
         and source.created_at_ms<=control.updated_at_ms)
 
 

@@ -1044,7 +1044,8 @@ class PostgresStrategyUniverseRepository:
         authorization_id = None if normal_authority is None else normal_authority.activation_authorization_id
         first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_effective_period_anchor_ms is not None
+            and control.pending_effective_period_anchor_ms <= authority.period.feature_cutoff_at_ms
             and control.pending_authorization_id == authorization_id
             and authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version + int(first_activation)!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:

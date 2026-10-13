@@ -315,6 +315,7 @@ upgrade:
 -> 0007_exit_profile_authority_v1
 -> 0008_generic_dynamic_selection_v1
 -> 0009_capacity_policy_v0
+-> 0010_dynamic_intent_v1
 ```
 
 It preserves terminal PostgreSQL lineage from the exact certified source; it does
@@ -783,3 +784,13 @@ Every condition must be current and true:
 - final flatness, no residual order, released budget/domain, zero Incident, and
   completed Owner state;
 - first successful hourly observation after any deployment change.
+
+## Dynamic intent repair migration
+
+`0009 -> 0010` changes only Generic first-activation proof functions. Every
+source row, original authorization, pending epoch, earliest boundary and terminal
+lineage must be preserved exactly before identity rotation. Release is stopped,
+flat and forward-only; use the existing compatible deployment path with the exact
+0009 source and certified 0010 target. Source failures and unfenced period expiry
+do not revoke Owner Dynamic intent. Later attempts require current snapshots and
+all existing closed-bar, certification, warming, Vacuum and atomic activation gates.
