@@ -80,4 +80,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("Dynamic intent migration is forward-only")
+    raise RuntimeError("Dynamic intent migration requires fix-forward; downgrade is forbidden")
