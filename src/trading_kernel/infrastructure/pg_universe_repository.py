@@ -2463,6 +2463,7 @@ class PostgresStrategyUniverseRepository:
                 .where(
                     instruments.c.exchange_instrument_id.in_(members)
                 )
+                .order_by(instruments.c.exchange_instrument_id)
                 .with_for_update(of=instruments)
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
@@ -2487,6 +2488,7 @@ class PostgresStrategyUniverseRepository:
                         instrument_certification_current.c.exchange_instrument_id,
                     ).in_(certification_keys)
                 )
+                .order_by(instrument_certification_current.c.runtime_profile_id,instrument_certification_current.c.exchange_instrument_id)
                 .with_for_update(of=instrument_certification_current)
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
@@ -3407,6 +3409,11 @@ class PostgresStrategyUniverseRepository:
             raise ValueError("certification next check precedes observation")
         if certification.status == "eligible" and product_rules_digest is None:
             raise ValueError("eligible certification requires product rules digest")
+        # Activation takes Instrument -> Certification. Acquire the same exact
+        # parent row before the leased certification update; never hold the
+        # child row while waiting for activation's parent lock.
+        await self._connection.execute(sa.select(instruments.c.exchange_instrument_id).where(
+            instruments.c.exchange_instrument_id==target.exchange_instrument_id).with_for_update(of=instruments))
         result = await self._connection.execute(
             sa.update(instrument_certification_current)
             .where(

@@ -265,3 +265,53 @@ async def test_expired_claims_are_recoverable_after_worker_crash(
     assert none_due is None
     assert recovered is not None
     assert recovered.exchange_instrument_id in MEMBERS
+
+
+@pytest.mark.asyncio
+async def test_certification_writer_waits_on_instrument_before_locking_current_certification(
+    _certification_engine: AsyncEngine,  # noqa: F811
+) -> None:
+    import asyncio
+
+    from src.trading_kernel.domain.instrument_certification import (
+        InstrumentCertification,
+    )
+
+    async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+        target=await uow.strategy_universes.claim_due_instrument_certification(
+            worker_id="lock-order-writer",now_ms=NOW_MS,lease_until_ms=NOW_MS+60_000)
+    assert target is not None
+    pid=asyncio.Future()
+    async def persist():
+        async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+            pid.set_result(await uow._connection.scalar(sa.text("SELECT pg_backend_pid()")))
+            await uow.strategy_universes.save_instrument_certification(target=target,
+                certification=InstrumentCertification(status="eligible",blocker_code=None,facts_digest="sha256:"+"a"*64,
+                    observed_at_ms=NOW_MS,valid_until_ms=NOW_MS+60_000),
+                product_rules_digest="sha256:"+"b"*64,configured_leverage=5,margin_mode="cross",position_mode="independent_sides",
+                next_check_at_ms=NOW_MS+60_000)
+    task=None
+    try:
+        async with _certification_engine.begin() as activation:
+            await activation.execute(sa.text("SELECT exchange_instrument_id FROM brc_instruments WHERE exchange_instrument_id=:member FOR UPDATE"),
+                {"member":target.exchange_instrument_id})
+            task=asyncio.create_task(persist())
+            writer_pid=await asyncio.wait_for(pid,timeout=2)
+            async def writer_waiting():
+                async with _certification_engine.connect() as monitor:
+                    for _ in range(100):
+                        blocked=await monitor.scalar(sa.text("SELECT wait_event_type='Lock' FROM pg_stat_activity WHERE pid=:pid"),{"pid":writer_pid})
+                        if blocked:return
+                        await asyncio.sleep(.01)
+                raise AssertionError("writer never waited on the held Instrument")
+            await asyncio.wait_for(writer_waiting(),timeout=3)
+            await activation.execute(sa.text("SET LOCAL lock_timeout='250ms'"))
+            # Activation takes Instrument -> Certification. The writer must
+            # not hold Certification while waiting for this Instrument.
+            await activation.execute(sa.text("SELECT exchange_instrument_id FROM brc_instrument_certification_current "
+                "WHERE runtime_profile_id=:profile AND exchange_instrument_id=:member FOR UPDATE"),
+                {"profile":target.runtime_profile_id,"member":target.exchange_instrument_id})
+        await asyncio.wait_for(task,timeout=3)
+    finally:
+        if task is not None and not task.done():
+            await asyncio.wait_for(task,timeout=3)
