@@ -1,7 +1,8 @@
 ---
 title: SOR-1H Dynamic Engineering Design
-status: DESIGN_DRAFT
+status: REVIEWED_READY_FOR_EXECUTION_PLAN
 created: 2026-10-13
+reviewed: 2026-10-13
 scope: Independent hourly opening-range strategy in the existing Trading Kernel
 ---
 
@@ -104,6 +105,9 @@ Selection 契约列举，未知身份显式拒绝。旧 Golden 输出与持久�
    SOR-1H与其他策略发生占用冲突时，现有Admission拒绝，不另开domain。
 4. 使用现有Crypto RuntimeProfile和sole Owner Policy；是否纳入具体Event scope由正式
    安装/启用边界持有，不由名称推断。不增加资本、杠杆、Family或Ticket限制。
+   Registry新增两个Event使catalog digest变化；Owner Policy Event映射、capability
+   certified scope、Registry/Seed identity与preservation verifier必须在正式R4中同步。
+   旧Policy/Registry摘要不能拿来认证新catalog；禁止启动后由seed函数自动扩展Event范围。
 5. 新Event各自绑定现有相同方向的Crypto ORB15m ExitProfile。无需复制Profile内容，
    新EventExitBinding有自己的身份与摘要，Ticket冻结实际binding和profile。
 
@@ -130,6 +134,28 @@ Signal交易，即使旧成员membership仍有来源记录。下个Session必须
 原子激活/提交Authority → 第一合法入场close为02:00。允许在02:00之前激活，但Authority
 必须显式冻结 `first_eligible_close_time_ms=02:00`，提前发Signal或ENTRY均拒绝。
 
+### 4.1 Job、Snapshot和Authority的时间键
+
+| 字段/对象 | 新kind精确值 | 约束用途 |
+| --- | --- | --- |
+| Session / `period_anchor_ms` | D（UTC00:00） | Job唯一键为Spec+epoch+D；每天至多一个Job |
+| Owner earliest pending anchor | D，按24H对齐 | Selector earliest due为D+H；长期意图不锁死首日 |
+| `feature_cutoff_at_ms` / decision boundary | D+H | 输入只含exclusive cutoff之前已完成15m |
+| Snapshot eligibility / generation prepare | D+2H / D+H | 两者分别校验，不能要求created_at≥02:00才开始warm |
+| Snapshot / Selection源expiry | D+25H | 之后不可新建该来源Desired或提交迟到结果 |
+| Authority `expires_at_ms` | D+24H | 当前Session trading grant有限；不带昨日OR进下一日 |
+| 新grant的first close | max(D+2H, floor(commit/H)H+H) | 严格未来且first<D+24H；连续NO_CHANGE继承已证明first |
+| members freshness | source Session S+48H | 最多下一日continuity；不是Snapshot可materialize期限 |
+
+现有Generic约束要求`feature_cutoff=period_anchor`、`decision=anchor+H`及当前close proof；
+新kind **cutoff=anchor+H**，必须有自己的精确DB分支。当前schema里列名session_start/period
+及family payload必须按上述含义统一，不以给字段不同名称绕过验证。
+
+每个Authority只授权自己的Session。次日01:00从历史成员provenance建立continuity时，
+**可以引用已结束交易Session的previous成员事实，但不能使用其过期trading grant**。
+新Owner版本、epoch、source年龄、当日OR/cert与gap覆盖重新证明；01:00之前无当日grant。
+Snapshot是否有资格物化、members是否可延续、Signal是否可入场是三个不同谓词。
+
 ## 5. Detector、Episode与退出
 
 ### 5.1 小时入场
@@ -137,10 +163,13 @@ Signal交易，即使旧成员membership仍有来源记录。下个Session必须
 1. 新Detector读取从D开始至当前触发close的**连续完整1h K线**，范围不超过当日24根。
    第一根定义OR，至少两根才能计算首次突破。线上读取官方1h数据；必要的15m区间一致性
    校验只比较已完成数据，不用未完成小时聚合或补造缺失K线。
-   **01:00单根OR是合法准备输入，不是数据缺失。**时间资格条件为false，Detector可以
-   返回明确的NOT_DUE/非触发事实，warm-only路径形成完整OR与保护参考readiness；它不能
+   **01:00单根OR是合法准备输入，不是数据缺失。**保持现有DetectorStatus集合，返回
+   `NOT_TRIGGERED`、`occurred_at_ms=None`，包含Registry要求的完整事实，时间资格与cross
+   均为false。`NOT_DUE`只属于runtime调度结果，不新增第四种Detector状态。
+   warm-only路径形成完整OR与保护参考readiness；它不能
    推断未来cross、推进正式Session消费或Recovery状态。这样可以在01:00–01:30完成准备，
-   不必等02:00而必然触发30min超时。Active Observation在02:00重新取得实际两根或更多
+   不必等02:00而必然触发30min超时。01:00–01:30只是理想准备窗口，不承诺全局排队一定
+   能在该窗口完成。Active Observation在02:00重新取得实际两根或更多
    小时序列，初次warming事实不能代替新Signal事实，也不靠延长freshness等待。
 2. LONG：`previous.close <= OR.high && current.close > OR.high`。
 3. SHORT：`previous.close >= OR.low && current.close < OR.low`。
@@ -154,6 +183,9 @@ Signal交易，即使旧成员membership仍有来源记录。下个Session必须
    创建新Episode；已拒绝的Admission同样不重试。多空为独立Episode和Netting Domain。
 8. Signal expiry取Fact有效期、Session截止与适用Authority限制的最小值；Entry仍重验
    当前Universe、birth Authority与action-time facts，不因1h Signal放宽交易事实TTL。
+9. 同members连续NO_CHANGE更新不得取消此前在合法Authority下出生的未过期Signal。
+   Entry验证exact birth/current lineage、同Session与未中断连续性，不能简单要求birth ID
+   永远等于latest ID；Vacuum/Pause/EMPTY切断后的旧Signal按现有失效规则处理，不复活。
 
 来源：[旧cross逻辑](../../../src/trading_kernel/domain/detectors/sor.py)；
 [Signal身份](../../../src/trading_kernel/application/produce_strategy_signal.py)；
@@ -222,18 +254,46 @@ Universe占位。**Initial basis是新双Event显式 **EMPTY binding**，univers
 1. 安装Strategy Control=paused，Selection Control=disabled；不创建交易授权或伪造TOTP。
 2. Owner正式选择Dynamic并启用新策略后，持久化epoch、original authorization及最早每日
    activation Session。失败、超时或错过首日不会使这项长期意图自动过期。
+   初次控制组合为 `selection_mode=disabled + pending=dynamic`，这只允许Selector/
+   materialization读取已授权意图，不能为ENTRY提供grant；不能被当前disabled短路拦住。
+   首个ACTIVE_NEW或VALID_EMPTY与mode=dynamic、pending清理、original authorization消费
+   在同一事务提交。strategy_resume与selection_mode_change保留各自正式TOTP边界，接口
+   可将其组合为一次Owner操作，但两个purpose/目标scope不能伪造为同一授权。
 3. 当日Job使用真实24币输入；第一非空Snapshot产生Generation，previous basis为双EMPTY。
    两边全部STAGED、认证与审计通过后才提交首个ACTIVE_NEW；控制版本CAS同时切换。
 4. 首次VALID_EMPTY发布双EMPTY Authority，保留Dynamic意图，次日重新计算；不存在
    “fallback previous”可交易集合。首次物化失败也不借旧策略产生fallback权限。
-5. 全球Entry恢复检查需要识别**已安装但明确paused/disabled且双EMPTY的bootstrap状态**。
-   精确证明无scope、无交易Authority、无signal、无Reservation/Command且未成为可入场Event；
-   不能对已有active、Owner-enabled或来源不明的Event忽略Universe认证。
+5. 全球Entry恢复检查采用下列**精确Event状态分类**，不能仅按是否Owner-enabled决定
+   要求存在current Universe，也不能按paused跳过实际存在的未认证Universe。
 6. 新策略启用后，缺失Universe/认证继续在该策略Admission处fail-closed；Entry promoter
    只处理现有操作Fence，不为新策略创建Policy范围、Selection grant或Owner授权。
+7. SOR-1H只支持Selection `disabled ↔ dynamic_selection`；UI/CLI/API拒绝Static configure/
+   rollback请求，不依赖一个并不存在的Static rollback_baseline。关闭Selection只阻止新
+   ENTRY并按durable路径drain unfinished ENTRY；保护Ticket继续。epoch只在Owner明确改变
+   意图时更换，不随Job failure、deploy或ordinary resume变化。
 
-这需要扩展Generation previous-baseline与source guard的显式EMPTY表示；不使用另一策略
-的UID填满当前非空previous_long/short字段。既有历史SOR的真实pair字段保持不变。
+| 新策略状态 | 全局恢复需要的证明 | 该策略ENTRY |
+| --- | --- | --- |
+| 安装后paused/disabled且未曾激活 | 两Event无scope/current trading grant、无活跃Signal/Reservation/Command | 禁止 |
+| Owner-enabled但首个Dynamic仍pending | exact持续意图、双EMPTY initial basis、无交易grant、无未完成迁移/Writer | 禁止；系统可准备成员 |
+| VALID_EMPTY或来源寿命已停入场 | 已提交的双EMPTY/blocking Authority；旧current留存则仍核验身份与cert | 禁止；不阻塞其他策略 |
+| ACTIVE_NEW/NO_CHANGE/continuity/fallback | exact双current、warm/cert/时间/owner proof与配置一致 | 仅合法close和action-time gate内 |
+| 任意warming/staged、unknown/Incident或矛盾来源 | 现有全局维护门槛继续阻止恢复/切换 | 不例外放行 |
+
+这些分类只适用于已精确安装的新kind，不放宽旧策略现有要求。PG integrity、flatness、
+Runtime Fence、证书及账户模式门槛不变；所有current和残留scope都进入preservation与
+certification检查。`EntryRestorationState`、`certify_readonly.py`及promoter使用同一个
+只读分类器和basis digest，不能一边通过一边仍按硬编码Event总数判失败。仅未来新策略
+缺乏grant不等于全局不安全，但任何实际未完成或矛盾状态仍fail-closed。
+
+**当前schema已具备** `brc_materialization_generation_event_baselines` 的双Event
+`EMPTY + universe_version_id=NULL + canonical empty digest`表示。旧previous_long/short
+字段在0008已移除；不重新增加pair列，不使用另一策略UID填充。迁移工作集中在新kind
+的source/target/proof guard与首次无current路由，而非复制一套baseline表。
+
+来源：[现有baseline迁移](../../../migrations/trading_kernel/versions/0008_generic_dynamic_selection_v1.py)；
+[Entry恢复读取](../../../src/trading_kernel/infrastructure/entry_restoration_certification.py)；
+[readonly认证](../../../scripts/trading_kernel/certify_readonly.py)。
 
 ### 7.2 正常切换与连续性
 
@@ -252,11 +312,25 @@ Universe占位。**Initial basis是新双Event显式 **EMPTY binding**，univers
 不继承昨日OR、Signal或当日交易资格。等待Selector、source failure与DESIRED本身不开Vacuum。
 同members且current pair合法，使用NO_CHANGE；变化才fence/drain/serial warm/atomic switch。
 01:00–02:00准备窗口内没有合法小时入场close，但仍要处理旧unfinished ENTRY的durable结果。
+新日continuity只有在新Session OR、scope事实和cert均真实准备完成后才能提交；午夜至
+01:00不得把昨日warm事实续期。允许对active current在01:00走受控`refresh_current_facts`
+准备新OR，但不生成Signal、Audit positive、Session消费或交易grant。若prepare失败，
+保留成员来源记录却不授当日交易Authority；不靠旧OR自动恢复。
 
 新小时策略采用**strict-next-hour grant**：正常commit在02:00之前，first=02:00；若在
 02:00或之后提交，first为strictly future整小时。秒级延迟也不追认刚过去cross。这继承SOR
 Session审计语义，不使用Generic当前close可消费proof。前一Version不存在的假continuity
 不可作为证据。超过原物化30分钟必须进入正式失败/恢复，不能顺延deadline。
+
+若同一Session已存在合法continuity，普通NO_CHANGE证明继承其连续覆盖和原first close；
+**不会因新sequence提交几秒晚而重造gap或作废合法birth Signal**。只有首次授权、Vacuum
+后的新grant、真实失权或原first不足以证明当前集合覆盖时才重新使用strict-next-hour。
+这不许可在更换成员后消费旧集合已经消费的close，也不补发错过的cross。
+
+**30min deadline从第一次持久化fence开始。**排队DESIRED不启动该timeout，不持有slot，
+但必须检查source expiry与Session未来close；retarget/SUPERSEDED或重启不得重置原Vacuum
+的fenced_at/deadline。新日输入到来可替换未生效旧Desired；真正旧Vacuum仍先完成原ENTRY
+drain及unknown核对，再以ledger明确handover，禁止新Desired堵在永不清理的旧任务之后。
 
 ### 7.3 缺口审计与触发抑制
 
@@ -276,6 +350,8 @@ Session审计语义，不使用Generic当前close可消费proof。前一Version�
    精确分开，不能共用一个返回true的宽松恢复函数。
 6. 日内无任何未来合格close时，明确NO_ELIGIBLE_CLOSE_BEFORE_SESSION_END，待次日；
    23:00之后commit不能授权24:00入场。数据缺口保持失败，禁止推断negative。
+7. DATA I/O与path重放在PG事务外完成；第一段事务冻结Audit exact scope/source version，
+   第二段事务校验结果和版本并提交PG证据。不得在两个方向current锁内下载union path。
 
 来源：[原SOR Gap Audit](../../../src/trading_kernel/interfaces/authority_gap_audit_source.py)；
 [旧Session设计](2026-08-20-sor-dynamic-instrument-selection-trading-v0-design.md)；
@@ -294,9 +370,29 @@ Session审计语义，不使用Generic当前close可消费proof。前一Version�
 | lease到期/重启 | exact Job/Generation lease epoch | 从PG current恢复，原first/deadline不改 |
 
 **成员年龄与当前Authority有效期分别记录。**设计默认最多容忍一次未完成每日Selection：
-previous source最多覆盖源Session及紧接的一个日Session；连续第二次miss暂停新ENTRY。
+previous source最多覆盖源Session及紧接的一个日Session；源Session为D时，交易成员的
+freshness deadline为D+48H，且每次当日ENTRY仍必须满足当日02:00–24:00窗口。
+连续第二次miss使该策略Selection Authority明确阻止新ENTRY，不修改全局Policy，
+不取消长期Owner意图、不新造Owner Pause版本。
 成功Snapshot仅计算完成并不重置实际current members的来源年龄；切换失败恢复也不重置。
 VALID_EMPTY覆盖当前有效Period，不能因旧成员尚在年龄预算内继续交易。
+旧Snapshot到D+25H后不能再创建新Desired或作为新来源重新materialize；容忍一次miss时，
+历史Snapshot只作exact成员provenance，当前日必须有新的continuity proof、Session OR与
+Owner/cert证据。新grant的有效期不能突破成员D+48H寿命或当前日24:00ENTRY截止。
+次日01:00新Period必须重新选择；此前VALID_EMPTY本身不构成可延续成员。即使物理current
+pointer仍保留较早pair，新非空Generation的**交易来源**也从双EMPTY开始，retire的物理
+pair与可fallback的交易basis分别记录，不能拿前日非交易成员作为fallback。
+
+首次/EMPTY来源的post-fence失败按现有状态记录FAILED_CLOSED。只有unfinished ENTRY已
+终态、无unknown和drain blocker、target已abandoned/slot释放且双方无grant的PG证据齐备，
+才原子设置Vacuum FAILED_CLOSED终态并清除其blocking current引用；不是伪造
+RESOLVED_FALLBACK。证据未齐则保持fenced。该清理不需要为永远不会获权的成员制造
+checked-negative；下一次合法非空激活必须审计其自身Session未授权path。
+
+日内terminal失败不重试同一个Job/Snapshot，不创建第二ENTRY generation；接管等待下一
+合法Snapshot/Session。跨日旧未完成Generation/Vacuum按原deadline和supersession ledger
+终结。清理可由Coordinator推进，Reconciliation只处理其已有unknown/drain工作，不增加
+独立repair服务。
 
 这个**一次miss寿命是新策略的设计默认值**，不是宣称旧SOR已有同样限制。状态与DB proof
 必须冻结，禁止每次CONTINUITY更新expiry而无限续旧members。首次原Owner意图可长期保留，
@@ -332,6 +428,12 @@ Job、Snapshot、authority current、order或Ticket链。proof schema字段和�
    Vacuum → append事件。任一步失败全部rollback。
 5. Instrument按canonical instrument顺序先锁，Certification按profile/instrument顺序后锁；
    认证Writer采用同序。STAGED继续刷新readonly cert，不能把过期当成无需重验。
+   **STAGED还须刷新过期warming行情事实。**在slot owner的当前Generation内以warm-only
+   操作读取新小时path、保存完整Fact/readiness，不开启observation_enabled/entry_enabled，
+   不生成Signal或推进Session。scope/Generation/lease epoch/control/最新close发生变化则
+   结果discard；跨小时重验后再CERTIFY_STAGED。仅刷新cert不能让旧01:00事实在02:00有效。
+   generic现有函数仍保持自身边界，新kind的专用warm-only入口共享Fact/readiness持久化，
+   不通过把STAGED重新改warming来刷新，否则会破坏single-slot/事件历史。
 6. Generation不承诺未来必然有可用close；timeout与source/session expiry均使用最初事实。
    锁顺序应在所有新增共用入口一致，不以捕获deadlock并无限重试代替。
 
@@ -339,14 +441,67 @@ Job、Snapshot、authority current、order或Ticket链。proof schema字段和�
 
 | Worker | 新增责任 | 工作上界 |
 | --- | --- | --- |
-| Observation | 每日Selector、Coordinator、小时Detector/事实 | 一Job/epoch/日；24×96输入；每币每天最多24小时bars |
+| Observation | 每日Selector、Coordinator、小时Detector/事实 | 一Job/epoch/日；一次输入24×96=2304根；每请求最多24小时bars |
 | Entry | 新Event通过既有Admission并串行发Ticket | 原single-lane、Policy与Netting Domain约束 |
 | Lifecycle | 新Ticket的15m Profile与保护 | 原Ticket cadence，无新daemon |
 | Reconciliation | staged cert、unknown、保护与结算 | 原有bounded claim与exact identities |
 
-复用现有网络并发上限；Gap每日最多24根/币、union最多14币×2Event，可按币共用一次只读
-path抓取。无需为两个方向重复下载同一窗口。正常idle零JSON/Markdown，日志只显示reason与
-必要身份，不包含credential。生产不会读取本设计或本地缓存作为授权。
+**上表是每次工作的数据量，不是全天请求上限，也不代表服务器已实测能承受。**性能实现
+必须同时满足如下cadence、并发和持久化边界。
+
+| 路径 | 请求/计算预算 | 调度与资源约束 |
+| --- | --- | --- |
+| 每日Selection | 每次24个15m窗口、2304根；临时网络失败最多3次，确定性完整性失败不重试 | 同Job只一个lease owner；复用已存在的30s backoff契约并以新kind冻结，不改变旧family的重试语义 |
+| 每小时active/fact refresh | 每个instrument/Session/latest-close一个共享path结果，两方向各自计算；正常稳定7币一天最多7×23=161个1h path | 正式Observation按PG cursor每scope/close消费一次；事实刷新只读/不消费，fresh已有事实时无网络 |
+| 新pair warming/STAGED刷新 | 每轮最多7币path，不双下载两方向；只有事实过期或close变化才再取 | 不随Coordinator2s tick重复运行Detector/下载 |
+| Gap Audit | 一次union最多14币、28Event scopes，每币最多24根；共享一次path后双方向重放 | bounded lease、每个exact Audit/version重试预算；未到新close且证据已完整则不重抓 |
+| 两个新增逻辑loop | Selection及Coordinator使用已有常驻Observation进程 | terminal/未到daily边界持久化next_due，只查有界current；不每2s扫描历史链 |
+| 认证 | 相同profile/instrument只共享既有current证书；warming/staged保持覆盖 | 采用当前5min检查/10min有效期与overdue公平调度，不复制双边认证工作 |
+
+1. **Observation市场I/O共享上限6**：semaphore在实际HTTP请求边界取得，覆盖新旧Selector、
+   warming与Audit，不按每个strategy再独立加6。等待semaphore算入attempt deadline；不在
+   外层拿token后嵌套等待同一token。现有Entry/Lifecycle/Reconciliation各自安全I/O与服务
+   不受新Selector占用锁或token，保留原cadence优先权。01:00与四Generic家族共同due必须
+   纳入一次burst场景验证；不扩大CPUQuota/MemoryMax为新策略兜底。共享limiter改变了旧
+   Selector的排队时间，因此所有受影响family的Job lease都必须按自己的冻结契约续租/
+   取消与CAS提交，不能只为新family续租而让旧30s lease在排队中失效。旧family的attempt
+   预算、材料deadline和数值语义不随新180s预算扩展，超出自身预算保持原失败结果。
+2. 复用进程内市场数据**singleflight**：key含instrument、timeframe、since、exclusive
+   closed_at、window/schema；只合并同刻已完成path请求，网络错误不缓存为negative。
+   内存缓存最多256个只读结果且规范payload总计不超过8MiB、按close/Session淘汰；
+   每个值必须先通过窗口/行数上界校验；LRU只影响读数据效率。PG facts/readiness/cert仍是权威。
+   不跨cutoff复用Selection source、不靠缓存延长TTL、不写本地JSON文件。
+3. 每attempt总预算180s（包括并发排队与现有HTTP timeout），初始Job lease60s，每20s
+   以exact Job/version/lease owner/epoch CAS续租；续租失败取消未完成I/O并丢弃结果，旧owner
+   不提交。最多3attempt不意味着3Job。不可把30s materialization lease误作市场抓取预算，
+   不延长Generation30min deadline。数值计算最多2304bars的纯Decimal批次，若短burst测得
+   event-loop lag明显影响已配置poll，则在同进程单worker有界executor执行、不并发多个
+   Decimal batch；最多一个待执行batch，过量工作留在PG待领取，不新增daemon。
+   新Selector未到daily边界/terminal时60s轻量检查，job到期按5s调度；Coordinator有state
+   progression/drain/warm工作时2s、idle/仅等待slot时30s检查，并不晚于原deadline/下一小时
+   boundary。真正等待新close的blocker不反复执行同一Audit或数据请求。既有四家族与
+   Entry/Lifecycle poll不随这项设计全局调慢。
+4. 复用一个Observation engine，保持连接pool配置；warm/audit/selector事务外不占连接。
+   当前脚本默认engine在本地依赖中解析为pool_size5、max_overflow10、pool timeout30s；
+   这是代码配置证据，不是Tokyo实际连接数。新两个loop不创建第二engine、不放大pool，
+   执行时核对实际配置并用混合loop场景确认总连接与等待有界。
+   单次事务用exact current IDs及成员上界：新pair14scope、union28binding；遍历历史仅用于
+   bounded lineage（沿用现有depth上界），不能在every tick全history查count/max。
+   查询计划与现有索引不匹配时加目的明确的索引，不用大LIMIT掩盖全表扫描。
+5. slice仍遵守现有CPU100%、Memory1GiB、Tasks128契约。上述数字为**设计预算**；增量CPU、
+   内存及实际耗时未实测，不在文档填伪benchmark。只测一轮01:00竞争、双边warm及late
+   audit，加request-counter与event-loop响应证据；不新增long soak或固定性能等待上线gate。
+   既有安全deadline/身份/额度门槛不受性能警告替代或放宽。
+
+稳定7币时的161只是成功path key数量；retry、成员变化、restart与audit增量分别记录，
+不是声称全天161次总HTTP。正常idle零JSON/Markdown，重复blocked日志限频，状态变化
+即时可见。新增策略的blocking/waiting不得刷每2s相同日志，更不能写重复append-only成功
+事件。生产不会读取本设计或本地缓存作为授权。
+
+来源：[常驻loop](../../../scripts/trading_kernel/run_observation_worker_once.py)；
+[现有网络/Job契约](../../../src/trading_kernel/interfaces/selection_runtime_worker.py)；
+[现有重试](../../../src/trading_kernel/domain/generic_selection_jobs.py)；
+[资源契约](../../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)。
 
 ## 9. 接入点与删除范围
 
@@ -362,6 +517,7 @@ path抓取。无需为两个方向重复下载同一窗口。正常idle零JSON/M
 | `authority_gap_audit_source.py` | contract取1h、Session path、suppression | 复用15m missed-cross结果 |
 | `owner_control.py`与Owner Console | 新身份允许列表、Dynamic意图、真实时钟显示 | Seed自动resume或恢复旧SOR |
 | `runtime_authority_seed.py` / entry readiness | 新策略paused/bootstrap及scope核验 | 所有新增策略默认enabled |
+| `entry_restoration_certification.py` / `certify_readonly.py` | 同一Event状态分类、EMPTY/blocked不拖累其他策略、basis digest与preservation | 只改promoter一个分支或按paused跳过实际矛盾来源 |
 | ExitBinding、release/schema verifier与migrations | 独立binding、forward identity与preservation | 复制Profile或重写历史Ticket |
 
 删除/替换仅限活跃共用入口中无依据的old-SOR常量绑定与epoch二选一推断。保留旧算法
@@ -417,14 +573,20 @@ migration与正式identity切换。保留现有策略控制、原Dynamic intents
 | 共用数值核心 | 原Golden unchanged；新旧同输入features/rank/members一致 | 数值/排序/并列漂移 |
 | 小时Detector |02:00首次、等号cross、多空、midnight、残缺/未完成bars | 提前或错Session入场 |
 | 01:00准备 | 单根真实OR可warm/stage；无Signal、无Session消费；02:00用新事实 | 等首个cross导致必然timeout |
+| STAGED跨小时 | PG warm-only刷新新close完整Fact/readiness；认证刷新独立；两边commit同时fresh | 仅cert刷新而行情过期、重开warming造成slot漂移 |
 | 混合时钟 | 新Signal1h，但Lifecycle请求15m，Profile/96bars保持 | 退出时间被放大 |
 | 首日无成员 | EMPTY→真实双staged→ACTIVE_NEW；失败/EMPTY无伪fallback | 偷渡Static7或旧授权 |
+| 全局恢复状态 | enabled-pending/VALID_EMPTY有exact阻止入场证据；实际矛盾scope不可豁免 | 新策略缺成员拖垮其他策略或错误漏验 |
 | atomic pair | 一边失败另一边不切换；cert到期再刷新 | 半切换与CERTIFICATION_STALE |
 | 延迟/重启 | 跨02:00、30min超时、跨first close、23:00后无未来close | 追认突破或延长deadline |
+| 连续NO_CHANGE | 合法birth Signal未失效，继承first close；失权后旧Signal仍拒绝 | latest-ID简化校验或无故产生gap |
 | Gap Audit | 小时positive suppression / negative；union与current范围 | second-cross补票、漏审 |
 | 控制/寿命 | 一次Owner意图跨首日失败；Pause优先；连续miss预算 | 授权次日丢失或旧成员无限续期 |
 | 交易边界 | Session单Ticket、全局串行、domain占用、unknown/partial | 复制交易通道或弱化保护 |
 | forward迁移 | 真实来源preservation、角色约束、old SOR保持disabled | 历史损坏或旧策略复活 |
+| 控制与首次失败清理 | disabled+pending可准备但无grant；no-previous FAILED_CLOSED释放slot；STATIC请求拒绝 | bootstrap短路、无fallback导致永久Vacuum |
+| 01:00短burst与lease | 四家族同时due；共享请求≤6、有限cache、续租失败丢弃、PG外I/O | 并发叠加、过期owner提交或保护调度受阻 |
+| 共享limiter回归 | 旧family排队时保持自身lease/attempt契约；不得仅测试新策略成功 | 新功能拖慢旧Selector产生假timeout |
 
 共用成熟执行链的用例只覆盖新增接入边界，不为每个新名称复制整套保护测试。必要PG
 并发测试覆盖slot与锁顺序；不增加无关soak、经济回测或调参。
@@ -441,7 +603,8 @@ migration与正式identity切换。保留现有策略控制、原Dynamic intents
 
 ## 12. 设计状态与决策边界
 
-**工程方案已经明确，可据此编写实施任务。**本文完成架构边界设计，代码、迁移、正式
+**完成本次架构与性能复核后，可据此编写执行文档。**这不是Owner已经批准全部默认行为，
+也不是代码实现或生产性能已验收。本文完成架构边界设计，代码、迁移、正式
 认证及生产启用尚未执行。实现可调整函数名与模块拆分，但不能隐含改变上述行为。
 
 仅以下属于产品行为默认假设：**退出维持现有15m Profile、每日单Episode、多空支持、
@@ -451,3 +614,23 @@ strict-next-hour晚接管、成员最多一次daily miss**。特别是新的成�
 
 本设计不把盈利证据作为额外开发审批门槛，不扩大已有资金边界，也不把本次设计请求
 视为新策略的实盘启用授权。
+
+### 12.1 复核关闭项
+
+| 原稿缺口 | 修订落点 | 执行文档必须保留的验收 |
+| --- | --- | --- |
+| NOT_DUE被当成Detector状态 | §5.1明确NOT_TRIGGERED + 完整false事实 | Registry exact facts、warm与Signal隔离 |
+| 使用已移除previous_long/short结构 | §7.1复用现有Event baseline EMPTY | exact DB identity，不新增旧pair列 |
+| enabled-pending / EMPTY恢复漏验 | §7.1统一Event状态分类，所有实际scope仍检查 | restoration/certifier/promoter同一basis |
+| disabled首日短路与伪Static fallback | §7.1明确pending prepare、只支持Dynamic/disabled | 一次真实Owner意图与atomic mode activation |
+| NO_CHANGE每次顺延first，birth Signal丢失 | §5.1与§7.2区分连续继承和真正新grant | 两种lineage负例与正例 |
+| STAGED证书fresh但warming行情过期 | §8.2受控warm-only刷新 | 跨小时、跨lease、无Signal/Session推进 |
+| 无previous失败后长期占Vacuum | §7.4无grant终态清理与次Session重进 | unknown未决必须阻止释放 |
+| 只以bars数量声称性能有界 | §8.3请求、cadence、cache、lease和slice预算 | 短burst计数、loop响应；不造实测结论 |
+| 每日anchor/cutoff混用Generic时间约束 | §4.1固定D/D+H/D+2H及不同expiry | Python与DB同一时间矩阵、迟到提交拒绝 |
+
+**执行文档的任务依赖：**先冻结Spec/timing与只读Event状态分类；然后完成纯计算与
+Detector准备事实；再实现shared Job/lease、pair物化、warm-only与Session audit；随后
+控制/API/Registry/Policy scope与forward DB guards；最后精确R4/R2认证及实际授权上线。
+DB schema/proof设计与Python边界同步做定向RED/GREEN，不先跑一条无DB guards的“可用”
+新交易路径。各任务必须列出受影响文件、前置条件、最小失败用例和完成证据。
