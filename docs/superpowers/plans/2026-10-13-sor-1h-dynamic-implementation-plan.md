@@ -39,6 +39,10 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
 5. **最早缺口：**新typed strategy/kind/timing和精确Registry/PG proof尚未定义。先解决此
    边界，再接Detector、真实来源、Authority和runtime，不先造直接下单demo。
 
+**分支基线规则：**代码开始前验证本分支包含当时exact production commit，检查差异文件。
+dev/main若落后，不为了名字是integration就丢弃生产修复；生产若又前进，则先纳入最新
+已认证变更再实施。设计分支目前只有文档任务，不声称代码已与未来生产版本自动同步。
+
 ## 3. 依赖与交付阶段
 
 **每卡一个实施负责人：当前主实施agent。**默认顺序执行，没有子agent/新线程委托要求。
@@ -73,6 +77,8 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
   cutoff/prepare、最早D+2h、Snapshot D+25h expiry、当日grant截止D+24h、strict未来小时。
   Static基线采用原七币但独立identity；mode支持Static/Dynamic/disabled；持久epoch与原
   authorization以earliest Session校验，不只匹配首次那一天。
+  exact identity路由，无SOR前缀/旧身份alias；旧group/Spec/epoch/timestamp proof不能进入
+  新group，即使members相同。参见设计§3.2隔离矩阵。
 - **RED：**新kind目前路由被当Generic拒绝；错误Event、旧epoch、错误period/cutoff不能
   通过。01:00 prepare与02:00 ENTRY资格必须是不同断言。
 - **GREEN/DONE：**frozen Pydantic模型/unknown kind拒绝，双方向完整tuple、当前与新合同
@@ -158,6 +164,9 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
   missing candidate、quoted timestamps与未来bars不得重复结果或假降资格。
 - **GREEN/DONE：**一个immutable成功Snapshot＋exact24 decisions；旧owner无提交权限；
   failure结果与runtime failure分离；次日新Job自动态，原Owner intent不被clear。
+  00:00可做历史输入/客户端/基线维护准备；完整排序仍以01:00截止96根为准。可选预取
+  不新增强制cache框架，不把92根历史或未完成OR当成最终Snapshot；最后4根及volume
+  必须重验。00:00结果与01:00完整请求应有数值一致性负/正例，旧算法Golden不变。
 - **禁止：**读旧SOR Snapshot当新授权、网络I/O占PG事务、追加本地JSON运行文件。
 
 ### H1-07：正常pair物化与常驻宿主
@@ -220,6 +229,8 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
 - **要求：**Static/Dynamic/disabled、pending intent、source/selection ages、pair readiness、
   Authority outcome/first close、稳定first blocker；显示1h entry/15m exit、多空独立状态。
   继承真实purpose/scope/version/idempotency/TOTP；不把Snapshot ready显示为active。
+  新策略显示SOR-1H（1h入场/15m退出），旧SOR显示15m及已退役；日志/历史/P&L查询用
+  exact group/version/事件来源，不以SOR前缀混合统计，不重标旧Ticket为新策略。
 - **RED：**新Spec hardcoded不支持；unknown/current mismatch、Snapshot成功但pair未ready、
   valid empty、paused状态；显示不得启用旧SOR或要求Owner操作租约/审核每单。
 - **GREEN/DONE：**只需既有页面局部接入，API/UI一致；普通故障显示自动等待，明确事故
@@ -279,6 +290,8 @@ production_activation_status: NOT_AUTHORIZED_BY_THIS_DOCUMENT
 | A10 | Same-domain/global/Family/风险限制与原保护不变 |09 |
 | A11 | Source preservation、paused install、schema/身份与role guards |04、11、12 |
 | A12 | 一轮必要混合due验证bounded I/O、lease、loop与零运行文件 |06、07、11 |
+| A13 | 新旧identity/授权/记录严格隔离，UI/日志/统计清晰，旧SOR保持退役 |01、03–04、08–10 |
+| A14 | 00:00准备无grant；01:00完整96根与原排名一致；02:00合法小时信号 |02–03、06–08 |
 
 ### 5.1 日常开发
 

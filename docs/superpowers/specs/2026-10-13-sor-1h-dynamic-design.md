@@ -118,6 +118,25 @@ Observation
 5. 新Registry/catalog、Owner scope映射、capability及Seed digest必须在正式R4安装事务
    同步，保留既有四家族控制/身份/历史。不把新策略权限隐含加入旧Policy。
 
+### 3.2 新旧SOR必要隔离
+
+**旧SOR-001/v4的历史与退役状态不变；新SOR-1H-001/v1不存在旧身份别名。**隔离不要求
+第二数据库、服务、资金池或订单链，要求每个事实与控制有准确identity。
+
+| 边界 | 新策略必须持有/显示 | 必要负例 |
+| --- | --- | --- |
+| Registry/Detector/Fact | 新group/version、双1h Event、自己的Fact IDs | 旧15m Event/Fact不被新Detector或Signal接受 |
+| Job/Snapshot/Generation/Universe | 新Spec/kind/epoch与双Event FK | 旧Snapshot/UID即使同成员也不能成为新source/grant |
+| Owner Policy/Control/Authorization | 新group/Spec/Event scope和purpose/version | 新Resume不改变旧SOR paused/retired；旧TOTP不可消费到新group |
+| Authority/Audit/suppression | 新Event、小时Session proof与typed schema | 旧15m审计/first close/抑制记录不提供新1h资格 |
+| Ticket/Command/Review | exact新Event与冻结profile/binding来源 | 同币方向也不能把旧Ticket历史重标为新策略 |
+| API/页面/日志/统计 | SOR-1H（1h入场/15m退出）；旧SOR（15m，已退役） | 不按SOR前缀合并、别名重定向、混合P&L或隐藏退出周期 |
+
+共用只有无策略authority的纯features/ranking与同方向immutable ExitProfile；新Event各自
+创建binding。读取与查询用exact group/version/Event/Spec/epoch；禁止startswith('SOR')
+做授权、profile或统计路由。同account/instrument/side的Netting Domain仍按既有全局规则
+共享占用，不能为了隔离身份绕过冲突或给新策略额外预算。
+
 ## 4. 时钟、输入与入场
 
 令D为UTC当日00:00，H=3,600,000ms。入场/审计K线用exclusive close boundary；
@@ -135,6 +154,29 @@ Binance end-minus-1ms在adapter归一化，不能混入proof。退出保持既�
 | 当日交易Authority | expires_at=D+24H | 次日重建Session授权，不沿用昨日OR |
 | materialization timeout | 原fence+1800s | 排队不启动timeout；重试/重启/retarget不重置 |
 | 退出数据 | 完整15m与原保护 cadence | 不改成1h、4h或96小时 |
+
+### 4.0 为什么最终选币不能提前到00:00
+
+**01:00是原算法数据完整的最早时点，不是任意挑选的定时。**排序核心需要当日
+00:00–01:00的OR.width/pre-OR ATR14；96根输入最后4根正是该小时。00:00时ATR与历史
+部分已知，当日OR与截至01:00的24h quote volume尚不完整，不能提交同算法的最终排名。
+
+| 可执行时点（UTC） | 已知数据/可提前的工作 | 禁止产生的结果 |
+| --- | --- | --- |
+| 00:00及之前 | 客户端/连接准备、Static维护、历史窗口完整性及开盘前ATR所需数据准备 | 当日最终OR、selected set或假Snapshot |
+| 00:00–01:00 | 可选预取已完成历史15m部分，待最后4根补齐 | 用未完成OR、上一日OR或临时排名授予交易 |
+| 01:00之后 | 获取截至01:00的完整96根、重新核对来源与quote volume、提交Snapshot、物化 | 把prefetch当作authority或改cutoff |
+| 02:00及之后 | 依真实Authority判断小时cross；迟到走future close/Audit | 追认未授权的过去突破 |
+
+原窗口为[D-23H,D+H)：00:00前最多先准备92根历史15m，最后4根需等01:00。预取并非
+首版强制新缓存框架；若采用，完整输入仍须按同cutoff重新校验，quote volume计算包含
+最后4根，读取修订/重复/缺口不得被缓存掩盖。00:00认证事实到01:00可能已过期，持续
+认证照原cadence刷新，activation与ENTRY仍重新验freshness。
+
+把最终决策直接改00:00会改成前一小时OR、昨日OR或开盘前另一个选币指标，属于**算法
+输入与策略语义变更**，不能再声称同输入复用原Golden。UTC00/01/02对应北京时间08/09/10。
+来源：[原特征计算](../../../src/trading_kernel/domain/instrument_selection.py)，其klines[92:96]
+为当日OR，78:92为开盘前ATR14输入。
 
 新kind不能套Generic的cutoff=anchor或current-close授权规则。Snapshot有效期、历史成员
 provenance及当日交易Authority是不同谓词。旧Snapshot可以在daily continuation中作为
