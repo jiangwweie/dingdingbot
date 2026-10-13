@@ -256,7 +256,12 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
         )
         await uow.instrument_selection.install_orb_spec(spec, installed_at_ms=D + 1)
     await install_static_pair(head_template_engine)
+    from tests.trading_kernel.integration.test_generic_selection_snapshot_repository import (
+        _apply_owner_control_grants,
+    )
+    await _apply_owner_control_grants(head_template_engine)
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
+        await uow._connection.execute(sa.text('SET LOCAL ROLE brc_owner_control'))
         c = await stage_orb_dynamic_selection_mode(
             uow,
             effective_session_start_ms=D + 86400000,
@@ -269,6 +274,10 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
             ),
             authentication_strength="totp_step_up",
         )
+    with pytest.raises(Exception,match='permission denied'):
+        async with head_template_engine.begin() as connection:
+            await connection.execute(sa.text('SET LOCAL ROLE brc_owner_control'))
+            await connection.execute(sa.text("UPDATE brc_strategy_universe_current SET lifecycle_state='retired' WHERE event_spec_id='event_spec:SOR-1H-001:SOR-1H-LONG:v1'"))
     assert (
         c.pending_authorization_id and c.selection_epoch_id and c.rollback_baseline_id
     )

@@ -44,6 +44,8 @@ TO brc_owner_control;
 
 GRANT EXECUTE ON FUNCTION brc_lock_owner_static_selection_source_v1(text)
 TO brc_owner_control;
+GRANT EXECUTE ON FUNCTION brc_lock_owner_orb_static_source()
+TO brc_owner_control;
 GRANT EXECUTE ON FUNCTION brc_lock_owner_pause_vacuum_v1(text,text)
 TO brc_owner_control;
 GRANT EXECUTE ON FUNCTION brc_lock_owner_static_retry_sources_v1(text,text),

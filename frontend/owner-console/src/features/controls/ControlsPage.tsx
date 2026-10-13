@@ -23,6 +23,7 @@ import {
 } from "./api";
 import { controlsQueryKey } from "./api";
 import { SelectionControlPanel } from "./SelectionControlPanel";
+import { OrbSelectionControlPanel } from "./OrbSelectionControlPanel";
 
 type PendingAction =
   | { kind: "global"; action: "pause" | "resume"; version: number }
@@ -212,7 +213,8 @@ export function ControlsPage() {
       </Panel>
 
       {(["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"] as const).map(group => <SelectionControlPanel key={group} strategyGroupId={group} />)}
-      <Panel title="SOR 已退役"><p>仅保留历史与兼容能力，不再提供 ENTRY Resume 或 Dynamic 激活。</p></Panel>
+      <OrbSelectionControlPanel />
+      <Panel title="旧 SOR-001 已退役"><p>仅保留历史记录，不再提供恢复入场或 Dynamic 激活。</p></Panel>
 
       <Panel title="当前受控操作">
         {operation ? (

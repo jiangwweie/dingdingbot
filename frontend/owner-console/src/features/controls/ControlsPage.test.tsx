@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ownerQueryClient } from "../../app/queryClient";
 import { ControlsPage } from "./ControlsPage";
-import { getControls, getFlattenPreview, getSelectionPreview } from "./api";
+import { getControls, getFlattenPreview, getSelectionPreview, getOrbSelectionPreview } from "./api";
 import { selectionFixture } from "./selectionFixtures";
 
 vi.mock("./api", async (importOriginal) => {
@@ -18,6 +18,8 @@ vi.mock("./api", async (importOriginal) => {
     setStrategyControl: vi.fn(),
     submitFlatten: vi.fn(),
     getSelectionPreview: vi.fn(),
+    getOrbSelectionPreview: vi.fn(),
+    submitOrbDynamicIntent: vi.fn(),
     submitSelectionIntent: vi.fn(),
   };
 });
@@ -38,6 +40,7 @@ const controlsFixture = {
 
 beforeEach(() => {
   ownerQueryClient.clear();
+  vi.mocked(getOrbSelectionPreview).mockResolvedValue({strategy_label:"SOR-1H（1h 入场 / 15m 退出）",installed:false,control:null,runtime:null,next_effective_period_anchor_ms:1800057600000,next_prepare_not_before_ms:1800061200000,next_eligibility_not_before_ms:1800064800000});
   vi.mocked(getControls).mockResolvedValue(controlsFixture);
   vi.mocked(getSelectionPreview).mockImplementation(async group => ({ ...selectionFixture, control: null,
     runtime: { ...selectionFixture.runtime, installed: false, strategy_group_id: group, first_blocker: "SPEC_NOT_INSTALLED" } }));
@@ -108,6 +111,6 @@ it("shows one readable control operation instead of individual state-machine eve
 
 it("never offers reactivation of retired SOR", async () => {
   render(<QueryClientProvider client={ownerQueryClient}><MemoryRouter initialEntries={["/controls"]}><ControlsPage /></MemoryRouter></QueryClientProvider>);
-  expect(await screen.findByText("SOR 已退役")).toBeInTheDocument();
+  expect(await screen.findByText("旧 SOR-001 已退役")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "激活 Dynamic" })).not.toBeInTheDocument();
 });

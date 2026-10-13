@@ -396,3 +396,11 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - API Dynamic activate新身份单独路由；旧SOR仍拒绝。新只读Job使用当前epoch，独立Preview明确UTC01准备/UTC02资格与1h入场/15m退出，不套Generic missed/staleness字段。
 - 历史CLAIMED Job被当前日正式Job supersede，保留原Owner intent；Session过期禁止源读取，错误计算记录失败。
 - 相关Slice 152 passed / 15.23s，`/tmp/brc-orb-host-final-slice.log`；8个生产/宿主模块Mypy通过。仍不含最终Release/R4、Frontend/R2、source0010 preservation或新Ticket完整链。
+
+### Owner界面与正式角色检查点（2026-10-14，未部署）
+
+- 新SOR-1H使用独立控制面板与Preview，显示每日01:00准备/02:00最早资格、当日Job/选择数/Authority；旧SOR-001明确退役。未安装/读失败/pending时禁止Dynamic提交，不借Generic staleness与missed字段。
+- Dynamic HTTP重复请求在原authorization/idempotency下返回当前control，首次请求仍先version后TOTP；旧SOR激活仍拒绝。
+- 正式brc_owner_control按发布role SQL可冻结独立双边Static基线；lock-only SECURITY DEFINER函数限exact新Spec/Static状态，仅锁两current，不授权Owner更新Universe/交易表。直接更新current被拒绝。
+- Owner HTTP＋真实PG Slice 55 passed / 15.32s，`/tmp/brc-orb-owner-pg-slice.log`；控制页相关19 tests passed；前端TypeScript typecheck通过。
+- 本地未执行部署/迁移/启用/真实订单。仍需完成手动Static rollback、完整1h源到Ticket保护/退出链、cross-hour deadline与source0010 preservation、official release验证与最终审查。

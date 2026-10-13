@@ -83,6 +83,20 @@ def upgrade() -> None:
     _hourly_generation_guard()
     _hourly_owner_resume()
     _hourly_audit_ledger()
+    op.execute(sa.text("""CREATE FUNCTION brc_lock_owner_orb_static_source() RETURNS void LANGUAGE plpgsql
+      SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+    BEGIN
+      IF NOT EXISTS(SELECT 1 FROM public.brc_strategy_selection_control_current c
+        JOIN public.brc_instrument_selection_specs s ON s.selection_spec_id=c.selection_spec_id
+        WHERE c.strategy_group_id='SOR-1H-001' AND c.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
+          AND c.selection_mode='static_baseline' AND c.pending_selection_mode IS NULL
+          AND s.selection_kind='orb_session_dynamic_v1' AND s.status='active') THEN
+        RAISE EXCEPTION 'ORB Owner source lock requires exact Static control'; END IF;
+      PERFORM 1 FROM public.brc_strategy_universe_current p
+        JOIN public.brc_instrument_selection_spec_events e ON e.event_spec_id=p.event_spec_id
+        WHERE e.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1' ORDER BY p.event_spec_id FOR UPDATE OF p;
+    END; $$"""))
+    op.execute(sa.text('REVOKE ALL ON FUNCTION brc_lock_owner_orb_static_source() FROM PUBLIC'))
     _replace_function('brc_enforce_universe_member_limit()',
         "IF spec.selection_kind='sor_dynamic_v0' THEN member_limit:=7;",
         "IF spec.selection_kind IN ('sor_dynamic_v0','orb_session_dynamic_v1') THEN member_limit:=7;")
@@ -95,6 +109,8 @@ def upgrade() -> None:
     for role in ('brc_owner_console','brc_owner_control'):
         if bind.scalar(sa.text('SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=:role)'),{'role':role}):
             op.execute(sa.text(f'GRANT SELECT ON brc_orb_session_selection_specs_v1 TO {role}'))
+            if role=='brc_owner_control':
+                op.execute(sa.text('GRANT EXECUTE ON FUNCTION brc_lock_owner_orb_static_source() TO brc_owner_control'))
 
 
 

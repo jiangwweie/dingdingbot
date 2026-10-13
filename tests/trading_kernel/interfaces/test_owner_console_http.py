@@ -1041,7 +1041,8 @@ def _settings(**overrides: object) -> OwnerConsoleSettings:
     return OwnerConsoleSettings(**values)  # type: ignore[arg-type]
 
 
-async def test_hourly_dynamic_owner_http_routes_exact_new_strategy(owner_console_client,monkeypatch):
+@pytest.mark.parametrize("duplicate",[False,True])
+async def test_hourly_dynamic_owner_http_routes_exact_new_strategy(owner_console_client,monkeypatch,duplicate):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -1058,7 +1059,7 @@ async def test_hourly_dynamic_owner_http_routes_exact_new_strategy(owner_console
         control_version=2,rollback_baseline_id='baseline:orb',selection_epoch_id='epoch:orb',updated_at_ms=BASE_MS)
     class Uow:
         async def __aenter__(self):
-            return SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control)))
+            return SimpleNamespace(instrument_selection=SimpleNamespace(get_selection_control=AsyncMock(return_value=control)),owner_controls=SimpleNamespace(get_strategy_control=AsyncMock(return_value=object()),get_authorization_by_idempotency_key=AsyncMock(return_value=object() if duplicate else None)))
         async def __aexit__(self,*args):pass
     monkeypatch.setattr(routes,'PostgresKernelUnitOfWork',lambda engine:Uow())
     monkeypatch.setattr(routes,'get_control_engine',lambda request:object())
@@ -1066,7 +1067,7 @@ async def test_hourly_dynamic_owner_http_routes_exact_new_strategy(owner_console
     monkeypatch.setattr(routes,'stage_orb_dynamic_selection_mode',staged,raising=False)
     monkeypatch.setattr(routes,'_require_step_up',AsyncMock())
     response=await owner_console_client.post('/api/owner/v1/controls/strategies/SOR-1H-001/selection/dynamic/activate',
-        headers={'Origin':'https://owner.example.test'},json={'expected_version':2,'reason':'hourly','idempotency_key':'orb:http',
+        headers={'Origin':'https://owner.example.test'},json={'expected_version':1 if duplicate else 2,'reason':'hourly','idempotency_key':'orb:http',
             'effective_session_start_ms':control.pending_effective_period_anchor_ms,'totp_code':'000000'})
     assert response.status_code==200,response.text
     staged.assert_awaited_once()

@@ -752,13 +752,13 @@ class PostgresInstrumentSelectionRepository:
         ):
             raise SelectionJobConflict("ORB baseline requires exact Static control")
         sources = []
+        await self._connection.execute(sa.text('SELECT brc_lock_owner_orb_static_source()'))
         for event, side in zip(ORB_EVENT_SPEC_IDS, ("long", "short"), strict=True):
             current = (
                 (
                     await self._connection.execute(
                         sa.select(strategy_universe_current)
                         .where(strategy_universe_current.c.event_spec_id == event)
-                        .with_for_update()
                     )
                 )
                 .mappings()

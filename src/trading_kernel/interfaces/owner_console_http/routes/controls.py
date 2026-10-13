@@ -543,6 +543,19 @@ async def activate_dynamic_selection(
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
     if not isinstance(body,DynamicSelectionActivationBody):
         raise OwnerControlBlocked("sor_selection_requires_session_start")
+    if strategy_group_id == 'SOR-1H-001':
+        async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
+            existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
+            if existing is None:
+                control=await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
+                if control is None:
+                    raise OwnerControlBlocked('selection_control_missing')
+                if control.control_version!=body.expected_version:
+                    raise OwnerControlConflict('selection_control_version_conflict')
+                await _require_step_up(body,request)
+            return await stage_orb_dynamic_selection_mode(uow,effective_session_start_ms=body.effective_session_start_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         current = await uow.instrument_selection.get_selection_control(
             strategy_group_id
@@ -553,10 +566,6 @@ async def activate_dynamic_selection(
             raise OwnerControlConflict("selection_control_version_conflict")
     await _require_step_up(body, request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
-        if strategy_group_id == "SOR-1H-001":
-            return await stage_orb_dynamic_selection_mode(uow,
-                effective_session_start_ms=body.effective_session_start_ms,
-                request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
         return await stage_dynamic_selection_mode(
             uow,
             strategy_group_id=strategy_group_id,
