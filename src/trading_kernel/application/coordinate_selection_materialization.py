@@ -1908,6 +1908,26 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     desired_at_ms=now_ms)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,**identity)
             if generation.lifecycle_state is MaterializationGenerationState.DESIRED:
+                snapshot = await uow.instrument_selection.get_generic_snapshot(generation.selection_snapshot_id)
+                blocker = await uow.instrument_selection.generic_recovery_transition_blocker(
+                    selection_spec_id=generation.selection_spec_id,target_members=snapshot.selected_members)
+                if blocker is not None:
+                    # Keep the old scopes observable until their authorized
+                    # recovery rebase is actually armed. Opening Vacuum first
+                    # prevents precisely that observation and causes starvation.
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        reason_code=blocker,**identity)
+                spec = await uow.instrument_selection.get_generic_spec(generation.selection_spec_id)
+                close = now_ms//HOUR_MS*HOUR_MS
+                try:
+                    await uow.signals.lock_generic_close_coverage(event_spec_id=spec.event_spec_id,
+                        exchange_instrument_ids=snapshot.selected_members,closed_at_ms=close)
+                except GenericCloseAlreadyConsumed:
+                    # No future eligible close is promised by taking the slot.
+                    # Keep this Desired unfenced so a newer due period can
+                    # supersede it without starving the old recovery path.
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                        reason_code="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED",**identity)
                 if not await uow.strategy_universes.materialization_slot_available(generation.materialization_generation_id):
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
                         reason_code="GLOBAL_WARMING_SLOT_BUSY",**identity)

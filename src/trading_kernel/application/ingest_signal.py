@@ -16,6 +16,10 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     GenericContinuityCloseProof,
 )
 from src.trading_kernel.domain.exposure_episode import build_episode_domain_key
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+)
+from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import (
     HOUR_MS,
     SOR_LONG_EVENT_SPEC_ID,
@@ -501,6 +505,43 @@ class IngestSignalResult(BaseModel):
     signal_event_id: str | None
 
 
+async def pending_dynamic_close_handover(uow: KernelUnitOfWork, *, control: SelectionControl,
+    runtime_scope: RuntimeScopeSnapshot, observed_close_time_ms: int, now_ms: int) -> bool:
+    """Defer formal Static close consumption to an already-due authorized switch.
+
+    No grant, cursor rewind, network read or warm write occurs here. Recovery
+    observations must first complete their real future-close rebase.
+    """
+    if (control.selection_mode is not SelectionMode.STATIC_BASELINE
+        or control.pending_selection_mode is not SelectionMode.DYNAMIC_SELECTION
+        or control.pending_authorization_id is None or control.selection_epoch_id is None
+        or control.pending_effective_period_anchor_ms is None
+        or observed_close_time_ms != now_ms//HOUR_MS*HOUR_MS
+        or runtime_scope.lifecycle_state != "active"):
+        return False
+    spec = generic_selection_spec(control.strategy_group_id)
+    cutoff = (observed_close_time_ms-HOUR_MS)//(spec.cadence_hours*HOUR_MS)*(spec.cadence_hours*HOUR_MS)
+    if cutoff < control.pending_effective_period_anchor_ms:
+        return False
+    job = await uow.instrument_selection.get_selection_job(selection_spec_id=control.selection_spec_id,
+        selection_epoch_id=control.selection_epoch_id,period_anchor_ms=cutoff)
+    if job is None or job.state != "SNAPSHOT_READY" or job.selection_snapshot_id is None:
+        return False
+    snapshot = await uow.instrument_selection.get_generic_snapshot(job.selection_snapshot_id)
+    if (snapshot.selection_spec_id != control.selection_spec_id or snapshot.selection_epoch_id != control.selection_epoch_id
+        or snapshot.feature_cutoff_at_ms != cutoff or snapshot.committed_at_ms >= observed_close_time_ms
+        or not snapshot.effective_from_ms <= now_ms < snapshot.expires_at_ms
+        or runtime_scope.exchange_instrument_id not in snapshot.selected_members):
+        return False
+    generation = await uow.instrument_selection.get_generic_materialization_generation(
+        GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id))
+    if generation is not None and generation.lifecycle_state.value not in {"PENDING","DESIRED","DRAINING_ENTRY","MATERIALIZING","STAGED"}:
+        return False
+    blocker = await uow.instrument_selection.generic_recovery_transition_blocker(
+        selection_spec_id=control.selection_spec_id,target_members=snapshot.selected_members)
+    return blocker is None
+
+
 async def _resolve_generic_selection_authority(
     uow: KernelUnitOfWork, *, control: SelectionControl, runtime_scope: RuntimeScopeSnapshot,
     birth_selection_authority_id: str | None, now_ms: int, lock_current: bool,
@@ -527,6 +568,9 @@ async def _resolve_generic_selection_authority(
         selection_spec_id=control.selection_spec_id,for_update=lock_current)
     if vacuum is not None and vacuum.blocks_new_entry:
         return decision(SelectionEntryAuthorityStatus.VACUUM_OPEN,"selection_entry_vacuum_open")
+    if recovery_observation and birth_selection_authority_id is None and await pending_dynamic_close_handover(
+        uow,control=control,runtime_scope=runtime_scope,observed_close_time_ms=observed_close_time_ms,now_ms=now_ms):
+        return decision(SelectionEntryAuthorityStatus.AUTHORITY_INVALID,"selection_activation_pending_current_close")
     if control.selection_mode is SelectionMode.STATIC_BASELINE and birth_selection_authority_id is None:
         static_proof = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(runtime_scope.universe_version_id)
         if static_proof is not None:

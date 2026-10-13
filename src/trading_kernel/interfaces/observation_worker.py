@@ -141,7 +141,7 @@ async def run_observation_worker_once(
         and observation.detector_reason == "market_snapshot_unavailable"
     )
     if observation.status is ObservationStatus.INVALID and observation.detector_reason in {
-        "selection_authority_missing_or_expired","selection_entry_vacuum",
+        "selection_authority_missing_or_expired","selection_entry_vacuum","selection_activation_pending_current_close",
     }:
         async with uow_factory() as uow:
             scope=await uow.signals.get_runtime_scope(claim.runtime_scope_id)

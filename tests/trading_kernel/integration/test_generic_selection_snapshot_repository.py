@@ -12093,8 +12093,13 @@ async def _cutover_static_with_protected_ticket(database, *, group, ticket, at_m
     return tick
 
 
-async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False, activation_delay_periods=0):
+async def _exercise_generic_generation(database, group, comparison_only, *, durable=False, first_activation=False, failure_case=None, natural_selection=False, activation_delay_periods=0, static_observer_first=False):
     source = inputs(group)
+    if static_observer_first:
+        # The existing Static member must actually overlap the selected set;
+        # MPG's ordinary synthetic fixture ranks that member last.
+        source=source.model_copy(update={"member_windows":tuple(w.model_copy(
+            update={"candles":source.member_windows[-1].candles}) for w in source.member_windows)})
     activation_anchor = source.feature_cutoff_at_ms
     for _ in range(activation_delay_periods):
         source = next_input(source).model_copy(update={"predecessor_snapshot":None})
@@ -12188,6 +12193,25 @@ async def _exercise_generic_generation(database, group, comparison_only, *, dura
             await uow.instrument_selection.save_generic_snapshot(snapshot, decision_at_ms=source.decision_at_ms, source_observed_at_ms=source.source_observed_at_ms)
     if not natural_selection and not first_activation:
         await enable_epoch(database, group, pending=first_activation)
+    if static_observer_first:
+        async with database.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true WHERE owner_policy_id='policy-main'"))
+            rid = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND exchange_instrument_id=:member"),
+                {"uid":uid,"member":snapshot.selected_members[0]})
+        assert rid is not None
+        class MustNotFetchOldClose:
+            async def fetch_closed_candles(self, request):
+                raise AssertionError("due Dynamic handover must not consume old Static close")
+        observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),MustNotFetchOldClose(),
+            ObservationRequest(runtime_scope_id=rid,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=snapshot.effective_from_ms,attempted_at_ms=snapshot.effective_from_ms+1))
+        assert observed.status is ObservationStatus.INVALID
+        assert observed.detector_reason == "selection_activation_pending_current_close"
+        async with PostgresKernelUnitOfWork(database) as uow:
+            key=build_episode_domain_key(event_spec_id=source.spec.event_spec_id,exchange_instrument_id=snapshot.selected_members[0],
+                position_side=source.spec.position_side)
+            episode=await uow.signals.lock_exposure_episode(key)
+            assert episode is None or episode.last_observed_at_ms < snapshot.effective_from_ms
     generation = GenericMaterializationGeneration.build(snapshot=snapshot, selection_control_version=2, created_at_ms=CUTOFF+HOUR+1,
         previous_events=(MaterializationEventBaseline(event_spec_id=source.spec.event_spec_id,position_side=source.spec.position_side,
             grant_state="ACTIVE",universe_version_id=uid,member_set_digest=selected_member_set_digest(source.spec.candidate_ids[:1]),
@@ -14055,3 +14079,56 @@ async def test_0010_preserves_pending_intent_and_every_source_row_then_rotates_i
     finally:
         await engine.dispose()
         await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("group", ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
+async def test_due_first_dynamic_handover_does_not_lose_close_to_old_static_observer(database: AsyncEngine, group: str) -> None:
+    source, snapshot, _generation, _uid = await _exercise_generic_generation(database,group,False,
+        durable=True,first_activation=True,natural_selection=True,static_observer_first=True)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert current.authority.authority_outcome=="ACTIVE_NEW"
+        assert current.authority.selection_snapshot_id==snapshot.selection_snapshot_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["GENERIC_RECOVERY_REBASE_PENDING", "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED"])
+async def test_dynamic_handover_waits_unfenced_for_rebase_or_an_unconsumed_close(database: AsyncEngine, blocker: str) -> None:
+    group="MI-001"
+    source=inputs(group)
+    await _install_static_selection_source(database,group)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        control=await stage_generic_dynamic_selection_mode(uow,strategy_group_id=group,effective_period_anchor_ms=CUTOFF,
+            request=ControlMutationRequest(expected_version=1,reason="handover-gate",idempotency_key="handover:gate",
+                owner_identity="owner",now_ms=CUTOFF-1),authentication_strength="totp_step_up")
+        source=source.model_copy(update={"selection_epoch_id":control.selection_epoch_id})
+        snapshot=compute_generic_selection(source)
+        await uow.instrument_selection.save_generic_snapshot(snapshot,decision_at_ms=source.decision_at_ms,
+            source_observed_at_ms=source.source_observed_at_ms)
+    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id,worker_id="handover-gate")
+    for offset in (1,2):
+        await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda offset=offset:CUTOFF+HOUR+offset)
+    if blocker=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED":
+        state=advance_exposure_episode(contract=strategy_contract_for(source.spec.event_spec_id),current=None,
+            detector_status=DetectorStatus.NOT_TRIGGERED,occurred_at_ms=None,observed_at_ms=CUTOFF+HOUR,
+            exchange_instrument_id=snapshot.selected_members[0]).current
+        async with PostgresKernelUnitOfWork(database) as uow:
+            await uow.signals.save_exposure_episode(state,expected_version=0)
+    async def run_gate():
+        return await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:CUTOFF+HOUR+3)
+    if blocker=="GENERIC_RECOVERY_REBASE_PENDING":
+        with patch.object(PostgresInstrumentSelectionRepository,"generic_recovery_transition_blocker",new=AsyncMock(return_value=blocker)):
+            result=await run_gate()
+    else:
+        result=await run_gate()
+    assert result.reason_code==blocker and result.disposition is MaterializationDisposition.GENERATION_DESIRED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        generation=await uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id)
+        assert generation.fenced_at_ms is None and generation.lifecycle_state.value=="DESIRED"
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
+        assert (await uow.instrument_selection.get_selection_control(group))==control
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
