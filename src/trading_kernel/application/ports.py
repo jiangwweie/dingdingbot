@@ -1934,6 +1934,9 @@ class InstrumentSelectionRepository(Protocol):
         abandoned_at_ms: int,
     ) -> MaterializationGeneration: ...
 
+    async def supersede_unfenced_orb_static_generations(self, *, replacement_generation: MaterializationGeneration,
+        superseded_at_ms: int) -> None: ...
+
     async def supersede_generation_and_retarget_vacuum(
         self,
         *,

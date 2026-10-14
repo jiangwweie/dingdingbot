@@ -671,7 +671,7 @@ def _hourly_static_commit_guard() -> None:
         OR NOT EXISTS(SELECT 1 FROM brc_strategy_entry_vacuums_current v JOIN brc_selection_authority_gap_audits_current audit
           ON audit.source_entry_vacuum_id=v.entry_vacuum_id AND audit.source_generation_id=v.source_generation_id
           WHERE v.source_generation_id=g.materialization_generation_id AND v.state='RESOLVED_ACTIVE' AND v.drained_at_ms IS NOT NULL
-            AND v.resolved_at_ms=a.created_at_ms AND a.created_at_ms<v.fenced_at_ms+1800000
+            AND v.resolved_at_ms=a.created_at_ms AND a.created_at_ms<greatest(v.fenced_at_ms,g.desired_at_ms)+1800000
             AND audit.authority_gap_audit_id=a.authority_gap_audit_id AND audit.state='COMPLETE' AND audit.proposed_authority_outcome='ACTIVE_NEW'
             AND audit.first_eligible_close_time_ms=a.first_eligible_close_time_ms AND audit.audited_through_close_time_ms+3600000=a.first_eligible_close_time_ms)
       THEN RAISE EXCEPTION 'ORB Static commit requires exact Owner baseline audit and atomic mode'; END IF;
@@ -725,11 +725,26 @@ def _hourly_previous_authority_guard() -> None:
           AND NOT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_events handoff
             JOIN brc_strategy_universe_materialization_generations replacement ON replacement.materialization_generation_id=handoff.payload->>'replacement_generation_id'
             JOIN brc_strategy_entry_vacuums_current v ON v.source_generation_id=replacement.materialization_generation_id
-            JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=replacement.selection_snapshot_id
+            LEFT JOIN brc_instrument_selection_snapshots s ON s.selection_snapshot_id=replacement.selection_snapshot_id
             WHERE handoff.materialization_generation_id=g.materialization_generation_id AND handoff.event_type='SUPERSEDED'
               AND replacement.selection_spec_id=g.selection_spec_id AND replacement.selection_epoch_id=g.selection_epoch_id
               AND replacement.selection_control_version=g.selection_control_version AND replacement.period_anchor_ms>g.period_anchor_ms
-              AND replacement.lifecycle_state='MATERIALIZING' AND s.selected_count>0 AND s.created_at_ms<=handoff.occurred_at_ms
+              AND replacement.lifecycle_state='MATERIALIZING' AND (
+                (replacement.selection_mode='dynamic_selection' AND s.selected_count>0 AND s.created_at_ms<=handoff.occurred_at_ms)
+                OR (replacement.selection_mode='static_baseline' AND replacement.desired_member_count=7 AND EXISTS (
+                  SELECT 1 FROM brc_strategy_universe_materialization_events source
+                  JOIN brc_owner_authorizations owner ON owner.authorization_id=source.payload->>'activation_authorization_id'
+                  JOIN brc_strategy_selection_control_current control ON control.pending_authorization_id=owner.authorization_id
+                  WHERE source.materialization_generation_id=replacement.materialization_generation_id AND source.event_sequence=1
+                    AND source.event_type='PENDING' AND owner.authentication_strength='totp_step_up'
+                    AND owner.purpose='selection_mode_change' AND control.strategy_group_id=g.strategy_group_id
+                    AND control.selection_spec_id=g.selection_spec_id AND control.selection_epoch_id=g.selection_epoch_id
+                    AND control.pending_selection_mode='static_baseline' AND control.rollback_baseline_id=replacement.rollback_baseline_id
+                    AND owner.target_scope->>'selection_epoch_id'=g.selection_epoch_id
+                    AND owner.target_scope->>'rollback_baseline_id'=replacement.rollback_baseline_id
+                    AND owner.target_scope->>'target_selection_mode'='static_baseline'
+                    AND owner.authorized_at_ms<=handoff.occurred_at_ms))
+              )
               AND v.state='RECONFIGURING' AND v.resolved_at_ms IS NULL AND v.drained_at_ms IS NOT NULL)) THEN
         RAISE EXCEPTION 'ORB negative recovery must retain fence and immutable EMPTY'; END IF;
       RETURN NULL;

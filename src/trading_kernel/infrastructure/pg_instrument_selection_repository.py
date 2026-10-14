@@ -3865,6 +3865,50 @@ class PostgresInstrumentSelectionRepository:
         )
         return abandoned
 
+    async def supersede_unfenced_orb_static_generations(self, *, replacement_generation: MaterializationGeneration,
+        superseded_at_ms: int) -> None:
+        """Supersede an older unfenced attempt under the explicit Static intent."""
+        replacement=replacement_generation
+        control=await self.get_selection_control(replacement.strategy_group_id,for_update=True)
+        if replacement.selection_spec_id!=ORB_SELECTION_SPEC_ID or replacement.selection_mode is not SelectionMode.STATIC_BASELINE or (
+            replacement.lifecycle_state is not MaterializationGenerationState.PENDING or control is None
+            or control.pending_authorization_id!=replacement.activation_authorization_id
+            or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
+            or control.selection_epoch_id!=replacement.selection_epoch_id
+            or control.control_version!=replacement.selection_control_version
+            or control.rollback_baseline_id!=replacement.rollback_baseline_id
+            or replacement.created_at_ms!=superseded_at_ms
+            or await self.get_current_entry_vacuum(strategy_group_id=control.strategy_group_id,selection_spec_id=control.selection_spec_id) is not None):
+            raise SelectionJobConflict('ORB unfenced retry requires current Static Owner intent')
+        rows=(await self._connection.execute(sa.select(*materialization_generation_projection_columns()).where(
+            strategy_universe_materialization_generations.c.strategy_group_id==replacement.strategy_group_id,
+            strategy_universe_materialization_generations.c.selection_spec_id==ORB_SELECTION_SPEC_ID,
+            strategy_universe_materialization_generations.c.lifecycle_state.in_(('PENDING','DESIRED')))
+            .limit(2).with_for_update())).mappings().all()
+        if len(rows)>1:raise SelectionJobConflict('ORB unfenced retry has contradictory predecessors')
+        for row in rows:
+            old=_materialization_generation_from_row(row)
+            if old.selection_mode not in {SelectionMode.STATIC_BASELINE,SelectionMode.DYNAMIC_SELECTION} or old.session_start_ms is None or replacement.session_start_ms is None or (
+                old.session_start_ms>=replacement.session_start_ms or old.selection_epoch_id!=replacement.selection_epoch_id
+                or old.selection_control_version!=replacement.selection_control_version
+                or (old.selection_mode is SelectionMode.STATIC_BASELINE and (
+                    old.activation_authorization_id!=replacement.activation_authorization_id
+                    or old.rollback_baseline_id!=replacement.rollback_baseline_id))
+                or old.previous_long_universe_version_id!=replacement.previous_long_universe_version_id
+                or old.previous_short_universe_version_id!=replacement.previous_short_universe_version_id
+                or row['fenced_at_ms'] is not None):
+                raise SelectionJobConflict('ORB unfenced retry previous source changed')
+            seq=old.projection_version+1
+            changed=await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
+                strategy_universe_materialization_generations.c.materialization_generation_id==old.materialization_generation_id,
+                strategy_universe_materialization_generations.c.projection_version==old.projection_version).values(
+                    lifecycle_state='SUPERSEDED',terminal_at_ms=superseded_at_ms,lease_owner=None,lease_expires_at_ms=None,projection_version=seq))
+            if changed.rowcount!=1:raise SelectionJobConflict('ORB unfenced retry CAS changed')
+            await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
+                materialization_event_id=f'materialization-event:{old.materialization_generation_id}:{seq}',
+                materialization_generation_id=old.materialization_generation_id,event_sequence=seq,event_type='SUPERSEDED',
+                payload={'replacement_generation_id':replacement.materialization_generation_id,'reason_code':'ORB_STATIC_NEXT_DAY_RETRY'},occurred_at_ms=superseded_at_ms))
+
     async def supersede_generation_and_retarget_vacuum(
         self,
         *,
@@ -3895,6 +3939,21 @@ class PostgresInstrumentSelectionRepository:
             or vacuum.resolved_at_ms is not None
         ):
             raise ValueError("supersession requires a newer exact drained Generation")
+        if replacement_generation.selection_mode is SelectionMode.STATIC_BASELINE:
+            control=await self.get_selection_control(replacement_generation.strategy_group_id,for_update=True)
+            owner=await self._connection.scalar(sa.select(strategy_entry_controls_current.c.entry_state).where(
+                strategy_entry_controls_current.c.strategy_group_id==replacement_generation.strategy_group_id))
+            if replacement_generation.selection_spec_id!=ORB_SELECTION_SPEC_ID or previous_generation.selection_spec_id!=ORB_SELECTION_SPEC_ID or (
+                owner!='enabled' or control is None or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE
+                or control.pending_authorization_id!=replacement_generation.activation_authorization_id
+                or control.selection_epoch_id!=replacement_generation.selection_epoch_id
+                or control.control_version!=replacement_generation.selection_control_version
+                or control.rollback_baseline_id!=replacement_generation.rollback_baseline_id
+                or previous_generation.selection_epoch_id!=replacement_generation.selection_epoch_id
+                or previous_generation.previous_long_universe_version_id!=replacement_generation.previous_long_universe_version_id
+                or previous_generation.previous_short_universe_version_id!=replacement_generation.previous_short_universe_version_id
+                or await self.entry_vacuum_has_drain_blockers(strategy_group_id=control.strategy_group_id)):
+                raise SelectionJobConflict('ORB Static retry source or Owner intent changed')
         locked_previous = await self.get_materialization_generation(
             previous_generation.materialization_generation_id,
             for_update=True,
@@ -3912,10 +3971,6 @@ class PostgresInstrumentSelectionRepository:
             ),
             first_blocker="SUPERSEDED_BY_NEWER_SELECTION",
             failed_at_ms=superseded_at_ms,
-        )
-        await self.add_pending_materialization_generation(
-            replacement_generation,
-            targets=replacement_targets,
         )
         previous_next_version = previous_generation.projection_version + 1
         if not previous_failed:
@@ -3958,6 +4013,10 @@ class PostgresInstrumentSelectionRepository:
                 },
                 occurred_at_ms=superseded_at_ms,
             )
+        )
+        await self.add_pending_materialization_generation(
+            replacement_generation,
+            targets=replacement_targets,
         )
         replacement_materializing = MaterializationGeneration.model_validate(
             replacement_generation.model_copy(

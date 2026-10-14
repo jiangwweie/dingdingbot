@@ -338,7 +338,7 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("changed,failed,late", [(False,False,False),(True,False,False),(True,True,False),(None,False,False),(False,False,True),(True,False,"static_failure")])
+@pytest.mark.parametrize("changed,failed,late", [(False,False,False),(True,False,False),(True,True,False),(None,False,False),(False,False,True),(True,False,"static_failure"),(True,False,"static_audit_failure"),(None,False,"static_after_empty_failure"),(True,False,"static_last_hour"),(True,False,"static_unfenced_dynamic")])
 async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(head_template_engine, changed, failed, late, monkeypatch):
     from decimal import Decimal
 
@@ -410,7 +410,7 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
             final=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
             assert final.authority.authority_outcome=='VALID_EMPTY' and final.authority.authorized_pair is None
             assert final.authority.activation_authorization_id==control.pending_authorization_id
-        await assert_empty_waits_for_nonempty_snapshot(head_template_engine,spec,session)
+        await assert_empty_waits_for_nonempty_snapshot(head_template_engine,spec,session,static_retry=late=="static_after_empty_failure")
         return
     if changed:
         assert result.disposition=='GENERATION_PENDING'
@@ -476,7 +476,7 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
                 assert restored.authority.activation_authorization_id is None
             return
         await assert_pair_entry_authority(head_template_engine,spec,session,active.selection_authority_id)
-        await assert_explicit_static_intent(head_template_engine,spec,session,fail=late=="static_failure")
+        await assert_explicit_static_intent(head_template_engine,spec,session,fail=late in {"static_failure", "static_audit_failure"}, audit_failure=late=="static_audit_failure", last_hour_wait=late=="static_last_hour",unfenced_dynamic=late=="static_unfenced_dynamic")
         return
     if late is True:
         assert result.disposition=='GAP_AUDIT_PENDING'
@@ -611,7 +611,7 @@ async def assert_owner_pause(engine,spec,session):
         assert vacuum is None or not vacuum.blocks_new_entry
 
 
-async def assert_empty_waits_for_nonempty_snapshot(engine,spec,session):
+async def assert_empty_waits_for_nonempty_snapshot(engine,spec,session,static_retry=False):
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateSelectionMaterializationRequest,
         coordinate_selection_materialization_once,
@@ -660,6 +660,9 @@ async def assert_empty_waits_for_nonempty_snapshot(engine,spec,session):
         assert current.authority.authority_outcome=='VALID_EMPTY'
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id)
         assert vacuum.blocks_new_entry
+    if static_retry:
+        await assert_explicit_static_intent(engine,spec,day,existing_failed_vacuum=True)
+        return
     later=day+86400000
     async with PostgresKernelUnitOfWork(engine) as uow:
         claim=await uow.instrument_selection.claim_orb_selection_job(selection_spec_id=spec.selection_spec_id,selection_epoch_id=control.selection_epoch_id,session_start_ms=later,worker_id='orb:retry:nonempty',now_ms=later+h,lease_duration_ms=120000)
@@ -722,11 +725,45 @@ async def assert_staged_facts_refresh(engine,spec,session,monkeypatch):
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_signal_events"))==0
 
 
-async def assert_explicit_static_intent(engine,spec,session,fail=False):
+async def assert_explicit_static_intent(engine,spec,session,fail=False, audit_failure=False, existing_failed_vacuum=False,last_hour_wait=False,unfenced_dynamic=False):
     from src.trading_kernel.application.owner_control import (
         ControlMutationRequest,
         stage_orb_static_selection_mode,
     )
+    if unfenced_dynamic:
+        from decimal import Decimal
+
+        from src.trading_kernel.application.coordinate_selection_materialization import (
+            _build_pending_generation,
+        )
+        from src.trading_kernel.domain.instrument_selection import (
+            SelectionKline,
+            SelectionSourceWindow,
+        )
+        from src.trading_kernel.domain.orb_session_selection import (
+            build_orb_session_period,
+            compute_orb_selection,
+        )
+        from src.trading_kernel.domain.selection_authority import UniverseAuthorityPair
+        old_day=session+86400000;h=3600000
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            current=await uow.instrument_selection.get_selection_control(spec.strategy_group_id)
+            claim=await uow.instrument_selection.claim_orb_selection_job(selection_spec_id=spec.selection_spec_id,selection_epoch_id=current.selection_epoch_id,
+                session_start_ms=old_day,worker_id='orb:unfenced',now_ms=old_day+h,lease_duration_ms=120000)
+            windows=tuple(SelectionSourceWindow(exchange_instrument_id=m,input_window_start_ms=old_day-23*h,feature_cutoff_at_ms=old_day+h,
+                klines=tuple(SelectionKline(open_time_ms=old_day-23*h+i*900000,close_time_ms=old_day-23*h+(i+1)*900000,
+                    open=Decimal(100),close=Decimal(100),high=Decimal(101 if i<92 or m in spec.candidate_ids[-7:] else 103),low=Decimal(99),quote_volume=Decimal(1000000)) for i in range(96))) for m in spec.candidate_ids)
+            value=compute_orb_selection(spec=spec,period=build_orb_session_period(old_day),selection_epoch_id=current.selection_epoch_id,
+                source_windows=windows,decision_at_ms=old_day+h,source_observed_at_ms=old_day+h+1,created_at_ms=old_day+h+2)
+            await uow.instrument_selection.complete_orb_selection_snapshot(claim=claim,computation=value,completed_at_ms=old_day+h+2)
+            long=await uow.strategy_universes.get_current(spec.event_spec_ids[0]);short=await uow.strategy_universes.get_current(spec.event_spec_ids[1])
+            prior=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
+            predecessor,targets=_build_pending_generation(snapshot=value.snapshot,selected_members=tuple(m.exchange_instrument_id for m in value.member_decisions if m.selected),
+                previous_pair=UniverseAuthorityPair(long_universe_version_id=long.universe_version_id,short_universe_version_id=short.universe_version_id),
+                created_at_ms=old_day+h+3,selection_control=current,previous_authority=prior.authority)
+            await uow.instrument_selection.add_pending_materialization_generation(predecessor,targets=targets)
+            await uow.instrument_selection.mark_materialization_generation_desired(predecessor.materialization_generation_id,expected_projection_version=1,desired_at_ms=old_day+h+4)
+        session=old_day
     async with PostgresKernelUnitOfWork(engine) as uow:
         current=await uow.instrument_selection.get_selection_control(spec.strategy_group_id)
         pending=await stage_orb_static_selection_mode(uow,rollback_baseline_id=current.rollback_baseline_id,
@@ -740,8 +777,20 @@ async def assert_explicit_static_intent(engine,spec,session,fail=False):
         coordinate_selection_materialization_once,
     )
     day=session+86400000
+    if last_hour_wait:
+        request=CoordinateSelectionMaterializationRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,session_start_ms=day,worker_id='orb:static:late')
+        before=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),request=request,clock_ms=lambda:day+22*3600000+1)
+        assert before.disposition=='GENERATION_PENDING'
+        desired=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),request=request,clock_ms=lambda:day+22*3600000+2)
+        assert desired.disposition=='GENERATION_DESIRED'
+        after=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),request=request,clock_ms=lambda:day+23*3600000)
+        assert after.disposition=='WAITING_SELECTION'
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id) is None
+            assert await uow.instrument_selection.get_selection_control(spec.strategy_group_id)==pending
+        day+=86400000
     created=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),request=CoordinateSelectionMaterializationRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,session_start_ms=day,worker_id='orb:static'),clock_ms=lambda:day+3600001)
-    assert created.disposition=='GENERATION_PENDING'
+    assert created.disposition==('GENERATION_DESIRED' if existing_failed_vacuum else 'GENERATION_PENDING')
     async with PostgresKernelUnitOfWork(engine) as uow:
         generation=await uow.instrument_selection.get_materialization_generation(created.materialization_generation_id)
         assert generation.selection_mode=='static_baseline' and generation.rollback_baseline_id==pending.rollback_baseline_id
@@ -782,6 +831,49 @@ async def assert_explicit_static_intent(engine,spec,session,fail=False):
         async def fetch_closed_candles(self,request):
             assert request.timeframe=='1h' and request.limit==1
             return (ClosedCandle(open_time_ms=day,close_time_ms=day+3600000,open=Decimal(100),high=Decimal(101),low=Decimal(99),close=Decimal(100),volume=Decimal(100)),)
+    if audit_failure:
+        class OfflineMarket:
+            async def fetch_closed_candles(self, request):
+                raise TimeoutError("local audit source unavailable")
+        failed_audit=await complete_pending_authority_gap_audit(uow_factory=lambda:PostgresKernelUnitOfWork(engine),authority_gap_audit_id=progress.authority_gap_audit_id,
+            audit_source=PublicMarketAuthorityGapAuditSource(OfflineMarket()),clock_ms=lambda:day+3600000+1800101)
+        assert failed_audit.reason_code == "AUTHORITY_GAP_SOURCE_UNAVAILABLE"
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            original=await uow.instrument_selection.get_authority_gap_audit(progress.authority_gap_audit_id)
+            old_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id)
+        later=day+86400000
+        request=CoordinateSelectionMaterializationRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,session_start_ms=later,worker_id='orb:static:retry')
+        for tick in range(1,15):
+            async with engine.connect() as connection:
+                warming=tuple((await connection.execute(sa.text("SELECT universe_version_id FROM brc_strategy_universe_versions WHERE strategy_group_id='SOR-1H-001' AND lifecycle_state='warming'"))).scalars())
+            for uid in warming:
+                await make_warming_ready(engine,universe_version_id=uid,warm_closed_bar_time_ms=later+3600000,valid_until_ms=later+7200000)
+            retried=await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(engine),request=request,clock_ms=lambda tick=tick:later+3600000+tick)
+            if retried.disposition=='GAP_AUDIT_PENDING':
+                break
+        assert retried.disposition=='GAP_AUDIT_PENDING',retried
+        class LaterMarket:
+            async def fetch_closed_candles(self,request):
+                return (ClosedCandle(open_time_ms=later,close_time_ms=later+3600000,open=Decimal(100),high=Decimal(101),low=Decimal(99),close=Decimal(100),volume=Decimal(100)),)
+        recovered=await complete_pending_authority_gap_audit(uow_factory=lambda:PostgresKernelUnitOfWork(engine),authority_gap_audit_id=retried.authority_gap_audit_id,
+            audit_source=PublicMarketAuthorityGapAuditSource(LaterMarket()),clock_ms=lambda:later+3600000+16)
+        assert recovered.disposition=='ACTIVE_NEW'
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            final=await uow.instrument_selection.get_selection_control(spec.strategy_group_id)
+            authority=await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
+            failed_still=await uow.instrument_selection.get_authority_gap_audit(original.authority_gap_audit_id)
+            assert failed_still==original
+            assert final.selection_mode=='static_baseline' and final.pending_authorization_id is None and final.selection_epoch_id is None
+            assert authority.authority.activation_authorization_id==pending.pending_authorization_id
+            assert authority.authority.first_eligible_close_time_ms==later+7200000
+            assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id) is None
+        async with engine.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_current p JOIN brc_strategy_universe_versions u USING(universe_version_id) WHERE u.strategy_group_id='SOR-1H-001' AND u.source_kind='static_baseline' AND p.lifecycle_state='active'"))==2
+            final_vacuum=(await connection.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current WHERE entry_vacuum_id=:vid"),{'vid':old_vacuum.entry_vacuum_id})).mappings().one()
+            assert final_vacuum['fenced_at_ms']==old_vacuum.fenced_at_ms
+            assert final_vacuum['drained_at_ms']==old_vacuum.drained_at_ms
+            assert await connection.scalar(sa.text('SELECT count(*) FROM brc_exchange_commands'))==0
+        return
     activated=await complete_pending_authority_gap_audit(uow_factory=lambda:PostgresKernelUnitOfWork(engine),authority_gap_audit_id=progress.authority_gap_audit_id,
         audit_source=PublicMarketAuthorityGapAuditSource(Market()),clock_ms=lambda:day+3600000+(1800101 if fail else 13))
     assert activated.disposition==('FALLBACK_PREVIOUS' if fail else 'ACTIVE_NEW')

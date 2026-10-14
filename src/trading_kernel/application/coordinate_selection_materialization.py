@@ -2694,6 +2694,11 @@ async def _coordinate_orb_static_selection(*,uow: KernelUnitOfWork,request: Coor
     source=OrbStaticMaterializationSource(session_start_ms=request.session_start_ms,selection_epoch_id=control.selection_epoch_id,rollback_baseline_id=baseline.rollback_baseline_id)
     gid='generation:orb:static:'+canonical_digest({'authorization':control.pending_authorization_id,'session':request.session_start_ms})[7:]
     generation=await uow.instrument_selection.get_materialization_generation(gid,for_update=True)
+    if now_ms>=request.session_start_ms+23*HOUR_MS and (generation is None or generation.lifecycle_state in {
+        MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}):
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_SELECTION,
+            reason_code='ORB_SESSION_HAS_NO_FUTURE_CLOSE')
+    vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=control.strategy_group_id,selection_spec_id=control.selection_spec_id,for_update=True)
     if generation is None:
         previous=await uow.instrument_selection.get_current_authority_projection(control.selection_spec_id)
         digest=selected_member_set_digest(members)
@@ -2707,12 +2712,31 @@ async def _coordinate_orb_static_selection(*,uow: KernelUnitOfWork,request: Coor
             previous_selection_authority_id=None if previous is None else previous.authority.selection_authority_id)
         targets=tuple(MaterializationTarget(event_spec_id=e,position_side="long" if i==1 else "short",expected_member_set_digest=digest,materialization_order=i)
             for i,e,side in ((1,ORB_EVENT_SPEC_IDS[0],'long'),(2,ORB_EVENT_SPEC_IDS[1],'short')))
+        if vacuum is not None:
+            if vacuum.state is not StrategyEntryVacuumState.RECONFIGURING or vacuum.source_generation_id is None or vacuum.drained_at_ms is None or vacuum.resolved_at_ms is not None:
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=vacuum.entry_vacuum_id,reason_code='ORB_STATIC_PREVIOUS_FENCE_NOT_DRAINED')
+            prior=await uow.instrument_selection.get_materialization_generation(vacuum.source_generation_id,for_update=True)
+            if prior is None or prior.session_start_ms is None or prior.session_start_ms>=request.session_start_ms:
+                return _blocked('ORB_STATIC_PREVIOUS_GENERATION_NOT_OLDER')
+            if not await uow.strategy_universes.materialization_slot_available(gid,replacing_generation_id=prior.materialization_generation_id):
+                return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
+                    entry_vacuum_id=vacuum.entry_vacuum_id,reason_code='GLOBAL_WARMING_SLOT_BUSY')
+            if await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=control.strategy_group_id):
+                return _blocked('ORB_STATIC_PREVIOUS_ENTRY_DRAIN_REQUIRED')
+            await _abandon_generation_targets(uow=uow,generation_id=prior.materialization_generation_id,
+                reason_code='superseded_by_owner_static_retry',attempted_at_ms=now_ms)
+            continued=await uow.instrument_selection.supersede_generation_and_retarget_vacuum(previous_generation=prior,
+                replacement_generation=generation,replacement_targets=targets,vacuum=vacuum,superseded_at_ms=now_ms)
+            return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,
+                materialization_generation_id=continued.materialization_generation_id,entry_vacuum_id=vacuum.entry_vacuum_id,
+                reason_code='ORB_STATIC_RETRY_RETAINED_DRAINED_FENCE')
+        await uow.instrument_selection.supersede_unfenced_orb_static_generations(replacement_generation=generation,superseded_at_ms=now_ms)
         await uow.instrument_selection.add_pending_materialization_generation(generation,targets=targets)
         return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_PENDING,materialization_generation_id=gid)
     if generation.lifecycle_state is MaterializationGenerationState.PENDING:
         await uow.instrument_selection.mark_materialization_generation_desired(gid,expected_projection_version=generation.projection_version,desired_at_ms=now_ms)
         return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,materialization_generation_id=gid)
-    vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=control.strategy_group_id,selection_spec_id=control.selection_spec_id,for_update=True)
     if generation.lifecycle_state is MaterializationGenerationState.DESIRED and vacuum is None:
         if not await uow.strategy_universes.materialization_slot_available(gid):
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.GENERATION_DESIRED,materialization_generation_id=gid,reason_code='GLOBAL_WARMING_SLOT_BUSY')

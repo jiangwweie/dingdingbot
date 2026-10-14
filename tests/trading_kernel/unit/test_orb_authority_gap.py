@@ -250,3 +250,52 @@ def test_hourly_audit_identity_separates_epoch_generation_and_repeated_owner_res
 
 def test_hourly_last_entry_hour_waits_for_next_session_without_a_new_grant():
     assert plan_selection_materialization(planning_facts(now_ms=D+23*H)).disposition=='WAITING_SELECTION'
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state', ['absent', 'desired'])
+async def test_static_intent_after_last_hour_does_not_create_generation_or_vacuum(state):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        _coordinate_orb_static_selection,
+    )
+    from src.trading_kernel.domain.selection_authority import (
+        MaterializationGenerationState,
+    )
+    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long'),))),
+        get_materialization_generation=AsyncMock(return_value=None if state=='absent' else SimpleNamespace(lifecycle_state=MaterializationGenerationState.DESIRED,projection_version=2)),
+        get_current_entry_vacuum=AsyncMock(return_value=None),add_pending_materialization_generation=AsyncMock(),open_generation_entry_vacuum=AsyncMock(),get_current_authority_projection=AsyncMock(return_value=None))
+    uow=SimpleNamespace(instrument_selection=repo,strategy_universes=SimpleNamespace(get_members=AsyncMock(return_value=tuple(sorted(f'binance-usdm:{m}USDT:perpetual' for m in ('BTC','ETH','BNB','SOL','XRP','DOGE','ADA')))),materialization_slot_available=AsyncMock(return_value=True)))
+    control=SimpleNamespace(pending_authorization_id='owner:static',rollback_baseline_id='baseline',selection_epoch_id='epoch:orb',strategy_group_id='SOR-1H-001',selection_spec_id=ORB_SELECTION_SPEC_ID,control_version=2)
+    result=await _coordinate_orb_static_selection(uow=uow,request=SimpleNamespace(session_start_ms=D),control=control,
+        pair=UniverseAuthorityPair(long_universe_version_id='long',short_universe_version_id='short'),long_members=('BTCUSDT',),short_members=('BTCUSDT',),now_ms=D+23*H)
+    assert result.disposition=='WAITING_SELECTION'
+    repo.add_pending_materialization_generation.assert_not_awaited()
+    repo.open_generation_entry_vacuum.assert_not_awaited()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fault',['undrained','entry_unresolved','not_older'])
+async def test_static_retry_does_not_abandon_targets_before_previous_fence_is_safe(fault):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        _coordinate_orb_static_selection,
+    )
+    from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuumState
+    prior=SimpleNamespace(session_start_ms=D if fault=='not_older' else D-86400000,materialization_generation_id='old')
+    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long'),))),
+        get_materialization_generation=AsyncMock(side_effect=[None,prior]),get_current_authority_projection=AsyncMock(return_value=None),
+        get_current_entry_vacuum=AsyncMock(return_value=SimpleNamespace(entry_vacuum_id='fence',source_generation_id='old',
+            state=StrategyEntryVacuumState.RECONFIGURING,drained_at_ms=None if fault=='undrained' else D-H,resolved_at_ms=None)),
+        entry_vacuum_has_drain_blockers=AsyncMock(return_value=fault=='entry_unresolved'),supersede_generation_and_retarget_vacuum=AsyncMock())
+    universes=SimpleNamespace(get_members=AsyncMock(return_value=tuple(sorted(f'binance-usdm:{m}USDT:perpetual' for m in ('BTC','ETH','BNB','SOL','XRP','DOGE','ADA')))),
+        materialization_slot_available=AsyncMock(return_value=True),get_generation_universe_targets=AsyncMock())
+    control=SimpleNamespace(pending_authorization_id='owner:static',rollback_baseline_id='baseline',selection_epoch_id='epoch:orb',strategy_group_id='SOR-1H-001',selection_spec_id=ORB_SELECTION_SPEC_ID,control_version=2)
+    result=await _coordinate_orb_static_selection(uow=SimpleNamespace(instrument_selection=repo,strategy_universes=universes),
+        request=SimpleNamespace(session_start_ms=D),control=control,pair=UniverseAuthorityPair(long_universe_version_id='long',short_universe_version_id='short'),
+        long_members=('BTCUSDT',),short_members=('BTCUSDT',),now_ms=D+H+1)
+    assert result.disposition in {'BLOCKED','WAITING_VACUUM'}
+    repo.supersede_generation_and_retarget_vacuum.assert_not_awaited()
+    universes.get_generation_universe_targets.assert_not_awaited()

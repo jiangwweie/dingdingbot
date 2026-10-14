@@ -446,3 +446,20 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 - 真PG全8个来源Universe场景验证paused/not-prepared可完成软件postflight但Entry恢复仍为false；Owner退出切换后11个Binding事实保留；新策略enabled则postflight拒绝。
 - 新负向覆盖错误成员／历史digest、missing Binding、pending intent和提前enabled，维持Fence。随后只准备SOR-1H新pair，不重装Generic Dynamic。
 - 必要部署定向回归通过后重新冻结候选与exact正式认证；H1-12保持未开始。
+
+
+### 历史Dynamic事故同类问题修复（2026-10-14）
+
+**执行范围：**Owner授权本地修复／测试；部署前等待确认。审查对象105c2387的F1–F3已完成目标RED/GREEN，最终exact发布认证待执行。
+
+| 缺陷 | 最终修复 | 必要证据 |
+| --- | --- | --- |
+| F1 Static旧围栏阻塞 | 跨日精确前代／Owner intent／epoch／baseline／drain验证，沿原Vacuum原子前向替代，先释放旧actionable索引再创建新Generation；不改失败事实或围栏起点 | 真PG审计源失败→次日双边Static ACTIVE；EMPTY失败后独立Static授权；旧Dynamic仅DESIRED时的Static切换；未drain／未决ENTRY／非旧周期均拒绝 |
+| F2 队列资格误用 | 按installed Selection kind分别判断资格，Generic保留current-close／rebase过滤，ORB使用当天01–23窗口和未来小时审计；Owner pause／版本／expiry／single-slot不变 | 混合队列最老ORB合法通过；暂停／过期／控制版本漂移／23h拒绝；既有29项Generic队列／handover通过 |
+| F3 Static截止遗漏 | 未启动attempt在23h之后不新建Generation／围栏；已启动恢复仍推进；次日同意图终结旧unfenced任务后继续 | 23h absent／DESIRED negative；22h queued→23h不fence→下一日完成双边Static |
+
+- 原Vacuum fence/drain时间保持；重试Generation独立1800s预算，与原daily materializer既有max(fence,desired)合同一致。新Static提交数据库guard按该独立attempt预算校验。
+- 新独立Static Owner授权可覆盖EMPTY后的负授权，但不能复活旧物理UID或伪造旧Dynamic资格；PG要求exact TOTP来源与baseline、原FAILED保持。
+- 0011尚未生产安装，故修订同一未发布0011正向迁移；0010 source行保留回归继续PASS，不加新schema分支或兼容读取。
+- 定向38、后续交易链／SOR／forward-preservation80、Generic共享回归29通过；Fast1672／Ruff／Mypy195通过属于阶段证据，最终counts按新冻结候选认证输出。
+- 无新的选币alpha／退出／资金／容量／服务，无生产SQL修补、exchange写、平仓或部署。本轮不增加backtest／参数搜索／long soak。
