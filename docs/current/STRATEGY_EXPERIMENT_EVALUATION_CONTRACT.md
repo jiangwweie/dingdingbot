@@ -51,6 +51,42 @@ show both the aggregate result and the contribution of tail outcomes. Missing
 funding or execution evidence remains explicit rather than being treated as
 zero.
 
+## Offline Attribution And Prospective Research
+
+Research outputs are display-only evidence; they do not replace canonical
+Review economics, create a second ledger, or authorize runtime changes.
+
+- Freeze the source code commit, database snapshot identity/time, analysis
+  revision, inclusion rules and effective Review revision. A moving branch
+  name alone is insufficient provenance.
+- Attribute Tickets by StrategyGroup/version, position side, frozen
+  ExitProfile, Policy and birth Selection authority/mode. Missing lineage stays
+  unknown; current controls must not retrospectively classify old Tickets.
+- Report all eligible Tickets, economically complete Tickets and missing-data
+  counts by group. Complete-case results are a subset, not total performance.
+  Missing funding/fills are never zero-filled. Use frozen initial stop risk as
+  the Net R denominator and disclose unavailable denominators.
+- Actual execution prices already reflect realized execution slippage. Report
+  benchmark slippage separately; do not deduct it twice from realized PnL.
+- TP1 quantity sensitivity at the historical Runner exit price is a conditional
+  estimate, not replay or a new strategy's realized return. Disclose changed
+  fees/funding, path dependence and execution assumptions that cannot be proved.
+- Report largest-winner concentration and leave-largest-winners-out sensitivity.
+  Tail dependence alone does not invalidate a right-tail hypothesis; prospective
+  evidence, bounded downside and a plausible repeatable mechanism still matter.
+- Compare rejected Signal-owned Shadow Outcomes separately by Policy and exact
+  Signal identity. Excursion is opportunity-path evidence, not executable profit.
+  Static/Dynamic cohort comparisons are descriptive unless a prospective
+  comparison design addresses regime, time and version confounding.
+- Freeze prospective metrics, observation windows and stop rules before tuning.
+  An elapsed window may end in insufficient evidence. Closed candles that touch
+  both stop and profit thresholds cannot establish intrabar first-touch order.
+
+Additional price-path persistence requires its own bounded design and engineering
+acceptance. It must reuse the kernel's identities, preserve read-only research
+semantics, bound query/storage cost and never create execution authority. An
+offline research delivery does not close deferred runtime or projector gates.
+
 ## Exit And Closure Attribution
 
 Lifecycle completeness and exit attribution are separate facts. A Ticket may

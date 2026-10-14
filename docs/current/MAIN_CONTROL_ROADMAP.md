@@ -92,6 +92,17 @@ performed at publication. Historical production tags stay immutable.
 4. Review accurate runtime blockers/presentation if needed; document publication
    is not an authorization to bypass freshness, comparison rebase or capacity.
 
+## Parallel Offline Research
+
+The Owner reports delivery of BRC-ALPHA-01's offline attribution first edition.
+Repository receipt and independent reproduction remain unverified; this does
+not close the deferred offline MAE/MFE projector, GS-13, long-run evidence or
+natural Ticket acceptance. See the
+[research delivery and planning record](../superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md).
+ALPHA-02 prospective path recording remains a proposal, not an authorized
+production change. Research does not change capital, exits, selection or scope.
+This documentation update does not refresh the dated runtime snapshot above.
+
 ## Current Stop Conditions
 
 No exchange write under wrong identity, stale/contradictory action-time facts,

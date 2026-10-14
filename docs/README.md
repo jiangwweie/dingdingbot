@@ -55,6 +55,15 @@ Live deployment, Resume and per-strategy activation facts belong exclusively to
 records the evidence boundary and provenance amendment. These design/research
 documents do not extend the `docs/current` runtime-authority allowlist.
 
+## Alpha Research Delivery And Planning
+
+[BRC-ALPHA delivery record and prospective research boundaries](superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md)
+records the Owner-reported offline ALPHA-01 delivery and the ALPHA-02 proposal.
+Repository receipt, independent reproduction and runtime integration are not
+claimed. This research record does not authorize strategy changes or deployment,
+and does not close deferred engineering acceptance. Economic interpretation
+remains owned by the Strategy Experiment Evaluation Contract.
+
 ## Version Nodes
 
 Project releases under `docs/releases/` are immutable publication notes, not
