@@ -31,18 +31,18 @@ continue concurrently across independent Netting Domains.
 | Area | Directly verified state |
 | --- | --- |
 | Snapshot time | 2026-10-15 00:04–00:08 Asia/Shanghai; official release output and bounded fresh PostgreSQL/systemd/journal reads |
-| Integration branch | `dev`; later documentation commits do not change production identity |
+| Integration branch | `dev` |
 | Production commit | `b8e82fb6b6dc24fdce36c845ac491b801fe561e5` |
 | Production tag | `tokyo-runtime-2026.10.15.1`, annotated exact runtime tag created and pushed to origin |
 | Production-commit certification | Exact R3/R2/R1 PASS: 1,681 Unit/Architecture, 1,693 Integration, 58 Full-chain; Ruff, Mypy196 and diff PASS. Earlier exact c06 R4 covered the0010→0011 migration; it is not claimed as b8 certification |
 | Kernel / schema | Official same-schema regular release PASS, `entry_enabled=false`; Alembic/runtime `0011_orb_session_1h_v1`; Kernel/API/static now use the same exact deployed commit |
 | Seed / Registry | Seed `sha256:98e0fe3c28c4f7dad37c96a5a63ca2be91ec38b4ccca8be791b8325f41366522`; source preservation and exact target gates PASS |
-| Source migration | Stopped0010→0011 source preservation verified39,669 source rows. Original c06 cutover completed migration/identity but its postflight was BLOCKED by target Selection preparation; the successor official regular release resolved final software acceptance without rewriting source evidence |
+| Source migration | Earlier `0009_capacity_policy_v0`→0010 original Dynamic intent repair is retained. Stopped0010→0011 source preservation verified39,669 source rows. Original c06 cutover completed migration/identity but its postflight was BLOCKED by target Selection preparation; the successor official regular release resolved final software acceptance without rewriting source evidence |
 | Owner controls | Policy version `23` has `new_entry_submit_enabled=false`; original capital/risk boundary retained. Existing four strategy controls and original Generic intent/negative fences preserved |
-| Runtime ownership | Observation, Lifecycle and Reconciliation active, all NRestarts0 at the post-release check; ENTRY inactive/disabled/write-fenced. No Entry promoter or Owner Resume occurred |
+| Runtime ownership | Observation, Lifecycle and Reconciliation active, all NRestarts0 at the post-release check; Entry inactive/disabled/write-fenced. No Entry promoter or Owner Resume occurred |
 | Owner API / Console | Exact R2 API and R1 static official deployment/smoke PASS, maintenance window ended |
 | New SOR-1H pair | Official independent bootstrap complete for LONG/SHORT, two current Active Universes with fourteen warmed member-direction scopes. New strategy control paused/version1; Selection `static_baseline`, no pending mode, no epoch |
-| Dynamic acceptance | New SOR-1H has no real Dynamic Universe/Authority takeover yet; first protected enable/Selection controls require genuine Owner TOTP. Chat deployment authorization is retained and must not be replaced by another deployment confirmation request |
+| Dynamic Selection postflight | New SOR-1H has no real Dynamic Universe/Authority takeover yet; first protected enable/Selection controls require genuine Owner TOTP. Chat deployment authorization is retained and must not be replaced by another deployment confirmation request |
 | Trading facts | Official cutover external flat/order-free gates PASS; fresh post-release active Ticket/position/command/Incident counts all zero; no release-owned order dispatched |
 | Readiness |32/32 current certification and10 Active Universes passed immediately before release. Latest running readiness is false after ordinary target cadence resumes; the earlier snapshot is not reusable as later ENTRY authority |
 | ExitProfile postflight | Existing frozen exits retained; independent new Events use the established Crypto15m exit bindings. No exit/stop/strategy sizing change |
