@@ -3630,15 +3630,18 @@ async def test_two_materializers_serialize_before_fence_and_pause_releases_durab
             assert not await uow.strategy_universes.materialization_slot_available(by_age[-1].materialization_generation_id)
             assert await uow.strategy_universes.materialization_slot_available(by_age[0].materialization_generation_id)
     both_entered=asyncio.Event()
-    actual_slot=PostgresStrategyUniverseRepository.materialization_slot_available
-    async def barrier_slot(repository,gid):
-        entered.add(gid)
+    actual_lock=PostgresStrategyUniverseRepository.lock_mutation
+    async def barrier_lock(repository):
+        # Compete at the transaction boundary, before acquiring the common lock.
+        # Waiting for both tasks after one already owns it invents a deadlock.
+        backend=await repository._connection.scalar(sa.text("SELECT pg_backend_pid()"))
+        entered.add(backend)
         if len(entered)==2:
             both_entered.set()
         await asyncio.wait_for(both_entered.wait(),timeout=10)
-        return await actual_slot(repository,gid)
+        await actual_lock(repository)
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)), patch.object(
-        PostgresStrategyUniverseRepository,"materialization_slot_available",new=barrier_slot):
+        PostgresStrategyUniverseRepository,"lock_mutation",new=barrier_lock):
         results=await asyncio.wait_for(asyncio.gather(*(coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
             request=requests[group],clock_ms=lambda:at) for group in groups)),timeout=20)
     assert sorted(r.disposition.value for r in results)==["GENERATION_DESIRED","WAITING_VACUUM"]
