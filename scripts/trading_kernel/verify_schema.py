@@ -2834,25 +2834,21 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
-    """Keep deployment RPC bounded without weakening manifest verification."""
-
-    manifest = payload.get("preservation_manifest")
-    if not isinstance(manifest, dict):
-        return payload
-    return {
-        **payload,
-        "preservation_manifest": {
-            key: manifest[key]
-            for key in (
-                "schema",
-                "source_revision",
-                "table_count",
-                "row_count",
-                "digest",
-            )
-            if key in manifest
-        },
-    }
+    """Bound display transport after complete official manifest computation."""
+    summary = dict(payload)
+    for key in ("preservation_manifest", "terminal_lineage_manifest"):
+        manifest = payload.get(key)
+        if not isinstance(manifest, dict):
+            continue
+        bounded = {name: value for name, value in manifest.items() if name != "tables"}
+        tables = manifest.get("tables")
+        if isinstance(tables, list):
+            bounded["tables"] = [
+                {name: value for name, value in table.items() if name != "rows"}
+                for table in tables
+            ]
+        summary[key] = bounded
+    return summary
 
 
 

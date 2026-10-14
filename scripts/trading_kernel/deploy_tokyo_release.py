@@ -747,16 +747,24 @@ def _deploy_compatible_upgrade(
         ):
             _require_marker(backend, plan.target_release, marker, expected)
 
+        # Preservation describes the stopped cutover, before ordinary Selection
+        # cadence is allowed to create new target facts.
+        _require_target_postflight(backend, plan, seed_identity=seed_identity)
         backend.start_services(SAFETY_SERVICES)
         target_safety_started = True
         active_safety = backend.services_active(ALL_SERVICES)
         if active_safety != frozenset(SAFETY_SERVICES):
             raise DeploymentBlocked("target safety services are not all active")
-        _require_target_postflight(
-            backend,
-            plan,
-            seed_identity=seed_identity,
-        )
+        certification, _, identity = _read_release_facts(backend, plan)
+        if identity != {
+            "runtime_commit": plan.target_commit,
+            "schema_revision": plan.schema_revision,
+            "seed_identity": seed_identity,
+        }:
+            raise DeploymentBlocked("deployed runtime identity differs from target")
+        policy = certification.get("owner_policy")
+        if not isinstance(policy, Mapping) or policy.get("new_entry_submit_enabled") is not False:
+            raise DeploymentBlocked("current paused Owner Policy is missing")
         if not backend.entry_is_inactive_disabled_and_fenced():
             raise DeploymentBlocked(
                 "portfolio admission upgrade did not retain the ENTRY fence"

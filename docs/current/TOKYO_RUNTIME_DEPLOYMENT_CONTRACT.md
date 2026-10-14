@@ -829,6 +829,20 @@ exchange readonly facts pass. Deployment does not prove Dynamic activation or a
 natural Ticket. The calling task's explicit pre-deployment confirmation boundary
 still takes precedence over standing server authorization.
 
+### Stopped cutover preservation versus running target facts
+
+The compatible cutover verifies the exact source Universe/history baseline and
+paused target preparation before starting Selection-capable workers. After
+startup it refreshes flat database/exchange facts, exact runtime identity,
+paused Policy and service ownership. Ordinary target Selection progress after
+that boundary is not required to equal the stopped-source fact counts. This
+ordering preserves the strict source gate; it never substitutes an updated
+baseline for a failed source preservation check.
+
+Recovery certification computes complete terminal lineage locally. Its summary
+transport removes only per-row display hashes while retaining table identities,
+row counts, original aggregate digests and every gate result.
+
 ### Paused failed Generic source quiescence
 
 A drained Generic recovery Vacuum is permitted to remain unresolved across the

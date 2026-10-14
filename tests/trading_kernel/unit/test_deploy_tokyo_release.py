@@ -357,8 +357,8 @@ def test_mig_007_compatible_upgrade_migrates_only_after_final_flat_recheck() -> 
         migration_index
         < preservation_index
         < persist_compatibility_index
-        < safety_start_index
         < exact_postflight_index
+        < safety_start_index
         < target_postflight_index
     )
     assert ("start_services", (ENTRY_SERVICE,)) not in backend.calls
@@ -2400,3 +2400,62 @@ def test_hourly_cutover_accepts_only_paused_uninstalled_pair_and_preserved_sourc
             _require_dynamic_selection_postflight(payload, seed_identity=SEED_IDENTITY, preserved_runtime=backend.preserved_runtime, hourly_upgrade=True)
     else:
         _require_dynamic_selection_postflight(payload, seed_identity=SEED_IDENTITY, preserved_runtime=backend.preserved_runtime, hourly_upgrade=True)
+
+
+def test_compatible_preservation_finishes_before_selection_workers_start() -> None:
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    original = backend.certify_flat
+
+    def stopped_preservation(release):
+        payload = dict(original(release))
+        if backend.active_services and backend.runtime_commit == TARGET_COMMIT:
+            payload['dynamic_selection_runtime_counts'] = {
+                **payload['dynamic_selection_runtime_counts'],
+                'jobs': payload['dynamic_selection_runtime_counts']['jobs'] + 1,
+            }
+        return payload
+
+    backend.certify_flat = stopped_preservation
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    assert result.status == 'pass'
+    start = backend.calls.index(('start_services', SAFETY_SERVICES))
+    assert any(call[0] == 'certify_flat' for call in backend.calls[:start])
+    assert any(call[0] == 'certify_flat' for call in backend.calls[start + 1:])
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_recovery_summary_omits_only_row_details_without_changing_digest() -> None:
+    from scripts.trading_kernel.verify_schema import _summary_payload
+    payload = {'status': 'pass', 'terminal_lineage_manifest': {
+        'schema': 'terminal', 'digest': 'sha256:' + '1' * 64,
+        'table_count': 1, 'row_count': 1,
+        'tables': [{'table': 'tickets', 'digest': 'sha256:' + '2' * 64,
+                    'columns': ['ticket_id'], 'row_count': 1, 'rows': [{'digest': 'row'}]}],
+    }}
+    summary = _summary_payload(payload)
+    assert summary['status'] == 'pass'
+    assert summary['terminal_lineage_manifest']['digest'] == payload['terminal_lineage_manifest']['digest']
+    assert 'rows' not in summary['terminal_lineage_manifest']['tables'][0]
+    assert 'rows' in payload['terminal_lineage_manifest']['tables'][0]
+
+
+@pytest.mark.parametrize('fault', ['policy', 'identity', 'position'])
+def test_running_target_drift_remains_blocked_after_stopped_preservation(fault):
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    original = backend.certify_flat
+
+    def running_drift(release):
+        payload = dict(original(release))
+        if backend.active_services and backend.runtime_commit == TARGET_COMMIT:
+            if fault == 'policy':
+                payload['owner_policy'] = {**payload['owner_policy'], 'new_entry_submit_enabled': True}
+            elif fault == 'identity':
+                payload['runtime_identity'] = {**payload['runtime_identity'], 'runtime_commit': CURRENT_COMMIT}
+            else:
+                payload['active_counts'] = {**payload['active_counts'], 'positions': 1}
+        return payload
+
+    backend.certify_flat = running_drift
+    with pytest.raises(DeploymentBlocked):
+        deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    assert backend.entry_is_inactive_disabled_and_fenced()
