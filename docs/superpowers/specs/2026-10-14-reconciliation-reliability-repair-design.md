@@ -246,7 +246,8 @@ log_lock_waits=off；Claim 当前行已覆盖，领取／失效没有 append-onl
 ## 本地修复实施记录
 
 - 专用 expedite 保留原到期年龄，普通 retry/lease 语义不变。
-- coordinator 从外层 UoW 先取安装锁，带锁目标读取及嵌套激活／恢复／废弃复用同一锁。
+- coordinator 从外层 UoW 先取安装锁，嵌套激活／恢复／废弃复用同一锁；
+  普通 Entry／事实权威读只保留行锁，不能在已持行锁后补取安装锁。
 - Claim 在 Instrument→Certification 锁后核验数据库权威时钟；失效事务整体回滚，
   不推进 Universe，不接受过期事实，缺失／矛盾身份保持异常。
 - Monitor 复用现有表，保留首次等待；覆盖持仓不一致、关键对账过期、Closure 停滞、

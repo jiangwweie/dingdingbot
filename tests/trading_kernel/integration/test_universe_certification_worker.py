@@ -368,7 +368,7 @@ async def test_revoked_certification_claim_rolls_back_rules_and_keeps_worker_run
 
 
 @pytest.mark.asyncio
-async def test_target_row_lock_cannot_precede_install_lock(_certification_engine):  # noqa: F811
+async def test_mutation_boundary_precedes_target_row_lock(_certification_engine):  # noqa: F811
     import asyncio
 
     from src.trading_kernel.application.advance_strategy_universe import (
@@ -390,6 +390,7 @@ async def test_target_row_lock_cannot_precede_install_lock(_certification_engine
     async def target_reader():
         await ready.wait()
         async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+            await uow.strategy_universes.lock_mutation()
             await uow.strategy_universes.get_generation_universe_targets(gid,for_update=True)
             # The repository must already own the common transaction lock.
             count = await uow._connection.scalar(sa.text("SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND objid=hashtext('brc-strategy-universe-install')::bigint AND granted"))

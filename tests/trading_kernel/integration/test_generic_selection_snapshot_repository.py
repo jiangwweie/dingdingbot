@@ -964,7 +964,8 @@ async def test_actual_resident_planes_renew_and_consume_hourly_close(database: A
                     assert line,"resident exited"
                     result=json.loads(line)
                     seen.append(result)
-                    assert result["status"]!="tick_failed",result
+                    if result["status"]=="tick_failed":
+                        pytest.fail(json.dumps((result,[r for r in seen if r.get("component_id")=="test-diagnostic"][-3:])))
                     if predicate(result): return result
         except TimeoutError:
             meaningful=[r for r in seen if r["component_id"]=="observation" and r["status"]!="no_work"]
@@ -1077,7 +1078,8 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
                     assert line,"resident exited"
                     result=json.loads(line)
                     seen.append(result)
-                    assert result["status"]!="tick_failed",result
+                    if result["status"]=="tick_failed":
+                        pytest.fail(json.dumps((result,[r for r in seen if r.get("component_id")=="test-diagnostic"][-3:])))
                     if predicate(result): return result
         except TimeoutError:
             observations=[r for r in seen if r["component_id"]=="observation" and r["status"]!="no_work"]

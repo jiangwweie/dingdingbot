@@ -84,8 +84,10 @@ async def main() -> None:
         cause=context.original_exception.__cause__
         print(json.dumps({"component_id":"test-diagnostic","status":"database_error",
             "sqlstate":getattr(context.original_exception,"sqlstate",None),
+            "statement":context.statement,
+            "stack":[(f.name,f.lineno) for f in __import__("traceback").extract_stack() if "trading_kernel" in f.filename],
             "database_error_class":None if cause is None else type(cause).__name__,
-            "database_message":None if cause is None else str(cause).splitlines()[0][:240]}),flush=True)
+            "database_message":None if cause is None else str(cause)[:2400]}),flush=True)
     uow=lambda:PostgresKernelUnitOfWork(engine)
     market=Market()
     async def authority_clock(_): return clock[0]

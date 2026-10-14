@@ -2156,8 +2156,6 @@ class PostgresStrategyUniverseRepository:
         *,
         for_update: bool = False,
     ) -> tuple[GenerationUniverseTarget, ...]:
-        if for_update:
-            await self.lock_mutation()
         statement = (
             sa.select(
                 strategy_universe_versions.c.universe_version_id,
