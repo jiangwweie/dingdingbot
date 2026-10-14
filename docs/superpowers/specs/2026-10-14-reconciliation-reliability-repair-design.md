@@ -166,9 +166,78 @@ frontend 相关层验证，不能用旧 SOR-1H 认证冒充联合补丁认证。
 **设计完成不等于修复完成**。Done 要求四分项证据、锁链映射、联合 exact 认证、
 源 lineage 保留和生产 postflight，不能以 OP 曾自动终态或 Incident=0 替代。
 
-尚未闭合：第二生产事务完整入口、Claim 那次失效的直接原因、R4 最小持久化与
-Worker 失败来源。前两项要么取得直接证据，要么明确历史数据缺口并以确定性
-复现覆盖实际失败条件；死锁双方路径映射仍是 R2 合并硬门槛。
+证据补齐结果见下节：死锁资源链已直接核验并映射到可执行入口；历史 backend PID
+与完整 Python stack 的逐项对应、Claim 那次失效的旧身份仍缺日志，必须如实保留。
+R4 最小持久化与 Worker 失败来源仍待实施前确认；R2 的真实应用路径并发回归
+仍是合并硬门槛，不能用下述简化 SQL 探针冒充通过。
 
 本轮仅交付设计；未修改生产代码、数据库或服务。ALPHA-02、策略启用和收益研究
 不混入此可靠性补丁。
+
+## 生产证据补充（2026-10-14）
+
+### E1：死锁双方 SQL 与可执行路径
+
+**直接日志事实**：14:56:55，北京时间，PG backend 4151186 持有安装锁、等待
+Universe 行锁；backend 4152932 持有冲突事务中的 Universe 行锁，等待安装 advisory
+lock 963081765。对账异常参数指定 **MI v16**
+`universe:36df22fd484f3096ae4b31e4:v16`。
+
+对账路径已由完整异常栈确认：
+`run_reconciliation_worker_once → _run_housekeeping_once → _certify_one_due_instrument
+→ advance_strategy_universe → try_activate → _lock_installs → Universe FOR UPDATE`。
+
+**反向可执行路径**（核对生产 57ad9fcc 源码，非只看最新 dev）：
+`_coordinate_generic_generation(STAGED, retargeted Vacuum)
+→ prepare_generic_recovered_activation_proof
+→ get_generation_universe_targets(for_update=True)
+→ advance_strategy_universe(ACTIVATE_GENERIC)
+→ _activate_generic → _lock_installs`。
+普通 STAGED／CERTIFY_STAGED 也先取得目标 Universe 行锁，再调用安装锁入口，
+failure／retarget／abandon 类嵌套调用另有同类路径，R2 必须一并审查。
+
+**生产交叉对应**：MI v16 在14:33:57进入 STAGED，其 Vacuum 沿用前代围栏，
+因此走 recovered activation 分支；14:56:45–14:57:15 同期 Observation MI component
+记录 `require_generic_recovered_activation_proof` 的失败定位。v16 后于15:30被新
+Selection 替代。数据库对象、状态、时序和调用路径均一致。
+
+**证据限制**：PG 历史日志只记录各事务当前 SQL，没有保存其全部前序 SQL；
+Observation 日志未记录 backend PID。故不能宣称已得到 backend 4152932 的完整
+Python stack，也不能只凭时间关联排除所有其他反序入口。已足够制定锁序补丁，
+合并仍须真实应用路径并发回归覆盖，而非扩大日志开启生产全 SQL 记录。
+
+### E2：Claim 失效不能等同于时间过期
+
+**直接日志事实**：13:42:07 的异常发生在 `save_instrument_certification` 的
+UPDATE rowcount != 1 分支。生产 SQL 比较 owner、lease 时间字段和 lease Universe
+是否仍与 target 相同，**没有实际保存时刻与 lease expiry 的大小比较**。
+因此“时间过了60秒”本身不会令该 UPDATE 变成0；必须发生字段变化／记录消失。
+R3 增加提交时有效性检查属于补足约束，不是描述已有行为。
+
+**相邻生命周期证据**：
+
+| 北京时间 | 事实 | 来源 |
+| --- | --- | --- |
+| 13:40:37.225 | CPM v8 因 MATERIALIZATION_TIMEOUT 废弃 | Universe 行／FAILED_CLOSED event |
+| 13:42:06.049 | BRF2 v8 因 MATERIALIZATION_TIMEOUT 废弃 | Universe 行／FAILED_CLOSED event |
+| 13:42:07.156 | 认证旧 Claim UPDATE 未命中并退出 | Worker 异常栈 |
+
+生产 `abandon()` 原子清除该 Universe 的 Certification lease owner／expiry／UID，
+合法重领也会改变旧 Claim 身份。**BRF2 废弃距异常约1.1秒，是直接支持的候选原因**，
+但异常未保存失败 target 的 instrument／UID／旧 owner／lease，不能确证它属于 BRF2。
+
+**历史证据缺口**：log_statement=none、log_min_duration_statement=-1、
+log_lock_waits=off；Claim 当前行已覆盖，领取／失效没有 append-only 明细。
+因此无法恢复该次旧 Claim，也无法证明锁等待是否促成它的失效。不得假称延长
+租约能解决。实现需覆盖废弃撤销、合法重领和真实租约过期三种安全失效。
+
+### E3：必要的本地 SQL 探针
+
+在一次性本地 PostgreSQL 测试库、两连接中重现相同安装键和行锁的反向交错，
+得到 **SQLSTATE 40P01**；另一个事务在牺牲事务回滚后继续完成。
+使用相同 Claim 等值谓词验证：字段不变 UPDATE 1；abandon 清除字段后 UPDATE 0。
+临时数据库已删除，没有生产写或交易所写。
+
+这是**资源顺序和 CAS 条件的探针**，不是 Kernel 应用链验收，不替代 R2/R3 真 PG
+回归或联合候选认证。脱敏原始摘要与探针输出保存在本地 display-only
+`.local/reconciliation-evidence-20261014/`，不提交原始运行日志。
