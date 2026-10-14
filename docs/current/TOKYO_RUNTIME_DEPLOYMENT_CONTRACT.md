@@ -831,8 +831,10 @@ still takes precedence over standing server authorization.
 
 ### Stopped cutover preservation versus running target facts
 
-The compatible cutover verifies the exact source Universe/history baseline and
-paused target preparation before starting Selection-capable workers. After
+The compatible and same-schema cutovers verify the exact source Universe/history baseline and
+paused target preparation before starting Selection-capable workers. Same-schema
+maintenance first starts only Lifecycle/Reconciliation to refresh certifications;
+Observation starts after the preserved baseline is verified. After
 startup it refreshes flat database/exchange facts, exact runtime identity,
 paused Policy and service ownership. Ordinary target Selection progress after
 that boundary is not required to equal the stopped-source fact counts. This

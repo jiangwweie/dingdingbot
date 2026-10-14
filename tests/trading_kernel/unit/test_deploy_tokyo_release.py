@@ -1021,6 +1021,7 @@ def test_regular_release_uses_database_derived_probe_manifest() -> None:
         ("probe_exchange", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
         ("probe_exchange", TARGET_RELEASE),
+        ("probe_exchange", TARGET_RELEASE),
     ]
 
 
@@ -1057,8 +1058,8 @@ def test_regular_release_awaits_current_facts_without_creating_a_batch() -> None
     backend = FakeDeploymentBackend(expired_certification_batch=True)
     result = deploy_tokyo_release(backend, _plan(enable_entry=False))
     assert result.status == "pass"
-    assert backend.calls.index(("start_services", SAFETY_SERVICES)) < backend.calls.index(
-        ("await_current_certification", TARGET_RELEASE))
+    assert backend.calls.index(("start_services", SAFETY_SERVICES[1:])) < backend.calls.index(
+        ("await_current_certification", TARGET_RELEASE)) < backend.calls.index(("start_services", SAFETY_SERVICES))
     assert not any(c[0] == "bootstrap_strategy_universes" for c in backend.calls)
 
 
@@ -1310,8 +1311,8 @@ def test_regular_release_uses_stopped_writer_evidence_and_preserves_runtime() ->
     backend = FakeDeploymentBackend()
     result = deploy_tokyo_release(backend, _plan(enable_entry=False))
     assert result.status == "pass" and not result.entry_enabled
-    assert backend.calls.count(("certify_flat", TARGET_RELEASE)) == 3
-    assert backend.calls.count(("probe_exchange", TARGET_RELEASE)) == 3
+    assert backend.calls.count(("certify_flat", TARGET_RELEASE)) == 4
+    assert backend.calls.count(("probe_exchange", TARGET_RELEASE)) == 4
     stop = backend.calls.index(("stop_services", ALL_SERVICES))
     proof = backend.calls.index(("migration_writers_stopped_and_entry_fenced",))
     identity = next(i for i,c in enumerate(backend.calls) if c[0] == "deploy_identity")
@@ -2458,4 +2459,23 @@ def test_running_target_drift_remains_blocked_after_stopped_preservation(fault):
     backend.certify_flat = running_drift
     with pytest.raises(DeploymentBlocked):
         deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_same_schema_preservation_is_checked_before_selection_start() -> None:
+    backend = FakeDeploymentBackend()
+    original = backend.certify_flat
+
+    def progressing_target(release):
+        payload = dict(original(release))
+        if backend.runtime_commit == TARGET_COMMIT and SAFETY_SERVICES[0] in backend.active_services:
+            runtime = payload['preserved_runtime']
+            payload['preserved_runtime'] = {**runtime, 'dynamic_selection_runtime_counts': {
+                **runtime['dynamic_selection_runtime_counts'],
+                'jobs': runtime['dynamic_selection_runtime_counts']['jobs'] + 1,
+            }}
+        return payload
+
+    backend.certify_flat = progressing_target
+    assert deploy_tokyo_release(backend, _plan(enable_entry=False)).status == 'pass'
     assert backend.entry_is_inactive_disabled_and_fenced()

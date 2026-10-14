@@ -415,10 +415,14 @@ def deploy_tokyo_release(
         ):
             _require_marker(backend, plan.target_release, marker, expected)
 
-        backend.start_services(SAFETY_SERVICES)
+        # Certification refresh does not need Selection-capable Observation.
+        backend.start_services(SAFETY_SERVICES[1:])
         if plan.closure_ticket_id is None:
             backend.await_current_certification(plan.target_release)
         _require_target_postflight(backend, plan, seed_identity=seed_identity)
+        backend.start_services(SAFETY_SERVICES)
+        if plan.closure_ticket_id is None:
+            _require_running_target_postflight(backend, plan, seed_identity=seed_identity)
         if (
             plan.closure_ticket_id is not None
             and not backend.entry_is_inactive_disabled_and_fenced()
@@ -755,16 +759,7 @@ def _deploy_compatible_upgrade(
         active_safety = backend.services_active(ALL_SERVICES)
         if active_safety != frozenset(SAFETY_SERVICES):
             raise DeploymentBlocked("target safety services are not all active")
-        certification, _, identity = _read_release_facts(backend, plan)
-        if identity != {
-            "runtime_commit": plan.target_commit,
-            "schema_revision": plan.schema_revision,
-            "seed_identity": seed_identity,
-        }:
-            raise DeploymentBlocked("deployed runtime identity differs from target")
-        policy = certification.get("owner_policy")
-        if not isinstance(policy, Mapping) or policy.get("new_entry_submit_enabled") is not False:
-            raise DeploymentBlocked("current paused Owner Policy is missing")
+        _require_running_target_postflight(backend, plan, seed_identity=seed_identity)
         if not backend.entry_is_inactive_disabled_and_fenced():
             raise DeploymentBlocked(
                 "portfolio admission upgrade did not retain the ENTRY fence"
@@ -922,6 +917,40 @@ def _read_compatible_source_facts(
         expected_leverage=plan.expected_configured_leverage,
     )
     return certification, probe, identity
+
+
+def _require_running_target_postflight(
+    backend: TokyoReleaseBackend, plan: DeploymentPlan, *, seed_identity: str,
+) -> None:
+    certification = backend.certify_flat(plan.target_release)
+    probe = backend.probe_exchange(plan.target_release)
+    identity = _require_release_facts(
+        certification, probe, expected_leverage=plan.expected_configured_leverage,
+        compatible_upgrade=True,
+    )
+    if identity != {
+        "runtime_commit": plan.target_commit,
+        "schema_revision": plan.schema_revision,
+        "seed_identity": seed_identity,
+    }:
+        raise DeploymentBlocked("deployed runtime identity differs from target")
+    for key in ("seed_identity", "registry_identity"):
+        fact = certification.get(key)
+        if not isinstance(fact, Mapping) or fact.get("status") != "pass":
+            raise DeploymentBlocked("running target Registry/Seed identity differs")
+    baseline = json.loads(backend.read_release_marker(plan.target_release, ".brc-preserved-runtime"))
+    runtime = certification.get("preserved_runtime")
+    if (not isinstance(runtime, Mapping)
+        or runtime.get("active_universe_manifest_digest")
+        != baseline["preserved_runtime"].get("active_universe_manifest_digest")):
+        raise DeploymentBlocked("running target Active Universe membership differs")
+    if (plan.mode is DeploymentMode.REGULAR and plan.closure_ticket_id is None
+        and certification.get("entry_control_posture_digest") != baseline.get("entry_control_posture_digest")):
+        raise DeploymentBlocked("running target Owner controls changed")
+    if plan.mode is DeploymentMode.COMPATIBLE_UPGRADE:
+        policy = certification.get("owner_policy")
+        if not isinstance(policy, Mapping) or policy.get("new_entry_submit_enabled") is not False:
+            raise DeploymentBlocked("current paused Owner Policy is missing")
 
 
 def _require_target_postflight(
