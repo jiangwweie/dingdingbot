@@ -2350,3 +2350,53 @@ def test_unknown_identity_write_never_restarts_old_workers() -> None:
     assert backend.runtime_commit==TARGET_COMMIT
     assert backend.entry_fenced and not backend.active_services
     assert not any(c[0]=="start_services" for c in backend.calls)
+
+
+def test_dynamic_intent_upgrade_uses_exact_0009_source(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setattr(sys.modules[__name__], "SOURCE_SCHEMA_REVISION", "0009_capacity_policy_v0")
+    backend = FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    result = deploy_tokyo_release(backend, _compatible_plan(enable_entry=False))
+    assert result.status == "pass"
+    assert ("migrate_schema", TARGET_RELEASE, "0009_capacity_policy_v0", TARGET_SCHEMA_REVISION) in backend.calls
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+def test_hourly_upgrade_uses_exact_source0010_and_keeps_entry_fenced(monkeypatch):
+    import sys
+    monkeypatch.setattr(sys.modules[__name__],'SOURCE_SCHEMA_REVISION','0010_dynamic_intent_v1')
+    backend=FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
+    original_certify = backend.certify_flat
+    def hourly_certify(release):
+        payload = dict(original_certify(release))
+        payload['strategy_universe'] = {**payload['strategy_universe'], 'identity_status': 'fail', 'semantic_digest_status': 'fail'}
+        payload['hourly_pair_preparation'] = {'status': 'pass', 'strategy_entry_state': 'paused', 'selection_mode': 'static_baseline', 'pending_selection_mode': None}
+        payload['exit_profile_authority'] = {**payload['exit_profile_authority'], 'binding_fact_count': 11, 'current_binding_count': 10, 'binding_event_count': 11}
+        return payload
+    backend.certify_flat = hourly_certify
+    result=deploy_tokyo_release(backend,_compatible_plan(enable_entry=False))
+    assert result.status=='pass'
+    assert ('migrate_schema',TARGET_RELEASE,'0010_dynamic_intent_v1',TARGET_SCHEMA_REVISION) in backend.calls
+    assert backend.entry_is_inactive_disabled_and_fenced()
+
+@pytest.mark.parametrize("fault", [None, "unpaused", "universe", "missing_binding", "history", "pending_intent"])
+def test_hourly_cutover_accepts_only_paused_uninstalled_pair_and_preserved_source(fault):
+    from scripts.trading_kernel.deploy_tokyo_release import (
+        _require_dynamic_selection_postflight,
+    )
+    backend = FakeDeploymentBackend()
+    payload = dict(backend.certify_flat(TARGET_RELEASE))
+    payload['strategy_universe'] = {**payload['strategy_universe'], 'identity_status': 'fail'}
+    payload['exit_profile_authority'] = {**payload['exit_profile_authority'], 'binding_fact_count': 11, 'current_binding_count': 10, 'binding_event_count': 11}
+    payload['hourly_pair_preparation'] = {'status': 'pass', 'strategy_entry_state': 'paused', 'selection_mode': 'static_baseline', 'pending_selection_mode': None}
+    if fault == 'unpaused': payload['hourly_pair_preparation']['strategy_entry_state'] = 'enabled'
+    if fault == 'pending_intent': payload['hourly_pair_preparation']['pending_selection_mode'] = 'dynamic_selection'
+    if fault == 'universe': payload['hourly_pair_preparation']['status'] = 'fail'
+    if fault == 'missing_binding': payload['exit_profile_authority']['current_binding_count'] = 9
+    if fault == 'history': payload['preserved_runtime'] = {**backend.preserved_runtime, 'active_universe_manifest_digest': 'sha256:'+'0'*64}
+    if fault:
+        with pytest.raises(DeploymentBlocked):
+            _require_dynamic_selection_postflight(payload, seed_identity=SEED_IDENTITY, preserved_runtime=backend.preserved_runtime, hourly_upgrade=True)
+    else:
+        _require_dynamic_selection_postflight(payload, seed_identity=SEED_IDENTITY, preserved_runtime=backend.preserved_runtime, hourly_upgrade=True)

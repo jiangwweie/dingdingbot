@@ -1044,7 +1044,8 @@ class PostgresStrategyUniverseRepository:
         authorization_id = None if normal_authority is None else normal_authority.activation_authorization_id
         first_activation = control is not None and control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
-            and control.pending_effective_period_anchor_ms == authority.period.feature_cutoff_at_ms
+            and control.pending_effective_period_anchor_ms is not None
+            and control.pending_effective_period_anchor_ms <= authority.period.feature_cutoff_at_ms
             and control.pending_authorization_id == authorization_id
             and authorization_id is not None)
         if control is None or (control.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not first_activation) or control.control_version + int(first_activation)!=authority.selection_control_version or control.selection_epoch_id!=authority.selection_epoch_id or control.selection_spec_id!=authority.selection_spec_id:
@@ -1287,10 +1288,10 @@ class PostgresStrategyUniverseRepository:
             ).order_by(instrument_selection_spec_events.c.event_spec_id).limit(3))).scalars())
         if spec is None or spec["status"] != "active" or target["event_spec_id"] not in expected_events or (
             (spec["selection_kind"] == "generic_dynamic_v1" and len(expected_events) != 1)
-            or (spec["selection_kind"] == "sor_dynamic_v0" and len(expected_events) != 2)
+            or (spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"} and len(expected_events) != 2)
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
-        if target["source_kind"]=="static_baseline" and spec["selection_kind"]!="generic_dynamic_v1":
+        if target["source_kind"]=="static_baseline" and spec["selection_kind"] not in {"generic_dynamic_v1","orb_session_dynamic_v1"}:
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if spec["selection_kind"] == "generic_dynamic_v1":
             from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
@@ -1434,7 +1435,7 @@ class PostgresStrategyUniverseRepository:
                 strategy_universe_materialization_events.c.event_sequence).where(
                     strategy_universe_materialization_events.c.materialization_generation_id == generation_id,
                 ).order_by(strategy_universe_materialization_events.c.event_sequence.desc()).limit(1)) or 0) + 1
-            if spec["selection_kind"] == "sor_dynamic_v0":
+            if spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"}:
                 # SOR activation still owns its frozen sequence-6 event.
                 event_sequence = 5
             await self._connection.execute(
@@ -1567,8 +1568,8 @@ class PostgresStrategyUniverseRepository:
         ):
             raise UniverseInstallConflict("DYNAMIC_PAIR_AUTHORITY_CONFLICT")
         if (
-            long_target["source_kind"] != "dynamic_selection"
-            or short_target["source_kind"] != "dynamic_selection"
+            long_target["source_kind"] != authority.selection_mode.value
+            or short_target["source_kind"] != authority.selection_mode.value
             or long_target["materialization_generation_id"] != generation_id
             or short_target["materialization_generation_id"] != generation_id
             or long_target["lifecycle_state"] != "staged"
@@ -1807,7 +1808,11 @@ class PostgresStrategyUniverseRepository:
                 else int(current_selection_version)
             ),
         )
-        if selection_control["pending_selection_mode"] == "dynamic_selection":
+        if authority.selection_mode is SelectionMode.STATIC_BASELINE:
+            await selection_repository.commit_orb_static_selection_mode(strategy_group_id=generation['strategy_group_id'],
+                expected_control_version=selection_control['control_version'],activation_authorization_id=authority.activation_authorization_id or '',
+                activated_at_ms=request.attempted_at_ms)
+        elif selection_control["pending_selection_mode"] == "dynamic_selection":
             await selection_repository.activate_pending_selection_mode(
                 strategy_group_id=str(selection_control["strategy_group_id"]),
                 expected_control_version=int(selection_control["control_version"]),
@@ -1952,13 +1957,14 @@ class PostgresStrategyUniverseRepository:
             and selection_control["selection_mode"] == "static_baseline"
             and selection_control["pending_selection_mode"] == "dynamic_selection"
             and selection_control["pending_effective_period_anchor_ms"]
-            == generation["period_anchor_ms"]
+            is not None
+            and (selection_control["pending_effective_period_anchor_ms"] <= generation["period_anchor_ms"] if authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" else selection_control["pending_effective_period_anchor_ms"]==generation["period_anchor_ms"])
             and selection_control["pending_authorization_id"] is not None
         )
         dynamic_previous_restore = bool(
             selection_control is not None
             and selection_control["selection_mode"] == "dynamic_selection"
-            and selection_control["pending_selection_mode"] is None
+            and (selection_control["pending_selection_mode"] is None or (authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" and generation["selection_mode"]=="static_baseline" and selection_control["pending_selection_mode"]=="static_baseline"))
         )
         if (
             previous_short is None
@@ -2106,7 +2112,7 @@ class PostgresStrategyUniverseRepository:
                 else int(current_selection_version)
             ),
         )
-        if pending_static_transition:
+        if pending_static_transition and authority.selection_spec_id != "SOR_1H_OR_ATR_DYNAMIC_V1":
             control_update = await self._connection.execute(
                 sa.update(strategy_selection_control_current)
                 .where(
@@ -2462,6 +2468,7 @@ class PostgresStrategyUniverseRepository:
                 .where(
                     instruments.c.exchange_instrument_id.in_(members)
                 )
+                .order_by(instruments.c.exchange_instrument_id)
                 .with_for_update(of=instruments)
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
@@ -2486,6 +2493,7 @@ class PostgresStrategyUniverseRepository:
                         instrument_certification_current.c.exchange_instrument_id,
                     ).in_(certification_keys)
                 )
+                .order_by(instrument_certification_current.c.runtime_profile_id,instrument_certification_current.c.exchange_instrument_id)
                 .with_for_update(of=instrument_certification_current)
                 .limit(MAX_UNIVERSE_MEMBERS + 1)
             )
@@ -3161,9 +3169,9 @@ class PostgresStrategyUniverseRepository:
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
-                    runtime_scopes_current.c.lifecycle_state.in_(("warming", "active")),
+                    runtime_scopes_current.c.lifecycle_state.in_(("warming", "staged", "active")),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),
                         pending_batch_due,
@@ -3182,7 +3190,7 @@ class PostgresStrategyUniverseRepository:
                     sa.case(
                         (pending_batch_due, 0),
                         (
-                            strategy_universe_versions.c.lifecycle_state == "warming",
+                            strategy_universe_versions.c.lifecycle_state.in_(("warming", "staged")),
                             1,
                         ),
                         else_=2,
@@ -3353,10 +3361,10 @@ class PostgresStrategyUniverseRepository:
                 )
                 .where(
                     strategy_universe_versions.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
                     runtime_scopes_current.c.lifecycle_state.in_(
-                        ("warming", "active")
+                        ("warming", "staged", "active")
                     ),
                     sa.or_(
                         certification.c.runtime_profile_id.is_(None),
@@ -3406,6 +3414,11 @@ class PostgresStrategyUniverseRepository:
             raise ValueError("certification next check precedes observation")
         if certification.status == "eligible" and product_rules_digest is None:
             raise ValueError("eligible certification requires product rules digest")
+        # Activation takes Instrument -> Certification. Acquire the same exact
+        # parent row before the leased certification update; never hold the
+        # child row while waiting for activation's parent lock.
+        await self._connection.execute(sa.select(instruments.c.exchange_instrument_id).where(
+            instruments.c.exchange_instrument_id==target.exchange_instrument_id).with_for_update(of=instruments))
         result = await self._connection.execute(
             sa.update(instrument_certification_current)
             .where(
@@ -3855,13 +3868,44 @@ class PostgresStrategyUniverseRepository:
             FROM brc_strategy_universe_materialization_generations g
             JOIN brc_strategy_entry_controls_current owner_control USING(strategy_group_id)
             JOIN brc_strategy_selection_control_current selection_control USING(strategy_group_id)
+            JOIN brc_instrument_selection_specs spec ON spec.selection_spec_id=g.selection_spec_id
             LEFT JOIN brc_instrument_selection_snapshots snapshot USING(selection_snapshot_id)
             WHERE g.lifecycle_state='DESIRED' AND owner_control.entry_state='enabled'
               AND (g.selection_control_version IS NULL OR g.selection_control_version=selection_control.control_version)
               AND (g.selection_snapshot_id IS NULL OR snapshot.expires_at_ms>:now)
               AND g.materialization_generation_id IS DISTINCT FROM :replace
+              AND (spec.selection_kind<>'orb_session_dynamic_v1' OR (
+                spec.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
+                AND spec.strategy_group_id='SOR-1H-001' AND g.strategy_group_id=spec.strategy_group_id
+                AND g.period_anchor_ms=:day AND :now>=g.period_anchor_ms+3600000
+                AND :now<g.period_anchor_ms+82800000))
+              AND (spec.selection_kind<>'generic_dynamic_v1' OR g.selection_mode='static_baseline' OR NOT EXISTS (
+                SELECT 1 FROM brc_instrument_selection_member_decisions member
+                JOIN brc_instrument_selection_spec_events event ON event.selection_spec_id=g.selection_spec_id
+                JOIN brc_exposure_episode_current episode ON episode.event_spec_id=event.event_spec_id
+                  AND episode.exchange_instrument_id=member.exchange_instrument_id
+                WHERE member.selection_snapshot_id=g.selection_snapshot_id AND member.selected
+                  AND greatest(episode.last_observed_at_ms,episode.comparison_last_observed_at_ms,
+                    episode.authority_recovery_last_observed_at_ms)>=:close
+              ))
+              AND (spec.selection_kind<>'generic_dynamic_v1' OR g.selection_mode='static_baseline' OR NOT EXISTS (
+                SELECT 1 FROM brc_selection_authority_current pointer
+                JOIN brc_selection_session_authorities authority USING(selection_authority_id)
+                JOIN brc_instrument_selection_spec_events event ON event.selection_spec_id=g.selection_spec_id
+                JOIN brc_instrument_selection_member_decisions member ON member.selection_snapshot_id=g.selection_snapshot_id AND member.selected
+                JOIN brc_selection_authority_event_bindings binding ON binding.selection_authority_id=authority.selection_authority_id
+                  AND binding.event_spec_id=event.event_spec_id
+                JOIN brc_strategy_universe_members previous_member ON previous_member.universe_version_id=binding.universe_version_id
+                  AND previous_member.exchange_instrument_id=member.exchange_instrument_id
+                JOIN brc_exposure_episode_current episode ON episode.event_spec_id=event.event_spec_id
+                  AND episode.exchange_instrument_id=member.exchange_instrument_id
+                WHERE pointer.selection_spec_id=g.selection_spec_id
+                  AND (authority.recovery_grant_proof IS NOT NULL OR authority.continued_from_selection_authority_id IS NOT NULL
+                    OR authority.current_close_proof->>'origin_recovery_authority_id' IS NOT NULL)
+                  AND episode.authority_recovery_id IS NOT NULL AND episode.authority_recovery_armed_at_ms IS NULL
+              ))
             ORDER BY g.desired_at_ms,g.created_at_ms,g.materialization_generation_id LIMIT 1
-        """),{"replace":replacing_generation_id,"now":queued_at_ms})
+        """),{"replace":replacing_generation_id,"now":queued_at_ms,"close":queued_at_ms//3_600_000*3_600_000,"day":queued_at_ms//86_400_000*86_400_000})
         if not replacing_holder and oldest is not None and oldest!=materialization_generation_id:
             return False
         return not bool(await self._connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM brc_strategy_universe_materialization_generations WHERE lifecycle_state IN ('DRAINING_ENTRY','MATERIALIZING') AND materialization_generation_id<>:gid AND materialization_generation_id IS DISTINCT FROM :replace) OR EXISTS(SELECT 1 FROM brc_strategy_universe_versions WHERE lifecycle_state='warming' AND materialization_generation_id IS DISTINCT FROM :gid AND (:replace IS NULL OR materialization_generation_id IS DISTINCT FROM :replace))"),{"gid":materialization_generation_id,"replace":replacing_generation_id}))
@@ -4163,7 +4207,7 @@ class PostgresStrategyUniverseRepository:
             if static_source.fenced_at_ms is None or request.installed_at_ms>=static_source.fenced_at_ms+static_spec.materialization_timeout_ms:
                 raise UniverseInstallConflict("MATERIALIZATION_TIMEOUT")
         if request.source_kind=="dynamic_selection":
-            if spec["selection_kind"]=="sor_dynamic_v0":
+            if spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"}:
                 limit = 7
             elif spec["selection_kind"]=="generic_dynamic_v1":
                 payload = (await self._connection.execute(sa.select(generic_dynamic_selection_specs_v1).where(

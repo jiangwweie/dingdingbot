@@ -33,7 +33,7 @@ from tests.trading_kernel.support.tickets import make_ticket
 
 def registered_sor_long_ticket():
     contract = next(
-        item for item in registered_strategy_contracts() if item.event_id == "SOR-LONG"
+        item for item in registered_strategy_contracts() if item.event_id == "SOR-1H-LONG"
     )
     ticket = make_ticket()
     identity = ticket.identity.model_copy(

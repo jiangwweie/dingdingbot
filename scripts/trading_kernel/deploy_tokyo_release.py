@@ -39,7 +39,11 @@ from src.trading_kernel.application.runtime import (
     RuntimeCompatibilityClassification,
     RuntimeReleaseCompatibilityFact,
 )
-from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
+from src.trading_kernel.domain.exit_policy import (
+    build_exit_profile_catalog_digest,
+    registered_event_exit_bindings,
+    registered_exit_profiles,
+)
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -119,7 +123,7 @@ class DeploymentPlan:
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            if self.source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
                 raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
@@ -534,6 +538,7 @@ def _deploy_compatible_upgrade(
     compatibility_fact = plan.runtime_release_compatibility_fact
     if compatibility_fact is None:
         raise DeploymentBlocked("release compatibility fact is missing")
+    source_schema_revision = str(plan.source_schema_revision)
     current_release = backend.read_current_release()
     if not backend.entry_is_inactive_disabled_and_fenced():
         raise DeploymentBlocked(
@@ -545,7 +550,7 @@ def _deploy_compatible_upgrade(
     schema_state = backend.inspect_schema(plan.target_release)
     database_revision = str(schema_state.get("alembic_revision", ""))
     if schema_state.get("status") != "pass" or database_revision not in {
-        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+        source_schema_revision,
         plan.schema_revision,
     }:
         raise DeploymentBlocked("compatible source schema revision differs")
@@ -553,7 +558,7 @@ def _deploy_compatible_upgrade(
     recovery_seed_identity: str
     source_certification: Mapping[str, object] | None = None
     source_identity: dict[str, str] | None = None
-    if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+    if database_revision == source_schema_revision:
         source_certification, _, source_identity = _read_compatible_source_facts(
             backend,
             plan,
@@ -574,7 +579,7 @@ def _deploy_compatible_upgrade(
             backend,
             current_release,
             ".brc-schema-revision",
-            COMPATIBLE_SOURCE_SCHEMA_REVISION,
+            source_schema_revision,
         )
         if (
             backend.read_release_marker(
@@ -617,7 +622,7 @@ def _deploy_compatible_upgrade(
                 backend,
                 current_release,
                 ".brc-schema-revision",
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                source_schema_revision,
             )
         recovery_seed_identity = backend.read_release_marker(
             current_release,
@@ -642,7 +647,7 @@ def _deploy_compatible_upgrade(
                 "migration writer stop prerequisite is not satisfied"
             )
 
-        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if database_revision == source_schema_revision:
             final_source, _, final_identity = _read_compatible_source_facts(
                 backend,
                 plan,
@@ -657,7 +662,7 @@ def _deploy_compatible_upgrade(
             baseline = {
                 "source_commit": compatibility_fact.from_commit,
                 "target_commit": plan.target_commit,
-                "source_schema_revision": COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                "source_schema_revision": source_schema_revision,
                 "preservation_digest": _require_preservation_digest(final_source),
                 "preserved_runtime": final_source.get("preserved_runtime"),
             }
@@ -668,7 +673,7 @@ def _deploy_compatible_upgrade(
                 migration_attempted = True
                 backend.migrate_schema(
                     plan.target_release,
-                    COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                    source_schema_revision,
                     plan.schema_revision,
                 )
             except Exception as migration_error:
@@ -686,7 +691,7 @@ def _deploy_compatible_upgrade(
                 raise
             else:
                 schema_migrated = True
-        if database_revision == COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if database_revision == source_schema_revision:
             if source_certification is None:
                 raise DeploymentBlocked("compatible source certification is missing")
             source_preservation_digest = _require_preservation_digest(
@@ -694,7 +699,7 @@ def _deploy_compatible_upgrade(
             )
             preservation = backend.verify_preservation(
                 plan.target_release,
-                COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                source_schema_revision,
                 source_preservation_digest,
             )
             _require_preservation_verification(
@@ -772,7 +777,7 @@ def _deploy_compatible_upgrade(
                         backend,
                         current_release,
                         ".brc-schema-revision",
-                        COMPATIBLE_SOURCE_SCHEMA_REVISION,
+                        source_schema_revision,
                     )
                     backend.start_services(SAFETY_SERVICES)
                 if schema_migrated:
@@ -946,7 +951,7 @@ def _require_target_postflight(
             not isinstance(baseline, Mapping)
             or baseline.get("source_commit") != compatibility.from_commit
             or baseline.get("target_commit") != plan.target_commit
-            or baseline.get("source_schema_revision") != COMPATIBLE_SOURCE_SCHEMA_REVISION
+            or baseline.get("source_schema_revision") != compatibility.from_schema_revision
             or not _SEED_IDENTITY.fullmatch(str(baseline.get("preservation_digest", "")))
             or not isinstance(baseline.get("preserved_runtime"), Mapping)
         ):
@@ -955,6 +960,7 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
             preserved_runtime=baseline["preserved_runtime"],
+            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision == "0011_orb_session_1h_v1"),
         )
         policy=certification.get("owner_policy")
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
@@ -978,6 +984,7 @@ def _require_dynamic_selection_postflight(
     *,
     seed_identity: str,
     preserved_runtime: Mapping[str, object],
+    hourly_upgrade: bool = False,
 ) -> None:
     owner_policy = certification.get("owner_policy")
     if (
@@ -996,11 +1003,17 @@ def _require_dynamic_selection_postflight(
         != registry_identity.get("expected_live_semantic_hash")
     ):
         raise DeploymentBlocked("exact Registry identity differs")
+    preparation = certification.get("hourly_pair_preparation")
+    hourly_pending = bool(hourly_upgrade and isinstance(preparation, Mapping)
+        and preparation.get("status") == "pass"
+        and preparation.get("strategy_entry_state") == "paused"
+        and preparation.get("selection_mode") == "static_baseline"
+        and preparation.get("pending_selection_mode") is None)
     strategy_universe = certification.get("strategy_universe")
     if (
         not isinstance(strategy_universe, Mapping)
-        or strategy_universe.get("identity_status") != "pass"
-        or strategy_universe.get("semantic_digest_status") != "pass"
+        or (strategy_universe.get("identity_status") != "pass" and not hourly_pending)
+        or (strategy_universe.get("semantic_digest_status") != "pass" and not hourly_pending)
     ):
         raise DeploymentBlocked("exact Universe identity differs")
     actual_preserved = certification.get("preserved_runtime")
@@ -1010,6 +1023,8 @@ def _require_dynamic_selection_postflight(
         != preserved_runtime.get("active_universe_manifest_digest")
     ):
         raise DeploymentBlocked("preserved Active Universe membership differs")
+    if hourly_upgrade and not hourly_pending:
+        raise DeploymentBlocked("hourly upgrade requires independent paused pair preparation")
     if int(str(strategy_universe.get("active_current_count", -1))) != 8:
         raise DeploymentBlocked("exact eight Active Universes are missing")
     runtime_identity = certification.get("runtime_identity")
@@ -1044,15 +1059,17 @@ def _require_dynamic_selection_postflight(
             "compatible upgrade created unexpected Dynamic Selection runtime facts"
         )
     exit_profile_authority = certification.get("exit_profile_authority")
+    expected_profiles = len(registered_exit_profiles()) if hourly_upgrade else 8
+    expected_bindings = len(registered_event_exit_bindings()) if hourly_upgrade else 8
     if (
         not isinstance(exit_profile_authority, Mapping)
         or exit_profile_authority.get("status") != "pass"
         or exit_profile_authority.get("catalog_digest")
         != build_exit_profile_catalog_digest()
-        or int(str(exit_profile_authority.get("profile_count", -1))) != 8
-        or int(str(exit_profile_authority.get("binding_fact_count", -1))) != 8
-        or int(str(exit_profile_authority.get("current_binding_count", -1))) != 8
-        or int(str(exit_profile_authority.get("binding_event_count", -1))) != 8
+        or int(str(exit_profile_authority.get("profile_count", -1))) != expected_profiles
+        or (int(str(exit_profile_authority.get("binding_fact_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_fact_count", -1))) != expected_bindings)
+        or int(str(exit_profile_authority.get("current_binding_count", -1))) != expected_bindings
+        or (int(str(exit_profile_authority.get("binding_event_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_event_count", -1))) != expected_bindings)
     ):
         raise DeploymentBlocked("exact ExitProfile/Binding manifest differs")
 
@@ -1684,7 +1701,7 @@ class SshTokyoReleaseBackend:
         source_schema_revision: str,
         target_schema_revision: str,
     ) -> None:
-        if source_schema_revision != COMPATIBLE_SOURCE_SCHEMA_REVISION:
+        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
             raise ValueError("compatible migration source revision differs")
         self._release_command(
             release,

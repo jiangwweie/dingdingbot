@@ -610,7 +610,7 @@ class SelectionComputation(BaseModel):
 
 
 @dataclass(frozen=True)
-class _SelectionFeatures:
+class OpeningRangeSelectionFeatures:
     window: SelectionSourceWindow
     or_high: Decimal
     or_low: Decimal
@@ -654,6 +654,105 @@ def build_sor_dynamic_selection_spec_v0(
     )
 
 
+def compute_opening_range_member_decisions(*, source_windows: tuple[SelectionSourceWindow, ...],
+    selection_snapshot_id: str, selection_spec_id: str, session_start_ms: int,
+    feature_cutoff_at_ms: int) -> tuple[tuple[SelectionMemberDecision, ...], int]:
+    """Shared frozen numeric core; identities are input, never trading authority."""
+    snapshot_id = selection_snapshot_id
+    features: dict[str, OpeningRangeSelectionFeatures] = {}
+    with localcontext(DECIMAL_CONTEXT):
+        for window in source_windows:
+            previous_close = window.klines[77].close
+            true_ranges: list[Decimal] = []
+            for bar in window.klines[78:92]:
+                true_ranges.append(
+                    max(
+                        bar.high - bar.low,
+                        abs(bar.high - previous_close),
+                        abs(bar.low - previous_close),
+                    )
+                )
+                previous_close = bar.close
+            or_bars = window.klines[92:96]
+            or_high = max(bar.high for bar in or_bars)
+            or_low = min(bar.low for bar in or_bars)
+            or_width = or_high - or_low
+            pre_or_atr14 = sum(true_ranges, Decimal(0)) / Decimal(14)
+            trailing_volume = sum(
+                (bar.quote_volume for bar in window.klines), Decimal(0)
+            )
+            reason = _primary_reason(
+                or_geometry_valid=or_high > or_low,
+                atr_valid=pre_or_atr14 > 0,
+                activity_valid=trailing_volume >= ACTIVITY_FLOOR_QUOTE_USDT,
+            )
+            features[window.exchange_instrument_id] = OpeningRangeSelectionFeatures(
+                window=window,
+                or_high=or_high,
+                or_low=or_low,
+                pre_or_atr14=pre_or_atr14,
+                ratio=(
+                    Decimal(0)
+                    if pre_or_atr14 <= 0
+                    else or_width / pre_or_atr14
+                ),
+                trailing_volume=trailing_volume,
+                reason=reason,
+            )
+
+        ready_ids = sorted(
+            (
+                instrument_id
+                for instrument_id, feature in features.items()
+                if feature.reason is None
+            ),
+            key=lambda instrument_id: (
+                features[instrument_id].ratio,
+                -features[instrument_id].trailing_volume,
+                instrument_id,
+            ),
+        )
+    rank_by_instrument = {
+        instrument_id: rank for rank, instrument_id in enumerate(ready_ids, start=1)
+    }
+
+    decisions: list[SelectionMemberDecision] = []
+    for instrument_id in CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS:
+        feature = features[instrument_id]
+        reason = feature.reason
+        rank = rank_by_instrument.get(instrument_id)
+        if reason is not None:
+            state = SelectionMemberState.INELIGIBLE
+        elif rank is not None and rank <= 7:
+            state = SelectionMemberState.SELECTED
+        elif rank is not None and rank <= 7 + 7:
+            state = SelectionMemberState.NEAR_THRESHOLD
+        else:
+            state = SelectionMemberState.NOT_SELECTED
+        decisions.append(
+            build_selection_member_decision(
+                selection_snapshot_id=snapshot_id,
+                selection_spec_id=selection_spec_id,
+                session_start_ms=session_start_ms,
+                feature_cutoff_at_ms=feature_cutoff_at_ms,
+                input_window_start_ms=feature.window.input_window_start_ms,
+                exchange_instrument_id=instrument_id,
+                input_window_digest=feature.window.input_window_digest,
+                or_high=feature.or_high,
+                or_low=feature.or_low,
+                pre_or_atr14=feature.pre_or_atr14,
+                trailing_24h_quote_volume=feature.trailing_volume,
+                stable_rank=rank,
+                member_state=state,
+                primary_reason=(
+                    reason
+                ),
+            )
+        )
+
+    return tuple(decisions), len(ready_ids)
+
+
 def run_sor_dynamic_selection_v0(
     *,
     spec: SorDynamicSelectionSpecV0,
@@ -688,104 +787,15 @@ def run_sor_dynamic_selection_v0(
             )
 
     snapshot_id = f"selection:{spec.selection_spec_id}:{period.session_start_ms}"
-    features: dict[str, _SelectionFeatures] = {}
-    with localcontext(DECIMAL_CONTEXT):
-        for window in source_windows:
-            previous_close = window.klines[77].close
-            true_ranges: list[Decimal] = []
-            for bar in window.klines[78:92]:
-                true_ranges.append(
-                    max(
-                        bar.high - bar.low,
-                        abs(bar.high - previous_close),
-                        abs(bar.low - previous_close),
-                    )
-                )
-                previous_close = bar.close
-            or_bars = window.klines[92:96]
-            or_high = max(bar.high for bar in or_bars)
-            or_low = min(bar.low for bar in or_bars)
-            or_width = or_high - or_low
-            pre_or_atr14 = sum(true_ranges, Decimal(0)) / Decimal(14)
-            trailing_volume = sum(
-                (bar.quote_volume for bar in window.klines), Decimal(0)
-            )
-            reason = _primary_reason(
-                or_geometry_valid=or_high > or_low,
-                atr_valid=pre_or_atr14 > 0,
-                activity_valid=trailing_volume >= spec.activity_floor_quote_usdt,
-            )
-            features[window.exchange_instrument_id] = _SelectionFeatures(
-                window=window,
-                or_high=or_high,
-                or_low=or_low,
-                pre_or_atr14=pre_or_atr14,
-                ratio=(
-                    Decimal(0)
-                    if pre_or_atr14 <= 0
-                    else or_width / pre_or_atr14
-                ),
-                trailing_volume=trailing_volume,
-                reason=reason,
-            )
-
-        ready_ids = sorted(
-            (
-                instrument_id
-                for instrument_id, feature in features.items()
-                if feature.reason is None
-            ),
-            key=lambda instrument_id: (
-                features[instrument_id].ratio,
-                -features[instrument_id].trailing_volume,
-                instrument_id,
-            ),
-        )
-    rank_by_instrument = {
-        instrument_id: rank for rank, instrument_id in enumerate(ready_ids, start=1)
-    }
-
-    decisions: list[SelectionMemberDecision] = []
-    for instrument_id in expected_candidates:
-        feature = features[instrument_id]
-        reason = feature.reason
-        rank = rank_by_instrument.get(instrument_id)
-        if reason is not None:
-            state = SelectionMemberState.INELIGIBLE
-        elif rank is not None and rank <= spec.selected_count_max:
-            state = SelectionMemberState.SELECTED
-        elif rank is not None and rank <= spec.selected_count_max + spec.near_count_max:
-            state = SelectionMemberState.NEAR_THRESHOLD
-        else:
-            state = SelectionMemberState.NOT_SELECTED
-        decisions.append(
-            build_selection_member_decision(
-                selection_snapshot_id=snapshot_id,
-                selection_spec_id=spec.selection_spec_id,
-                session_start_ms=period.session_start_ms,
-                feature_cutoff_at_ms=period.feature_cutoff_at_ms,
-                input_window_start_ms=feature.window.input_window_start_ms,
-                exchange_instrument_id=instrument_id,
-                input_window_digest=feature.window.input_window_digest,
-                or_high=feature.or_high,
-                or_low=feature.or_low,
-                pre_or_atr14=feature.pre_or_atr14,
-                trailing_24h_quote_volume=feature.trailing_volume,
-                stable_rank=rank,
-                member_state=state,
-                primary_reason=(
-                    reason
-                ),
-            )
-        )
-
+    decisions, ready_count = compute_opening_range_member_decisions(source_windows=source_windows,
+        selection_snapshot_id=snapshot_id, selection_spec_id=spec.selection_spec_id,
+        session_start_ms=period.session_start_ms, feature_cutoff_at_ms=period.feature_cutoff_at_ms)
     source_digest = _semantic_digest(
         [
             [decision.exchange_instrument_id, decision.input_window_digest]
             for decision in decisions
         ]
     )
-    ready_count = len(ready_ids)
     selected_count = min(spec.selected_count_max, ready_count)
     selection_digest = _semantic_digest(
         {

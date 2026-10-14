@@ -22,6 +22,7 @@ from src.trading_kernel.application.owner_control import (
 from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
+from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
@@ -79,6 +80,12 @@ from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
 class PromotionWarmMarket(RecordingWarmMarket):
     async def fetch_closed_candles(self, request):
         candles = await super().fetch_closed_candles(request)
+        if request.timeframe == "1h" and request.limit == 24:
+            day = request.closed_at_ms // 86_400_000 * 86_400_000
+            return tuple(ClosedCandle(open_time_ms=t, close_time_ms=t+3_600_000,
+                open=Decimal(100), high=Decimal(101), low=Decimal(99),
+                close=Decimal(100), volume=Decimal(1000000))
+                for t in range(day, request.closed_at_ms, 3_600_000))
         if request.timeframe != "15m":
             return candles
         if not request.exchange_instrument_id.endswith(
@@ -207,7 +214,7 @@ class RecordingPromotionBackend:
         self.entry_active = False
 
 
-async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
+async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_hourly: bool = True) -> None:
     admin = await asyncpg.connect(ADMIN_DSN)
     engine = None
     try:
@@ -256,6 +263,14 @@ async def _seed_and_bootstrap(database_name: str, database_url: str) -> None:
                 runtime_profile_id=RUNTIME_PROFILE_ID,
             ),
         )
+        if prepare_hourly:
+            await bootstrap_strategy_universes(
+                database_url, runtime_profile_id=RUNTIME_PROFILE_ID,
+                strategy_group_id="SOR-1H-001", now_ms=clock.read,
+                wait_timeout_ms=60_000, poll_interval_ms=1,
+                sleep=_worker_driving_sleep_for_profile(engine=engine, clock=clock,
+                    market=market, certification=certification, runtime_profile_id=RUNTIME_PROFILE_ID),
+            )
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(

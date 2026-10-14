@@ -44,6 +44,10 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_EVENT_SPEC_IDS,
+    ORB_STATIC_MEMBERS,
+)
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
@@ -97,8 +101,11 @@ def _select_bootstrap_universe(
 
 
 def _manifest_for_profile(
-    runtime_profile_id: str,
+    runtime_profile_id: str,*,strategy_group_id: str | None=None,
 ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
+    if strategy_group_id is not None:
+        if strategy_group_id!='SOR-1H-001' or runtime_profile_id!='tiny-live-v1':raise BootstrapBlocked('strategy_batch_manifest_missing')
+        return (('SOR-1H-LONG',ORB_EVENT_SPEC_IDS[0]),('SOR-1H-SHORT',ORB_EVENT_SPEC_IDS[1])),ORB_STATIC_MEMBERS
     manifest = APPROVED_UNIVERSE_BATCHES.get(runtime_profile_id)
     if manifest is None:
         raise BootstrapBlocked("runtime_profile_manifest_missing")
@@ -106,9 +113,9 @@ def _manifest_for_profile(
 
 
 def _validate_static_manifest(
-    runtime_profile_id: str = "tiny-live-v1",
+    runtime_profile_id: str = "tiny-live-v1",*,strategy_group_id: str | None=None,
 ) -> None:
-    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
     contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
@@ -132,8 +139,9 @@ async def _validate_database_authority(
     engine: AsyncEngine,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
 ) -> BootstrapAuthority:
-    event_specs, _members = _manifest_for_profile(runtime_profile_id)
+    event_specs, _members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
     expected_event_specs = tuple(
@@ -209,10 +217,11 @@ async def _ensure_certification_batch(
     engine: AsyncEngine,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
     authority: BootstrapAuthority,
     started_at_ms: int,
 ) -> str:
-    _event_specs, members = _manifest_for_profile(runtime_profile_id)
+    _event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     manifest_digest = build_certification_manifest_digest(members)
     required_valid_until_ms = started_at_ms + CERTIFICATION_PROMOTION_WINDOW_MS
     async with engine.connect() as connection:
@@ -310,8 +319,9 @@ async def _validate_active_universe_manifest(
     engine: AsyncEngine,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
 ) -> None:
-    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
     async with engine.connect() as connection:
@@ -391,6 +401,7 @@ async def refresh_active_certification_batch(
     database_url: str,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
     now_ms: Callable[[], int],
 ) -> str:
     """Create or reuse a Batch from the exact current Active Universe manifest."""
@@ -399,20 +410,23 @@ async def refresh_active_certification_batch(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip():
         raise ValueError("runtime profile identity must be non-blank")
-    _validate_static_manifest(runtime_profile_id)
+    _validate_static_manifest(runtime_profile_id,strategy_group_id=strategy_group_id)
     engine = create_async_engine(database_url)
     try:
         authority = await _validate_database_authority(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
         )
         await _validate_active_universe_manifest(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
         )
         return await _ensure_certification_batch(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
             authority=authority,
             started_at_ms=now_ms(),
         )
@@ -424,6 +438,7 @@ async def prepare_certification_batch(
     database_url: str,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
     now_ms: Callable[[], int],
 ) -> str:
     """Create or reuse the exact Batch before readonly workers can certify."""
@@ -432,8 +447,8 @@ async def prepare_certification_batch(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip():
         raise ValueError("runtime profile identity must be non-blank")
-    _validate_static_manifest(runtime_profile_id)
-    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    _validate_static_manifest(runtime_profile_id,strategy_group_id=strategy_group_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
     engine = create_async_engine(database_url)
@@ -441,6 +456,7 @@ async def prepare_certification_batch(
         authority = await _validate_database_authority(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
         )
         prepared_at_ms = now_ms()
         async with PostgresKernelUnitOfWork(engine) as uow:
@@ -460,6 +476,7 @@ async def prepare_certification_batch(
         return await _ensure_certification_batch(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
             authority=authority,
             started_at_ms=prepared_at_ms,
         )
@@ -471,6 +488,7 @@ async def bootstrap_strategy_universes(
     database_url: str,
     *,
     runtime_profile_id: str,
+    strategy_group_id: str | None=None,
     now_ms: Callable[[], int],
     wait_timeout_ms: int = 300_000,
     poll_interval_ms: int = 5_000,
@@ -482,8 +500,8 @@ async def bootstrap_strategy_universes(
         raise ValueError("database URL must use postgresql+asyncpg")
     if not runtime_profile_id.strip() or wait_timeout_ms <= 0 or poll_interval_ms <= 0:
         raise ValueError("bootstrap identities and timing must be positive")
-    _validate_static_manifest(runtime_profile_id)
-    event_specs, members = _manifest_for_profile(runtime_profile_id)
+    _validate_static_manifest(runtime_profile_id,strategy_group_id=strategy_group_id)
+    event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
     engine = create_async_engine(database_url)
@@ -491,6 +509,7 @@ async def bootstrap_strategy_universes(
         authority = await _validate_database_authority(
             engine,
             runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
         )
         deadline_ms = now_ms() + wait_timeout_ms
         results: list[BootstrapResult] = []
@@ -518,6 +537,7 @@ async def bootstrap_strategy_universes(
                 certification_batch_id = await _ensure_certification_batch(
                     engine,
                     runtime_profile_id=runtime_profile_id,
+            strategy_group_id=strategy_group_id,
                     authority=authority,
                     started_at_ms=installed_at_ms,
                 )
@@ -581,6 +601,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("TRADING_KERNEL_DATABASE_URL", ""))
     parser.add_argument("--runtime-profile-id", required=True)
+    parser.add_argument("--strategy-group-id",choices=("SOR-1H-001",))
     parser.add_argument("--wait-timeout-ms", type=int, default=300_000)
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
     certification_batch_mode = parser.add_mutually_exclusive_group()
@@ -603,6 +624,7 @@ def main(argv: list[str] | None = None) -> int:
                 prepare_certification_batch(
                     str(args.database_url),
                     runtime_profile_id=str(args.runtime_profile_id),
+                    strategy_group_id=args.strategy_group_id,
                     now_ms=lambda: int(time.time() * 1_000),
                 )
             )
@@ -616,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
                 refresh_active_certification_batch(
                     str(args.database_url),
                     runtime_profile_id=str(args.runtime_profile_id),
+                    strategy_group_id=args.strategy_group_id,
                     now_ms=lambda: int(time.time() * 1_000),
                 )
             )
@@ -628,6 +651,7 @@ def main(argv: list[str] | None = None) -> int:
             bootstrap_strategy_universes(
                 str(args.database_url),
                 runtime_profile_id=str(args.runtime_profile_id),
+                    strategy_group_id=args.strategy_group_id,
                 now_ms=lambda: int(time.time() * 1_000),
                 wait_timeout_ms=args.wait_timeout_ms,
                 poll_interval_ms=args.poll_interval_ms,

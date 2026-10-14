@@ -120,6 +120,13 @@ from src.trading_kernel.domain.instrument_selection import (
     SelectionSnapshot,
     SorDynamicSelectionSpecV0,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    InstalledOrbSessionSelectionSpec,
+    OrbSessionSelectionComputation,
+    OrbSessionSelectionSnapshot,
+    OrbSessionSelectionSpec,
+    OrbStaticRollbackBaseline,
+)
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.owner_control import (
     OwnerAuthorization,
@@ -399,7 +406,7 @@ class RuntimeScopeSnapshot(BaseModel):
     position_side: Literal["long", "short"]
     universe_version_id: str
     universe_semantic_digest: str
-    lifecycle_state: Literal["warming", "active", "retired", "abandoned"]
+    lifecycle_state: Literal["warming", "staged", "active", "retired", "abandoned"]
     observation_enabled: bool
     entry_enabled: bool
     scope_version: int
@@ -534,7 +541,7 @@ class ObservationUniverseMembershipSnapshot(BaseModel):
     event_spec_id: str
     universe_version_id: str
     semantic_digest: str
-    lifecycle_state: Literal["warming", "active"]
+    lifecycle_state: Literal["warming", "staged", "active"]
     exchange_instrument_ids: tuple[str, ...]
 
 
@@ -1259,7 +1266,7 @@ class SignalRepository(Protocol):
 
     async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
         universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
-        limit: int) -> tuple[RuntimeScopeSnapshot,...]: ...
+        limit: int, staged: bool=False) -> tuple[RuntimeScopeSnapshot,...]: ...
 
     async def list_generic_selection_member_status(self, *, event_spec_id: str) -> tuple[GenericSelectionMemberRuntimeStatus, ...]: ...
 
@@ -1443,6 +1450,7 @@ class StrategyRegistryRepository(Protocol):
         include_product_compatibility: bool = True,
         include_exit_profile_authority: bool = True,
         compatible_source_registry_semantic_hash: str | None = None,
+        preserve_existing_exit_authority: bool = False,
     ) -> RegistrySeedResult: ...
 
     async def list_current_event_ids(self) -> tuple[str, ...]: ...
@@ -1701,10 +1709,27 @@ class InstrumentSelectionRepository(Protocol):
         lease_kind: Literal["selection", "materialization", "observation"],
     ) -> str: ...
 
+    async def install_orb_spec(self, spec: OrbSessionSelectionSpec, *, installed_at_ms: int) -> None: ...
+    async def get_orb_spec(self, selection_spec_id: str) -> OrbSessionSelectionSpec: ...
+    async def save_orb_snapshot(self, computation: OrbSessionSelectionComputation) -> None: ...
+    async def get_orb_snapshot(self, selection_snapshot_id: str) -> OrbSessionSelectionComputation: ...
+    async def claim_orb_selection_job(self, *, selection_spec_id: str, selection_epoch_id: str,
+        session_start_ms: int, worker_id: str, now_ms: int, lease_duration_ms: int
+    ) -> GenericSelectionJobClaim | SelectionJobFailure | OrbSessionSelectionSnapshot | None: ...
+    async def complete_orb_selection_snapshot(self, *, claim: GenericSelectionJobClaim,
+        computation: OrbSessionSelectionComputation, completed_at_ms: int) -> None: ...
+
+    async def capture_orb_static_baseline(
+        self, *, captured_at_ms: int
+    ) -> OrbStaticRollbackBaseline: ...
+    async def get_orb_static_baseline(
+        self, baseline_id: str
+    ) -> OrbStaticRollbackBaseline: ...
+
     async def get_active_spec(
         self,
         selection_spec_id: str,
-    ) -> SorDynamicSelectionSpecV0: ...
+    ) -> SorDynamicSelectionSpecV0 | InstalledOrbSessionSelectionSpec: ...
 
     async def claim_selection_job(
         self,
@@ -1909,6 +1934,9 @@ class InstrumentSelectionRepository(Protocol):
         abandoned_at_ms: int,
     ) -> MaterializationGeneration: ...
 
+    async def supersede_unfenced_orb_static_generations(self, *, replacement_generation: MaterializationGeneration,
+        superseded_at_ms: int) -> None: ...
+
     async def supersede_generation_and_retarget_vacuum(
         self,
         *,
@@ -2078,6 +2106,15 @@ class InstrumentSelectionRepository(Protocol):
         self,
         audit: AuthorityGapAudit,
     ) -> None: ...
+
+    async def resolve_orb_owner_pause_vacuum(self, vacuum: StrategyEntryVacuum, *,
+        authority: SelectionSessionAuthority, resolved_at_ms: int) -> None: ...
+
+    async def commit_orb_static_selection_mode(self, *, strategy_group_id: str,expected_control_version: int,
+        activation_authorization_id: str,activated_at_ms: int) -> None: ...
+
+    async def mark_orb_failed_without_previous_authority(self, *, generation: MaterializationGeneration,
+        vacuum: StrategyEntryVacuum,failed_at_ms: int) -> None: ...
 
     async def get_authority_gap_audit(
         self,

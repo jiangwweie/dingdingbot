@@ -514,6 +514,8 @@ def registered_event_exit_bindings() -> tuple[EventExitBinding, ...]:
         "BRF2-SHORT": "exit-profile:failure-reversal:1h:short:v1",
         "SOR-LONG": "exit-profile:orb-crypto:15m:long:v1",
         "SOR-SHORT": "exit-profile:orb-crypto:15m:short:v1",
+        "SOR-1H-LONG": "exit-profile:orb-crypto:15m:long:v1",
+        "SOR-1H-SHORT": "exit-profile:orb-crypto:15m:short:v1",
         "SOR-US-LONG-15M": "exit-profile:orb-us:15m:long:v1",
         "SOR-US-SHORT-15M": "exit-profile:orb-us:15m:short:v1",
     }

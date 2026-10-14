@@ -82,7 +82,10 @@ class StrategyEntryVacuum(BaseModel):
 
     @model_validator(mode="after")
     def _validate_vacuum(self) -> StrategyEntryVacuum:
-        if self.selection_spec_id == "sor-dynamic-selection-v0":
+        if self.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1":
+            if self.strategy_group_id!="SOR-1H-001":raise ValueError("hourly ORB Vacuum identity differs")
+            interval=DAY_MS
+        elif self.selection_spec_id == "sor-dynamic-selection-v0":
             if self.strategy_group_id != "SOR-001":
                 raise ValueError("Vacuum StrategyGroup/Selection Spec identity differs")
             interval = DAY_MS

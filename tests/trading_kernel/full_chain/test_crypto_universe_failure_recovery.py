@@ -37,6 +37,7 @@ from src.trading_kernel.application.strategy_authority import (
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.domain.ticket import build_ticket_id
 from src.trading_kernel.infrastructure.pg_models import (
     instrument_certification_current,
@@ -393,7 +394,7 @@ async def test_official_replacement_keeps_old_runner_ticket_to_terminal_review(
     """Catches lifecycle or review reading the new Universe instead of the Ticket."""
 
     old_version_id, new_version_id = await prepare_active_and_warming(
-        _activation_engine
+        _activation_engine,contract=next(c for c in registered_strategy_contracts() if c.event_id=='SOR-1H-LONG')
     )
     await make_warming_ready(
         _activation_engine,
@@ -498,7 +499,7 @@ async def test_official_activation_rolls_back_while_entry_lane_is_claimed(
     """Catches official activation splitting projections under claimed ENTRY."""
 
     old_version_id, new_version_id = await prepare_active_and_warming(
-        _activation_engine
+        _activation_engine,contract=next(c for c in registered_strategy_contracts() if c.event_id=='SOR-1H-LONG')
     )
     await make_warming_ready(
         _activation_engine,
@@ -555,6 +556,13 @@ async def _arm_entry(engine: AsyncEngine) -> None:
             uow,
             ArmAcceptancePolicyRequest(armed_at_ms=1_000),
         )
+        from src.trading_kernel.application.owner_control import (
+            ControlMutationRequest,
+            set_strategy_entry_state,
+        )
+        from src.trading_kernel.domain.owner_control import StrategyEntryState
+        await set_strategy_entry_state(uow,strategy_group_id='SOR-1H-001',target_state=StrategyEntryState.ENABLED,
+            request=ControlMutationRequest(expected_version=1,reason='local active-ticket recovery',idempotency_key='orb:recovery:resume',owner_identity='owner',now_ms=1001),authentication_strength='totp_step_up')
 
 
 async def _assert_ticket_authority(engine: AsyncEngine, ticket) -> None:

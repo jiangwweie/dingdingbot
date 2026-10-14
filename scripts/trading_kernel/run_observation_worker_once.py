@@ -26,6 +26,7 @@ from src.trading_kernel.application.market_ports import (
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
+from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
@@ -177,8 +178,8 @@ async def _run(args: argparse.Namespace) -> int:
             )
         generic_loops: list[WorkerProcessLoop]=[]
         facts_cursors: dict[str,str]={}
-        for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
-            family=generic_selection_spec(group)
+        for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"):
+            family=OrbSessionSelectionSpec() if group=='SOR-1H-001' else generic_selection_spec(group)
             async def generic_selection_tick(group=group,spec_id=family.selection_spec_id):
                 return await selection_tick(group,spec_id)
             async def generic_materialization_tick(group=group,spec_id=family.selection_spec_id):

@@ -16,6 +16,8 @@ EXPECTED_EVENTS = {
     ("MI-001", "MI-LONG", "long"),
     ("SOR-001", "SOR-LONG", "long"),
     ("SOR-001", "SOR-SHORT", "short"),
+    ("SOR-1H-001", "SOR-1H-LONG", "long"),
+    ("SOR-1H-001", "SOR-1H-SHORT", "short"),
     ("BRF2-001", "BRF2-SHORT", "short"),
     ("SOR-US-EQ-PERP-001", "SOR-US-LONG-15M", "long"),
     ("SOR-US-EQ-PERP-001", "SOR-US-SHORT-15M", "short"),
@@ -31,14 +33,14 @@ LEGACY_EVENT_HASHES = {
 }
 
 
-def test_registry_contains_the_six_existing_and_two_owner_accepted_tradfi_events() -> None:
+def test_registry_contains_existing_and_independent_hourly_orb_events() -> None:
     contracts = registered_strategy_contracts()
 
     assert {
         (item.strategy_group_id, item.event_id, item.position_side)
         for item in contracts
     } == EXPECTED_EVENTS
-    assert len(contracts) == 8
+    assert len(contracts) == 10
 
 
 def test_existing_six_event_semantic_hashes_do_not_drift() -> None:
@@ -117,7 +119,7 @@ def test_registry_uses_exact_versioned_semantic_identities() -> None:
             4
             if contract.strategy_group_id == "SOR-001"
             else 1
-            if contract.strategy_group_id == "SOR-US-EQ-PERP-001"
+            if contract.strategy_group_id in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
             else 3
         )
         assert contract.strategy_version_id == f"sgv:{contract.strategy_group_id}:v{version}"
@@ -149,7 +151,7 @@ def test_registry_new_event_versions_use_new_exit_policy_identities() -> None:
     assert all(
         "portfolio-admission-v1" in item.exit_policy_id
         for item in contracts
-        if item.strategy_group_id != "SOR-US-EQ-PERP-001"
+        if item.strategy_group_id not in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
     )
     assert all(
         "us-regular-or-v1" in item.exit_policy_id

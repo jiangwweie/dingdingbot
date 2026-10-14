@@ -261,6 +261,14 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {
+                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
+                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
+                    "runtime_profile_id": "tiny-live-v1",
+                },
+                {
                     "event_spec_id": (
                         "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1"
                     ),
@@ -700,7 +708,7 @@ async def test_compatible_identity_rotates_exact_migrated_v4_authority(
     assert current["max_gross_initial_margin_utilization"] == Decimal("0.90")
     assert current["max_leverage"] == 10
     assert current["supported_margin_mode"] == "cross"
-    assert len(current["scope"]["event_runtime_profiles"]) == 8
+    assert len(current["scope"]["event_runtime_profiles"]) == 10
     assert {
         item["runtime_profile_id"]
         for item in current["scope"]["event_runtime_profiles"]

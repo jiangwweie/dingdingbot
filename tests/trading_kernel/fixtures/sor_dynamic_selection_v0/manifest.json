@@ -525,7 +525,7 @@
   "session_start_ms": 1704067200000,
   "source_semantic_identity": {
     "src/trading_kernel/domain/detectors/sor.py": "62841a063b1d0b9cc8d9f41d51befa6117953117c8c3adb38c371441539feba8",
-    "src/trading_kernel/domain/instrument_selection.py": "baddb1b95f2e2a7ce5e629f6a0da0af10a3c0f5e267a4d27fac2878547b0d54b"
+    "src/trading_kernel/domain/instrument_selection.py": "b15747a214e205fd983950eee1a23d4dd855098cf0a2796574a253316f601dd6"
   },
   "source_set_digest": "sha256:05f1e3dcfc469aaf3022ca897b1efb3f5704cf85b9155a261a09170832e8d6da",
   "test_portfolio": {
@@ -560,5 +560,20 @@
       "byte-deterministic artifact comparison",
       "DS-03 SelectionCore parity against all 961x24 decisions"
     ]
+  },
+  "verified_numeric_refactor": {
+    "change": "Extract unchanged opening-range numeric core for independent hourly ORB identities",
+    "core_parity": {
+      "member_decisions": 23064,
+      "snapshots": 961,
+      "status": "verified"
+    },
+    "current_source_sha256": "b15747a214e205fd983950eee1a23d4dd855098cf0a2796574a253316f601dd6",
+    "previous_source_sha256": "baddb1b95f2e2a7ce5e629f6a0da0af10a3c0f5e267a4d27fac2878547b0d54b",
+    "source_path": "src/trading_kernel/domain/instrument_selection.py",
+    "unchanged_numeric_artifacts": {
+      "member_decisions.csv.gz": "e7aefa1727184c867eb9fe67901210ae943340743c6bf7bc4f4cf6f1f1530448",
+      "selection_snapshots.csv.gz": "ebe22391c5b73f532a71bd1ff08a51d3f2851118c7dadbfb826d56638807972b"
+    }
   }
 }

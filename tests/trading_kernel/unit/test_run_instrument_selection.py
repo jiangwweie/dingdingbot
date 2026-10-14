@@ -359,3 +359,15 @@ class _RecordingSelectionSource:
             ).klines
         finally:
             self.active_reads -= 1
+
+
+def test_source_integrity_failure_keeps_exact_safe_reason() -> None:
+    from src.trading_kernel.application.run_instrument_selection import (
+        _source_failure_reason,
+    )
+    member = "binance-usdm:ADAUSDT:perpetual"
+    error = SelectionSourceIntegrityError("Generic raw Kline close boundary is invalid")
+    assert _source_failure_reason({member: error}) == (
+        f"SOURCE_MEMBER_FAILED:{member}:SelectionSourceIntegrityError:"
+        "Generic raw Kline close boundary is invalid")
+    assert "secret" not in _source_failure_reason({member: ConnectionError("secret")})

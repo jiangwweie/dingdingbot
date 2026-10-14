@@ -309,7 +309,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
             await connection.execute(
                 sa.delete(strategy_universe_current).where(
                     strategy_universe_current.c.event_spec_id
-                    == "event_spec:SOR-001:SOR-LONG:v4"
+                    == "event_spec:SOR-1H-001:SOR-1H-LONG:v1"
                 )
             )
             await connection.execute(
@@ -335,7 +335,7 @@ async def test_signal_authority_matrix_fails_before_persistence(
                 sa.update(facts_current)
                 .where(
                     facts_current.c.fact_definition_id
-                    == "fact:breakout_edge_crossed_v3:v3"
+                    == "fact:breakout_edge_crossed_1h_v1:v1"
                 )
                 .values(value=False, satisfied=False)
             )
@@ -1317,9 +1317,9 @@ def _signal(
     occurred_at_ms: int = 1_000,
 ) -> StrategySignal:
     event_spec_id = (
-        "event_spec:SOR-001:SOR-LONG:v4"
+        "event_spec:SOR-1H-001:SOR-1H-LONG:v1"
         if position_side == "long"
-        else "event_spec:SOR-001:SOR-SHORT:v4"
+        else "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"
     )
     facts = _signal_facts(position_side=position_side)
     return StrategySignal(
@@ -1327,8 +1327,8 @@ def _signal(
         exposure_episode_id=f"episode:{signal_event_id}",
         runtime_scope_id=runtime_scope_id,
         runtime_scope_version=4,
-        strategy_group_id="SOR-001",
-        strategy_version_id="sgv:SOR-001:v4",
+        strategy_group_id="SOR-1H-001",
+        strategy_version_id="sgv:SOR-1H-001:v1",
         event_spec_id=event_spec_id,
         universe_version_id="universe:sor-long:4",
         universe_semantic_digest="sha256:" + "a" * 64,
@@ -1376,7 +1376,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                 strategy_entry_control_event_id=(
                     "strategy-control-event:seed:SOR-001"
                 ),
-                strategy_group_id="SOR-001",
+                strategy_group_id="SOR-1H-001",
                 control_version=1,
                 operation="resume",
                 target_state="enabled",
@@ -1388,7 +1388,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             sa.insert(strategy_entry_controls_current).values(
-                strategy_group_id="SOR-001",
+                strategy_group_id="SOR-1H-001",
                 entry_state="enabled",
                 control_version=1,
                 last_event_id="strategy-control-event:seed:SOR-001",
@@ -1426,8 +1426,8 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         await connection.execute(
             sa.insert(strategy_universe_versions).values(
                 universe_version_id="universe:sor-long:4",
-                strategy_group_id="SOR-001",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                strategy_group_id="SOR-1H-001",
+                event_spec_id="event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                 universe_version=4,
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -1443,7 +1443,7 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         )
         await connection.execute(
             sa.insert(strategy_universe_current).values(
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                event_spec_id="event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                 universe_version_id="universe:sor-long:4",
                 semantic_digest="sha256:" + "a" * 64,
                 lifecycle_state="active",
@@ -1502,13 +1502,13 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
                     "event_runtime_profiles": [
                         {
                             "event_spec_id": (
-                                "event_spec:SOR-001:SOR-LONG:v4"
+                                "event_spec:SOR-1H-001:SOR-1H-LONG:v1"
                             ),
                             "runtime_profile_id": "tiny-live-v1",
                         },
                         {
                             "event_spec_id": (
-                                "event_spec:SOR-001:SOR-SHORT:v4"
+                                "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"
                             ),
                             "runtime_profile_id": "tiny-live-v1",
                         },
@@ -1551,9 +1551,9 @@ async def _seed_runtime_authority(engine: AsyncEngine) -> None:
         await connection.execute(
             sa.insert(runtime_scopes_current).values(
                 runtime_scope_id="scope-sor-btc-long",
-                strategy_group_id="SOR-001",
-                strategy_version_id="sgv:SOR-001:v4",
-                event_spec_id="event_spec:SOR-001:SOR-LONG:v4",
+                strategy_group_id="SOR-1H-001",
+                strategy_version_id="sgv:SOR-1H-001:v1",
+                event_spec_id="event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                 runtime_profile_id="tiny-live-v1",
                 owner_policy_id="policy-main",
                 exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
@@ -1687,11 +1687,11 @@ async def _seed_tradfi_live_authority(
         policy_scope = {
             "event_runtime_profiles": [
                 {
-                    "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {
-                    "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4",
+                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {
@@ -2081,28 +2081,29 @@ def _signal_facts(
             ],
             ...,
         ] = (
-            ("fact:opening_range_defined_v3:v3", "condition", True, True),
-            ("fact:breakout_edge_crossed_v3:v3", "condition", True, True),
+            ("fact:opening_range_defined_1h_v1:v1", "condition", True, True),
+            ("fact:entry_hour_eligible_1h_v1:v1", "condition", True, True),
+            ("fact:breakout_edge_crossed_1h_v1:v1", "condition", True, True),
             (
-                "fact:opening_range_high_reference_v3:v3",
+                "fact:opening_range_high_reference_1h_v1:v1",
                 "lifecycle_reference",
                 "10050.0",
                 True,
             ),
             (
-                "fact:opening_range_low_reference_v3:v3",
+                "fact:opening_range_low_reference_1h_v1:v1",
                 "protection_reference",
                 "9900.0",
                 True,
             ),
             (
-                "fact:session_start_ms_v3:v3",
+                "fact:session_start_ms_1h_v1:v1",
                 "identity_reference",
                 "1000",
                 True,
             ),
             (
-                "fact:session_end_ms_v3:v3",
+                "fact:session_end_ms_1h_v1:v1",
                 "lifecycle_reference",
                 "86401000",
                 True,
@@ -2110,28 +2111,29 @@ def _signal_facts(
         )
     else:
         values = (
-            ("fact:opening_range_defined_v3:v3", "condition", True, True),
-            ("fact:breakdown_edge_crossed_v3:v3", "condition", True, True),
+            ("fact:opening_range_defined_1h_v1:v1", "condition", True, True),
+            ("fact:entry_hour_eligible_1h_v1:v1", "condition", True, True),
+            ("fact:breakdown_edge_crossed_1h_v1:v1", "condition", True, True),
             (
-                "fact:opening_range_low_reference_v3:v3",
+                "fact:opening_range_low_reference_1h_v1:v1",
                 "lifecycle_reference",
                 "9950.0",
                 True,
             ),
             (
-                "fact:opening_range_high_reference_v3:v3",
+                "fact:opening_range_high_reference_1h_v1:v1",
                 "protection_reference",
                 "10100.0",
                 True,
             ),
             (
-                "fact:session_start_ms_v3:v3",
+                "fact:session_start_ms_1h_v1:v1",
                 "identity_reference",
                 "1000",
                 True,
             ),
             (
-                "fact:session_end_ms_v3:v3",
+                "fact:session_end_ms_1h_v1:v1",
                 "lifecycle_reference",
                 "86401000",
                 True,

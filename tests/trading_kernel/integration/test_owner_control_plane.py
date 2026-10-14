@@ -262,11 +262,14 @@ async def test_flat_0003_upgrade_seeds_controls_and_pauses_entry() -> None:
                 controls = await uow.owner_controls.list_strategy_controls()
                 assert policy is not None
                 assert not policy.new_entry_submit_enabled
-                assert len(controls) == 6
+                assert len(controls) == 7
                 assert next(
                     item
                     for item in controls
                     if item.strategy_group_id == "SOR-US-EQ-PERP-001"
+                ).entry_state is StrategyEntryState.PAUSED
+                assert next(
+                    item for item in controls if item.strategy_group_id == "SOR-1H-001"
                 ).entry_state is StrategyEntryState.PAUSED
         finally:
             await engine.dispose()

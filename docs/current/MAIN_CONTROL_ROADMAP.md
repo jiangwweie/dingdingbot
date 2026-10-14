@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-10-12
+last_verified: 2026-10-13
 ---
 
 # Main Control Roadmap
@@ -26,71 +26,83 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
-### Software deployed; Owner resumed; Dynamic activation pending
+### Dynamic engineering repair deployed; complete activation remains pending
 
 | Area | Directly verified state |
 | --- | --- |
 | Integration branch | `dev` |
-| Snapshot time | 2026-10-12 13:32 Asia/Shanghai; bounded readonly PG / Generic status inspection, not an exchange-flat proof |
-| Production commit | `1ac0d4ae8fe10937923cecd9fd4948765c42420c` |
-| Production tag | `tokyo-runtime-2026.10.12.2`; exact deployed candidate; project publication does not move this tag |
-| Production-commit certification | Exact R3 PASS: 1,581 Unit/Architecture, 1,639 Integration, 54 Full-chain; Ruff, Mypy193 and diff PASS. Earlier Generic/Capacity R4 PASS belongs to the preserved release evidence |
-| Kernel / schema | Kernel, API and static release links identify production commit; Alembic/runtime schema `0009_capacity_policy_v0`; no migration in the restoration repair |
-| Seed / Registry | `sha256:a053adc206ecb7fa2fe9ee813c779bca5a6feb654a0a5256879e9aaefa1945ed`; source/target integrity certified |
-| Owner controls | Policy version `19` has `new_entry_submit_enabled=true`; exact Resume/TOTP proof was verified after Owner action. Capacity B remains same-strategy/side2, continuation2/opening_range2/short1, global3 and unchanged stop-risk/margin/leverage |
-| Runtime ownership | Observation, Entry, Lifecycle, Reconciliation and API active; Entry fence absent. Cleanup/reload left Worker/API PIDs unchanged and restart counters0 |
-| Owner API / Console | Exact R2/R1 PASS for deployed commit; current API uses Unix socket and frontend /trading/; latest Nginx smoke returned200 |
-| Entry restoration | Official paused preparation removed only operational Fence, not Policy; later Owner Resume enabled ENTRY. No repeat promoter/server operation is required |
-| Dynamic Selection postflight | Four Specs installed and four authorized pending Dynamic intents; all still `static_baseline` at this read, control version2. No current-epoch successful Snapshot/Authority confirmed. Pending is not activation success |
-| PostgreSQL activity | Active Tickets2, nonzero projected positions2, open Incidents0 at the readonly snapshot. No current exchange position/order proof was collected for this documentation task; do not claim flatness or complete lifecycle |
-| ExitProfile postflight | Historical release certification:8 Profiles/8 Bindings/8 Current/8 ACTIVATED; no Profile switch/retirement authorized by this documentation release |
-| SOR retirement | Crypto `SOR-001` permanently retired and Entry paused/version6 despite historical Dynamic mode; TradFi SOR Entry also paused |
-| Resource posture | Cleanup postflight at12:50: root59G/used29G/available29G/50%; available memory1354MiB, load0.86/0.48/0.50. These are dated snapshots, not a representative CPU benchmark |
-| Server retention | Owner authorized removal of101 historical Kernel/API/static releases; only current version remains. Systemd journal3-day low-priority bounded hourly rotation/vacuum installed; journal footprint4.1G to1.3G. Databases, credentials, shared Python and unrelated applications untouched |
-| Nginx cleanup | Jewelry Demo static directory and both routes removed; nginx -t PASS and graceful reload; CPA/New API/trading HTTP200; no trading restart |
-| Deferred evidence | Full long-run soak NOT PASSED; offline MAE/MFE projector not delivered; complete GS-13 task acceptance and new Generic live economic evidence not claimed |
-| Probe contract | Actual ENTRY action-fact validity30,000ms; maintenance probe also bounded30s but is separate display/maintenance evidence. This release did not loosen per-order freshness |
+| Repair branch | `codex/dynamic-close-handover` in isolated worktree; main workspace remains clean `dev` |
+| Snapshot time | 2026-10-13 18:00-18:04 Asia/Shanghai; bounded PostgreSQL, service and journal reads after deployment |
+| Production commit | `57ad9fcc6ac86a88e0fd6f468c9ccb5f38d4205a` |
+| Production tag | `tokyo-runtime-2026.10.13.2`; local immutable annotated tag points to exact runtime commit; no remote publication claimed |
+| Production-commit certification | Exact R3 PASS: 1,618 Unit/Architecture, 1,655 Integration, 54 Full-chain; Ruff, Mypy193 and diff PASS. Exact R2 Owner API certification PASS |
+| Kernel / schema | Kernel and API identify the exact production commit; Alembic/runtime schema `0010_dynamic_intent_v1`; this repair is same-schema R3. Earlier `0009_capacity_policy_v0` ->0010 function migration preserved original Dynamic authorization |
+| Seed / Registry | Seed `sha256:896c67c4b7df31b42d02272fe4468c0383d44186606275ef5978986a4c5320c6`; exact source/target integrity and preservation gates PASS |
+| Owner controls | Policy version `21` has `new_entry_submit_enabled=true`; genuine Resume/TOTP proof retained. Capacity B and capital, stop-risk, margin, leverage and strategy scope unchanged |
+| Runtime ownership | Observation, Entry, Lifecycle, Reconciliation and API active; Entry fence absent; official promoter returned `promoted`; all five NRestarts0 at18:03 |
+| Owner API / Console | Exact R2 API deployment and smoke PASS; static frontend was not redeployed in this backend repair |
+| Entry restoration | Official same-schema deployment then `promote_entry.py`; no extra Policy write or Owner TOTP required |
+| Dynamic Selection postflight | All four selectors have successful 24-Ready Snapshots. CPM first activated13:06 and remains Dynamic but is now under FALLBACK_PREVIOUS recovery after a failed old attempt. MPG/MI/BRF2 remain Static with original pending Dynamic intent. MPG/MI next period is DESIRED without Vacuum; complete four-family takeover is NOT PASSED |
+| PostgreSQL activity | Latest flat deployment gate17:51: zero active Tickets, positions, commands and incidents; current recovery readiness PASS. This snapshot is not an assurance that later authorized runtime remains flat |
+| Exchange postflight | Official deployment probes confirmed no exposure/open orders, independent sides, cross margin and configured leverage5. No manual exchange mutation or flatten was dispatched |
+| ExitProfile postflight | Existing frozen Profile authority retained by exact source/target deployment preservation checks; no Profile switch or retirement performed |
+| SOR retirement | Crypto SOR remains permanently Entry-disabled; TradFi SOR remains paused. Historical Dynamic metadata is not permission to resume |
+| Deferred evidence | Full long-run soak, offline MAE/MFE projector, full GS-13 acceptance and new Generic live economics remain unclaimed |
 
-Sources: exact committed R3/R4/R2/R1 manifests and archived deployment outputs;
-fresh Tokyo PostgreSQL/read-only Generic controls and service/symlink inspection;
-Owner Resume/activation actions; bounded cleanup and Nginx postflight. Docs are
-not runtime authority.
+Sources: exact local certification manifests; official Kernel R3 deployment
+PASS, Owner API R2 deployment/smoke PASS, official Entry promotion; fresh Tokyo
+PostgreSQL, systemd and journal inspection. Documents are not runtime authority.
 
-### Owner Dynamic intents — Beijing time on snapshot date
+### Current Dynamic acceptance boundary
 
-| Strategy | Frozen Spec | Selection cutoff | Scheduled materialization boundary | Verified state |
-| --- | --- | --- | --- | --- |
-| CPM | CPM_ABSOLUTE_DIRECTIONAL_EFFICIENCY_V1 | 16:00 | 17:00 | Authorized pending; no successful Snapshot confirmed |
-| BRF2 | BRF2_RESIDUAL_EXTENSION_V0 | 16:00 | 17:00 | Authorized pending; no successful Snapshot confirmed |
-| MPG | MPG_PERSISTENT_LEADERSHIP_SCORE_V1 | 13:00 | 14:00 | Authorized pending; no successful Snapshot confirmed |
-| MI | MI_POSITIVE_IMPULSE_RECENCY_V0 | 13:00 | 14:00 | Authorized pending; no successful Snapshot confirmed |
+| Strategy | Selection result | Actual mode and authority | Remaining evidence |
+| --- | --- | --- | --- |
+| CPM | Ready24 / selected16 | Dynamic; FALLBACK_PREVIOUS after old target failed | Real recovery rebase and later successful period takeover |
+| MPG | Ready24 / selected16 at current snapshot | Static; original Dynamic intent; DESIRED, no Vacuum | Real rebase, unconsumed close, successful current Universe/Authority |
+| MI | Ready24 / selected16 | Static; original Dynamic intent; DESIRED, no Vacuum | Real rebase, unconsumed close, successful current Universe/Authority |
+| BRF2 | Ready24 / selected16 | Static; original Dynamic intent; FALLBACK_PREVIOUS, no Vacuum | Real rebase and later legal four-hour period takeover |
 
-Static ENTRY can continue before a genuine switching Vacuum; existing protected
-lifecycle always continues. Current readonly presentation reports
-`ALL_CURRENT_MEMBERS_BLOCKED` from historical Static warm expiry; that display
-does not independently prove actual Static admission is blocked. It must not be
-used to claim healthy opportunity-waiting either. Actual tickets now exist,
-but first Dynamic Selection execution/takeover still needs direct evidence.
+18:00 production journals prove real Observation and current-fact refresh have
+resumed. Old attempts were cleaned by the existing timeout/recovery path, without
+manual data repair. Recovery requires an actual future NOT_TRIGGERED close on
+the overlapping members; Snapshot success, DESIRED or process liveness alone is
+not activation success. No unconditional guarantee for the next period is made.
 
-## Publication Node
+At18:03, actual recovery checkpoints were ARMED on MPG5/7, MI2/7, BRF24/7
+and CPM9/16 members. This is partial recovery progress, not full takeover.
 
-The project node `release-2026.10.12.1` consolidates Generic Selection,
-ExitProfile Authority, Capacity B, Entry restoration and current documentation.
-It is a repository publication on synchronized dev/main, not a new server
-deployment or new exchange authorization. Exact Git tag/branch verification is
-performed at publication. Historical production tags stay immutable.
+## Repair Evidence
+
+Production evidence identified and local regressions repaired these defects:
+
+1. Old Static Observation consumed selected members' due close before queued
+   first Dynamic activation. Exact same-epoch precommitted current Snapshot now
+   coordinates observation deferral and bounded retry; born Signals keep their
+   existing authority path.
+2. Switching Vacuum opened before prior recovery checkpoints were ARMED, blocking
+   the very recovery observations needed to progress. DESIRED now checks actual
+   recovery and unconsumed close before taking the slot or opening Vacuum.
+3. Consumed-close or unarmed-recovery queue heads starved eligible work. Bounded
+   eligible FIFO filtering preserves the single warming slot and Owner pause.
+4. Reconciliation and activation locked Certification/Instrument in opposite
+   order, producing the16:12 production deadlock. Both use Instrument then
+   Certification in canonical order; real PostgreSQL concurrency test PASS.
+5. STAGED members were excluded by both certification scheduler preview and
+   claim, causing CERTIFICATION_STALE while waiting. Both now refresh those
+   members through the existing readonly certification path. Regression proves
+   no activation, Observation permission, Entry permission or Exchange Command.
+
+No schema change, SQL repair, forged ARMED, consumed-close reuse, timeout
+extension, capital expansion or safety-boundary bypass. Original Owner intents
+and terminal lineage remain preserved.
 
 ## Remaining Critical Path
 
-1. Verify actual first Generic Snapshot, materialization, current Universe and
-   Authority after each authorized boundary; distinguish pending/valid-empty/
-   fallback/failure without inventing success.
+1. Prove each family's real current-epoch Universe/Authority takeover after
+   recovery and the next legal boundary; current complete activation gate is open.
 2. Follow naturally admitted Tickets through protection, exit, reconciliation,
-   settlement and review; no forced trade, SQL repair or redundant Resume.
-3. Keep long-run engineering evidence and offline projector explicitly deferred;
-   publish any future proof separately, without claiming existing gates PASS.
-4. Review accurate runtime blockers/presentation if needed; document publication
-   is not an authorization to bypass freshness, comparison rebase or capacity.
+   settlement and review without forced trades or risk expansion.
+3. Keep long-run evidence, offline projector and complete live economics deferred.
 
 ## Parallel Offline Research
 
@@ -107,12 +119,13 @@ This documentation update does not refresh the dated runtime snapshot above.
 
 No exchange write under wrong identity, stale/contradictory action-time facts,
 unknown outcome, same-domain occupancy, missing stop/budget, schema mismatch or
-old-writer overlap. Existing exposure keeps its frozen lifecycle. Crypto SOR
-must remain disabled. Documentation, main merge and Release publication do not
-authorize migration, restart, strategy activation or risk expansion.
+old-writer overlap. Existing exposure retains its frozen lifecycle. Crypto SOR
+must remain Entry-disabled. No manual repair of recovery/cursors to manufacture
+activation evidence.
 
 ## Historical Evidence
 
-Prior measured states and superseded task claims are preserved in
+Prior roadmap snapshots are preserved in
 [historical roadmap](../archive/2026-10-12-main-control-roadmap-history.md).
-Historical PASS belongs only to its exact candidate, command set and scope.
+Historical PASS belongs only to its exact candidate and scope. The earlier
+repository publication `release-2026.10.12.1` is not this server deployment.

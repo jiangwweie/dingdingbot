@@ -330,7 +330,8 @@ def test_current_schema_authority_is_the_exact_flat_forward_revision_chain() -> 
         "-> 0006_sor_dynamic_selection_v0 "
         "-> 0007_exit_profile_authority_v1 "
         "-> 0008_generic_dynamic_selection_v1 "
-        "-> 0009_capacity_policy_v0"
+        "-> 0009_capacity_policy_v0 "
+        "-> 0010_dynamic_intent_v1"
     )
 
     for relative_path in SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS:

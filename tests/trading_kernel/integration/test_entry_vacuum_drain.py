@@ -68,6 +68,9 @@ from src.trading_kernel.domain.generic_selection_spec import (
     generic_selection_spec,
 )
 from src.trading_kernel.domain.identities import TicketIdentity
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID as SELECTION_SPEC_ID,
+)
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
@@ -105,7 +108,6 @@ from tests.trading_kernel.support.dispatch_venues import (
 )
 from tests.trading_kernel.support.lifecycle import registered_sor_long_ticket
 from tests.trading_kernel.support.selection_vacuum import (
-    SELECTION_SPEC_ID,
     SESSION_START_MS,
     open_entry_vacuum,
 )
@@ -1711,7 +1713,7 @@ async def test_reconciliation_worker_supplies_position_facts_to_vacuum_reducer(
             timeout_seconds=1,
             unknown_visibility_grace_ms=30_000,
             idle_poll_interval_ms=2_000,
-            entry_vacuum_strategy_group_id="SOR-001",
+            entry_vacuum_strategy_group_id="SOR-1H-001",
             entry_vacuum_selection_spec_id=SELECTION_SPEC_ID,
         ),
     )
@@ -2143,7 +2145,7 @@ def _request(
 ) -> DrainStrategyEntryVacuumRequest:
     return DrainStrategyEntryVacuumRequest(
         strategy_group_id=ticket.identity.runtime.strategy_group_id,
-        selection_spec_id=(SELECTION_SPEC_ID if ticket.identity.runtime.strategy_group_id == "SOR-001"
+        selection_spec_id=(SELECTION_SPEC_ID if ticket.identity.runtime.strategy_group_id == "SOR-1H-001"
             else generic_selection_spec(ticket.identity.runtime.strategy_group_id).selection_spec_id),
         now_ms=now_ms,
         ticket_id=ticket.identity.ticket_id,
@@ -2160,7 +2162,7 @@ def _reconciliation_request(now_ms: int) -> ReconciliationWorkerRequest:
         timeout_seconds=1,
         unknown_visibility_grace_ms=30_000,
         idle_poll_interval_ms=2_000,
-        entry_vacuum_strategy_group_id="SOR-001",
+        entry_vacuum_strategy_group_id="SOR-1H-001",
         entry_vacuum_selection_spec_id=SELECTION_SPEC_ID,
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from functools import partial
 
 import pytest
 import sqlalchemy as sa
@@ -92,6 +93,9 @@ from tests.trading_kernel.support.signal_ingest import (
     signal as _signal,
 )
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
+
+_seed_runtime_authority = partial(_seed_runtime_authority, hourly=True)
+_signal = partial(_signal, hourly=True)
 
 
 class FakeEntryAdmissionFactsSource:

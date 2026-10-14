@@ -76,6 +76,8 @@ is one unbranched forward Alembic chain:
 -> 0007_exit_profile_authority_v1
 -> 0008_generic_dynamic_selection_v1
 -> 0009_capacity_policy_v0
+-> 0010_dynamic_intent_v1
+-> 0011_orb_session_1h_v1
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -152,3 +154,27 @@ read by exact key from PostgreSQL and reconciled against exchange facts.
 - Manual exports are bounded, display-only, and disposable.
 - Retired program generations are deleted rather than preserved as current
   compatibility surfaces.
+
+## Persistent first Dynamic intent
+
+`0009 -> 0010` is a stopped, flat, forward-only function migration preserving
+every existing row. A Generic Dynamic mode authorization owns its original
+epoch and earliest activation period until the Owner changes that intent.
+Source failure or pre-fence Generation expiry does not revoke the intent.
+A later current Snapshot may activate the same epoch; its cutoff, freshness,
+leases, warming, closed-bar proofs and atomic commit gates still apply.
+The original Owner proof and failed Job/Generation history remain immutable.
+SOR semantics and capital/strategy scope are unchanged.
+
+
+## Independent hourly Crypto ORB extension
+
+`0010 -> 0011` adds `SOR-1H-001/v1` with independent LONG/SHORT Events, typed
+`orb_session_dynamic_v1` Spec, daily epoch/Job/Snapshot, exact hourly Gap Audit
+and paired materialization in the existing Kernel. It reuses the frozen daily
+OR/ATR numerical core and existing Crypto 15m ExitProfiles. `SOR-001` remains
+permanently retired for new ENTRY; identity and permission never transfer by
+name prefix or matching members. Deployment initialization starts the new
+strategy and global ENTRY paused. This describes the tracked target capability;
+current production commit/schema and activation evidence remain exclusively in
+`MAIN_CONTROL_ROADMAP.md`.

@@ -467,7 +467,7 @@ CERTIFIED_0002_SOURCE_EVENTS = (
 def test_runtime_identity_points_to_current_schema_head() -> None:
     # HEAD_REVISION in this historical fixture is its frozen 0003 target,
     # not the current runtime identity used by head-schema tests.
-    assert CURRENT_SCHEMA_REVISION == "0009_capacity_policy_v0"
+    assert CURRENT_SCHEMA_REVISION == "0011_orb_session_1h_v1"
 
 
 def test_alembic_has_one_exact_current_head() -> None:
@@ -821,7 +821,7 @@ async def test_0003_installs_vnext_registry_and_retires_exact_source_lineage(
             contracts=tuple(
                 contract
                 for contract in registered_strategy_contracts()
-                if contract.strategy_group_id != "SOR-US-EQ-PERP-001"
+                if contract.strategy_group_id not in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
             ),
             include_product_compatibility=False,
             include_exit_profile_authority=False,

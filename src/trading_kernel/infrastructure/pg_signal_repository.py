@@ -47,6 +47,7 @@ from src.trading_kernel.domain.exposure_episode import (
     build_episode_domain_key,
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
+from src.trading_kernel.domain.orb_session_selection import ORB_EVENT_SPEC_IDS
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -1079,7 +1080,8 @@ class PostgresSignalRepository:
             runtime_scopes_current.c.event_spec_id==readiness.event_spec_id,
             runtime_scopes_current.c.universe_version_id==readiness.universe_version_id,
             runtime_scopes_current.c.universe_semantic_digest==readiness.universe_semantic_digest,
-            runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True),
+            sa.or_(sa.and_(runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True)),
+                sa.and_(runtime_scopes_current.c.lifecycle_state=="staged",runtime_scopes_current.c.event_spec_id.in_(ORB_EVENT_SPEC_IDS),runtime_scopes_current.c.observation_enabled.is_(False),runtime_scopes_current.c.entry_enabled.is_(False))),
             sa.or_(runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),
                 runtime_scopes_current.c.warm_closed_bar_time_ms<=readiness.warm_closed_bar_time_ms),
         ).values(warm_closed_bar_time_ms=readiness.warm_closed_bar_time_ms,
@@ -1161,12 +1163,14 @@ class PostgresSignalRepository:
 
     async def list_current_fact_refresh_scopes(self, *, event_spec_id: str,
         universe_version_id: str, closed_at_ms: int, checked_at_ms: int,
-        limit: int) -> tuple[RuntimeScopeSnapshot,...]:
+        limit: int, staged: bool=False) -> tuple[RuntimeScopeSnapshot,...]:
         if not 1<=limit<=16:
             raise ValueError("Current fact refresh bound invalid")
+        if staged and event_spec_id not in ORB_EVENT_SPEC_IDS:
+            raise ValueError('staged fact refresh requires exact hourly ORB Event')
         rows=(await self._connection.execute(sa.select(runtime_scopes_current).where(
             runtime_scopes_current.c.event_spec_id==event_spec_id,runtime_scopes_current.c.universe_version_id==universe_version_id,
-            runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True),
+            runtime_scopes_current.c.lifecycle_state==('staged' if staged else 'active'),runtime_scopes_current.c.observation_enabled.is_(not staged),
             sa.or_(runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),runtime_scopes_current.c.warm_closed_bar_time_ms<closed_at_ms,
                 runtime_scopes_current.c.warm_valid_until_ms<=checked_at_ms),
         ).order_by(runtime_scopes_current.c.exchange_instrument_id).limit(limit))).mappings().all()
@@ -1315,10 +1319,11 @@ class PostgresSignalRepository:
                 strategy_universe_versions.c.universe_version_id
                 == universe_version_id,
                 strategy_universe_versions.c.lifecycle_state.in_(
-                    ("warming", "active")
+                    ("warming", "staged", "active")
                 ),
                 sa.or_(
                     strategy_universe_versions.c.lifecycle_state == "warming",
+                    sa.and_(strategy_universe_versions.c.lifecycle_state=="staged",strategy_universe_versions.c.event_spec_id.in_(ORB_EVENT_SPEC_IDS)),
                     strategy_universe_current.c.universe_version_id.is_not(None),
                 ),
             )
@@ -1362,7 +1367,7 @@ class PostgresSignalRepository:
             universe_version_id=universe.universe_version_id,
             semantic_digest=universe.semantic_digest,
             lifecycle_state=cast(
-                Literal["warming", "active"],
+                Literal["warming", "staged", "active"],
                 str(first["lifecycle_state"]),
             ),
             exchange_instrument_ids=universe.exchange_instrument_ids,
@@ -1815,7 +1820,7 @@ def _signal_values(signal: StrategySignal) -> dict[str, object]:
 
 
 def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
-    pair = sor_authority_pair_from_bindings(row["event_bindings"])
+    pair = sor_authority_pair_from_bindings(row["event_bindings"],selection_spec_id=str(row["selection_spec_id"]))
     proof_kind = row["grant_proof_kind"]
     proof = (
         None
@@ -1829,6 +1834,9 @@ def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
+        selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
+        selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
+        activation_authorization_id=row["activation_authorization_id"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
         session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),

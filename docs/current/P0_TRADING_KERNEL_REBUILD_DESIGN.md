@@ -71,7 +71,8 @@ The forward schema chain is `0001_trading_kernel_baseline_v4 ->
 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability ->
 0004_owner_control_plane -> 0005_tradfi_instrument_center ->
 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1 ->
-0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0`.
+0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0
+-> 0010_dynamic_intent_v1 -> 0011_orb_session_1h_v1`.
 The frozen `0001_trading_kernel_baseline_v4` definition remains historical
 source lineage only. PostgreSQL owns current runtime truth and append-only
 lifecycle facts. Exchange readonly facts own external truth. Repository
@@ -259,3 +260,39 @@ The rebuild is complete only when:
 
 Current completion evidence for these acceptance items belongs only to
 `MAIN_CONTROL_ROADMAP.md`.
+
+## Persistent first Dynamic intent
+
+`0009 -> 0010` is a stopped, flat, forward-only function migration preserving
+every existing row. A Generic Dynamic mode authorization owns its original
+epoch and earliest activation period until the Owner changes that intent.
+Source failure or pre-fence Generation expiry does not revoke the intent.
+A later current Snapshot may activate the same epoch; its cutoff, freshness,
+leases, warming, closed-bar proofs and atomic commit gates still apply.
+The original Owner proof and failed Job/Generation history remain immutable.
+SOR semantics and capital/strategy scope are unchanged.
+
+
+## Independent hourly ORB authority
+
+SOR-1H-001 is an independent hourly LONG/SHORT Crypto experiment, with exact new
+Registry, Spec, epoch, Static pair, Job, Snapshot, Generation, Audit and Authority
+identities. The previous SOR-001 admission is permanently disabled in the core
+Entry gate. The new strategy uses the same CapacityClaim/Ticket/Command chain,
+global serialized ENTRY lane and side-specific Netting Domains; current capital
+and capacity values do not change through Selection mode.
+
+Preparation becomes due after the closed UTC00–01 opening range; the first
+eligible hourly close is UTC02. A late grant uses a strict future close and a
+complete hourly Session Gap Audit, including trigger suppression. Trading
+Authority ends at UTC24; no midnight close is admitted for the previous Session.
+First ordinary source failure retains legal Static and the original Dynamic
+intent. Post-fence recovery restores the actual previous trading basis with
+audited proof. VALID_EMPTY owns no member grant, and dormant physical rows
+cannot become fallback authority. Ordinary later-day retries preserve the
+original intent, while explicit Static rollback consumes its own authorization,
+creates a new pair from the frozen baseline, and cancels the active Dynamic
+epoch atomically. Existing Tickets keep their frozen Crypto 15m exit rules.
+
+These are tracked target semantics. Server deployment and new strategy ENTRY
+remain separate action-time Owner decisions and gates.

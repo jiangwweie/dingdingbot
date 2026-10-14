@@ -971,11 +971,11 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 scope={
                     "event_runtime_profiles": [
                         {
-                            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+                            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
                             "runtime_profile_id": "tiny-live-v1",
                         },
                         {
-                            "event_spec_id": "event_spec:SOR-001:SOR-SHORT:v4",
+                            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
                             "runtime_profile_id": "tiny-live-v1",
                         },
                     ]
@@ -995,9 +995,9 @@ def _ticket_for_side(
     runtime = base_ticket.identity.runtime.model_copy(
         update={
             "event_spec_id": (
-                "event_spec:SOR-001:SOR-LONG:v4"
+                "event_spec:SOR-1H-001:SOR-1H-LONG:v1"
                 if side == "long"
-                else "event_spec:SOR-001:SOR-SHORT:v4"
+                else "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"
             )
         }
     )

@@ -191,7 +191,6 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
             return SimpleNamespace(materialization_generation_id="generation:original-first") if late_first_pending else None
         async def get_current_entry_vacuum(self,**_): return None
         async def get_selection_job(self,**kwargs):
-            assert not late_first_pending,"later period Snapshot must not displace first activation recovery"
             assert kwargs["period_anchor_ms"]==expected
             assert kwargs["selection_epoch_id"]=="epoch:materialize"
             return SimpleNamespace(state="SNAPSHOT_READY",selection_snapshot_id="snapshot:effective")
@@ -208,10 +207,9 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
         request=SelectionRuntimeRequest(strategy_group_id=group,selection_spec_id=spec.selection_spec_id,worker_id="materialize",
             now_ms=cutoff+8),clock_ms=lambda:cutoff+8)
     assert result.status is MaterializationRuntimeStatus.ADVANCED
-    if not late_first_pending:
-        assert calls[-1].selection_snapshot_id=="snapshot:effective"
+    assert calls[-1].selection_snapshot_id=="snapshot:effective"
     if late_first_pending:
-        assert calls[0].materialization_generation_id=="generation:original-first"
+        assert len(calls)==1
     else:
         assert calls[0].period_anchor_ms==expected
 
@@ -257,7 +255,7 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(mon
     monkeypatch.setattr(script,"run_current_fact_refresh_runtime_once",refresh)
     monkeypatch.setattr(script,"run_worker_process_group",group)
     assert await script._run(args)==0
-    expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001"}
+    expected={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001","SOR-1H-001"}
     assert {item[1] for item in calls if item[0]=="selection"}==expected
     assert {item[1] for item in calls if item[0]=="materialization"}==expected
     for strategy in expected-{"SOR-001"}:
@@ -1106,3 +1104,11 @@ class _SelectionControlUow:
 
     async def __aexit__(self, _exc_type, _exc, _traceback) -> None:
         return None
+
+
+def test_hourly_bootstrap_manifest_targets_only_new_pair():
+    import scripts.trading_kernel.bootstrap_strategy_universes as bootstrap
+    events,members=bootstrap._manifest_for_profile('tiny-live-v1',strategy_group_id='SOR-1H-001')
+    assert tuple(e for e,_ in events)==('SOR-1H-LONG','SOR-1H-SHORT')
+    assert len(members)==7
+    assert all('SOR-1H-001' in eid for _,eid in events)

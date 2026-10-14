@@ -355,8 +355,18 @@ def _parse_generic_selection_row(row: object) -> GenericSelectionCandle:
         raise SelectionSourceIntegrityError("Generic raw Kline row is malformed")
     if any(not isinstance(row[i], str) for i in (1, 2, 3, 4, 5, 7)):
         raise SelectionSourceIntegrityError("Generic raw OHLCV must enter from decimal strings")
-    if type(row[0]) is not int or type(row[6]) is not int or row[6] != row[0] + 3600000 - 1:
+    open_time_ms = _generic_timestamp(row[0])
+    close_time_ms = _generic_timestamp(row[6])
+    if close_time_ms != open_time_ms + 3600000 - 1:
         raise SelectionSourceIntegrityError("Generic raw Kline close boundary is invalid")
-    return GenericSelectionCandle(open_time_ms=row[0], close_time_ms=row[6]+1,
+    return GenericSelectionCandle(open_time_ms=open_time_ms, close_time_ms=close_time_ms+1,
         open=Decimal(row[1]), high=Decimal(row[2]), low=Decimal(row[3]), close=Decimal(row[4]),
         base_volume=Decimal(row[5]), quote_volume=Decimal(row[7]))
+
+
+def _generic_timestamp(value: object) -> int:
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and value and value.isascii() and value.isdecimal():
+        return int(value)
+    raise SelectionSourceIntegrityError("Generic raw Kline timestamp must be an exact integer")

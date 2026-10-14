@@ -1077,15 +1077,15 @@ async def _seed_policy(
                 scope={
                     "event_runtime_profiles": [
                         {
+                            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                        {
+                            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
+                            "runtime_profile_id": "tiny-live-v1",
+                        },
+                        {
                             "event_spec_id": "mi-long-v2",
-                            "runtime_profile_id": "tiny-live-v1",
-                        },
-                        {
-                            "event_spec_id": "sor-long-v2",
-                            "runtime_profile_id": "tiny-live-v1",
-                        },
-                        {
-                            "event_spec_id": "sor-short-v2",
                             "runtime_profile_id": "tiny-live-v1",
                         },
                     ]
@@ -1129,7 +1129,7 @@ async def _seed_policy(
                 runtime_scope_id="scope-short",
                 strategy_group_id=identity.runtime.strategy_group_id,
                 strategy_version_id=identity.runtime.strategy_version_id,
-                event_spec_id="sor-short-v2",
+                event_spec_id="event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
                 exchange_instrument_id=(identity.netting_domain.exchange_instrument_id),
@@ -1228,7 +1228,7 @@ def _ticket_for_signal(
     runtime = (
         original.runtime
         if position_side == "long"
-        else original.runtime.model_copy(update={"event_spec_id": "sor-short-v2"})
+        else original.runtime.model_copy(update={"event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"})
     )
     domain = NettingDomain(
         venue_id=original.netting_domain.venue_id,
@@ -1339,9 +1339,9 @@ def _ticket_for_strategy_group(
         "runtime_scope_id": runtime_scope_id,
         "universe_version_id": f"universe:{event_spec_id}:1",
         "exposure_family": (
-            "opening_range" if strategy_group_id == "SOR-001" else "long_continuation"
+            "opening_range" if strategy_group_id == "SOR-1H-001" else "long_continuation"
         ),
-        "family_ticket_limit": 2 if strategy_group_id == "SOR-001" else 1,
+        "family_ticket_limit": 2 if strategy_group_id == "SOR-1H-001" else 1,
         "pre_tp1_reclaim_price": None,
         "exposure_session_end_ms": None,
     }

@@ -396,10 +396,15 @@ async def get_selection_runtime_view(
 
     repository = uow.instrument_selection
     control = await repository.get_selection_control(request.strategy_group_id)
-    job = await repository.get_selection_job(
-        selection_spec_id=request.selection_spec_id,
-        period_anchor_ms=request.session_start_ms,
-    )
+    if request.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1" and control is not None:
+        job = None if control.selection_epoch_id is None else await repository.get_selection_job(
+            selection_spec_id=request.selection_spec_id,period_anchor_ms=request.session_start_ms,
+            selection_epoch_id=control.selection_epoch_id)
+    else:
+        job = await repository.get_selection_job(
+            selection_spec_id=request.selection_spec_id,
+            period_anchor_ms=request.session_start_ms,
+        )
     snapshot = await repository.get_snapshot_disposition(
         selection_spec_id=request.selection_spec_id,
         session_start_ms=request.session_start_ms,

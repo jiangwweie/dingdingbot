@@ -315,6 +315,7 @@ upgrade:
 -> 0007_exit_profile_authority_v1
 -> 0008_generic_dynamic_selection_v1
 -> 0009_capacity_policy_v0
+-> 0010_dynamic_intent_v1
 ```
 
 It preserves terminal PostgreSQL lineage from the exact certified source; it does
@@ -783,3 +784,47 @@ Every condition must be current and true:
 - final flatness, no residual order, released budget/domain, zero Incident, and
   completed Owner state;
 - first successful hourly observation after any deployment change.
+
+## Dynamic intent repair migration
+
+`0009 -> 0010` changes only Generic first-activation proof functions. Every
+source row, original authorization, pending epoch, earliest boundary and terminal
+lineage must be preserved exactly before identity rotation. Release is stopped,
+flat and forward-only; use the existing compatible deployment path with the exact
+0009 source and certified 0010 target. Source failures and unfenced period expiry
+do not revoke Owner Dynamic intent. Later attempts require current snapshots and
+all existing closed-bar, certification, warming, Vacuum and atomic activation gates.
+
+Resource-constrained resident long soak and Docker resource-load scenarios belong to the Periodic audit portfolio,
+not every repair release. The Release portfolio retains Unit/Architecture,
+Integration excluding those resource audits, Full-chain, Ruff, Mypy and exact migration
+preservation; R4 also retains Golden/core parity. Exclusion is not soak PASS.
+
+
+## Hourly ORB source upgrade
+
+The current target extension supports exact stopped, flat `0010 -> 0011`
+preservation. The readonly source verifier hashes every pre-existing source row;
+post-DDL preservation precedes identity rotation. The identity transaction adds
+only the named hourly pair, starts its Strategy Control paused, retains existing
+capital/Capacity B values, and keeps global new ENTRY disabled. Existing Selector
+intent, Universe, Authority and terminal trading lineage remain source facts.
+
+The software cutover postflight may pass while the new pair is not yet prepared
+only if the exact new Spec and Static control are installed with no epoch or
+pending intent, its Strategy Control is paused, global ENTRY is disabled, and
+all eight pre-existing Universes and Dynamic history match the stopped source
+baseline. This is an explicit paused preparation stage, not Entry readiness.
+Existing Owner ExitBinding choices and their additional immutable history are
+retained; the target has ten exact current Event bindings over the same eight
+Profiles. Normal Entry restoration remains blocked until the new pair is prepared.
+
+After Owner approval for deployment, prepare only the new pair with
+`bootstrap_strategy_universes.py --runtime-profile-id tiny-live-v1
+--strategy-group-id SOR-1H-001`; this exact batch uses the independent seven-coin
+Static baseline. It must not reinstall existing Dynamic groups. New strategy
+activation and global ENTRY restoration use the official Owner/Kernel path after
+current certificates, readiness, runtime identity, source preservation and
+exchange readonly facts pass. Deployment does not prove Dynamic activation or a
+natural Ticket. The calling task's explicit pre-deployment confirmation boundary
+still takes precedence over standing server authorization.

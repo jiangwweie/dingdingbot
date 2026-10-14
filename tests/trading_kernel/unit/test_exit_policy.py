@@ -513,8 +513,8 @@ def test_owner_frozen_v1_catalog_is_complete_and_explicit() -> None:
 
     assert len(profiles) == 8
     assert len({item.exit_profile_id for item in profiles}) == 8
-    assert len(bindings) == 8
-    assert len({item.event_spec_id for item in bindings}) == 8
+    assert len(bindings) == 10
+    assert len({item.event_spec_id for item in bindings}) == 10
     assert {item.exit_profile_id for item in bindings} == {
         item.exit_profile_id for item in profiles
     }

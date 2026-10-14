@@ -15,7 +15,7 @@ export async function getSelectionPreview(strategyGroupId: string): Promise<Sele
     params: { path: { strategy_group_id: strategyGroupId } },
   });
   if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
-  if (!result.data) throw new ApiError(502, "invalid_response", "Selection preview is missing");
+  if (!result.data || "strategy_label" in result.data) throw new ApiError(502, "invalid_response", "Selection preview is missing");
   return result.data;
 }
 
@@ -84,4 +84,26 @@ export async function submitFlatten(body: FlattenBody): Promise<OwnerControlOper
   if (!response.ok) throw apiErrorFromResponse(response, error);
   if (!data) throw new ApiError(502, "invalid_response", "Flatten operation is missing");
   return data;
+}
+
+export type OrbSelectionPreview = components['schemas']['OrbSelectionPreviewView'];
+export async function getOrbSelectionPreview(): Promise<OrbSelectionPreview> {
+  const result = await apiClient.GET('/api/owner/v1/controls/strategies/{strategy_group_id}/selection', {
+    params: { path: { strategy_group_id: 'SOR-1H-001' } },
+  });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+  if (!result.data || !('strategy_label' in result.data)) throw new ApiError(502, 'invalid_response', 'SOR-1H preview is missing');
+  return result.data;
+}
+export async function submitOrbDynamicIntent(body: components['schemas']['DynamicSelectionActivationBody']): Promise<void> {
+  const result = await apiClient.POST('/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate', {
+    params: { path: { strategy_group_id: 'SOR-1H-001' } }, body,
+  });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
+}
+export async function submitOrbStaticIntent(body: components['schemas']['GenericStaticSelectionActivationBody']): Promise<void> {
+  const result = await apiClient.POST('/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate', {
+    params: { path: { strategy_group_id: 'SOR-1H-001' } }, body,
+  });
+  if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
 }

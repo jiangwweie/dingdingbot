@@ -49,9 +49,9 @@ def registered_sor_ticket():
     base = make_ticket()
     runtime = base.identity.runtime.model_copy(
         update={
-            "strategy_group_id": "SOR-001",
-            "strategy_version_id": "sgv:SOR-001:v4",
-            "event_spec_id": "event_spec:SOR-001:SOR-LONG:v4",
+            "strategy_group_id": "SOR-1H-001",
+            "strategy_version_id": "sgv:SOR-1H-001:v1",
+            "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
         }
     )
     identity = TicketIdentity(
@@ -75,7 +75,7 @@ def ticket():
 async def seed_policy(
     engine: AsyncEngine,
     *,
-    event_spec_id: str = "event_spec:SOR-001:SOR-LONG:v4",
+    event_spec_id: str = "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
     event_spec_ids: tuple[str, ...] | None = None,
 ) -> None:
     authorized_event_spec_ids = event_spec_ids or (event_spec_id,)

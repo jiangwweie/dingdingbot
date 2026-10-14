@@ -26,6 +26,8 @@ from src.trading_kernel.application.owner_control import (
     stage_dynamic_selection_mode,
     stage_generic_dynamic_selection_mode,
     stage_generic_static_selection_mode,
+    stage_orb_dynamic_selection_mode,
+    stage_orb_static_selection_mode,
     switch_event_exit_profile,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
@@ -67,8 +69,11 @@ from src.trading_kernel.interfaces.readonly_api import (
     ExitProfileAuthorityReadonlyView,
     GenericSelectionRuntimeReadonlyRequest,
     GenericSelectionRuntimeReadonlyView,
+    SelectionRuntimeReadonlyRequest,
+    SelectionRuntimeReadonlyView,
     get_exit_profile_authority_view,
     get_generic_selection_runtime_view,
+    get_selection_runtime_view,
 )
 
 router = APIRouter(prefix="/api/owner/v1", tags=["owner-controls"])
@@ -107,6 +112,17 @@ class GenericSelectionPreviewView(BaseModel):
     runtime: GenericSelectionRuntimeReadonlyView
     cadence_hours: int
     next_effective_period_anchor_ms: int
+    next_eligibility_not_before_ms: int
+
+
+class OrbSelectionPreviewView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra='forbid')
+    strategy_label: Literal['SOR-1H（1h 入场 / 15m 退出）']='SOR-1H（1h 入场 / 15m 退出）'
+    installed: bool
+    control: SelectionControl | None
+    runtime: SelectionRuntimeReadonlyView | None
+    next_effective_period_anchor_ms: int
+    next_prepare_not_before_ms: int
     next_eligibility_not_before_ms: int
 
 
@@ -528,6 +544,19 @@ async def activate_dynamic_selection(
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
     if not isinstance(body,DynamicSelectionActivationBody):
         raise OwnerControlBlocked("sor_selection_requires_session_start")
+    if strategy_group_id == 'SOR-1H-001':
+        async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
+            existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
+            if existing is None:
+                control=await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
+                if control is None:
+                    raise OwnerControlBlocked('selection_control_missing')
+                if control.control_version!=body.expected_version:
+                    raise OwnerControlConflict('selection_control_version_conflict')
+                await _require_step_up(body,request)
+            return await stage_orb_dynamic_selection_mode(uow,effective_session_start_ms=body.effective_session_start_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         current = await uow.instrument_selection.get_selection_control(
             strategy_group_id
@@ -548,7 +577,24 @@ async def activate_dynamic_selection(
 
 
 @router.get("/controls/strategies/{strategy_group_id}/selection")
-async def preview_generic_selection(strategy_group_id: str,request: Request) -> GenericSelectionPreviewView:
+async def preview_generic_selection(strategy_group_id: str,request: Request) -> GenericSelectionPreviewView | OrbSelectionPreviewView:
+    if strategy_group_id=='SOR-1H-001':
+        now=get_clock_ms(request)
+        session=now//86_400_000*86_400_000
+        next_session=session if now<session+3_600_000 else session+86_400_000
+        async with PostgresKernelUnitOfWork(get_read_engine(request)) as uow:
+            assert uow._connection is not None
+            await uow._connection.execute(sa.text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
+            try:
+                await uow.instrument_selection.get_orb_spec('SOR_1H_OR_ATR_DYNAMIC_V1')
+            except LookupError:
+                orb_runtime=None
+            else:
+                orb_runtime=await get_selection_runtime_view(uow,SelectionRuntimeReadonlyRequest(strategy_group_id=strategy_group_id,
+                    selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',session_start_ms=session))
+        return OrbSelectionPreviewView(installed=orb_runtime is not None,control=None if orb_runtime is None else orb_runtime.selection_control,
+            runtime=orb_runtime,next_effective_period_anchor_ms=next_session,next_prepare_not_before_ms=next_session+3_600_000,
+            next_eligibility_not_before_ms=next_session+7_200_000)
     try:
         spec=generic_selection_spec(strategy_group_id)
     except ValueError as exc:
@@ -574,6 +620,10 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
         existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
         if existing is not None:
+            if strategy_group_id=='SOR-1H-001':
+                return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+                    selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
+                    request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
             return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
                 rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
                 effective_period_anchor_ms=body.effective_period_anchor_ms,
@@ -584,6 +634,10 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         if current.control_version!=body.expected_version:
             raise OwnerControlConflict("selection_control_version_conflict")
         await _require_step_up(body,request)
+        if strategy_group_id=='SOR-1H-001':
+            return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+                selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
+                request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
         return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
             rollback_baseline_id=body.rollback_baseline_id,selection_epoch_id=body.selection_epoch_id,
             effective_period_anchor_ms=body.effective_period_anchor_ms,

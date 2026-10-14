@@ -551,6 +551,12 @@ instrument_selection_specs = sa.Table(
     ),
 )
 
+orb_session_selection_specs_v1 = sa.Table(
+    "brc_orb_session_selection_specs_v1", metadata,
+    _id("selection_spec_id",primary_key=True),_json("payload"),
+    sa.ForeignKeyConstraint(["selection_spec_id"],["brc_instrument_selection_specs.selection_spec_id"]),
+)
+
 sor_dynamic_selection_specs_v0 = sa.Table(
     "brc_sor_dynamic_selection_specs_v0",
     metadata,
@@ -942,7 +948,16 @@ def materialization_generation_projection_columns() -> tuple[sa.ColumnElement, .
         baselines.c.materialization_generation_id == root.c.materialization_generation_id,
         baselines.c.position_side == side,
     ).correlate(root).scalar_subquery().label(f"previous_{side}_universe_version_id") for side in ("long", "short"))
-    return (*root.c, *references)
+    static_owner=sa.select(strategy_universe_materialization_events.c.payload['activation_authorization_id'].astext).where(
+        strategy_universe_materialization_events.c.materialization_generation_id==root.c.materialization_generation_id,
+        strategy_universe_materialization_events.c.event_sequence==1).correlate(root).scalar_subquery().label('activation_authorization_id')
+    prior_grant=sa.select(strategy_universe_materialization_events.c.payload['previous_entry_authorized'].astext).where(
+        strategy_universe_materialization_events.c.materialization_generation_id==root.c.materialization_generation_id,
+        strategy_universe_materialization_events.c.event_sequence==1).correlate(root).scalar_subquery()
+    prior_authority=sa.select(strategy_universe_materialization_events.c.payload['previous_selection_authority_id'].astext).where(
+        strategy_universe_materialization_events.c.materialization_generation_id==root.c.materialization_generation_id,
+        strategy_universe_materialization_events.c.event_sequence==1).correlate(root).scalar_subquery().label('previous_selection_authority_id')
+    return (*root.c, *references,static_owner,sa.func.coalesce(sa.cast(prior_grant,sa.Boolean),True).label('previous_entry_authorized'),prior_authority)
 
 
 strategy_universe_materialization_targets = sa.Table(

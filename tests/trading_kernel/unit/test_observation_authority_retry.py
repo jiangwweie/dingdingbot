@@ -16,7 +16,7 @@ from src.trading_kernel.interfaces.observation_worker import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group",["CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-001"])
-@pytest.mark.parametrize("reason",["selection_authority_missing_or_expired","selection_entry_vacuum","selection_valid_empty","OWNER_PAUSED","RECOVERY_REBASE_REQUIRED"])
+@pytest.mark.parametrize("reason",["selection_authority_missing_or_expired","selection_entry_vacuum","selection_activation_pending_current_close","selection_valid_empty","OWNER_PAUSED","RECOVERY_REBASE_REQUIRED"])
 @pytest.mark.parametrize("offset",[8,3_600_000-8])
 @pytest.mark.parametrize("lease_changed",[False,True])
 async def test_only_generic_transient_authority_wait_retries_unconsumed_close(monkeypatch,group,reason,offset,lease_changed):
@@ -41,7 +41,7 @@ async def test_only_generic_transient_authority_wait_retries_unconsumed_close(mo
     monkeypatch.setattr("src.trading_kernel.interfaces.observation_worker.observe_strategy_scope",observe)
     result=await run_observation_worker_once(Uow,SimpleNamespace(),ObservationWorkerRequest(worker_id="observation",runtime_commit="test",
         schema_revision="test",now_ms=close+offset,lease_until_ms=close+offset+30_000,timeout_seconds=1,retry_interval_ms=1_000))
-    retry=group!="SOR-001" and reason in {"selection_authority_missing_or_expired","selection_entry_vacuum"}
+    retry=group!="SOR-001" and reason in {"selection_authority_missing_or_expired","selection_entry_vacuum","selection_activation_pending_current_close"}
     if lease_changed:
         assert result.status.value=="superseded"
         assert scheduled==[]

@@ -830,6 +830,66 @@ export interface components {
             /** Source Watermark */
             source_watermark: string | null;
         };
+        /** AuthorityGapAudit */
+        AuthorityGapAudit: {
+            /** Audit Result Digest */
+            audit_result_digest: string | null;
+            /** Audit Scope Digest */
+            audit_scope_digest: string | null;
+            /** Audited Through Close Time Ms */
+            audited_through_close_time_ms: number | null;
+            /** Authority Gap Audit Id */
+            authority_gap_audit_id: string;
+            /** Detector Semantic Digest */
+            detector_semantic_digest: string;
+            /** First Blocker */
+            first_blocker: string | null;
+            /** First Eligible Close Time Ms */
+            first_eligible_close_time_ms: number | null;
+            gap_kind: components["schemas"]["AuthorityGapAuditKind"];
+            /** Projection Version */
+            projection_version: number;
+            proposed_authority_outcome: components["schemas"]["AuthorityOutcome"];
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Session Start Ms */
+            session_start_ms: number;
+            /** Source Entry Vacuum Id */
+            source_entry_vacuum_id: string | null;
+            /** Source Generation Id */
+            source_generation_id: string | null;
+            state: components["schemas"]["AuthorityGapAuditState"];
+            /** Unauthorized From Close Time Ms */
+            unauthorized_from_close_time_ms: number;
+        };
+        /**
+         * AuthorityGapAuditKind
+         * @enum {string}
+         */
+        AuthorityGapAuditKind: "LATE_PRE_FENCE_CONTINUITY" | "LATE_NO_CHANGE" | "ENTRY_VACUUM" | "OWNER_PAUSE";
+        /**
+         * AuthorityGapAuditState
+         * @enum {string}
+         */
+        AuthorityGapAuditState: "PENDING" | "COMPLETE" | "FAILED";
+        /** AuthorityGrantProof */
+        AuthorityGrantProof: {
+            /** Authority Gap Audit Id */
+            authority_gap_audit_id: string | null;
+            kind: components["schemas"]["AuthorityGrantProofKind"];
+            /** Predecessor Authority Id */
+            predecessor_authority_id: string | null;
+        };
+        /**
+         * AuthorityGrantProofKind
+         * @enum {string}
+         */
+        AuthorityGrantProofKind: "CONTINUOUS_ELIGIBLE_CLOSES" | "AUDITED_AUTHORITY_GAP";
+        /**
+         * AuthorityOutcome
+         * @enum {string}
+         */
+        AuthorityOutcome: "PRE_FENCE_CONTINUITY" | "ACTIVE_NEW" | "NO_CHANGE" | "FALLBACK_PREVIOUS" | "VALID_EMPTY" | "OWNER_PAUSED_NOT_MATERIALIZED";
         /** BreakEvenFloorRule */
         BreakEvenFloorRule: {
             /**
@@ -890,6 +950,11 @@ export interface components {
             /** Price */
             price: string;
         };
+        /**
+         * ContinuitySourceKind
+         * @enum {string}
+         */
+        ContinuitySourceKind: "SELECTION_AUTHORITY" | "STATIC_BASELINE" | "AUTHORITY_GAP_AUDIT" | "NONE";
         /** ControlEventView */
         ControlEventView: {
             /** Authorization Id */
@@ -952,6 +1017,12 @@ export interface components {
             event_spec_id: string;
             /** Exit Binding Id */
             exit_binding_id: string;
+            /** Projection Version */
+            projection_version: number;
+        };
+        /** CurrentSelectionAuthority */
+        CurrentSelectionAuthority: {
+            authority: components["schemas"]["SelectionSessionAuthority"];
             /** Projection Version */
             projection_version: number;
         };
@@ -1581,6 +1652,14 @@ export interface components {
             /** Summary */
             summary: string;
         };
+        MaterializationGeneration: {
+            [key: string]: unknown;
+        };
+        /**
+         * MaterializationGenerationState
+         * @enum {string}
+         */
+        MaterializationGenerationState: "PENDING" | "DESIRED" | "DRAINING_ENTRY" | "MATERIALIZING" | "STAGED" | "ACTIVE" | "FALLBACK_PREVIOUS" | "SUPERSEDED" | "ABANDONED" | "FAILED_CLOSED";
         /** MoneyMetric */
         MoneyMetric: {
             /** Unavailable Reason */
@@ -1601,6 +1680,78 @@ export interface components {
              * @constant
              */
             status: "not_found";
+        };
+        /** OrbSelectionPreviewView */
+        OrbSelectionPreviewView: {
+            control: components["schemas"]["SelectionControl"] | null;
+            /** Installed */
+            installed: boolean;
+            /** Next Effective Period Anchor Ms */
+            next_effective_period_anchor_ms: number;
+            /** Next Eligibility Not Before Ms */
+            next_eligibility_not_before_ms: number;
+            /** Next Prepare Not Before Ms */
+            next_prepare_not_before_ms: number;
+            runtime: components["schemas"]["SelectionRuntimeReadonlyView"] | null;
+            /**
+             * Strategy Label
+             * @default SOR-1H（1h 入场 / 15m 退出）
+             * @constant
+             */
+            strategy_label: "SOR-1H（1h 入场 / 15m 退出）";
+        };
+        /** OrbSessionSelectionSnapshot */
+        OrbSessionSelectionSnapshot: {
+            /**
+             * Candidate Count
+             * @default 24
+             * @constant
+             */
+            candidate_count: 24;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Decision At Ms */
+            decision_at_ms: number;
+            /** Eligibility Not Before Ms */
+            eligibility_not_before_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+            /** Feature Cutoff At Ms */
+            feature_cutoff_at_ms: number;
+            /** Ready Count */
+            ready_count: number;
+            /** Selected Count */
+            selected_count: number;
+            /** Selection Epoch Id */
+            selection_epoch_id: string;
+            /** Selection Semantic Digest */
+            selection_semantic_digest: string;
+            /** Selection Snapshot Id */
+            selection_snapshot_id: string;
+            /**
+             * Selection Spec Id
+             * @default SOR_1H_OR_ATR_DYNAMIC_V1
+             * @constant
+             */
+            selection_spec_id: "SOR_1H_OR_ATR_DYNAMIC_V1";
+            /** Session Start Ms */
+            session_start_ms: number;
+            /** Source Observed At Ms */
+            source_observed_at_ms: number;
+            /** Source Semantic Digest */
+            source_semantic_digest: string;
+            /**
+             * Strategy Group Id
+             * @default SOR-1H-001
+             * @constant
+             */
+            strategy_group_id: "SOR-1H-001";
+            /**
+             * Strategy Version Id
+             * @default sgv:SOR-1H-001:v1
+             * @constant
+             */
+            strategy_version_id: "sgv:SOR-1H-001:v1";
         };
         /** OwnerConclusion */
         OwnerConclusion: {
@@ -1888,6 +2039,11 @@ export interface components {
          * @enum {string}
          */
         RunnerRuleKind: "rolling_extreme_atr";
+        /**
+         * RuntimeCompatibilityClassification
+         * @enum {string}
+         */
+        RuntimeCompatibilityClassification: "COMPATIBLE_RESTART" | "REQUIRES_RUNTIME_REMATERIALIZATION";
         /** RuntimeEntryAuthorityView */
         RuntimeEntryAuthorityView: {
             /**
@@ -1901,6 +2057,31 @@ export interface components {
             first_blocker?: string | null;
             /** Runtime Profile Ids */
             runtime_profile_ids: string[];
+        };
+        /**
+         * RuntimeReleaseCompatibilityFact
+         * @description Thin immutable projection bound to one exact R4 certification manifest.
+         */
+        RuntimeReleaseCompatibilityFact: {
+            /** Certification Manifest Digest */
+            certification_manifest_digest: string;
+            classification: components["schemas"]["RuntimeCompatibilityClassification"];
+            /** Compatibility Basis Digest */
+            compatibility_basis_digest: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** From Commit */
+            from_commit: string;
+            /** From Schema Revision */
+            from_schema_revision: string;
+            /** Reason Codes */
+            reason_codes: string[];
+            /** Release Compatibility Id */
+            release_compatibility_id: string;
+            /** To Commit */
+            to_commit: string;
+            /** To Schema Revision */
+            to_schema_revision: string;
         };
         /** SelectionControl */
         SelectionControl: {
@@ -1923,11 +2104,124 @@ export interface components {
             /** Updated At Ms */
             updated_at_ms: number;
         };
+        /** SelectionJobRecord */
+        SelectionJobRecord: {
+            /** Attempt Count */
+            attempt_count: number;
+            /** Feature Cutoff At Ms */
+            feature_cutoff_at_ms: number;
+            /** First Blocker */
+            first_blocker: string | null;
+            /** Lease Expires At Ms */
+            lease_expires_at_ms: number | null;
+            /** Lease Owner */
+            lease_owner: string | null;
+            /** Next Retry At Ms */
+            next_retry_at_ms: number | null;
+            /** Period Anchor Ms */
+            period_anchor_ms: number;
+            /** Predecessor Member Digest */
+            predecessor_member_digest?: string | null;
+            /** Predecessor Snapshot Id */
+            predecessor_snapshot_id?: string | null;
+            /** Projection Version */
+            projection_version: number;
+            /** Scheduled At Ms */
+            scheduled_at_ms: number;
+            /** Selection Control Version */
+            selection_control_version?: number | null;
+            /**
+             * Selection Epoch Id
+             * @default sor-v0
+             */
+            selection_epoch_id: string;
+            /** Selection Job Id */
+            selection_job_id: string;
+            /** Selection Snapshot Id */
+            selection_snapshot_id: string | null;
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "DUE" | "CLAIMED" | "SNAPSHOT_READY" | "SOURCE_FAILED" | "COMPUTE_FAILED" | "EXPIRED" | "SUPERSEDED";
+            /** Updated At Ms */
+            updated_at_ms: number;
+        };
         /**
          * SelectionMode
          * @enum {string}
          */
         SelectionMode: "disabled" | "static_baseline" | "dynamic_selection";
+        /** SelectionRuntimeReadonlyView */
+        SelectionRuntimeReadonlyView: {
+            /** Authority Gap Audits */
+            authority_gap_audits: components["schemas"]["AuthorityGapAudit"][];
+            current_authority: components["schemas"]["CurrentSelectionAuthority"] | null;
+            /** Entry Vacuums */
+            entry_vacuums: components["schemas"]["StrategyEntryVacuum"][];
+            /** First Eligible Close Time Ms */
+            first_eligible_close_time_ms: number | null;
+            materialization_generation: components["schemas"]["MaterializationGeneration"] | null;
+            release_compatibility_fact: components["schemas"]["RuntimeReleaseCompatibilityFact"] | null;
+            selection_control: components["schemas"]["SelectionControl"] | null;
+            selection_job: components["schemas"]["SelectionJobRecord"] | null;
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Session Start Ms */
+            session_start_ms: number;
+            snapshot_disposition: components["schemas"]["SelectionSnapshotDisposition"] | null;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+        };
+        SelectionSessionAuthority: {
+            [key: string]: unknown;
+        };
+        /** SelectionSnapshot */
+        SelectionSnapshot: {
+            /** Candidate Count */
+            candidate_count: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            /** Decision At Ms */
+            decision_at_ms: number;
+            /** Eligibility Not Before Ms */
+            eligibility_not_before_ms: number;
+            /** Expires At Ms */
+            expires_at_ms: number;
+            /** Feature Cutoff At Ms */
+            feature_cutoff_at_ms: number;
+            /** Ready Count */
+            ready_count: number;
+            /** Selected Count */
+            selected_count: number;
+            /** Selection Semantic Digest */
+            selection_semantic_digest: string;
+            /** Selection Snapshot Id */
+            selection_snapshot_id: string;
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Session Start Ms */
+            session_start_ms: number;
+            /** Source Observed At Ms */
+            source_observed_at_ms: number;
+            /** Source Semantic Digest */
+            source_semantic_digest: string;
+            /** Strategy Group Id */
+            strategy_group_id: string;
+            /** Strategy Version Id */
+            strategy_version_id: string;
+        };
+        /** SelectionSnapshotDisposition */
+        SelectionSnapshotDisposition: {
+            /** Selected Member Set Digest */
+            selected_member_set_digest: string;
+            /** Selected Members */
+            selected_members: string[];
+            /** Snapshot */
+            snapshot: components["schemas"]["OrbSessionSelectionSnapshot"] | components["schemas"]["SelectionSnapshot"];
+        };
         /** ShadowOutcomeSummary */
         ShadowOutcomeSummary: {
             /** Completed At Ms */
@@ -2096,6 +2390,35 @@ export interface components {
          * @enum {string}
          */
         StrategyEntryState: "enabled" | "paused";
+        /** StrategyEntryVacuum */
+        StrategyEntryVacuum: {
+            /** Drained At Ms */
+            drained_at_ms: number | null;
+            /** Entry Vacuum Id */
+            entry_vacuum_id: string;
+            /** Fenced At Ms */
+            fenced_at_ms: number;
+            /** First Blocker */
+            first_blocker: string;
+            /** Period Anchor Ms */
+            period_anchor_ms: number;
+            /** Projection Version */
+            projection_version: number;
+            /** Resolved At Ms */
+            resolved_at_ms: number | null;
+            /** Selection Spec Id */
+            selection_spec_id: string;
+            /** Source Generation Id */
+            source_generation_id: string | null;
+            state: components["schemas"]["StrategyEntryVacuumState"];
+            /** Strategy Group Id */
+            strategy_group_id: string;
+        };
+        /**
+         * StrategyEntryVacuumState
+         * @enum {string}
+         */
+        StrategyEntryVacuumState: "OPEN" | "DRAINING_ENTRY" | "RECONFIGURING" | "RECOVERY_PENDING" | "RESOLVED_ACTIVE" | "RESOLVED_FALLBACK" | "RESOLVED_CONTINUITY" | "VALID_EMPTY" | "OWNER_PAUSED" | "SUPERSEDED" | "FAILED_CLOSED";
         /** StrategyGroupSampleState */
         StrategyGroupSampleState: {
             /** Evidence */
@@ -2570,6 +2893,13 @@ export interface components {
             runtime_profile_id: string;
             /** Totp Code */
             totp_code: string;
+        };
+        /** UniverseAuthorityPair */
+        UniverseAuthorityPair: {
+            /** Long Universe Version Id */
+            long_universe_version_id: string;
+            /** Short Universe Version Id */
+            short_universe_version_id: string;
         };
         /** UniverseChangePreview */
         UniverseChangePreview: {
@@ -3133,7 +3463,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GenericSelectionPreviewView"];
+                    "application/json": components["schemas"]["GenericSelectionPreviewView"] | components["schemas"]["OrbSelectionPreviewView"];
                 };
             };
             /** @description Validation Error */
