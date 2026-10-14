@@ -120,9 +120,10 @@ Regime/maintenance-pause boundaries. Detailed implementation remains unstarted.
 Local parameter tuning is deferred; console redesign and USDC adaptation remain
 separate backlog. Research does not change capital, exits, selection or scope.
 
-The Owner explicitly authorized periodic flatness checks and SOR-1H deployment
-after natural closure and all official action-time gates pass, without another
-confirmation. Do not force closure; keep new ENTRY paused after deployment.
+The latest Owner instruction authorizes local reliability repair and testing,
+but requires explicit confirmation before deployment. This supersedes the prior
+automatic-after-flatness authorization. The monitoring task remains paused.
+Do not force closure; keep new ENTRY paused.
 The Owner subsequently required joint release with BRC-RECON-RELIABILITY-01:
 reconciliation expedite fairness, Universe lock ordering, superseded
 certification Claim handling and minimal stagnation visibility. Repair and exact

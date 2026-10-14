@@ -14068,3 +14068,45 @@ async def test_dynamic_handover_waits_unfenced_for_rebase_or_an_unconsumed_close
         assert (await uow.instrument_selection.get_selection_control(group))==control
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+
+
+@pytest.mark.asyncio
+async def test_recovered_target_and_certification_share_install_lock_before_row(database):
+    """Production MI STAGED recovery competes with real certification activation."""
+    from src.trading_kernel.infrastructure.pg_universe_repository import (
+        PostgresStrategyUniverseRepository,
+    )
+    original = PostgresStrategyUniverseRepository.get_generation_universe_targets
+    competitors = []
+    exercised = False
+
+    async def targets(repo, generation_id, *, for_update=False):
+        nonlocal exercised
+        rows = await original(repo, generation_id, for_update=for_update)
+        if for_update and rows and rows[0].lifecycle_state.value == "staged" and not exercised:
+            exercised = True
+            pid = asyncio.Future()
+            async def certify():
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    pid.set_result(await uow._connection.scalar(sa.text("SELECT pg_backend_pid()")))
+                    return await uow.strategy_universes.try_activate(UniverseActivationRequest(
+                        universe_version_id=rows[0].universe_version_id,attempted_at_ms=CUTOFF+3600000))
+            task=asyncio.create_task(certify())
+            competitors.append(task)
+            backend=await asyncio.wait_for(pid,timeout=2)
+            async with database.connect() as monitor:
+                for _ in range(100):
+                    wait=await monitor.scalar(sa.text("SELECT wait_event FROM pg_stat_activity WHERE pid=:pid"),{"pid":backend})
+                    if wait == "advisory":break
+                    await asyncio.sleep(.01)
+                else:raise AssertionError("certification did not wait on installation before target row")
+        return rows
+    try:
+        with patch.object(PostgresStrategyUniverseRepository,"get_generation_universe_targets",targets):
+            await _exercise_generic_generation(database,"MI-001",False,durable=True)
+        assert exercised
+        await asyncio.wait_for(asyncio.gather(*competitors),timeout=3)
+    finally:
+        for task in competitors:
+            if not task.done():task.cancel()
+        await asyncio.gather(*competitors,return_exceptions=True)

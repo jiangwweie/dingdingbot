@@ -36,6 +36,7 @@ from src.trading_kernel.infrastructure.pg_unit_of_work import (
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
+    run_reconciliation_with_health,
     run_reconciliation_worker_once,
 )
 from src.trading_kernel.interfaces.worker_process import (
@@ -119,41 +120,48 @@ async def _run(args: argparse.Namespace) -> int:
     try:
         async def tick():
             now_ms = args.now_ms or int(time.time() * 1_000)
-            return await run_reconciliation_worker_once(
-                lambda: PostgresKernelUnitOfWork(engine),
-                cast(VenueTruthPort, adapter),
-                cast(PositionSnapshotSource, adapter),
-                ReconciliationWorkerRequest(
-                    worker_id=args.worker_id,
-                    runtime_commit=args.runtime_commit,
-                    schema_revision=args.schema_revision,
-                    now_ms=now_ms,
-                    timeout_seconds=args.timeout_seconds,
-                    unknown_visibility_grace_ms=(
-                        args.unknown_visibility_grace_ms
+            async def execute():
+                return await run_reconciliation_worker_once(
+                    lambda: PostgresKernelUnitOfWork(engine),
+                    cast(VenueTruthPort, adapter),
+                    cast(PositionSnapshotSource, adapter),
+                    ReconciliationWorkerRequest(
+                        worker_id=args.worker_id,
+                        runtime_commit=args.runtime_commit,
+                        schema_revision=args.schema_revision,
+                        now_ms=now_ms,
+                        timeout_seconds=args.timeout_seconds,
+                        unknown_visibility_grace_ms=(
+                            args.unknown_visibility_grace_ms
+                        ),
+                        review_economics_visibility_grace_ms=(
+                            args.review_economics_visibility_grace_ms
+                        ),
+                        idle_poll_interval_ms=args.idle_poll_interval_ms,
+                        fee_capability_monitor_interval_ms=(
+                            args.fee_capability_monitor_interval_ms
+                        ),
+                        entry_vacuum_scan_all=True,
                     ),
-                    review_economics_visibility_grace_ms=(
-                        args.review_economics_visibility_grace_ms
+                    account_risk_source=cast(AccountRiskSnapshotSource, adapter),
+                    instrument_rules_source=cast(InstrumentRulesSource, adapter),
+                    review_economics_source=cast(ReviewEconomicsSource, adapter),
+                    fee_discount_capability_source=adapter,
+                    instrument_certification_source=cast(
+                        InstrumentCertificationSource,
+                        adapter,
                     ),
-                    idle_poll_interval_ms=args.idle_poll_interval_ms,
-                    fee_capability_monitor_interval_ms=(
-                        args.fee_capability_monitor_interval_ms
+                    account_position_audit_source=cast(
+                        AccountPositionAuditSource,
+                        adapter,
                     ),
-                    entry_vacuum_scan_all=True,
-                ),
-                account_risk_source=cast(AccountRiskSnapshotSource, adapter),
-                instrument_rules_source=cast(InstrumentRulesSource, adapter),
-                review_economics_source=cast(ReviewEconomicsSource, adapter),
-                fee_discount_capability_source=adapter,
-                instrument_certification_source=cast(
-                    InstrumentCertificationSource,
-                    adapter,
-                ),
-                account_position_audit_source=cast(
-                    AccountPositionAuditSource,
-                    adapter,
-                ),
+                )
+            return await run_reconciliation_with_health(
+                lambda: PostgresKernelUnitOfWork(engine), execute,
+                worker_id=args.worker_id, now_ms=now_ms,
+                failure_window_ms=max(60_000, int(args.timeout_seconds * 1000)) * 3,
             )
+
 
         return await run_worker_process(
             tick,

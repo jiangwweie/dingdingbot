@@ -47,6 +47,9 @@ class _AggregateRepository:
         self.aggregate = aggregate
         self.scheduled_due_at_ms: int | None = None
 
+    async def get_for_update(self, ticket_id):
+        return self.aggregate
+
     async def get_next_for_statuses(self, statuses, **kwargs):
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
@@ -134,8 +137,19 @@ class _IncidentRepository:
         self.created.append(incident)
 
 
+class _Monitors:
+    def __init__(self):
+        self.rows = {}
+    async def get(self,key):
+        return self.rows.get(key)
+    async def save_if_changed(self,state):
+        self.rows[state.monitor_key]=state
+        return state
+
+
 class _FakeUnitOfWork:
     def __init__(self, state: _WorkerState) -> None:
+        self.monitors = _Monitors()
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands
         self.events = state.events

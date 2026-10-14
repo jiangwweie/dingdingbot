@@ -1,6 +1,6 @@
 # BRC-RECON-RELIABILITY-01：对账可靠性修复详细设计
 
-日期：**2026-10-14**。状态：**详细设计已编写，尚未实施或认证**。
+日期：**2026-10-14**。状态：**本地修复已实施，联合精确认证待完成，未部署**。
 来源：Owner 本线程明确要求对账修复与 **SOR-1H 联合上线**。
 
 ## 目标与硬边界
@@ -154,7 +154,8 @@ frontend 相关层验证，不能用旧 SOR-1H 认证冒充联合补丁认证。
 1. 修复、审查、生产死锁证据映射及联合精确认证通过后，才进入可部署状态。
 2. 所有持仓自然退出、挂单／未决命令／活动预算／Incident 与非终态 Ticket 满足
    flat／quiescent；停止点还需满足运行任务和 source preservation 官方门槛。
-3. Owner 已授权联合上线，无需再次确认；不得部署旧 832e1bf3 或只含 SOR-1H 的候选。
+3. **最新 Owner 指令要求部署前等待确认**，覆盖此前自动部署授权；不得部署旧
+   832e1bf3 或只含 SOR-1H 的候选。监控任务保持暂停。
 4. 通过官方部署工具执行 0010→0011 和软件发布，不带仓迁移，不提前恢复 ENTRY。
 5. postflight 核对精确 code/schema/seed、保存源终态 lineage、四服务及 API、Owner
    新开仓暂停、旧 SOR ENTRY-disabled、新 pair 独立 paused、监控状态及无残留异常。
@@ -241,3 +242,17 @@ log_lock_waits=off；Claim 当前行已覆盖，领取／失效没有 append-onl
 这是**资源顺序和 CAS 条件的探针**，不是 Kernel 应用链验收，不替代 R2/R3 真 PG
 回归或联合候选认证。脱敏原始摘要与探针输出保存在本地 display-only
 `.local/reconciliation-evidence-20261014/`，不提交原始运行日志。
+
+## 本地修复实施记录
+
+- 专用 expedite 保留原到期年龄，普通 retry/lease 语义不变。
+- coordinator 从外层 UoW 先取安装锁，带锁目标读取及嵌套激活／恢复／废弃复用同一锁。
+- Claim 在 Instrument→Certification 锁后核验数据库权威时钟；失效事务整体回滚，
+  不推进 Universe，不接受过期事实，缺失／矛盾身份保持异常。
+- Monitor 复用现有表，保留首次等待；覆盖持仓不一致、关键对账过期、Closure 停滞、
+  重复40P01及Claim失效。终态清除提示，无新schema／服务／资金或策略变化。
+- 仅已回滚的40P01返回 database_retry，下一自然tick重读；其他数据库错误仍抛出。
+- 验证覆盖真实PG重复催办、三Ticket公平性、并发retry、旧Claim回滚、保存时过期、
+  MI实际路径锁竞争；最终发布证据只认冻结提交的正式认证。
+- 原始日志、本地验证日志均为display-only，不提交为runtime权威。
+- 当前仅本地实现；生产未改动，部署前等待Owner明确确认。

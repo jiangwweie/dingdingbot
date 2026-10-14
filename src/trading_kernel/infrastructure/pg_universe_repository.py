@@ -37,7 +37,10 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseInstallResult,
     UniverseInstallStatus,
 )
-from src.trading_kernel.application.ports import InstrumentCertificationTarget
+from src.trading_kernel.application.ports import (
+    InstrumentCertificationClaimSuperseded,
+    InstrumentCertificationTarget,
+)
 from src.trading_kernel.application.project_comparative_universe import (
     ComparativeProjectionAuthorityChanged,
     ComparativeProjectionFailure,
@@ -627,6 +630,7 @@ class PostgresStrategyUniverseRepository:
         self,
         request: UniverseActivationRequest,
     ) -> UniverseActivationResult:
+        await self.lock_mutation()
         if request.operation is UniverseActivationOperation.ACTIVATE_GENERIC_STATIC:
             return await self._activate_generic_static(request)
         if request.operation is UniverseActivationOperation.ACTIVATE_GENERIC:
@@ -2152,6 +2156,8 @@ class PostgresStrategyUniverseRepository:
         *,
         for_update: bool = False,
     ) -> tuple[GenerationUniverseTarget, ...]:
+        if for_update:
+            await self.lock_mutation()
         statement = (
             sa.select(
                 strategy_universe_versions.c.universe_version_id,
@@ -3419,6 +3425,14 @@ class PostgresStrategyUniverseRepository:
         # child row while waiting for activation's parent lock.
         await self._connection.execute(sa.select(instruments.c.exchange_instrument_id).where(
             instruments.c.exchange_instrument_id==target.exchange_instrument_id).with_for_update(of=instruments))
+        from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+            PostgresInstrumentSelectionRepository,
+        )
+        await self._connection.execute(sa.select(instrument_certification_current.c.runtime_profile_id).where(
+            instrument_certification_current.c.runtime_profile_id == target.runtime_profile_id,
+            instrument_certification_current.c.exchange_instrument_id == target.exchange_instrument_id,
+        ).with_for_update(of=instrument_certification_current))
+        checked_at_ms = await PostgresInstrumentSelectionRepository(self._connection).read_authority_clock_ms()
         result = await self._connection.execute(
             sa.update(instrument_certification_current)
             .where(
@@ -3432,6 +3446,8 @@ class PostgresStrategyUniverseRepository:
                 == target.lease_expires_at_ms,
                 instrument_certification_current.c.lease_universe_version_id
                 == target.universe_version_id,
+                instrument_certification_current.c.lease_expires_at_ms
+                > checked_at_ms,
             )
             .values(
                 status=certification.status,
@@ -3453,7 +3469,20 @@ class PostgresStrategyUniverseRepository:
             )
         )
         if result.rowcount != 1:
-            raise RuntimeError("instrument certification claim is stale")
+            current = (await self._connection.execute(sa.select(instrument_certification_current).where(
+                instrument_certification_current.c.runtime_profile_id == target.runtime_profile_id,
+                instrument_certification_current.c.exchange_instrument_id == target.exchange_instrument_id,
+            ))).mappings().one_or_none()
+            if current is None:
+                raise RuntimeError("certification Claim identity missing")
+            lease = (current["lease_owner"], current["lease_expires_at_ms"], current["lease_universe_version_id"])
+            original = (target.lease_owner, target.lease_expires_at_ms, target.universe_version_id)
+            expired = checked_at_ms >= target.lease_expires_at_ms
+            cleared = all(value is None for value in lease)
+            replaced = all(value is not None for value in lease) and int(lease[1]) > target.lease_expires_at_ms
+            if not (cleared or replaced or (lease == original and expired)):
+                raise RuntimeError("certification Claim identity contradictory")
+            raise InstrumentCertificationClaimSuperseded("instrument certification claim is stale")
         await self._connection.execute(
             sa.update(instruments)
             .where(
@@ -3912,6 +3941,10 @@ class PostgresStrategyUniverseRepository:
 
     async def _try_lock_installs(self) -> bool:
         return bool(await self._connection.scalar(sa.select(sa.func.pg_try_advisory_xact_lock(sa.func.hashtext(_INSTALL_LOCK_KEY)))))
+
+    async def lock_mutation(self) -> None:
+        """Acquire before caller authority/Universe row locks in this transaction."""
+        await self._lock_installs()
 
     async def _lock_installs(self) -> None:
         await self._connection.execute(

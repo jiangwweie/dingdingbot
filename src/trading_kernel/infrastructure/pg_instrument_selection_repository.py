@@ -237,6 +237,12 @@ class PostgresInstrumentSelectionRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def _lock_universe_mutation(self) -> None:
+        from src.trading_kernel.infrastructure.pg_universe_repository import (
+            PostgresStrategyUniverseRepository,
+        )
+        await PostgresStrategyUniverseRepository(self._connection).lock_mutation()
+
     async def get_generic_snapshot(self, selection_snapshot_id: str) -> GenericSelectionSnapshotV1:
         row = (await self._connection.execute(sa.select(instrument_selection_snapshots).where(
             instrument_selection_snapshots.c.selection_snapshot_id == selection_snapshot_id,
@@ -2690,6 +2696,7 @@ class PostgresInstrumentSelectionRepository:
     async def fail_generic_static_materialization_generation(self, materialization_generation_id: str, *,
         worker_id: str, lease_epoch: int, expected_projection_version: int, reason_code: str,
     ) -> GenericStaticMaterializationGeneration:
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.abandon_strategy_universe import (
             AbandonStrategyUniverseRequest,
         )
@@ -2761,6 +2768,7 @@ class PostgresInstrumentSelectionRepository:
     async def prepare_generic_static_activation_proof(self, materialization_generation_id: str, *,
         worker_id: str, lease_epoch: int,
     ) -> GenericStaticActivationProof:
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.advance_strategy_universe import (
             UniverseActivationOperation,
             UniverseActivationRequest,
@@ -3234,6 +3242,7 @@ class PostgresInstrumentSelectionRepository:
         remain immutable evidence; the replacement gets its own timeout clock.
         No Authority is granted by this transaction.
         """
+        await self._lock_universe_mutation()
         generation = GenericMaterializationGeneration.model_validate(generation.model_dump())
         if generation.lifecycle_state is not MaterializationGenerationState.PENDING:
             raise SelectionJobConflict("Generic replacement must start PENDING")
@@ -3391,6 +3400,7 @@ class PostgresInstrumentSelectionRepository:
         expected_projection_version: int, worker_id: str, lease_epoch: int, reason_code: str,
     ) -> GenericMaterializationGeneration:
         """Release failed targets, preserving the same unresolved recovery Vacuum."""
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.abandon_strategy_universe import (
             AbandonStrategyUniverseRequest,
         )
@@ -4717,6 +4727,7 @@ class PostgresInstrumentSelectionRepository:
         vacuum: StrategyEntryVacuum,
         paused_at_ms: int,
     ) -> MaterializationGeneration | GenericMaterializationGeneration | GenericStaticMaterializationGeneration:
+        await self._lock_universe_mutation()
         if generation.lifecycle_state not in {
             MaterializationGenerationState.PENDING,
             MaterializationGenerationState.DESIRED,
@@ -4988,6 +4999,7 @@ class PostgresInstrumentSelectionRepository:
     async def prepare_generic_gap_continuity_proof(self, *, strategy_group_id: str,
         selection_spec_id: str, period_anchor_ms: int) -> GenericRecoveryGrantProof:
         """Lock the former Active set and produce a strictly future gap proposal."""
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.advance_strategy_universe import (
             UniverseActivationOperation,
             UniverseActivationRequest,
@@ -5370,6 +5382,7 @@ class PostgresInstrumentSelectionRepository:
 
     async def prepare_generic_recovered_activation_proof(self, materialization_generation_id: str) -> GenericRecoveryGrantProof:
         """Freeze a newer staged target's future-close recovery inputs without writing."""
+        await self._lock_universe_mutation()
         from src.trading_kernel.infrastructure.pg_signal_repository import (
             PostgresSignalRepository,
         )
@@ -5538,6 +5551,7 @@ class PostgresInstrumentSelectionRepository:
         This is not a grant. The eventual commit must revalidate this evidence
         and atomically install Authority/rebase, resolve Vacuum and clear pending.
         """
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.advance_strategy_universe import (
             UniverseActivationOperation,
             UniverseActivationRequest,
@@ -5734,6 +5748,7 @@ class PostgresInstrumentSelectionRepository:
         return authorization is not None and authorization["purpose"]=="selection_mode_change" and authorization["authentication_strength"]=="totp_step_up" and authorization["target_scope"]==expected_scope and authorization["authorized_at_ms"]<=authority.created_at_ms
 
     async def commit_generic_no_change(self, authority: GenericSelectionAuthority, *, expected_current_version: int | None) -> None:
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.advance_strategy_universe import (
             UniverseActivationOperation,
             UniverseActivationRequest,
@@ -6114,6 +6129,7 @@ class PostgresInstrumentSelectionRepository:
         selection_snapshot_id: str, expected_owner_version: int, expected_control_version: int,
     ) -> StrategyEntryVacuum:
         """New empty Desired takes over an uninterrupted fence; never grant fallback."""
+        await self._lock_universe_mutation()
         from src.trading_kernel.application.abandon_strategy_universe import (
             AbandonStrategyUniverseRequest,
         )

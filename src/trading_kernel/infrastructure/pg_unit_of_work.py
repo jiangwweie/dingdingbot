@@ -516,6 +516,12 @@ class PostgresKernelUnitOfWork:
                         updated_at_ms=event.occurred_at_ms,
                     )
                 )
+                from src.trading_kernel.application.reconciliation_health import (
+                    resolve_reconciliation_wait,
+                )
+                await resolve_reconciliation_wait(self, key=f"reconciliation-mismatch:{effect.ticket_id}", now_ms=event.occurred_at_ms)
+                await resolve_reconciliation_wait(self, key=f"reconciliation-closure:{effect.ticket_id}", now_ms=event.occurred_at_ms)
+                await resolve_reconciliation_wait(self, key=f"reconciliation-overdue:{effect.ticket_id}", now_ms=event.occurred_at_ms)
                 continue
             raise UnsupportedKernelEffect(
                 f"no durable materializer for {type(effect).__name__}"

@@ -22,6 +22,7 @@ from src.trading_kernel.application.ports import (
     MonitorStateRecord,
     OwnerControlRepository,
     OwnerPolicySnapshot,
+    ReconciliationHealthCandidate,
     RuntimeIncidentRecord,
     TradeReviewRecord,
 )
@@ -616,6 +617,35 @@ class PostgresAggregateRepository:
         )
         if updated.rowcount != 1:
             raise AggregateVersionConflict("aggregate missing during reschedule")
+
+    async def list_reconciliation_health_candidates(self) -> tuple[ReconciliationHealthCandidate, ...]:
+        statuses = (AggregateStatus.POST_FILL_RISK_PENDING.value,
+            *(status.value for status in RECONCILIATION_POSITION_STATUSES),
+            AggregateStatus.SETTLEMENT_PENDING.value, AggregateStatus.REVIEW_PENDING.value)
+        due = sa.func.coalesce(trade_aggregates.c.reconciliation_due_at_ms,trade_aggregates.c.updated_at_ms)
+        rows=(await self._connection.execute(sa.select(
+            trade_aggregates.c.ticket_id, trade_aggregates.c.status,
+            due.label("due_at_ms"),trade_aggregates.c.updated_at_ms.label("last_progress_at_ms"),
+        ).join(trade_tickets,trade_tickets.c.ticket_id==trade_aggregates.c.ticket_id).where(trade_aggregates.c.status.in_(statuses),trade_tickets.c.terminal_at_ms.is_(None)).order_by(due,trade_aggregates.c.ticket_id).limit(8))).mappings().all()
+        return tuple(ReconciliationHealthCandidate.model_validate(dict(row)) for row in rows)
+
+    async def expedite_reconciliation(self, ticket_id: str, *, due_at_ms: int) -> None:
+        """Wake critical work without resetting its age or a routine lease."""
+        if due_at_ms <= 0:
+            raise ValueError("aggregate expedite time must be positive")
+        await self._connection.execute(
+            sa.update(trade_aggregates)
+            .where(
+                trade_aggregates.c.ticket_id == ticket_id,
+                trade_aggregates.c.status.in_(
+                    (AggregateStatus.POST_FILL_RISK_PENDING.value,
+                     *(status.value for status in RECONCILIATION_POSITION_STATUSES))
+                ),
+            )
+            .values(reconciliation_due_at_ms=sa.func.least(
+                sa.func.coalesce(trade_aggregates.c.reconciliation_due_at_ms,
+                                 trade_aggregates.c.updated_at_ms), due_at_ms))
+        )
 
     async def _get(
         self,

@@ -70,6 +70,9 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
         await tick()
         return 0
 
+    async def health(uow_factory, tick, **kwargs):
+        return await tick()
+    monkeypatch.setattr(runner, "run_reconciliation_with_health", health)
     monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda: Adapter())
     monkeypatch.setattr(runner, "create_async_engine", lambda url: Engine())
     monkeypatch.setattr(runner, "run_reconciliation_worker_once", run_once)

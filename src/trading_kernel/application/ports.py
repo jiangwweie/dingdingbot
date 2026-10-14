@@ -177,6 +177,10 @@ if TYPE_CHECKING:
     )
 
 
+class InstrumentCertificationClaimSuperseded(RuntimeError):
+    """An exact certification lease expired or was legitimately replaced."""
+
+
 class AggregateVersionConflict(RuntimeError):
     """The persisted aggregate is not the version used to compute a change."""
 
@@ -652,7 +656,19 @@ class TicketRepository(Protocol):
     ) -> bool: ...
 
 
+class ReconciliationHealthCandidate(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    ticket_id: str
+    status: str
+    due_at_ms: int
+    last_progress_at_ms: int
+
+
 class AggregateRepository(Protocol):
+    async def list_reconciliation_health_candidates(self) -> tuple[ReconciliationHealthCandidate, ...]: ...
+
+    async def expedite_reconciliation(self, ticket_id: str, *, due_at_ms: int) -> None: ...
+
     async def add(
         self,
         aggregate: TradeAggregate,
@@ -1457,6 +1473,8 @@ class StrategyRegistryRepository(Protocol):
 
 
 class StrategyUniverseRepository(Protocol):
+    async def lock_mutation(self) -> None: ...
+
     async def materialization_slot_available(self, materialization_generation_id: str, *, replacing_generation_id: str | None = None) -> bool: ...
 
     async def resolve_install_context(

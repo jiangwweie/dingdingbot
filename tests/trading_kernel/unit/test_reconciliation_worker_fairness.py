@@ -54,6 +54,9 @@ class _AggregateRepository:
         self.aggregate = _reconciliation_pending_aggregate()
         self.scheduled_due_at_ms: int | None = None
 
+    async def get_for_update(self, ticket_id):
+        return self.aggregate
+
     async def get_next_for_statuses(self, statuses, **kwargs):
         del kwargs
         return self.aggregate if self.aggregate.status in statuses else None
@@ -83,7 +86,7 @@ class _UnitOfWork:
     def __init__(self, state):
         self.exchange_commands = state.commands
         self.aggregates = state.aggregates
-        self.monitors = getattr(state, "monitors", None)
+        self.monitors = getattr(state, "monitors", None) or _MonitorRepository()
         self.strategy_universes = getattr(state, "strategy_universes", None)
 
     async def __aenter__(self):
@@ -248,6 +251,9 @@ class _AgeAwareAggregateRepository:
             update={"status": worker_module.AggregateStatus.SETTLEMENT_PENDING}
         )
 
+    async def get_for_update(self, ticket_id):
+        return self.settlement
+
     async def claim_next_critical_reconciliation_work(self, *, now_ms):
         del now_ms
         return self.position
@@ -290,6 +296,9 @@ class _RoutineOnlyAggregateRepository:
             update={"status": worker_module.AggregateStatus.SETTLEMENT_PENDING}
         )
         self.routine_due_at_ms = 900_000
+
+    async def get_for_update(self, ticket_id):
+        return self.aggregate
 
     async def claim_next_critical_reconciliation_work(self, *, now_ms):
         del now_ms

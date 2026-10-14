@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
@@ -26,6 +27,7 @@ from src.trading_kernel.application.drain_strategy_entry_vacuum import (
 )
 from src.trading_kernel.application.owner_control import advance_flatten_operation_once
 from src.trading_kernel.application.ports import (
+    InstrumentCertificationClaimSuperseded,
     MonitorOwnerStatus,
     MonitorStateRecord,
     RuntimeIncidentRecord,
@@ -125,6 +127,8 @@ class ReconciliationWorkerStatus(StrEnum):
     SETTLED = "settled"
     REVIEWED = "reviewed"
     INSTRUMENT_CERTIFIED = "instrument_certified"
+    CERTIFICATION_SUPERSEDED = "certification_superseded"
+    DATABASE_RETRY = "database_retry"
     FEE_CAPABILITY_OBSERVED = "fee_capability_observed"
     VACUUM_DRAIN_ADVANCED = "vacuum_drain_advanced"
     VACUUM_DRAIN_WAITING = "vacuum_drain_waiting"
@@ -892,27 +896,34 @@ async def _certify_one_due_instrument(
         )
     if target is None:
         return None
-    result = await certify_universe_instrument(
-        uow_factory,
-        source,
-        CertifyUniverseInstrumentRequest(
-            target=target,
-            now_ms=request.now_ms,
-            timeout_seconds=request.timeout_seconds,
-            required_leverage=5,
-            required_margin_mode="cross",
-            valid_for_ms=request.certification_valid_for_ms,
-            eligible_check_interval_ms=(
-                request.certification_eligible_check_interval_ms
+    try:
+        result = await certify_universe_instrument(
+            uow_factory,
+            source,
+            CertifyUniverseInstrumentRequest(
+                target=target,
+                now_ms=request.now_ms,
+                timeout_seconds=request.timeout_seconds,
+                required_leverage=5,
+                required_margin_mode="cross",
+                valid_for_ms=request.certification_valid_for_ms,
+                eligible_check_interval_ms=(
+                    request.certification_eligible_check_interval_ms
+                ),
+                owner_action_check_interval_ms=(
+                    request.certification_owner_action_check_interval_ms
+                ),
+                transient_retry_interval_ms=(
+                    request.certification_transient_retry_interval_ms
+                ),
             ),
-            owner_action_check_interval_ms=(
-                request.certification_owner_action_check_interval_ms
-            ),
-            transient_retry_interval_ms=(
-                request.certification_transient_retry_interval_ms
-            ),
-        ),
-    )
+        )
+    except InstrumentCertificationClaimSuperseded:
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.CERTIFICATION_SUPERSEDED,
+            exchange_instrument_id=target.exchange_instrument_id,
+            detail="certification_claim_superseded",
+        )
     async with uow_factory() as uow:
         await advance_strategy_universe(
             uow,
@@ -929,6 +940,38 @@ async def _certify_one_due_instrument(
 
 
 async def _run_reconciliation_worker_once_core(
+    uow_factory: UnitOfWorkFactory,
+    venue_truth: VenueTruthPort,
+    position_source: PositionSnapshotSource,
+    request: ReconciliationWorkerRequest,
+    *,
+    unknown: ExchangeCommand | None,
+    aggregate: TradeAggregate | None,
+    account_risk_source: AccountRiskSnapshotSource | None = None,
+    instrument_rules_source: InstrumentRulesSource | None = None,
+    review_economics_source: ReviewEconomicsSource | None = None,
+) -> ReconciliationWorkerResult:
+    from src.trading_kernel.application.reconciliation_health import (
+        record_reconciliation_wait,
+        resolve_reconciliation_wait,
+    )
+    result = await _run_reconciliation_worker_once_core_impl(
+        uow_factory, venue_truth, position_source, request, unknown=unknown, aggregate=aggregate,
+        account_risk_source=account_risk_source, instrument_rules_source=instrument_rules_source,
+        review_economics_source=review_economics_source,
+    )
+    if aggregate is not None and aggregate.status in {AggregateStatus.SETTLEMENT_PENDING, AggregateStatus.REVIEW_PENDING}:
+        async with uow_factory() as uow:
+            key=f"reconciliation-closure:{aggregate.identity.ticket_id}"
+            if result.status in {ReconciliationWorkerStatus.SETTLED, ReconciliationWorkerStatus.REVIEWED}:
+                await resolve_reconciliation_wait(uow,key=key,now_ms=request.now_ms)
+            else:
+                await record_reconciliation_wait(uow,key=key,reason=f"closure_wait:{aggregate.status.value}",
+                    now_ms=request.now_ms, allowed_delay_ms=max(request.closure_retry_interval_ms * 3, request.review_economics_visibility_grace_ms),ticket_id=aggregate.identity.ticket_id)
+    return result
+
+
+async def _run_reconciliation_worker_once_core_impl(
     uow_factory: UnitOfWorkFactory,
     venue_truth: VenueTruthPort,
     position_source: PositionSnapshotSource,
@@ -1515,3 +1558,37 @@ async def _schedule_review_retry(
             work_kind="reconciliation",
             due_at_ms=due_at_ms,
         )
+
+
+async def run_reconciliation_with_health(
+    uow_factory: UnitOfWorkFactory,
+    tick: Callable[[], Awaitable[ReconciliationWorkerResult]],
+    *, worker_id: str, now_ms: int, failure_window_ms: int,
+) -> ReconciliationWorkerResult:
+    """Observe this worker's progress; only a rolled-back deadlock retries next tick."""
+    from sqlalchemy.exc import DBAPIError
+
+    from src.trading_kernel.application.reconciliation_health import (
+        clear_worker_retry,
+        observe_reconciliation_backlog,
+        record_worker_retry,
+    )
+
+    try:
+        result = await tick()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) != "40P01":
+            raise
+        async with uow_factory() as uow:
+            await record_worker_retry(uow, key=f"reconciliation-worker:{worker_id}",
+                reason="database_deadlock_40P01", now_ms=now_ms, window_ms=failure_window_ms)
+        return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.DATABASE_RETRY, detail="database_deadlock_40P01")
+    async with uow_factory() as uow:
+        await observe_reconciliation_backlog(uow,now_ms=now_ms,budget_ms=failure_window_ms)
+        if result.status is ReconciliationWorkerStatus.CERTIFICATION_SUPERSEDED or result.housekeeping_status is ReconciliationWorkerStatus.CERTIFICATION_SUPERSEDED:
+            await record_worker_retry(uow, key=f"reconciliation-claim:{worker_id}",
+                reason="certification_claim_superseded", now_ms=now_ms, window_ms=failure_window_ms)
+        else:
+            await clear_worker_retry(uow,key=f"reconciliation-claim:{worker_id}",now_ms=now_ms,window_ms=failure_window_ms)
+        await clear_worker_retry(uow,key=f"reconciliation-worker:{worker_id}",now_ms=now_ms,window_ms=failure_window_ms)
+    return result

@@ -345,3 +345,94 @@ async def test_staged_members_refresh_expired_certification_without_activating_o
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
         assert await connection.scalar(sa.text(
             "SELECT count(*) FROM brc_runtime_scopes_current WHERE observation_enabled OR entry_enabled")) == 0
+
+
+@pytest.mark.asyncio
+async def test_revoked_certification_claim_rolls_back_rules_and_keeps_worker_running(_certification_engine):  # noqa: F811
+    class RevokingSource(RecordingReadonlyCertificationSource):
+        async def read_instrument_certification(self, request):
+            snapshot = await super().read_instrument_certification(request)
+            async with self.engine.begin() as c:
+                await c.execute(sa.text("UPDATE brc_instrument_certification_current SET lease_owner=NULL,lease_expires_at_ms=NULL,lease_universe_version_id=NULL WHERE exchange_instrument_id=:id"), {"id": request.target.exchange_instrument_id})
+            return snapshot
+
+    source = RevokingSource(_certification_engine)
+    result = await run_reconciliation_worker_once(
+        lambda: PostgresKernelUnitOfWork(_certification_engine), NoTicketVenueTruth(),
+        NoTicketPositionSource(), worker_request(NOW_MS), instrument_certification_source=source,
+    )
+    assert result.status.value == "certification_superseded"
+    async with _certification_engine.connect() as c:
+        assert await c.scalar(sa.text("SELECT count(*) FROM brc_instrument_certification_current WHERE status='eligible'")) == 0
+        assert await c.scalar(sa.text("SELECT count(*) FROM brc_instrument_rules_current")) == 0
+
+
+@pytest.mark.asyncio
+async def test_target_row_lock_cannot_precede_install_lock(_certification_engine):  # noqa: F811
+    import asyncio
+
+    from src.trading_kernel.application.advance_strategy_universe import (
+        UniverseActivationRequest,
+    )
+
+    async with _certification_engine.connect() as c:
+        uid = await c.scalar(sa.text("SELECT universe_version_id FROM brc_strategy_universe_versions LIMIT 1"))
+        gid = "generation:missing-probe"
+        await c.rollback()
+    # Test the actual repository target-lock entry against certification activation.
+    ready = asyncio.Event()
+    async def activation():
+        async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+            await uow.strategy_universes._lock_installs()
+            ready.set()
+            await asyncio.sleep(.15)
+            return await uow.strategy_universes.try_activate(UniverseActivationRequest(universe_version_id=uid,attempted_at_ms=NOW_MS))
+    async def target_reader():
+        await ready.wait()
+        async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+            await uow.strategy_universes.get_generation_universe_targets(gid,for_update=True)
+            # The repository must already own the common transaction lock.
+            count = await uow._connection.scalar(sa.text("SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid() AND locktype='advisory' AND objid=hashtext('brc-strategy-universe-install')::bigint AND granted"))
+            assert count == 1
+    await asyncio.wait_for(asyncio.gather(activation(),target_reader()),timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_lease_expiry_is_checked_at_save_not_read_start(_certification_engine):  # noqa: F811
+    from src.trading_kernel.application.ports import (
+        InstrumentCertificationClaimSuperseded,
+    )
+    from src.trading_kernel.domain.instrument_certification import (
+        InstrumentCertification,
+    )
+    async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+        target=await uow.strategy_universes.claim_due_instrument_certification(worker_id="expired",now_ms=1000,lease_until_ms=61000)
+    assert target is not None
+    with pytest.raises(InstrumentCertificationClaimSuperseded):
+        async with PostgresKernelUnitOfWork(_certification_engine) as uow:
+            await uow.strategy_universes.save_instrument_certification(target=target,
+                certification=InstrumentCertification(status="eligible",blocker_code=None,facts_digest="sha256:"+"a"*64,observed_at_ms=1000,valid_until_ms=61000),
+                product_rules_digest="sha256:"+"b"*64,configured_leverage=5,margin_mode="cross",position_mode="independent_sides",next_check_at_ms=61000)
+    async with _certification_engine.connect() as c:
+        assert await c.scalar(sa.text("SELECT status FROM brc_instrument_certification_current LIMIT 1")) == "temporarily_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_newer_claim_keeps_ownership_and_old_result_cannot_commit(_certification_engine):  # noqa: F811
+    class ReclaimingSource(RecordingReadonlyCertificationSource):
+        async def read_instrument_certification(self, request):
+            snapshot=await super().read_instrument_certification(request)
+            for _ in range(len(MEMBERS)):
+                async with PostgresKernelUnitOfWork(self.engine) as uow:
+                    current=await uow.strategy_universes.claim_due_instrument_certification(worker_id="new-owner",now_ms=NOW_MS+60001,lease_until_ms=NOW_MS+120001)
+                    assert current is not None
+                if current.exchange_instrument_id == request.target.exchange_instrument_id:
+                    break
+            assert current.exchange_instrument_id == request.target.exchange_instrument_id
+            return snapshot
+    source=ReclaimingSource(_certification_engine)
+    result=await run_reconciliation_worker_once(lambda:PostgresKernelUnitOfWork(_certification_engine),NoTicketVenueTruth(),NoTicketPositionSource(),worker_request(NOW_MS),instrument_certification_source=source)
+    assert result.status.value == 'certification_superseded'
+    async with _certification_engine.connect() as c:
+        assert await c.scalar(sa.text("SELECT lease_owner FROM brc_instrument_certification_current LIMIT 1")) == "new-owner"
+        assert await c.scalar(sa.text("SELECT count(*) FROM brc_instrument_rules_current")) == 0

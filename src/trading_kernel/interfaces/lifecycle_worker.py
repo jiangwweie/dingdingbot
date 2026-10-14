@@ -24,6 +24,10 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
 )
 from src.trading_kernel.application.owner_control import consume_pending_flatten_once
 from src.trading_kernel.application.ports import UnitOfWorkFactory, VenuePort
+from src.trading_kernel.application.reconciliation_health import (
+    record_reconciliation_wait,
+    resolve_reconciliation_wait,
+)
 from src.trading_kernel.application.runtime_facts import (
     LifecycleFactsRequest,
     LifecycleFactsSource,
@@ -267,9 +271,8 @@ async def run_lifecycle_worker_once(
             expected_position_quantity = None
     if facts.position_quantity != expected_position_quantity:
         async with uow_factory() as uow:
-            await uow.aggregates.schedule_next_check(
+            await uow.aggregates.expedite_reconciliation(
                 aggregate.identity.ticket_id,
-                work_kind="reconciliation",
                 due_at_ms=request.now_ms,
             )
             await uow.aggregates.schedule_next_check(
@@ -277,11 +280,19 @@ async def run_lifecycle_worker_once(
                 work_kind="lifecycle",
                 due_at_ms=request.now_ms + request.idle_poll_interval_ms,
             )
+        async with uow_factory() as uow:
+            await record_reconciliation_wait(uow, key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}",
+                reason="external_flat_internal_live" if facts.position_quantity == 0 else "venue_position_differs_from_ticket_projection",
+                now_ms=request.now_ms, allowed_delay_ms=max(request.idle_poll_interval_ms * 3, int(request.timeout_seconds * 1000) * 3),
+                ticket_id=aggregate.identity.ticket_id)
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.RECONCILIATION_REQUIRED,
             ticket_id=aggregate.identity.ticket_id,
             detail="venue_position_differs_from_ticket_projection",
         )
+
+    async with uow_factory() as uow:
+        await resolve_reconciliation_wait(uow, key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}", now_ms=request.now_ms)
 
     async with uow_factory() as uow:
         maintenance = await maintain_ticket_lifecycle(

@@ -507,6 +507,7 @@ async def coordinate_selection_materialization_once(
     now_ms = clock_ms()
     if isinstance(request,CoordinateGenericStaticRequest):
         async with uow_factory() as uow:
+            await uow.strategy_universes.lock_mutation()
             owner = await uow.owner_controls.get_strategy_control(request.strategy_group_id,for_update=True)
             control = await uow.instrument_selection.get_selection_control(request.strategy_group_id,for_update=True)
             if owner is None or owner.entry_state is StrategyEntryState.PAUSED:
@@ -704,6 +705,7 @@ async def coordinate_selection_materialization_once(
     if isinstance(request, CoordinateGenericGenerationRequest):
         return await _coordinate_generic_generation(uow_factory=uow_factory,request=request,now_ms=now_ms)
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         spec = await uow.instrument_selection.get_active_spec(
             request.selection_spec_id
         )
@@ -1444,6 +1446,7 @@ async def coordinate_selection_materialization_once(
 async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
     request: CoordinateGenericPeriodRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         spec = await uow.instrument_selection.get_generic_spec(request.selection_spec_id)
         if spec.strategy_group_id!=request.strategy_group_id:
             return _blocked("GENERIC_CONTINUITY_SPEC_CHANGED")
@@ -1567,6 +1570,7 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
 async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
     request: CoordinateGenericSnapshotRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         snapshot = await uow.instrument_selection.get_generic_snapshot(request.selection_snapshot_id)
         generation_id = GenericMaterializationGeneration.id_for_snapshot(snapshot.selection_snapshot_id)
         existing = await uow.instrument_selection.get_generic_materialization_generation(generation_id)
@@ -1823,6 +1827,7 @@ async def _coordinate_generic_empty(*, uow: KernelUnitOfWork, snapshot: GenericS
 async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
     request: CoordinateGenericGenerationRequest, now_ms: int) -> CoordinateSelectionMaterializationResult:
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         initial = await uow.instrument_selection.get_generic_materialization_generation(request.materialization_generation_id)
         if initial is None:
             return _blocked("GENERIC_GENERATION_MISSING")
@@ -2220,6 +2225,7 @@ async def _complete_pending_authority_gap_audit(
     """Evaluate a staged audit outside PG and commit positive/negative proof."""
 
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         audit = await uow.instrument_selection.get_authority_gap_audit(
             authority_gap_audit_id
         )
@@ -2407,12 +2413,14 @@ async def _complete_pending_authority_gap_audit(
             first_blocker="AUTHORITY_GAP_AUDIT_INCOMPLETE",
         )
         async with uow_factory() as uow:
+            await uow.strategy_universes.lock_mutation()
             await uow.instrument_selection.fail_authority_gap_audit(
                 failed,
                 failed_at_ms=completed_at_ms,
             )
         return _blocked("AUTHORITY_GAP_AUDIT_INCOMPLETE")
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         owner_control = await uow.owner_controls.get_strategy_control(
             spec.strategy_group_id,
             for_update=True,
@@ -2601,6 +2609,7 @@ async def _persist_gap_audit_failure(
 ) -> CoordinateSelectionMaterializationResult:
     failed = fail_authority_gap_audit(audit, first_blocker=first_blocker)
     async with uow_factory() as uow:
+        await uow.strategy_universes.lock_mutation()
         await uow.instrument_selection.fail_authority_gap_audit(
             failed,
             failed_at_ms=failed_at_ms,
