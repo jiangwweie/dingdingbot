@@ -68,6 +68,10 @@ the explicit Owner flatness-contingent authorization recorded in that plan,
 and does not close deferred engineering acceptance. Economic interpretation
 remains owned by the Strategy Experiment Evaluation Contract.
 
+[Reconciliation Reliability Repair design](superpowers/specs/2026-10-14-reconciliation-reliability-repair-design.md)
+defines the Owner-required joint repair gate for SOR-1H release. Design is
+recorded; implementation and joint-candidate certification are not claimed.
+
 ## Version Nodes
 
 Project releases under `docs/releases/` are immutable publication notes, not

@@ -482,3 +482,10 @@ DONE，不把定向通过当作完整R4或生产验收。所有Tokyo写、部署
 后续研究范围、参数冻结和独立待办由
 [三阶段研究规划](2026-10-14-brc-alpha-research-status-and-plan.md)记录。
 本次修订不声明已经生产部署或完成自然生命周期验收。
+
+### 后续联合修复门槛
+
+Owner 随后明确要求与 **BRC-RECON-RELIABILITY-01** 一起上线。
+详见[对账可靠性修复设计](../specs/2026-10-14-reconciliation-reliability-repair-design.md)。
+**自然平仓不足以触发旧候选部署**：必须先完成修复、生产锁链映射和联合精确认证，
+再通过正式平仓／迁移门槛。原 SOR-1H-only 认证保留为历史证据，不能覆盖新补丁。

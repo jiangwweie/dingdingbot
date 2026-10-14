@@ -123,6 +123,12 @@ separate backlog. Research does not change capital, exits, selection or scope.
 The Owner explicitly authorized periodic flatness checks and SOR-1H deployment
 after natural closure and all official action-time gates pass, without another
 confirmation. Do not force closure; keep new ENTRY paused after deployment.
+The Owner subsequently required joint release with BRC-RECON-RELIABILITY-01:
+reconciliation expedite fairness, Universe lock ordering, superseded
+certification Claim handling and minimal stagnation visibility. Repair and exact
+joint-candidate certification are release prerequisites even if flatness is met;
+do not deploy the prior SOR-1H-only candidate. See the
+[reliability repair design](../superpowers/specs/2026-10-14-reconciliation-reliability-repair-design.md).
 Software deployment, strategy/Selection activation and real lifecycle evidence
 remain separate gates. This authority does not resume retired SOR-001.
 This documentation update does not refresh the dated runtime snapshot above.
