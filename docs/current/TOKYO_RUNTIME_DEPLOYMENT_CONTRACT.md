@@ -828,3 +828,16 @@ current certificates, readiness, runtime identity, source preservation and
 exchange readonly facts pass. Deployment does not prove Dynamic activation or a
 natural Ticket. The calling task's explicit pre-deployment confirmation boundary
 still takes precedence over standing server authorization.
+
+### Paused failed Generic source quiescence
+
+A drained Generic recovery Vacuum is permitted to remain unresolved across the
+0010→0011 stopped upgrade only when the shared source predicate proves exact
+FAILED_CLOSED lineage, abandoned targets, unchanged current baseline, matching
+epoch/control, an authenticated persisted Owner Policy pause and zero live
+trading debt. The negative fence and original intent remain unchanged; this
+proof neither grants ENTRY nor claims a recovered Universe/Authority. In-flight
+Generation or missing evidence still blocks. The locked pre-DDL gate rechecks
+the same predicate under locks on all proof dependencies. Preparation workers
+are stopped after flatness; real deadline closure uses the source coordinator.
+Never resume ENTRY to satisfy this migration condition.

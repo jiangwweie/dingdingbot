@@ -257,3 +257,20 @@ log_lock_waits=off；Claim 当前行已覆盖，领取／失效没有 append-onl
   MI实际路径锁竞争；最终发布证据只认冻结提交的正式认证。
 - 原始日志、本地验证日志均为display-only，不提交为runtime权威。
 - 当前仅本地实现；生产未改动，部署前等待Owner明确确认。
+
+## 暂停状态下的部署静止性补充
+
+Owner 明确要求不恢复 ENTRY。部署前保持 Policy 暂停、Entry 服务禁用与写围栏。
+已全平后停止准备／认证写入，未完成 Generation 只能由原版本正式 coordinator 在
+真实 deadline 到达后终结，不能提前伪造失败或 SQL 清理。
+
+0010→0011 新增精确 negative-fence 静止性证明：终态 FAILED_CLOSED、lease 清空、
+真实排空与失败／RECOVERY_REQUIRED 事件、目标全部 abandoned 且无启用 scope、
+原 baseline 仍 current、同 Selection epoch/control、正式 Owner Policy pause lineage、
+无 Ticket／position／command／budget／Incident 负债。Policy 为 true 或任一证据缺失
+仍阻断。预检与迁移锁定后共用证明；锁保护全部证明依赖行。
+
+这是保留负围栏的暂停迁移，不是解除围栏、授予恢复 Authority 或 ENTRY。失败历史、
+原意图与全部源行原样保留，后续自然运行仍需正式新周期与真实恢复证明。
+仅0010源升级使用新增证明，旧迁移默认行为不变；不修改旧SOR禁用或任何资金参数。
+新候选必须重新取得精确R4/R2/R1认证，原315aa28b认证不覆盖本次迁移补充。

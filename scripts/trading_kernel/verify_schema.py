@@ -943,7 +943,8 @@ async def _verify_generic_selection_source(
                     "SELECT count(*) FROM brc_owner_control_operations_current WHERE state NOT IN ('completed','blocked')"
                 ))) or 0),
                 "open_selection_vacuums": await connection.run_sync(
-                    count_nonquiescent_source_vacuums
+                    lambda bind: count_nonquiescent_source_vacuums(bind,
+                        allow_paused_failed_generic=source_revision == "0010_dynamic_intent_v1")
                 ),
             })
             manifest = (await _orb_source_preservation_manifest(connection) if source_revision=="0010_dynamic_intent_v1" else

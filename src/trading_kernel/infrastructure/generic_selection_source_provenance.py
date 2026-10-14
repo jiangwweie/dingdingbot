@@ -54,7 +54,7 @@ class SourceProvenanceInsufficient(RuntimeError):
     """The source cannot justify an unchanged Static comparison checkpoint."""
 
 
-def count_nonquiescent_source_vacuums(connection: sa.Connection) -> int:
+def _count_standalone_nonquiescent_vacuums(connection: sa.Connection) -> int:
     """Keep a proved, drained standalone Owner pause as a negative fence.
 
     This never resolves a Vacuum or grants ENTRY. Generation-linked pauses,
@@ -94,6 +94,141 @@ def count_nonquiescent_source_vacuums(connection: sa.Connection) -> int:
                 AND drained.payload->'entry_drain_complete'='true'::jsonb)
         )
     """)) or 0)
+
+
+def count_nonquiescent_source_vacuums(connection: sa.Connection, *, allow_paused_failed_generic: bool = False) -> int:
+    """Keep a proved, drained standalone Owner pause as a negative fence.
+
+    This never resolves a Vacuum or grants ENTRY. Generation-linked pauses,
+    missing drain evidence, resumed controls and pending switches still block.
+    A paused, terminally failed Generic attempt may also be proved quiescent:
+    its drained negative fence is preserved, never resolved and never granted
+    ENTRY. Exact failure/drain lineage, abandoned targets and zero live debt
+    are mandatory. Both advisory and locked pre-DDL checks use this predicate.
+    """
+    if not allow_paused_failed_generic:
+        return _count_standalone_nonquiescent_vacuums(connection)
+    return int(connection.scalar(sa.text("""
+        SELECT count(*) FROM brc_strategy_entry_vacuums_current v
+        WHERE v.resolved_at_ms IS NULL AND NOT EXISTS (
+          SELECT 1 FROM brc_strategy_entry_controls_current o
+          JOIN brc_strategy_entry_control_events oe
+            ON oe.strategy_entry_control_event_id=o.last_event_id
+            AND oe.strategy_group_id=o.strategy_group_id
+            AND oe.control_version=o.control_version
+          JOIN brc_strategy_selection_control_current s
+            ON s.strategy_group_id=o.strategy_group_id
+            AND s.selection_spec_id=v.selection_spec_id
+          WHERE o.strategy_group_id=v.strategy_group_id
+            AND v.state='OWNER_PAUSED' AND v.first_blocker='OWNER_PAUSED'
+            AND v.source_generation_id IS NULL
+            AND v.drained_at_ms>=v.fenced_at_ms
+            AND o.entry_state='paused' AND oe.operation='pause'
+            AND oe.target_state='paused' AND oe.created_at_ms=o.updated_at_ms
+            AND o.updated_at_ms<=v.fenced_at_ms
+            AND s.pending_selection_mode IS NULL
+            AND s.pending_authorization_id IS NULL
+            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events origin
+              WHERE origin.entry_vacuum_id=v.entry_vacuum_id
+                AND origin.event_sequence=1 AND origin.event_type='OPEN'
+                AND origin.occurred_at_ms=v.fenced_at_ms
+                AND origin.payload->>'intended_outcome'='OWNER_PAUSED')
+            AND EXISTS (SELECT 1 FROM brc_strategy_entry_vacuum_events drained
+              WHERE drained.entry_vacuum_id=v.entry_vacuum_id
+                AND drained.event_sequence=v.projection_version
+                AND drained.event_type='OWNER_PAUSED'
+                AND drained.occurred_at_ms=v.drained_at_ms
+                AND drained.payload->'entry_drain_complete'='true'::jsonb)
+        ) AND NOT EXISTS (
+          SELECT 1
+          FROM brc_strategy_universe_materialization_generations g
+          JOIN brc_strategy_selection_control_current s
+            ON s.strategy_group_id=g.strategy_group_id AND s.selection_spec_id=g.selection_spec_id
+          JOIN brc_instrument_selection_specs spec ON spec.selection_spec_id=g.selection_spec_id
+          JOIN brc_owner_policy_current policy ON policy.owner_policy_id='policy-main'
+          JOIN brc_owner_policy_events pe ON pe.owner_policy_id=policy.owner_policy_id
+            AND pe.policy_version=policy.policy_version
+          JOIN brc_owner_authorizations pa ON pa.authorization_id=pe.payload->>'authorization_id'
+          WHERE :allow_paused_failed_generic AND g.materialization_generation_id=v.source_generation_id
+            AND g.strategy_group_id=v.strategy_group_id AND g.selection_spec_id=v.selection_spec_id
+            AND spec.selection_kind='generic_dynamic_v1' AND spec.status='active'
+            AND g.selection_mode='dynamic_selection' AND g.lifecycle_state='FAILED_CLOSED'
+            AND g.terminal_at_ms IS NOT NULL AND g.activated_at_ms IS NULL AND g.fallback_at_ms IS NULL
+            AND g.lease_owner IS NULL AND g.lease_expires_at_ms IS NULL
+            AND g.fenced_at_ms>=v.fenced_at_ms AND g.terminal_at_ms>=g.fenced_at_ms
+            AND v.state='RECONFIGURING' AND v.drained_at_ms>=v.fenced_at_ms
+            AND v.drained_at_ms<=g.terminal_at_ms
+            AND s.selection_mode='dynamic_selection' AND s.pending_selection_mode IS NULL
+            AND s.pending_authorization_id IS NULL AND s.selection_epoch_id=g.selection_epoch_id
+            AND s.control_version=g.selection_control_version
+            AND policy.enabled AND NOT policy.new_entry_submit_enabled
+            AND pe.operation='owner_control_entry_pause' AND pe.created_at_ms=policy.updated_at_ms
+            AND pe.payload->'new_entry_submit_enabled'='false'::jsonb
+            AND pa.purpose='entry_pause' AND pa.authorized_at_ms=pe.created_at_ms
+            AND pa.target_scope=jsonb_build_object('owner_policy_id',policy.owner_policy_id)
+            AND EXISTS (
+              SELECT 1 FROM brc_strategy_universe_materialization_events failed
+              WHERE failed.materialization_generation_id=g.materialization_generation_id
+                AND failed.event_type='FAILED_CLOSED' AND failed.occurred_at_ms=g.terminal_at_ms
+                AND failed.payload->>'entry_vacuum_id'=v.entry_vacuum_id
+                AND failed.payload->>'reason_code'=v.first_blocker
+            )
+            AND EXISTS (
+              SELECT 1 FROM brc_strategy_entry_vacuum_events recovery
+              WHERE recovery.entry_vacuum_id=v.entry_vacuum_id
+                AND recovery.event_type='RECOVERY_REQUIRED'
+                AND recovery.event_sequence=v.projection_version
+                AND recovery.occurred_at_ms=g.terminal_at_ms
+                AND recovery.payload->>'source_generation_id'=g.materialization_generation_id
+                AND recovery.payload->>'reason_code'=v.first_blocker
+            )
+            AND EXISTS (
+              SELECT 1 FROM brc_strategy_entry_vacuum_events drain
+              WHERE drain.entry_vacuum_id=v.entry_vacuum_id AND drain.event_type='ENTRY_DRAINED'
+                AND drain.occurred_at_ms=v.drained_at_ms
+            )
+            AND EXISTS (
+              SELECT 1 FROM brc_strategy_universe_versions target
+              WHERE target.materialization_generation_id=g.materialization_generation_id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_strategy_universe_versions target
+              WHERE target.materialization_generation_id=g.materialization_generation_id
+                AND (target.lifecycle_state<>'abandoned' OR target.abandoned_at_ms IS NULL
+                  OR target.activated_at_ms IS NOT NULL)
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_runtime_scopes_current scope
+              JOIN brc_strategy_universe_versions target USING(universe_version_id)
+              WHERE target.materialization_generation_id=g.materialization_generation_id
+                AND (scope.entry_enabled OR scope.observation_enabled OR scope.lifecycle_state<>'abandoned')
+            )
+            AND EXISTS (
+              SELECT 1 FROM brc_materialization_generation_event_baselines baseline
+              JOIN brc_strategy_universe_current pointer
+                ON pointer.event_spec_id=baseline.event_spec_id
+                AND pointer.universe_version_id=baseline.universe_version_id
+                AND pointer.lifecycle_state='active'
+              WHERE baseline.materialization_generation_id=g.materialization_generation_id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_trade_tickets ticket WHERE ticket.terminal_at_ms IS NULL
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_positions_current position WHERE position.quantity<>0
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_exchange_commands command
+              WHERE command.status IN ('prepared','claimed','dispatch_started','outcome_unknown')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_budget_reservations reservation WHERE reservation.status='active'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM brc_runtime_incidents incident WHERE incident.status='open'
+            )
+        )
+    """), {"allow_paused_failed_generic": allow_paused_failed_generic}) or 0)
 
 
 class StaticComparisonSourceEvidence(BaseModel):

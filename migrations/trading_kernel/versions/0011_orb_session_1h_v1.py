@@ -28,11 +28,11 @@ def upgrade() -> None:
         'brc_runtime_incidents':"status='open'",'brc_strategy_universe_versions':"lifecycle_state IN ('warming','staged')",
         'brc_strategy_universe_materialization_generations':"lifecycle_state IN ('PENDING','DESIRED','DRAINING_ENTRY','MATERIALIZING','STAGED')",
         'brc_owner_control_operations_current':"state NOT IN ('completed','blocked')"}
-    bind.execute(sa.text('LOCK TABLE '+','.join(predicates)+',brc_strategy_selection_control_current,brc_owner_authorizations,brc_strategy_entry_vacuums_current IN SHARE ROW EXCLUSIVE MODE'))
+    bind.execute(sa.text('LOCK TABLE '+','.join(predicates)+',brc_strategy_selection_control_current,brc_owner_authorizations,brc_owner_policy_current,brc_owner_policy_events,brc_strategy_entry_vacuums_current,brc_strategy_entry_vacuum_events,brc_strategy_universe_materialization_events,brc_materialization_generation_event_baselines,brc_strategy_universe_current,brc_runtime_scopes_current,brc_instrument_selection_specs IN SHARE ROW EXCLUSIVE MODE'))
     for table,predicate in predicates.items():
         if bind.scalar(sa.text(f'SELECT EXISTS(SELECT 1 FROM {table} WHERE {predicate})')):
             raise RuntimeError(f'0011 requires flat quiescent source: {table}')
-    if count_nonquiescent_source_vacuums(bind):
+    if count_nonquiescent_source_vacuums(bind, allow_paused_failed_generic=True):
         raise RuntimeError('0011 requires quiescent source Vacuums')
     op.drop_constraint('ck_brc_instrument_selection_specs_kind_valid','brc_instrument_selection_specs',type_='check')
     op.create_check_constraint('ck_brc_instrument_selection_specs_kind_valid','brc_instrument_selection_specs',

@@ -14115,3 +14115,46 @@ async def test_recovered_target_and_certification_share_install_lock_before_row(
         for task in competitors:
             if not task.done():task.cancel()
         await asyncio.gather(*competitors,return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect",[None,"enabled","missing_failure_event","not_drained","wrong_generation","live_target"])
+async def test_paused_failed_selection_is_quiescent_without_recovery_or_entry(database,defect):
+    from src.trading_kernel.application.owner_control import set_global_entry_state
+    from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
+        count_nonquiescent_source_vacuums,
+    )
+    await _exercise_generic_generation(database,"MI-001",False,failure_case="timeout")
+    # This fixture seeds paused ENTRY; simulate the pre-pause state, then use
+    # the real Owner control application to persist the pause and its lineage.
+    async with database.begin() as c:
+        await c.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true"))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        policy=await uow.entry_admission.get_owner_policy("policy-main")
+        await set_global_entry_state(uow,owner_policy_id="policy-main",enabled=False,
+            request=ControlMutationRequest(expected_version=policy.policy_version,reason="deployment_quiescence",idempotency_key="pause-for-deployment",owner_identity="owner",now_ms=CUTOFF+3*HOUR),authentication_strength="session")
+    async with database.connect() as c:
+        gid=await c.scalar(sa.text("SELECT source_generation_id FROM brc_strategy_entry_vacuums_current WHERE strategy_group_id='MI-001' AND resolved_at_ms IS NULL"))
+        before=await c.scalar(sa.text("SELECT row_to_json(v)::text FROM brc_strategy_entry_vacuums_current v WHERE source_generation_id=:gid"),{"gid":gid})
+    async with database.begin() as c:
+        if defect=="enabled":
+            await c.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true"))
+        elif defect=="missing_failure_event":
+            await c.execute(sa.text("ALTER TABLE brc_strategy_universe_materialization_events DISABLE TRIGGER USER"))
+            await c.execute(sa.text("DELETE FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":gid})
+        elif defect=="not_drained":
+            await c.execute(sa.text("UPDATE brc_strategy_entry_vacuums_current SET drained_at_ms=NULL WHERE source_generation_id=:gid"),{"gid":gid})
+        elif defect=="wrong_generation":
+            await c.execute(sa.text("ALTER TABLE brc_strategy_universe_materialization_generations DISABLE TRIGGER USER"))
+            await c.execute(sa.text("UPDATE brc_strategy_universe_materialization_generations SET selection_control_version=99999 WHERE materialization_generation_id=:gid"),{"gid":gid})
+        elif defect=="live_target":
+            await c.execute(sa.text("ALTER TABLE brc_runtime_scopes_current DISABLE TRIGGER USER"))
+            await c.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='staged' WHERE universe_version_id IN (SELECT universe_version_id FROM brc_strategy_universe_versions WHERE materialization_generation_id=:gid)"),{"gid":gid})
+            await c.execute(sa.text("UPDATE brc_strategy_universe_versions SET abandoned_at_ms=NULL,abandon_reason_code=NULL,lifecycle_state='staged' WHERE materialization_generation_id=:gid"),{"gid":gid})
+    async with database.connect() as c:
+        count=await c.run_sync(lambda bind:count_nonquiescent_source_vacuums(bind,allow_paused_failed_generic=True))
+        assert count==(0 if defect is None else 1)
+        if defect is None:
+            assert await c.scalar(sa.text("SELECT row_to_json(v)::text FROM brc_strategy_entry_vacuums_current v WHERE source_generation_id=:gid"),{"gid":gid})==before
+            assert await c.scalar(sa.text("SELECT new_entry_submit_enabled FROM brc_owner_policy_current")) is False
+            assert await c.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
