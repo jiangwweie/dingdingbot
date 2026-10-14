@@ -58,9 +58,13 @@ documents do not extend the `docs/current` runtime-authority allowlist.
 ## Alpha Research Delivery And Planning
 
 [BRC-ALPHA delivery record and prospective research boundaries](superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md)
-records the Owner-reported offline ALPHA-01 delivery and the ALPHA-02 proposal.
+records the Owner-reported offline ALPHA-01 delivery and the approved three-stage
+direction: SOR-1H release/natural evidence, generic ALPHA-02 path Observation,
+then evidence-driven iteration. ALPHA-02 design can proceed in parallel with
+natural evidence accumulation; implementation is not claimed.
 Repository receipt, independent reproduction and runtime integration are not
-claimed. This research record does not authorize strategy changes or deployment,
+claimed. Research does not authorize strategy changes; SOR-1H deployment uses
+the explicit Owner flatness-contingent authorization recorded in that plan,
 and does not close deferred engineering acceptance. Economic interpretation
 remains owned by the Strategy Experiment Evaluation Contract.
 

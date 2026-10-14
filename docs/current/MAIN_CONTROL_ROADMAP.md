@@ -104,15 +104,27 @@ and terminal lineage remain preserved.
    settlement and review without forced trades or risk expansion.
 3. Keep long-run evidence, offline projector and complete live economics deferred.
 
-## Parallel Offline Research
+## Three-Stage Program Direction
 
 The Owner reports delivery of BRC-ALPHA-01's offline attribution first edition.
 Repository receipt and independent reproduction remain unverified; this does
 not close the deferred offline MAE/MFE projector, GS-13, long-run evidence or
 natural Ticket acceptance. See the
 [research delivery and planning record](../superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md).
-ALPHA-02 prospective path recording remains a proposal, not an authorized
-production change. Research does not change capital, exits, selection or scope.
+The Owner-approved direction is SOR-1H release and natural lifecycle validation,
+then generic ALPHA-02 path Observation, then evidence-driven strategy iteration.
+ALPHA-02 design may proceed alongside natural SOR-1H evidence accumulation;
+profitability is not a prerequisite to designing evidence collection. Prefer
+reuse of existing SOR-US Signal-owned paths; preserve Shadow/real-PnL and Owner
+Regime/maintenance-pause boundaries. Detailed implementation remains unstarted.
+Local parameter tuning is deferred; console redesign and USDC adaptation remain
+separate backlog. Research does not change capital, exits, selection or scope.
+
+The Owner explicitly authorized periodic flatness checks and SOR-1H deployment
+after natural closure and all official action-time gates pass, without another
+confirmation. Do not force closure; keep new ENTRY paused after deployment.
+Software deployment, strategy/Selection activation and real lifecycle evidence
+remain separate gates. This authority does not resume retired SOR-001.
 This documentation update does not refresh the dated runtime snapshot above.
 
 ## Current Stop Conditions
