@@ -30,7 +30,7 @@ continue concurrently across independent Netting Domains.
 
 | Area | Directly verified state |
 | --- | --- |
-| Snapshot time | 2026-10-15 20:48–21:00 Asia/Shanghai; official regular deployment, exact markers/PG identity, four Worker process identities, API health and exchange readonly facts |
+| Snapshot time | 2026-10-15 20:48–21:46 Asia/Shanghai; official regular deployment, exact markers/PG identity, four Worker process identities, API health and exchange readonly facts |
 | Integration branch | `dev` |
 | Production commit | `e7f86acf1287a0cb395702331add1cd9f5354d2d` |
 | Production tag | `tokyo-runtime-2026.10.15.2`, immutable annotated tag pushed to origin at the exact production SHA |
@@ -42,10 +42,10 @@ continue concurrently across independent Netting Domains.
 | Runtime ownership | Observation, Entry, Lifecycle and Reconciliation active/enabled, NRestarts0; each process environment identifies exact e7f86acf/0011. Official promotion preparation returned `prepared_owner_paused`; operational fence removed while paused; later genuine Owner Resume/TOTP at Policy26 restored new-entry permission |
 | Owner API / Console | Owner API stopped only for final flat write-quiescent cutover, then restarted; `/healthz` returns ok. Existing compatible API/static release retained; no frontend/API release performed |
 | Controlled closure | Owner used Web controlled exit for BRF2 ADAUSDT short Ticket `ticket:254270cf7923f2adefb6b179ddc58e77`. Official cancellation/reconciliation resolved transient unknown outcome; Ticket/Aggregate terminal, budget released, domain released, Settlement/Review complete; no manual exchange write |
-| Trading facts | At20:49 and20:54: exchange positions0/orders0, pending Commands0; no active Ticket after controlled closure. This is a timestamped sample, not ongoing flatness authority |
+| Trading facts | Cutover/20:54 flat/order-free PASS. At21:46, authorized runtime has a new BRF2 LTCUSDT short Ticket `ticket:68ceee4346d67c056a7756c514761152`, quantity10.419, Aggregate position_protected; exact full reduce-only stop and TP1 orders match PG/exchange; pending Commands0. Current runtime is no longer flat |
 | ExitProfile postflight | Existing Profile/Binding authority and frozen exits preserved; no exit-policy changes or strategy parameter changes |
-| Dynamic Selection postflight | Original Selection controls and Universe/Authority lineage retained; MPG next legal takeover is not yet claimed; Owner Resume alone is not a new valid strategy Authority |
-| MPG state | Old20:00 Generation `generation:65249c7f57166cc169f5649135bb9f14d694f02c595730de432e18b70e64a52e` had already FAILED_CLOSED at20:30 before the new code was deployed. Prior recovery Authority expired20:00. Patch hash matches exact certified source; next legal runtime takeover remains unproven; a new21:00 Generation is in normal preparation and must retain valid Proof/Authority |
+| Dynamic Selection postflight | Original controls and terminal lineage retained; MPG new recovered target ACTIVE with original Vacuum resolved. Owner Resume alone is not strategy readiness: MPG still needs22:00 recovery close and rebase before ENTRY |
+| MPG state | Old20:00 failed Generation retained. New `generation:a2659598d42a31f91caad16666eb82b5077728b5acbc9ea38acbe0a80cecae28` ACTIVE at21:10:05.904; old Vacuum RESOLVED_ACTIVE. Recovery Authority `authority:recovery:081667d130253cb16b04598aae3b6fca26c5f99e7b876bde57652ea6a2b49913`, effective/first eligible22:00, expires23:00; 14scopes still selection_recovery_not_effective at21:44. Exact new code hash PASS; direct normal successor after rebase still needs natural future evidence |
 | Entry restoration | Software/postflight complete; official preparation followed by genuine Owner Console Resume/TOTP restored new-entry permission. Entry active/enabled with fence absent; no synthetic authorization or agent Policy update |
 | SOR retirement | Crypto `SOR-001` remains permanently ENTRY-disabled; no strategy or Selection scope resumed by this release |
 | A+B boundary | Historical `fcea10c8` R4 PASS preserved, not deployed. MPG fix port is preparation only; new combined SHA requires its own fresh R4 before any0012 release. Research remains disabled by default |
@@ -60,7 +60,7 @@ systemd/marker facts remain required before any later production action.
 
 | Strategy | Current boundary | Remaining evidence |
 | --- | --- | --- |
-| MPG-001 | New direct-successor recovery proof guard deployed; old failed Generation retained; global ENTRY paused | Next naturally due valid Generation/Authority takeover and recovery rebase under authorized Resume |
+| MPG-001 | Direct-successor guard deployed; recovered target ACTIVE21:10, Vacuum resolved; Authority first eligible22:00 | Legal22:00 recovery/rebase and later direct normal successor; no simulated production acceptance |
 | CPM / MI / BRF2 / SOR-1H | Existing Universe/Authority/Selection controls preserved by exact deployment postflight; global ENTRY resumed by Owner; action-time gates still required | Fresh per-family business availability must be read at action time; service running is not activation proof |
 | SOR-001 | Permanently retired for new ENTRY | Historical Registry/Universe cannot grant resume |
 
