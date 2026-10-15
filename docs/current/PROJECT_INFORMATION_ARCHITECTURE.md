@@ -78,6 +78,7 @@ is one unbranched forward Alembic chain:
 -> 0009_capacity_policy_v0
 -> 0010_dynamic_intent_v1
 -> 0011_orb_session_1h_v1
+-> 0012_generic_signal_path_v1
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -178,3 +179,20 @@ name prefix or matching members. Deployment initialization starts the new
 strategy and global ENTRY paused. This describes the tracked target capability;
 current production commit/schema and activation evidence remain exclusively in
 `MAIN_CONTROL_ROADMAP.md`.
+
+
+## Signal-owned generic path research
+
+`0011 -> 0012` preserves every existing source column and row while adding
+`generic_signal_path_v1` to the same Signal-unique Shadow projection. The
+migration is stopped, flat, quiescent and forward-only. Frozen inputs and terminal
+new-kind results are immutable; existing evaluation versions retain their price
+basis and metrics. Source preservation readers are deployment evidence only.
+
+The existing Observation process owns the bounded projection cadence. Research
+control, its append-only revisions and UTC-day quota/coverage counts live in
+PostgreSQL. Installation creates a disabled control with zero sample capacity;
+software deployment never enables prospective research collection. Its exact
+limit requires a separate Owner decision. Research cannot create exchange commands
+or change trading policy. Scope and economic interpretation remain owned by
+`STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`.

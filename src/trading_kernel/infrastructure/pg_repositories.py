@@ -106,6 +106,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
     owner_policy_events,
     positions_current,
+    research_collection_control,
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
@@ -1419,14 +1420,74 @@ class PostgresShadowOutcomeRepository:
         self._connection = connection
 
     async def add_pending(self, spec: ShadowOutcomeSpec) -> None:
+        if spec.source_kind == "signal_path":
+            raise ValueError("generic Signal path requires quota-controlled admission")
         statement = pg_insert(shadow_outcomes_current).values(
             _shadow_outcome_pending_values(spec)
         )
-        await self._connection.execute(
+        inserted = (await self._connection.execute(
             statement.on_conflict_do_nothing(
                 index_elements=[shadow_outcomes_current.c.signal_event_id]
-            )
+            ).returning(shadow_outcomes_current.c.shadow_outcome_id)
+        )).scalar_one_or_none()
+        if inserted is None:
+            existing=(await self._connection.execute(sa.select(shadow_outcomes_current)
+                .where(shadow_outcomes_current.c.signal_event_id==spec.signal_event_id))).mappings().one()
+            if existing["source_kind"]=="signal_path" and spec.source_kind=="portfolio_rejection":
+                return
+            if (existing["shadow_outcome_id"]!=spec.shadow_outcome_id
+                or existing["source_kind"]!=spec.source_kind):
+                raise ValueError("Shadow immutable Signal input conflict")
+
+    async def signal_path_enabled(self) -> bool:
+        value=await self._connection.scalar(sa.select(research_collection_control.c.enabled).where(
+            research_collection_control.c.control_id=="generic_signal_path_v1"))
+        return value is True
+
+    async def add_signal_path_if_enabled(self, spec: ShadowOutcomeSpec, *, strategy_group_id: str) -> bool:
+        """Atomically gate one Signal-owned sample by persisted daily capacity."""
+        if spec.source_kind != "signal_path" or strategy_group_id not in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}:
+            raise ValueError("research admission requires an allowed generic Signal path")
+        control = (await self._connection.execute(sa.text(
+            "SELECT enabled,daily_limit FROM brc_research_collection_control "
+            "WHERE control_id='generic_signal_path_v1' FOR UPDATE"
+        ))).mappings().one()
+        if not control["enabled"] or int(control["daily_limit"]) <= 0:
+            return False
+        existing = (await self._connection.execute(
+            sa.select(shadow_outcomes_current.c.source_kind,shadow_outcomes_current.c.path_spec_digest)
+            .where(shadow_outcomes_current.c.signal_event_id == spec.signal_event_id)
+        )).mappings().one_or_none()
+        if existing is not None:
+            if existing["source_kind"] != "signal_path" or existing["path_spec_digest"] != spec.path_spec_digest:
+                raise ValueError("Signal Shadow path identity conflict")
+            return True
+        day = spec.horizon_start_ms // 86_400_000 * 86_400_000
+        from src.trading_kernel.infrastructure.pg_models import (
+            research_collection_daily,
         )
+        await self._connection.execute(pg_insert(research_collection_daily).values(
+            day_start_ms=day,admitted_count=0,skipped_count=0).on_conflict_do_nothing())
+        row=(await self._connection.execute(sa.select(research_collection_daily)
+            .where(research_collection_daily.c.day_start_ms==day).with_for_update())).mappings().one()
+        coverage=dict(row["coverage_counts"])
+        bucket_key=f"{strategy_group_id}/{(spec.horizon_start_ms%86_400_000)//3_600_000:02d}"
+        bucket=dict(coverage.get(bucket_key,{"admitted":0,"skipped":0}))
+        if int(row["admitted_count"])>=int(control["daily_limit"]):
+            bucket["skipped"]+=1
+            coverage[bucket_key]=bucket
+            await self._connection.execute(sa.update(research_collection_daily)
+                .where(research_collection_daily.c.day_start_ms==day)
+                .values(skipped_count=research_collection_daily.c.skipped_count+1,coverage_counts=coverage))
+            return False
+        await self._connection.execute(pg_insert(shadow_outcomes_current).values(
+            _shadow_outcome_pending_values(spec)))
+        bucket["admitted"]+=1
+        coverage[bucket_key]=bucket
+        await self._connection.execute(sa.update(research_collection_daily)
+            .where(research_collection_daily.c.day_start_ms==day)
+            .values(admitted_count=research_collection_daily.c.admitted_count+1,coverage_counts=coverage))
+        return True
 
     async def claim_one_due(
         self,
@@ -1444,14 +1505,22 @@ class PostgresShadowOutcomeRepository:
                             sa.and_(
                                 shadow_outcomes_current.c.status == "pending",
                                 shadow_outcomes_current.c.horizon_end_ms <= now_ms,
+                                sa.or_(shadow_outcomes_current.c.source_kind != "signal_path",
+                                       shadow_outcomes_current.c.next_attempt_at_ms <= now_ms),
                             ),
                             sa.and_(
                                 shadow_outcomes_current.c.status == "claimed",
                                 shadow_outcomes_current.c.lease_until_ms <= now_ms,
                             ),
-                        )
+                        ),
+                        sa.or_(shadow_outcomes_current.c.source_kind != "signal_path",
+                            sa.exists(sa.select(1).select_from(research_collection_control).where(
+                                research_collection_control.c.control_id=="generic_signal_path_v1",
+                                research_collection_control.c.enabled.is_(True)))),
                     )
                     .order_by(
+                        sa.func.coalesce(shadow_outcomes_current.c.last_attempted_at_ms,0),
+                        sa.func.coalesce(shadow_outcomes_current.c.next_attempt_at_ms,shadow_outcomes_current.c.horizon_end_ms),
                         shadow_outcomes_current.c.horizon_end_ms,
                         shadow_outcomes_current.c.shadow_outcome_id,
                     )
@@ -1463,6 +1532,15 @@ class PostgresShadowOutcomeRepository:
             .one_or_none()
         )
         if row is None:
+            return None
+        if row["source_kind"] == "signal_path" and (
+            int(row["attempt_count"]) >= 4 or now_ms > int(row["retry_deadline_ms"])
+        ):
+            await self._connection.execute(sa.update(shadow_outcomes_current)
+                .where(shadow_outcomes_current.c.shadow_outcome_id == row["shadow_outcome_id"])
+                .values(status="unavailable",claim_owner=None,claim_token=None,lease_until_ms=None,
+                    completion_reason="retry_limit_or_deadline",completed_at_ms=now_ms,
+                    projection_version=shadow_outcomes_current.c.projection_version+1))
             return None
         shadow_id = str(row["shadow_outcome_id"])
         claim_token = f"shadow-claim:{uuid4().hex}"
@@ -1476,6 +1554,8 @@ class PostgresShadowOutcomeRepository:
                 claim_token=claim_token,
                 lease_until_ms=lease_until_ms,
                 projection_version=projection_version,
+                last_attempted_at_ms=now_ms,
+                attempt_count=shadow_outcomes_current.c.attempt_count + sa.case((shadow_outcomes_current.c.source_kind=="signal_path",1),else_=0),
             )
         )
         return ShadowOutcomeClaim(
@@ -1485,6 +1565,28 @@ class PostgresShadowOutcomeRepository:
             projection_version=projection_version,
             lease_until_ms=lease_until_ms,
         )
+
+    async def retry_signal_path(self, *, claim: ShadowOutcomeClaim, now_ms: int, reason: str) -> bool:
+        """Release one exact lease with durable bounded backoff, or terminate it."""
+        if claim.spec.source_kind != "signal_path":
+            raise ValueError("generic retry requires a Signal path")
+        row=(await self._connection.execute(sa.select(shadow_outcomes_current)
+            .where(shadow_outcomes_current.c.shadow_outcome_id==claim.spec.shadow_outcome_id)
+            .with_for_update())).mappings().one()
+        if (row["status"]!="claimed" or row["claim_owner"]!=claim.claim_owner
+            or row["claim_token"]!=claim.claim_token or row["projection_version"]!=claim.projection_version):
+            raise RuntimeError("lost Shadow claim")
+        attempts=int(row["attempt_count"])
+        delay=(60_000,300_000,900_000)[min(attempts-1,2)]
+        terminal=attempts>=4 or now_ms+delay>int(row["retry_deadline_ms"])
+        await self._connection.execute(sa.update(shadow_outcomes_current)
+            .where(shadow_outcomes_current.c.shadow_outcome_id==claim.spec.shadow_outcome_id)
+            .values(status="unavailable" if terminal else "pending",claim_owner=None,claim_token=None,
+                    lease_until_ms=None,completion_reason=reason if terminal else None,
+                    completed_at_ms=now_ms if terminal else None,
+                    next_attempt_at_ms=row["next_attempt_at_ms"] if terminal else now_ms+delay,
+                    projection_version=shadow_outcomes_current.c.projection_version+1))
+        return not terminal
 
     async def complete(
         self,
@@ -1529,10 +1631,15 @@ class PostgresShadowOutcomeRepository:
                 mae_r=projection.mae_r,
                 observed_through_ms=projection.observed_through_ms,
                 completion_reason=(
-                    "sor_path_observed"
-                    if claim.spec.evaluation_kind == "sor_path_observation_v1"
-                    else "fixed_horizon_observed"
+                    "signal_path_observed" if claim.spec.evaluation_kind == "generic_signal_path_v1" else
+                    "sor_path_observed" if claim.spec.evaluation_kind == "sor_path_observation_v1" else
+                    "fixed_horizon_observed"
                 ),
+                path_metrics=({"levels":{key:value.model_dump(mode="json") for key,value in projection.path_levels.items()},
+                    "initial_stop_first_touch_at_ms":projection.initial_stop_first_touch_at_ms,
+                    "max_favorable_at_ms":projection.max_favorable_at_ms,
+                    "max_adverse_at_ms":projection.max_adverse_at_ms}
+                    if projection.path_levels is not None else sa.null()),
                 first_path=projection.first_path,
                 first_path_at_ms=projection.first_path_at_ms,
                 observed_bar_count=projection.observed_bar_count,
@@ -3401,6 +3508,13 @@ def _shadow_outcome_pending_values(spec: ShadowOutcomeSpec) -> dict[str, object]
         "mark_index_deviation_bps": spec.mark_index_deviation_bps,
         "horizon_start_ms": spec.horizon_start_ms,
         "horizon_end_ms": spec.horizon_end_ms,
+        "reference_at_ms": spec.reference_at_ms,
+        "price_basis": spec.price_basis,
+        "path_spec_digest": spec.path_spec_digest,
+        "source_runtime_commit": spec.source_runtime_commit,
+        "attempt_count": 0,
+        "next_attempt_at_ms": spec.horizon_end_ms if spec.source_kind == "signal_path" else None,
+        "retry_deadline_ms": spec.horizon_end_ms + 2 * 3_600_000 if spec.source_kind == "signal_path" else None,
         "claim_owner": None,
         "claim_token": None,
         "lease_until_ms": None,
@@ -3463,6 +3577,10 @@ def _shadow_outcome_spec_from_row(row: RowMapping) -> ShadowOutcomeSpec:
         horizon_start_ms=int(row["horizon_start_ms"]),
         horizon_end_ms=int(row["horizon_end_ms"]),
         created_at_ms=int(row["created_at_ms"]),
+        reference_at_ms=row["reference_at_ms"],
+        price_basis=row["price_basis"],
+        path_spec_digest=row["path_spec_digest"],
+        source_runtime_commit=row["source_runtime_commit"],
     )
 
 

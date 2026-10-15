@@ -871,3 +871,24 @@ Generation or missing evidence still blocks. The locked pre-DDL gate rechecks
 the same predicate under locks on all proof dependencies. Preparation workers
 are stopped after flatness; real deadline closure uses the source coordinator.
 Never resume ENTRY to satisfy this migration condition.
+
+
+## Generic Signal-path research release
+
+The `0011 -> 0012` research extension uses the existing compatible-upgrade path,
+with stopped writers, flat/exact source gates and a full source-column preservation
+digest. Postflight preserves the source's exact current Universe count and member
+manifest, Dynamic facts, ExitProfile bindings and terminal lineage. Installation
+creates no enabled research control, new ENTRY permission or strategy activation.
+
+OBS-EFFICIENCY-01 and ALPHA-02A may share one maintenance window while retaining
+independent feature acceptance. The final combined commit requires fresh release
+classification and its complete R4/other required portfolios; a previous R3
+manifest is evidence only for its original exact commit. Production deployment
+and enabling research remain separate Owner-authorized actions.
+
+Research configuration uses `configure_research_collection.py` with an exact
+control version, explicit quota, Owner identity and reason; its revision is
+persisted atomically and append-only. `--show` is readonly and reports the current
+control and one UTC-day coverage record. Enabling or disabling this control cannot
+change Owner ENTRY, Strategy Controls, Selection Authority or risk policy.

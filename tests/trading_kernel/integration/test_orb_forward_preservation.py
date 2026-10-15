@@ -23,11 +23,40 @@ async def test_hourly_upgrade_preserves_exact_source_0010_rows(monkeypatch):
     try:
         run_alembic(url,'upgrade','0010_dynamic_intent_v1')
         # Build certified terminal lineage using the real source schema and an active Generic Event.
-        from src.trading_kernel.domain.strategy_registry import strategy_contract_for
-        from tests.trading_kernel.support import event_chain as chain
-        monkeypatch.setattr(chain,'CURRENT_SCHEMA_REVISION','0010_dynamic_intent_v1')
-        await chain.run_event_chain(engine,
-            strategy_contract_for('event_spec:CPM-RO-001:CPM-LONG:v3'),False)
+        import asyncio
+        import io
+        import os
+        import subprocess
+        import sys
+        import tarfile
+        import tempfile
+        from pathlib import Path
+        # Source lineage must execute certified pre-0012 code. New production
+        # repositories intentionally do not read a schema missing research tables.
+        root=Path(__file__).resolve().parents[3]
+        source_commit="1366f00ab80ecd08b07b300b41860eb56fdf7af7"
+        archive=await asyncio.to_thread(subprocess.run,['git','archive',source_commit,'src','scripts/trading_kernel','migrations/trading_kernel'],
+            cwd=root,capture_output=True,check=True,timeout=20)
+        with tempfile.TemporaryDirectory(prefix='brc-certified-0010-') as directory:
+            with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
+                bundle.extractall(directory,filter='data')
+            program="""import asyncio,sys
+from sqlalchemy.ext.asyncio import create_async_engine
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
+from tests.trading_kernel.support import event_chain as chain
+chain.CURRENT_SCHEMA_REVISION='0010_dynamic_intent_v1'
+async def run():
+    engine=create_async_engine(sys.argv[1])
+    try:
+        await chain.run_event_chain(engine,strategy_contract_for('event_spec:CPM-RO-001:CPM-LONG:v3'),False)
+    finally:
+        await engine.dispose()
+asyncio.run(run())
+"""
+            result=await asyncio.to_thread(subprocess.run,[sys.executable,'-c',program,url],cwd=directory,
+                env={**os.environ,'PYTHONPATH':directory+os.pathsep+str(root),'PYTHONDONTWRITEBYTECODE':'1'},
+                capture_output=True,text=True,check=False,timeout=60)
+            assert result.returncode==0,result.stderr[-5000:]
         async with engine.begin() as connection:
             await connection.execute(sa.text('UPDATE brc_owner_policy_current SET policy_version=4,new_entry_submit_enabled=false'))
             assert await connection.scalar(sa.text('SELECT count(*) FROM brc_trade_reviews'))==1

@@ -13,9 +13,10 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     EntryAdmissionSnapshot,
     canonical_digest,
 )
-from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.shadow_outcome import (
+    GENERIC_SIGNAL_PATH_KIND,
     SHADOW_EVALUATION_KIND,
     SOR_PATH_EVALUATION_KIND,
     ShadowOutcomeClaim,
@@ -210,6 +211,49 @@ def pending_shadow_spec_for_strategy_observation(
     )
 
 
+def pending_generic_signal_path_spec(*, signal: StrategySignal, snapshot: MarketSnapshot, runtime_commit: str) -> ShadowOutcomeSpec:
+    """Freeze the observed close and Registry stop for one eligible live Signal."""
+    allowed={"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
+    contract=strategy_contract_for(signal.event_spec_id)
+    if (signal.strategy_group_id not in allowed or contract.strategy_group_id!=signal.strategy_group_id
+        or contract.strategy_version_id!=signal.strategy_version_id
+        or contract.position_side!=signal.position_side or contract.timeframe!="1h"
+        or contract.shadow_horizon_bars!=24 or snapshot.exchange_instrument_id!=signal.exchange_instrument_id
+        or snapshot.trigger_candle_close_time_ms!=signal.occurred_at_ms):
+        raise ValueError("generic Signal path identity differs from Registry or closed bar")
+    candles=[c for c in snapshot.candles_1h if c.close_time_ms==signal.occurred_at_ms]
+    if len(candles)!=1:
+        raise ValueError("generic Signal path requires exact trigger closed candle")
+    stop_facts=[f for f in signal.facts if f.role=="protection_reference" and any(
+        r.fact_definition_id==f.fact_definition_id and r.fact_name==contract.protection_reference_fact
+        for r in contract.required_facts)]
+    if len(stop_facts)!=1:
+        raise ValueError("generic Signal path protection reference differs from Registry")
+    reference=candles[0].close
+    stop=Decimal(str(stop_facts[0].value))
+    unavailable=None
+    if stop==reference:
+        unavailable="zero_initial_risk_distance"
+    elif ((signal.position_side=="long" and stop>reference)
+          or (signal.position_side=="short" and stop<reference)):
+        unavailable="invalid_initial_stop_direction"
+    if not runtime_commit.strip():
+        raise ValueError("generic Signal path runtime commit is missing")
+    identity={"signal_event_id":signal.signal_event_id,"runtime_commit":runtime_commit,"fact_digest":signal.fact_digest,
+        "evaluation_kind":GENERIC_SIGNAL_PATH_KIND,"reference_price":str(reference),"stop_price":str(stop),
+        "reference_close_ms":signal.occurred_at_ms,"horizon_bars":24,
+        "source_candle":candles[0].model_dump(mode="json")}
+    return ShadowOutcomeSpec(shadow_outcome_id="shadow:"+canonical_digest(identity)[7:39],
+        signal_event_id=signal.signal_event_id,admission_decision_id=None,source_kind="signal_path",
+        evaluation_kind=GENERIC_SIGNAL_PATH_KIND,exchange_instrument_id=signal.exchange_instrument_id,
+        position_side=signal.position_side,timeframe="1h",entry_reference_price=reference,
+        initial_stop_price=stop,unavailable_reason=unavailable,
+        horizon_start_ms=signal.occurred_at_ms,horizon_end_ms=signal.occurred_at_ms+24*3_600_000,
+        created_at_ms=signal.observed_at_ms,reference_at_ms=signal.occurred_at_ms,
+        price_basis="signal_closed_bar",path_spec_digest=canonical_digest(identity),
+        source_runtime_commit=runtime_commit)
+
+
 async def project_claimed_shadow_outcome(
     uow_factory: UnitOfWorkFactory,
     claim: ShadowOutcomeClaim,
@@ -228,8 +272,9 @@ async def project_claimed_shadow_outcome(
             )
         return True
     if not has_complete_closed_candle_sequence(claim.spec, candles):
-        async with uow_factory() as uow:
-            await uow.shadow_outcomes.release_expired_claim(claim=claim)
+        if claim.spec.source_kind != "signal_path":
+            async with uow_factory() as uow:
+                await uow.shadow_outcomes.release_expired_claim(claim=claim)
         return False
     try:
         projection = evaluate_shadow_outcome(claim.spec, candles)

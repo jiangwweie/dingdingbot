@@ -46,6 +46,7 @@ async def read_preserved_runtime_state(connection: AsyncConnection) -> dict[str,
         counts[key] = int(await connection.scalar(sa.text(f"SELECT count(*) FROM {table}")) or 0)
     return {
         "active_universe_manifest_digest": canonical_digest([dict(row) for row in rows]),
+        "active_current_count": len(rows),
         "dynamic_selection_runtime_counts": counts,
     }
 

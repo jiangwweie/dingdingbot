@@ -123,7 +123,7 @@ class DeploymentPlan:
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
+            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
                 raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
@@ -997,7 +997,8 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
             preserved_runtime=baseline["preserved_runtime"],
-            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision == "0011_orb_session_1h_v1"),
+            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1"}),
+            orb_already_installed=plan.source_schema_revision == "0011_orb_session_1h_v1",
         )
         policy=certification.get("owner_policy")
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
@@ -1022,6 +1023,7 @@ def _require_dynamic_selection_postflight(
     seed_identity: str,
     preserved_runtime: Mapping[str, object],
     hourly_upgrade: bool = False,
+    orb_already_installed: bool = False,
 ) -> None:
     owner_policy = certification.get("owner_policy")
     if (
@@ -1062,8 +1064,9 @@ def _require_dynamic_selection_postflight(
         raise DeploymentBlocked("preserved Active Universe membership differs")
     if hourly_upgrade and not hourly_pending:
         raise DeploymentBlocked("hourly upgrade requires independent paused pair preparation")
-    if int(str(strategy_universe.get("active_current_count", -1))) != 8:
-        raise DeploymentBlocked("exact eight Active Universes are missing")
+    expected_universe_count = int(str(preserved_runtime.get("active_current_count", -1))) if orb_already_installed else 8
+    if expected_universe_count <= 0 or int(str(strategy_universe.get("active_current_count", -1))) != expected_universe_count:
+        raise DeploymentBlocked("exact source Active Universe count differs")
     runtime_identity = certification.get("runtime_identity")
     if (
         not isinstance(runtime_identity, Mapping)
@@ -1096,17 +1099,18 @@ def _require_dynamic_selection_postflight(
             "compatible upgrade created unexpected Dynamic Selection runtime facts"
         )
     exit_profile_authority = certification.get("exit_profile_authority")
-    expected_profiles = len(registered_exit_profiles()) if hourly_upgrade else 8
-    expected_bindings = len(registered_event_exit_bindings()) if hourly_upgrade else 8
+    extended_orb = hourly_upgrade or orb_already_installed
+    expected_profiles = len(registered_exit_profiles()) if extended_orb else 8
+    expected_bindings = len(registered_event_exit_bindings()) if extended_orb else 8
     if (
         not isinstance(exit_profile_authority, Mapping)
         or exit_profile_authority.get("status") != "pass"
         or exit_profile_authority.get("catalog_digest")
         != build_exit_profile_catalog_digest()
         or int(str(exit_profile_authority.get("profile_count", -1))) != expected_profiles
-        or (int(str(exit_profile_authority.get("binding_fact_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_fact_count", -1))) != expected_bindings)
+        or (int(str(exit_profile_authority.get("binding_fact_count", -1))) < expected_bindings if extended_orb else int(str(exit_profile_authority.get("binding_fact_count", -1))) != expected_bindings)
         or int(str(exit_profile_authority.get("current_binding_count", -1))) != expected_bindings
-        or (int(str(exit_profile_authority.get("binding_event_count", -1))) < expected_bindings if hourly_upgrade else int(str(exit_profile_authority.get("binding_event_count", -1))) != expected_bindings)
+        or (int(str(exit_profile_authority.get("binding_event_count", -1))) < expected_bindings if extended_orb else int(str(exit_profile_authority.get("binding_event_count", -1))) != expected_bindings)
     ):
         raise DeploymentBlocked("exact ExitProfile/Binding manifest differs")
 
@@ -1738,7 +1742,7 @@ class SshTokyoReleaseBackend:
         source_schema_revision: str,
         target_schema_revision: str,
     ) -> None:
-        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1"}:
+        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
             raise ValueError("compatible migration source revision differs")
         self._release_command(
             release,

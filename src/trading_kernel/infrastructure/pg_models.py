@@ -2149,6 +2149,15 @@ shadow_outcomes_current = sa.Table(
     sa.Column("mark_index_deviation_bps", MONEY, nullable=True),
     _time("horizon_start_ms"),
     _time("horizon_end_ms"),
+    _time("reference_at_ms", nullable=True),
+    sa.Column("price_basis", SHORT_TEXT, nullable=True),
+    _id("path_spec_digest", nullable=True),
+    _id("source_runtime_commit", nullable=True),
+    _json("path_metrics", nullable=True),
+    _time("last_attempted_at_ms", nullable=True),
+    sa.Column("attempt_count", sa.Integer, nullable=False, server_default="0"),
+    _time("next_attempt_at_ms", nullable=True),
+    _time("retry_deadline_ms", nullable=True),
     _id("claim_owner", nullable=True),
     _id("claim_token", nullable=True),
     _time("lease_until_ms", nullable=True),
@@ -2172,7 +2181,7 @@ shadow_outcomes_current = sa.Table(
     ),
     sa.CheckConstraint(
         "evaluation_kind IN ('fixed_horizon_excursion_v1', "
-        "'sor_path_observation_v1')",
+        "'sor_path_observation_v1', 'generic_signal_path_v1')",
         name="evaluation_kind_valid",
     ),
     sa.CheckConstraint("position_side IN ('long', 'short')", name="side_valid"),
@@ -2185,13 +2194,26 @@ shadow_outcomes_current = sa.Table(
         name="risk_horizon_valid",
     ),
     sa.CheckConstraint(
-        "(source_kind = 'portfolio_rejection' "
+        "COALESCE(((source_kind = 'portfolio_rejection' "
         "AND admission_decision_id IS NOT NULL "
         "AND evaluation_kind = 'fixed_horizon_excursion_v1') OR "
         "(source_kind = 'strategy_observation' "
         "AND admission_decision_id IS NULL "
-        "AND evaluation_kind = 'sor_path_observation_v1')",
+        "AND evaluation_kind = 'sor_path_observation_v1') OR "
+        "(source_kind = 'signal_path' AND admission_decision_id IS NULL "
+        "AND evaluation_kind = 'generic_signal_path_v1' AND timeframe = '1h' "
+        "AND price_basis = 'signal_closed_bar' AND reference_at_ms = horizon_start_ms "
+        "AND path_spec_digest ~ '^sha256:[0-9a-f]{64}$' AND source_runtime_commit IS NOT NULL "
+        "AND retry_deadline_ms > horizon_end_ms "
+        "AND next_attempt_at_ms >= horizon_end_ms AND next_attempt_at_ms <= retry_deadline_ms)),false)",
         name="source_kind_valid",
+    ),
+    sa.CheckConstraint(
+        "attempt_count>=0 AND attempt_count<=4 AND (source_kind='signal_path' OR "
+        "(attempt_count=0 AND next_attempt_at_ms IS NULL AND retry_deadline_ms IS NULL "
+        "AND reference_at_ms IS NULL AND price_basis IS NULL AND path_spec_digest IS NULL "
+        "AND source_runtime_commit IS NULL AND path_metrics IS NULL))",
+        name="retry_bounds",
     ),
     sa.CheckConstraint(
         "first_path IS NULL OR first_path IN ("
@@ -2214,14 +2236,14 @@ shadow_outcomes_current = sa.Table(
         "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
         "AND observed_through_ms IS NULL AND completion_reason IS NULL "
         "AND first_path IS NULL AND first_path_at_ms IS NULL "
-        "AND observed_bar_count IS NULL) OR "
+        "AND observed_bar_count IS NULL AND path_metrics IS NULL) OR "
         "(status = 'pending' AND claim_owner IS NULL "
         "AND claim_token IS NULL AND lease_until_ms IS NULL "
         "AND completed_at_ms IS NULL AND max_favorable_price IS NULL "
         "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
         "AND observed_through_ms IS NULL AND completion_reason IS NULL "
         "AND first_path IS NULL AND first_path_at_ms IS NULL "
-        "AND observed_bar_count IS NULL) OR "
+        "AND observed_bar_count IS NULL AND path_metrics IS NULL) OR "
         "(status = 'completed' AND claim_owner IS NULL "
         "AND claim_token IS NULL AND lease_until_ms IS NULL "
         "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NOT NULL "
@@ -2233,17 +2255,42 @@ shadow_outcomes_current = sa.Table(
         "AND observed_bar_count IS NULL) OR "
         "(evaluation_kind = 'sor_path_observation_v1' "
         "AND first_path IS NOT NULL AND first_path_at_ms IS NOT NULL "
-        "AND observed_bar_count > 0))) OR "
+        "AND observed_bar_count > 0 AND path_metrics IS NULL) OR "
+        "(evaluation_kind = 'generic_signal_path_v1' AND first_path IS NULL "
+        "AND first_path_at_ms IS NULL AND observed_bar_count IS NOT NULL AND observed_bar_count > 0 "
+        "AND path_metrics IS NOT NULL AND jsonb_typeof(path_metrics) = 'object' AND octet_length(path_metrics::text)<=4096 "
+        "AND COALESCE(path_metrics ?& ARRAY['levels','initial_stop_first_touch_at_ms','max_favorable_at_ms','max_adverse_at_ms'],false) "
+        "AND COALESCE((path_metrics->'levels') ?& ARRAY['1R','3R','5R'],false)))) OR "
         "(status = 'unavailable' AND claim_owner IS NULL "
         "AND claim_token IS NULL AND lease_until_ms IS NULL "
         "AND completed_at_ms IS NOT NULL AND max_favorable_price IS NULL "
         "AND max_adverse_price IS NULL AND mfe_r IS NULL AND mae_r IS NULL "
         "AND observed_through_ms IS NULL AND completion_reason IS NOT NULL "
         "AND first_path IS NULL AND first_path_at_ms IS NULL "
-        "AND observed_bar_count IS NULL)",
+        "AND observed_bar_count IS NULL AND path_metrics IS NULL)",
         name="projection_shape_valid",
     ),
 )
+
+sa.Index("ix_brc_shadow_signal_path_due",shadow_outcomes_current.c.status,shadow_outcomes_current.c.last_attempted_at_ms,shadow_outcomes_current.c.next_attempt_at_ms,shadow_outcomes_current.c.horizon_end_ms)
+
+research_collection_control = sa.Table("brc_research_collection_control",metadata,
+    _id("control_id",primary_key=True),sa.Column("enabled",sa.Boolean,nullable=False),
+    sa.Column("daily_limit",sa.Integer,nullable=False),sa.Column("control_version",sa.Integer,nullable=False),
+    sa.CheckConstraint("control_id='generic_signal_path_v1' AND daily_limit BETWEEN 0 AND 1000 AND control_version>0 AND (NOT enabled OR daily_limit>0)",name="bounds"))
+research_collection_events = sa.Table("brc_research_collection_events",metadata,
+    _id("event_id",primary_key=True),sa.Column("control_version",sa.Integer,nullable=False),
+    sa.Column("enabled",sa.Boolean,nullable=False),sa.Column("daily_limit",sa.Integer,nullable=False),
+    _id("owner_identity"),sa.Column("reason",LONG_TEXT,nullable=False),_time("occurred_at_ms"),
+    sa.UniqueConstraint("control_version"),
+    sa.CheckConstraint("control_version>1 AND daily_limit BETWEEN 0 AND 1000 AND length(trim(reason))>0",name="bounds"))
+research_collection_daily = sa.Table("brc_research_collection_daily",metadata,
+    _time("day_start_ms"),sa.Column("admitted_count",sa.Integer,nullable=False),
+    sa.Column("skipped_count",sa.Integer,nullable=False),
+    sa.Column("coverage_counts",JSONB,nullable=False,server_default=sa.text("'{}'::jsonb")),
+    sa.PrimaryKeyConstraint("day_start_ms"),
+    sa.CheckConstraint("jsonb_typeof(coverage_counts)='object'",name="coverage_shape"),
+    sa.CheckConstraint("day_start_ms>=0 AND day_start_ms%86400000=0 AND admitted_count>=0 AND skipped_count>=0",name="counts"))
 
 sa.Index(
     "ix_brc_shadow_outcomes_current_due",

@@ -2479,3 +2479,39 @@ def test_same_schema_preservation_is_checked_before_selection_start() -> None:
     backend.certify_flat = progressing_target
     assert deploy_tokyo_release(backend, _plan(enable_entry=False)).status == 'pass'
     assert backend.entry_is_inactive_disabled_and_fenced()
+
+
+@pytest.mark.parametrize('count', [8, 10])
+def test_research_upgrade_preserves_exact_source_current_universe_count(count):
+    from scripts.trading_kernel.deploy_tokyo_release import (
+        _require_dynamic_selection_postflight,
+    )
+    backend=FakeDeploymentBackend(active_universe_count=count)
+    backend.preserved_runtime['active_current_count']=count
+    payload=dict(backend.certify_flat(TARGET_RELEASE))
+    payload['exit_profile_authority']={**payload['exit_profile_authority'],
+        'binding_fact_count':10,'current_binding_count':10,'binding_event_count':10}
+    _require_dynamic_selection_postflight(payload,seed_identity=SEED_IDENTITY,
+        preserved_runtime=backend.preserved_runtime,orb_already_installed=True)
+    payload['strategy_universe']={**payload['strategy_universe'],'active_current_count':count+1}
+    with pytest.raises(DeploymentBlocked,match='Universe'):
+        _require_dynamic_selection_postflight(payload,seed_identity=SEED_IDENTITY,
+            preserved_runtime=backend.preserved_runtime,orb_already_installed=True)
+
+
+def test_research_upgrade_accepts_exact0011_with_preserved_hourly_pair(monkeypatch):
+    import sys
+    monkeypatch.setattr(sys.modules[__name__],'SOURCE_SCHEMA_REVISION','0011_orb_session_1h_v1')
+    backend=FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION,active_universe_count=10)
+    backend.preserved_runtime['active_current_count']=10
+    original=backend.certify_flat
+    def certify(release):
+        payload=dict(original(release))
+        payload['exit_profile_authority']={**payload['exit_profile_authority'],
+            'binding_fact_count':10,'current_binding_count':10,'binding_event_count':10}
+        return payload
+    backend.certify_flat=certify
+    result=deploy_tokyo_release(backend,_compatible_plan(enable_entry=False))
+    assert result.status=='pass'
+    assert ('migrate_schema',TARGET_RELEASE,'0011_orb_session_1h_v1',TARGET_SCHEMA_REVISION) in backend.calls
+    assert backend.entry_is_inactive_disabled_and_fenced()

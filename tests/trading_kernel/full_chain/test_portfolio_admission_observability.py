@@ -901,6 +901,10 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
             request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor", idempotency_key="capacity-natural:sor-pause",
                 owner_identity="owner",now_ms=NOW_MS-9_000_000), authentication_strength="totp_step_up")
     await _install_capacity_then_upgrade(issue_engine,source_request)
+    # Prospective research is explicitly enabled in this disposable database.
+    async with issue_engine.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_research_collection_control "
+            "SET enabled=true,daily_limit=2,control_version=2"))
     market = RecordingReplayMarketSource()
     template = cpm_long_snapshot()
     market._base_responses[(SOL,"1h")] = template.candles_1h
@@ -962,6 +966,8 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
     async with issue_engine.connect() as connection:
         tickets = (await connection.execute(sa.select(trade_tickets))).mappings().all()
     assert len(tickets)==2
+    async with issue_engine.connect() as connection:
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current))==2
     assert BNB in {row["exchange_instrument_id"] for row in tickets}
     assert {row["exchange_instrument_id"] for row in tickets}<={BNB,DOGE,SOL}
     assert len({row["signal_event_id"] for row in tickets})==2
@@ -1020,6 +1026,29 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
             assert await uow.entry_admission.count_active_strategy_side_tickets(
                 venue_id=ticket.identity.netting_domain.venue_id,account_id=ticket.identity.netting_domain.account_id,
                 strategy_group_id=ticket.identity.runtime.strategy_group_id,position_side="long")==1-index
+        from src.trading_kernel.interfaces.read_signal_path import read_signal_path
+        path = await read_signal_path(issue_engine,signal_event_id=ticket.identity.signal_event_id)
+        assert path is not None and path.evaluation_kind=="generic_signal_path_v1"
+        assert path.ticket_id==ticket_id
+        assert path.review_id==f"review:capacity:{index}" and path.review_revision==1
+        assert path.review_metrics=={"economics_evidence":"structural_test_only"}
+        assert path.path_initial_risk_per_unit is not None
+        assert path.ticket_initial_stop_price==ticket.initial_stop_price
+        assert path.ticket_frozen_stop_risk==ticket.risk_at_stop
+        if index==0:
+            from src.trading_kernel.application.settle_ticket import (
+                ReviseTradeReviewRequest,
+                revise_trade_review,
+            )
+            async with PostgresKernelUnitOfWork(issue_engine) as uow:
+                await revise_trade_review(uow,ReviseTradeReviewRequest(ticket_id=ticket_id,
+                    review_id='review:capacity:revision2',supersedes_review_id=f'review:capacity:{index}',
+                    outcome='closed',metrics={'economics_evidence':'revised_structural_test_only'},
+                    decision_impact={'capacity_policy':'v0'},recorded_at_ms=at+10_002))
+            revised_path=await read_signal_path(issue_engine,signal_event_id=ticket.identity.signal_event_id)
+            assert revised_path.review_revision==2 and revised_path.review_id=='review:capacity:revision2'
+            assert revised_path.review_metrics=={'economics_evidence':'revised_structural_test_only'}
+            assert revised_path.path_initial_risk_per_unit==path.path_initial_risk_per_unit
 
 
 @pytest.mark.asyncio

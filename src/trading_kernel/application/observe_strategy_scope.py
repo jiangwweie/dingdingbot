@@ -38,6 +38,7 @@ from src.trading_kernel.application.project_comparative_universe import (
     serialize_comparative_projection,
 )
 from src.trading_kernel.application.project_shadow_outcome import (
+    pending_generic_signal_path_spec,
     pending_shadow_spec_for_strategy_observation,
 )
 from src.trading_kernel.domain.comparison_universe import comparative_lookback_bars
@@ -787,6 +788,11 @@ async def observe_strategy_scope(
                 now_ms=attempted_at_ms,
             ),
         )
+        if (ingest_result.status is IngestSignalStatus.CANDIDATE_READY
+            and contract.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
+            and await uow.shadow_outcomes.signal_path_enabled()):
+            path = pending_generic_signal_path_spec(signal=signal,snapshot=snapshot,runtime_commit=request.runtime_commit)
+            await uow.shadow_outcomes.add_signal_path_if_enabled(path,strategy_group_id=signal.strategy_group_id)
         if (
             ingest_result.status
             in {

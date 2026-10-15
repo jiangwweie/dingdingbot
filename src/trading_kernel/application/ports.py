@@ -1423,6 +1423,10 @@ class AdmissionDecisionRepository(Protocol):
 
 
 class ShadowOutcomeRepository(Protocol):
+    async def signal_path_enabled(self) -> bool: ...
+
+    async def add_signal_path_if_enabled(self, spec: ShadowOutcomeSpec, *, strategy_group_id: str) -> bool: ...
+
     async def add_pending(self, spec: ShadowOutcomeSpec) -> None: ...
 
     async def claim_one_due(
@@ -1432,6 +1436,8 @@ class ShadowOutcomeRepository(Protocol):
         now_ms: int,
         lease_until_ms: int,
     ) -> ShadowOutcomeClaim | None: ...
+
+    async def retry_signal_path(self, *, claim: ShadowOutcomeClaim, now_ms: int, reason: str) -> bool: ...
 
     async def complete(
         self,

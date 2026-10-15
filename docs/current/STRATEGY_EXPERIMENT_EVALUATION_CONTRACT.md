@@ -120,6 +120,22 @@ observation uses `sor_path_observation_v1` directly from the Signal and has no
 AdmissionDecision. Both freeze explicit price and time facts and record bounded
 closed-candle path evidence.
 
+The independently enabled `generic_signal_path_v1` observes valid CPM, MPG, MI,
+BRF2 and SOR-1H Signals on their frozen hourly Signal-close price and original
+Registry stop. It covers the Registry's 24-bar horizon, stores full-horizon
+MFE/MAE, +1R/+3R/+5R and initial-stop first-touch bars, and labels same-bar order
+as ambiguous. Stop-then-rally evidence is retained as opportunity evidence.
+One Signal still owns at most one Outcome, whether admitted or rejected. Existing
+older Outcomes are retained in their original version and price basis.
+
+The PostgreSQL research switch starts disabled with zero quota. Enabled sampling
+uses a persisted UTC-day limit and strategy/hour coverage counts; skipped samples
+must remain disclosed. Retries are bounded and persisted. Price-path R0, Ticket
+frozen stop risk and effective Review economics are distinct fields. Readonly
+association follows the exact AdmissionDecision/Ticket and effective Review
+pointer; absent execution evidence stays unknown. Owner Regime attribution is
+outside this MVP.
+
 This evidence is not a fill, not simulated PnL, not realized PnL, and not a
 fee, funding, or real slippage estimate. It never creates CapacityClaim,
 Reservation, Ticket, Exchange Command, or venue mutation. If real Entry is

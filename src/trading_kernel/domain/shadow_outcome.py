@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from enum import StrEnum
 from typing import Final, Literal
@@ -12,10 +13,12 @@ from src.trading_kernel.domain.market import ClosedCandle
 
 SHADOW_EVALUATION_KIND: Final = "fixed_horizon_excursion_v1"
 SOR_PATH_EVALUATION_KIND: Final = "sor_path_observation_v1"
-ShadowSourceKind = Literal["portfolio_rejection", "strategy_observation"]
+GENERIC_SIGNAL_PATH_KIND: Final = "generic_signal_path_v1"
+ShadowSourceKind = Literal["portfolio_rejection", "strategy_observation", "signal_path"]
 ShadowEvaluationKind = Literal[
     "fixed_horizon_excursion_v1",
     "sor_path_observation_v1",
+    "generic_signal_path_v1",
 ]
 ShadowFirstPath = Literal[
     "tp1_first",
@@ -68,6 +71,10 @@ class ShadowOutcomeSpec(BaseModel):
     horizon_start_ms: int
     horizon_end_ms: int
     created_at_ms: int
+    reference_at_ms: int | None = None
+    price_basis: Literal["signal_closed_bar"] | None = None
+    path_spec_digest: str | None = None
+    source_runtime_commit: str | None = None
 
     @field_validator(
         "shadow_outcome_id",
@@ -152,6 +159,28 @@ class ShadowOutcomeSpec(BaseModel):
                 or self.unavailable_reason is not None
             ):
                 raise ValueError("portfolio Shadow requires exact Admission inputs")
+        elif self.source_kind == "signal_path":
+            if (self.evaluation_kind != GENERIC_SIGNAL_PATH_KIND
+                or self.admission_decision_id is not None
+                or self.timeframe != "1h"
+                or self.reference_at_ms != self.horizon_start_ms
+                or self.price_basis != "signal_closed_bar"
+                or self.path_spec_digest is None
+                or self.source_runtime_commit is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", self.path_spec_digest) is None
+                or not self.source_runtime_commit.strip()):
+                raise ValueError("generic Signal path requires exact frozen source")
+            if not prices_complete and self.unavailable_reason is None:
+                raise ValueError("generic Signal path requires price or unavailable reason")
+            if prices_complete and self.unavailable_reason is None:
+                entry = self.entry_reference_price
+                stop = self.initial_stop_price
+                assert entry is not None and stop is not None
+                if self.initial_risk_per_unit is None or self.initial_risk_per_unit <= 0:
+                    raise ValueError("generic Signal path requires positive R0")
+                if ((self.position_side == "long" and stop >= entry)
+                    or (self.position_side == "short" and stop <= entry)):
+                    raise ValueError("generic Signal path stop direction invalid")
         else:
             if self.evaluation_kind != SOR_PATH_EVALUATION_KIND:
                 raise ValueError("strategy observation requires SOR path evaluation")
@@ -215,6 +244,13 @@ class ShadowOutcomeClaim(BaseModel):
         return self
 
 
+class ShadowPathLevel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    first_touch_at_ms: int | None
+    order_vs_stop: Literal["threshold_first", "stop_first", "same_bar_ambiguous", "neither"]
+
+
 class ShadowOutcomeProjection(BaseModel):
     """Observed MFE/MAE only; it is never a simulated trade result."""
 
@@ -229,6 +265,10 @@ class ShadowOutcomeProjection(BaseModel):
     first_path: ShadowFirstPath | None = None
     first_path_at_ms: int | None = None
     observed_bar_count: int | None = None
+    path_levels: dict[str, ShadowPathLevel] | None = None
+    initial_stop_first_touch_at_ms: int | None = None
+    max_favorable_at_ms: int | None = None
+    max_adverse_at_ms: int | None = None
 
     @model_validator(mode="after")
     def _validate_projection_shape(self) -> ShadowOutcomeProjection:
@@ -245,6 +285,14 @@ class ShadowOutcomeProjection(BaseModel):
             raise ValueError("shadow MFE R must be nonnegative")
         if self.mae_r is not None and self.mae_r < 0:
             raise ValueError("shadow MAE R must be nonnegative")
+        if self.evaluation_kind == GENERIC_SIGNAL_PATH_KIND:
+            if (self.path_levels is None or set(self.path_levels) != {"1R", "3R", "5R"}
+                or self.max_favorable_at_ms is None or self.max_adverse_at_ms is None
+                or self.observed_bar_count is None or self.observed_bar_count <= 0
+                or self.first_path is not None or self.first_path_at_ms is not None):
+                raise ValueError("generic Signal path projection requires threshold evidence")
+        elif self.path_levels is not None or self.initial_stop_first_touch_at_ms is not None or self.max_favorable_at_ms is not None or self.max_adverse_at_ms is not None:
+            raise ValueError("legacy Shadow projection forbids generic path evidence")
         if self.evaluation_kind == SHADOW_EVALUATION_KIND:
             if any(
                 value is not None
@@ -255,7 +303,7 @@ class ShadowOutcomeProjection(BaseModel):
                 )
             ):
                 raise ValueError("fixed-horizon projection forbids SOR path fields")
-        elif (
+        elif self.evaluation_kind == SOR_PATH_EVALUATION_KIND and (
             self.first_path is None
             or self.first_path_at_ms is None
             or self.observed_bar_count is None
@@ -396,12 +444,57 @@ def evaluate_sor_path_observation(
     )
 
 
+def evaluate_generic_signal_path(
+    spec: ShadowOutcomeSpec,
+    candles: tuple[ClosedCandle, ...],
+) -> ShadowOutcomeProjection:
+    if spec.evaluation_kind != GENERIC_SIGNAL_PATH_KIND or spec.unavailable_reason is not None:
+        raise ShadowOutcomeUnavailable(spec.unavailable_reason or "unsupported_generic_signal_path")
+    if not has_complete_closed_candle_sequence(spec, candles):
+        raise ShadowOutcomeUnavailable("incomplete_historical_window")
+    if spec.entry_reference_price is None or spec.initial_stop_price is None or spec.initial_risk_per_unit is None:
+        raise ShadowOutcomeUnavailable("incomplete_signal_path_reference")
+    selected = tuple(c for c in candles if spec.horizon_start_ms < c.close_time_ms <= spec.horizon_end_ms)
+    if not selected:
+        raise ShadowOutcomeUnavailable("no_closed_candles_in_horizon")
+    excursion = evaluate_fixed_horizon_excursion(spec, selected)
+    favorable_price = excursion.max_favorable_price
+    adverse_price = excursion.max_adverse_price
+    assert favorable_price is not None and adverse_price is not None
+    favorable_at = next(c.close_time_ms for c in selected if (c.high if spec.position_side == "long" else c.low) == favorable_price)
+    adverse_at = next(c.close_time_ms for c in selected if (c.low if spec.position_side == "long" else c.high) == adverse_price)
+    stop_at = next((c.close_time_ms for c in selected if (c.low <= spec.initial_stop_price if spec.position_side == "long" else c.high >= spec.initial_stop_price)), None)
+    levels: dict[str, ShadowPathLevel] = {}
+    for multiple in (1, 3, 5):
+        target = spec.entry_reference_price + (spec.initial_risk_per_unit * multiple * (1 if spec.position_side == "long" else -1))
+        first_at = next((c.close_time_ms for c in selected if (c.high >= target if spec.position_side == "long" else c.low <= target)), None)
+        order: Literal["threshold_first", "stop_first", "same_bar_ambiguous", "neither"]
+        if first_at is None and stop_at is None:
+            order = "neither"
+        elif first_at is None or (stop_at is not None and stop_at < first_at):
+            order = "stop_first"
+        elif stop_at is None or first_at < stop_at:
+            order = "threshold_first"
+        else:
+            order = "same_bar_ambiguous"
+        levels[f"{multiple}R"] = ShadowPathLevel(first_touch_at_ms=first_at, order_vs_stop=order)
+    return ShadowOutcomeProjection(evaluation_kind=GENERIC_SIGNAL_PATH_KIND,
+        max_favorable_price=favorable_price, max_adverse_price=adverse_price,
+        mfe_r=excursion.mfe_r, mae_r=excursion.mae_r,
+        observed_through_ms=excursion.observed_through_ms,
+        observed_bar_count=len(selected), path_levels=levels,
+        initial_stop_first_touch_at_ms=stop_at,
+        max_favorable_at_ms=favorable_at, max_adverse_at_ms=adverse_at)
+
+
 def evaluate_shadow_outcome(
     spec: ShadowOutcomeSpec,
     candles: tuple[ClosedCandle, ...],
 ) -> ShadowOutcomeProjection:
     if spec.evaluation_kind == SOR_PATH_EVALUATION_KIND:
         return evaluate_sor_path_observation(spec, candles)
+    if spec.evaluation_kind == GENERIC_SIGNAL_PATH_KIND:
+        return evaluate_generic_signal_path(spec, candles)
     return evaluate_fixed_horizon_excursion(spec, candles)
 
 
@@ -426,4 +519,9 @@ def has_complete_closed_candle_sequence(
         for candle in candles
         if spec.horizon_start_ms < candle.close_time_ms <= spec.horizon_end_ms
     )
+    if spec.evaluation_kind == GENERIC_SIGNAL_PATH_KIND and any(
+        candle.open_time_ms != candle.close_time_ms - duration_ms
+        for candle in candles if spec.horizon_start_ms < candle.close_time_ms <= spec.horizon_end_ms
+    ):
+        return False
     return actual == expected

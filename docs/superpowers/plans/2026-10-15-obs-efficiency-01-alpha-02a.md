@@ -6,9 +6,10 @@
 开发基线为 `origin/dev` 的 `de73f2791a01a14ba77e842da0a3ecadbdbc1069`。
 当前生产身份仍只由 [主路线图](../../current/MAIN_CONTROL_ROADMAP.md) 管理。
 
-**建议分开发版**：效率补丁无迁移；ALPHA-02A 涉及 Shadow 冻结输入、指标语义、额度和
-Schema 变更，需单独实现、验收与停止/平仓/前向迁移门槛。将两者合并会使调度收益和
-研究负载无法分辨，也扩大审查范围。本轮无发布授权。
+**Owner 最新发布安排：A+B 合并发布、独立验收；软件上线与研究采集启用分开。**
+A 已合入 dev，暂不单独部署。B 在独立分支实现，审查后再合入 dev；最终精确联合提交
+重新分类并执行相应 R4 等认证，生产部署另行确认。以下保留 A 的原交付和设计出处；
+B 的实现、验证与 P1 耗时归因见[实施交付记录](2026-10-15-alpha-02a-implementation.md)。
 
 ## 已知事实与根因
 
@@ -123,7 +124,7 @@ Repository/Schema。基线 coordinator 同时加载，避免将新 reason code �
   的饥饿。单样本 retry/backoff/终止期限列入 ALPHA-02A Schema 设计，不在本轮偷改。
 - 全库类型检查及最终测试计数记录于本文末尾；未通过的门槛不包装成发布认证。
 
-## ALPHA-02A：待实施设计
+## ALPHA-02A：实施基准设计
 
 **以下是设计决策与待批准预算，不是现有能力或生产配置。**
 复用 `domain/shadow_outcome.py`、`application/project_shadow_outcome.py`、
@@ -249,7 +250,7 @@ Path R0 与 Ticket 的冻结初始风险分别显示，禁止混用分母或由�
    Signal close 口径，零新 Ticket/Command/venue mutation。
 4. 接入研究 retry/backoff 与只读 Review 联接，压力下验证 scope 和研究双向有界进展；
    单个坏样本不能阻塞其他研究样本。测试 source timeout、DB failure、lease loss、进程重启。
-5. 精确 release candidate 全套认证及单独发布审批。无历史全量回补。
+5. A+B 审查合入后，以最终精确 release candidate 执行全套所需认证；联合生产部署另行确认。无历史全量回补。
 
 **Owner Regime 不进入 MVP**：普通 Pause/Resume 不能还原完整市场方向/作用域/有效时间
 Journal。未来真实 Gate 存在时，新增冻结 gate ID/version 或显式 absent 标签，在当时的

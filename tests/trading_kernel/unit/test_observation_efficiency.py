@@ -303,3 +303,62 @@ def test_explicit_historical_experiment_fails_clearly_when_baseline_missing(monk
     assert efficiency_baseline.benchmark_variants() == (True, False)
     with pytest.raises(RuntimeError, match='requires Git baseline de73f279'):
         efficiency_baseline.load_baseline('unused', 'unused')
+
+
+@pytest.mark.asyncio
+async def test_alpha_research_backlog_keeps_106_live_scopes_moving(monkeypatch):
+    """A+B host 106 due scopes and 200 research attempts with bounded failures."""
+    import scripts.trading_kernel.run_observation_worker_once as script
+
+    stop=asyncio.Event()
+    monkeypatch.setattr(process,'_shutdown_event',lambda:stop)
+    elapsed=[0]
+    monkeypatch.setattr(process.time,'monotonic_ns',lambda:elapsed[0]*1_000_000)
+    scopes=[]
+    research=[]
+    failures=[]
+    class Source:
+        async def fetch_closed_candles(self,_): raise AssertionError('fake tick owns no exchange I/O')
+    class Engine:
+        async def dispose(self): pass
+    monkeypatch.setattr(script,'_load_factory',lambda _:Source)
+    monkeypatch.setattr(script,'create_async_engine',lambda _:Engine())
+    async def fake_tick(_uow,_source,request):
+        elapsed[0]+=10
+        if request.prefer_shadow and len(research)<200:
+            if len(scopes)<106 and len(research)%2==1 and len(failures)<6:
+                failures.append(elapsed[0])
+                return observation.ObservationWorkerResult(status='shadow_retry_scheduled',
+                    shadow_outcome_id='slow:research',detail='TimeoutError')
+            research.append(elapsed[0])
+            return observation.ObservationWorkerResult(status='shadow_completed',shadow_outcome_id=str(len(research)))
+        if len(scopes)<106:
+            scopes.append(elapsed[0])
+            return observation.ObservationWorkerResult(status='observed',runtime_scope_id=str(len(scopes)))
+        if len(research)<200:
+            research.append(elapsed[0])
+            return observation.ObservationWorkerResult(status='shadow_completed',shadow_outcome_id=str(len(research)))
+        stop.set()
+        return observation.ObservationWorkerResult(status='no_work')
+    monkeypatch.setattr(script,'run_observation_worker_once',fake_tick)
+    real_wait=asyncio.wait_for
+    async def virtual_wait(awaitable,*,timeout):
+        if timeout==5:
+            elapsed[0]+=5000
+            awaitable.close()
+            raise TimeoutError
+        return await real_wait(awaitable,timeout=timeout)
+    monkeypatch.setattr(process.asyncio,'wait_for',virtual_wait)
+    async def group(loops,**_):
+        selected=tuple(loop for loop in loops if loop.component_id=='alpha-benchmark')
+        return await process.run_worker_process_group(selected,run_forever=True,idle_log_interval_ms=300_000,
+            emit=lambda _:None)
+    monkeypatch.setattr(script,'run_worker_process_group',group)
+    args=script._parser().parse_args(['--database-url','postgresql+asyncpg://unused/test',
+        '--market-source-factory','unused:source','--worker-id','alpha-benchmark',
+        '--runtime-commit','test','--schema-revision','test','--run-forever'])
+    assert await script._run(args)==0
+    assert len(scopes)==106 and len(research)==200 and len(failures)==6
+    assert research[0]<scopes[8]
+    assert scopes[-1]<research[-1]
+    assert scopes[100]<120_000

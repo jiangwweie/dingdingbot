@@ -1624,3 +1624,26 @@ async def _seed_active_universe(
             activated_at_ms=NOW_MS - 1,
         )
     )
+
+
+@pytest.mark.asyncio
+async def test_generic_signal_path_follows_official_first_signal_and_does_not_rewrite_duplicate(observation_engine: AsyncEngine) -> None:
+    from src.trading_kernel.infrastructure.pg_models import shadow_outcomes_current
+    await _seed_six_scopes(observation_engine)
+    async with observation_engine.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_research_collection_control SET enabled=true,daily_limit=2,control_version=2"))
+    snapshot=cpm_long_snapshot()
+    first=await _observe_cpm(observation_engine,snapshot,trigger_ms=NOW_MS)
+    assert first.status is ObservationStatus.SIGNAL_CREATED
+    duplicate=await _observe_cpm(observation_engine,snapshot,trigger_ms=NOW_MS+3_600_000)
+    assert duplicate.status is ObservationStatus.DUPLICATE_SIGNAL
+    async with observation_engine.connect() as connection:
+        rows=(await connection.execute(sa.select(shadow_outcomes_current).where(
+            shadow_outcomes_current.c.signal_event_id==first.signal_event_id))).mappings().all()
+        assert len(rows)==1
+        assert rows[0]['source_kind']=='signal_path'
+        assert rows[0]['entry_reference_price']==snapshot.candles_1h[-1].close
+        assert rows[0]['reference_at_ms']==NOW_MS
+        assert await connection.scalar(sa.text("SELECT admitted_count FROM brc_research_collection_daily WHERE day_start_ms=:day"),
+            {'day':NOW_MS//86_400_000*86_400_000})==1
+        assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0

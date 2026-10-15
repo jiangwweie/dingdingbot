@@ -37,6 +37,7 @@ class ObservationWorkerStatus(StrEnum):
     RETRY_SCHEDULED = "retry_scheduled"
     SHADOW_COMPLETED = "shadow_completed"
     SHADOW_RETRY_SCHEDULED = "shadow_retry_scheduled"
+    SHADOW_UNAVAILABLE = "shadow_unavailable"
 
 
 class ObservationWorkerRequest(BaseModel):
@@ -233,7 +234,7 @@ async def _run_one_due_shadow(
                         since_ms=claim.spec.horizon_start_ms,
                     )
                 ),
-                timeout=request.timeout_seconds,
+                timeout=min(request.timeout_seconds, 5.0) if claim.spec.source_kind == "signal_path" else request.timeout_seconds,
             )
         terminal = await project_claimed_shadow_outcome(
             uow_factory,
@@ -241,17 +242,27 @@ async def _run_one_due_shadow(
             candles,
             completed_at_ms=request.now_ms,
         )
-    except Exception as exc:  # noqa: BLE001 - source failure retains retry authority.
+    except Exception as exc:  # noqa: BLE001 - source failure retains bounded retry authority.
         async with uow_factory() as uow:
-            await uow.shadow_outcomes.release_expired_claim(
-                claim=claim,
-            )
+            retry = (await uow.shadow_outcomes.retry_signal_path(
+                claim=claim, now_ms=request.now_ms, reason=type(exc).__name__)
+                if claim.spec.source_kind == "signal_path" else None)
+            if retry is None:
+                await uow.shadow_outcomes.release_expired_claim(claim=claim)
         return ObservationWorkerResult(
-            status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED,
-            detail=type(exc).__name__,
-            shadow_outcome_id=claim.spec.shadow_outcome_id,
+            status=(ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED if retry is not False
+                    else ObservationWorkerStatus.SHADOW_UNAVAILABLE),
+            detail=type(exc).__name__, shadow_outcome_id=claim.spec.shadow_outcome_id,
         )
     if not terminal:
+        if claim.spec.source_kind == "signal_path":
+            async with uow_factory() as uow:
+                retry = await uow.shadow_outcomes.retry_signal_path(
+                    claim=claim, now_ms=request.now_ms,
+                    reason="incomplete_historical_window")
+            return ObservationWorkerResult(
+                status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED if retry else ObservationWorkerStatus.SHADOW_UNAVAILABLE,
+                detail="incomplete_historical_window", shadow_outcome_id=claim.spec.shadow_outcome_id)
         return ObservationWorkerResult(
             status=ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED,
             detail="incomplete_historical_window",

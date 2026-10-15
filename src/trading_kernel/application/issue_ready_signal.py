@@ -574,7 +574,13 @@ async def _refuse(
             decided_at_ms=now_ms,
         )
         await uow.admission_decisions.add(decision)
-        if admission_snapshot is not None:
+        prospective_research_enabled = (
+            signal.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
+            and await uow.shadow_outcomes.signal_path_enabled()
+        )
+        # Observation already applied the prospective quota. A refusal must not
+        # create an unbudgeted legacy sample when that quota was exhausted.
+        if admission_snapshot is not None and not prospective_research_enabled:
             shadow = pending_shadow_spec_for_rejection(
                 decision=decision,
                 signal=signal,
