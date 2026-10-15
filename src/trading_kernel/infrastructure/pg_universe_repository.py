@@ -1117,7 +1117,18 @@ class PostgresStrategyUniverseRepository:
             static_recovery_is_first_activation_source(current_authority.authority,control,
                 owner_control_version=authority.owner_control_version,activation_authorization_id=authorization_id))
         if current_authority is not None and isinstance(current_authority.authority,GenericRecoveryAuthority) and not recovering and not static_recovery_retry:
-            raise UniverseInstallConflict("GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")
+            # A changed target need not wait for an unrelated NO_CHANGE
+            # Snapshot. Its direct successor must instead prove the current
+            # close and the exact ARMED recovery checkpoints of every retained
+            # member, as the existing PostgreSQL authority guard also requires.
+            successor_snapshot = await selection.get_generic_snapshot(authority.selection_snapshot_id)
+            recovery_blocker = await selection.generic_recovery_transition_blocker(
+                selection_spec_id=authority.selection_spec_id,target_members=successor_snapshot.selected_members)
+            if (not isinstance(proof,CurrentFinalCloseGrantProof)
+                or current_authority.authority.first_eligible_close_time_ms is None
+                or proof.current_final_close_time_ms<current_authority.authority.first_eligible_close_time_ms
+                or recovery_blocker is not None):
+                raise UniverseInstallConflict("GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")
         if first_activation and current_authority is not None and not static_recovery_retry:
             raise UniverseInstallConflict("GENERIC_FIRST_ACTIVATION_AUTHORITY_EXISTS")
         if not recovering and not static_recovery_retry and current_authority is not None and (current_authority.authority.blocks_new_entry

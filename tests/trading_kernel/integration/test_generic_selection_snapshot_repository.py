@@ -9151,6 +9151,7 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
     ("MI-001","activate"),("MI-001","activate_refusal"),("MI-001","empty"),("BRF2-001","fallback"),
     ("MPG-001","activate_change_guard"),("MI-001","activate_change_guard"),
     ("MPG-001","activate_change_after_arm"),("MI-001","activate_change_after_arm"),
+    ("MPG-001","activate_direct_change_after_arm"),("MI-001","activate_direct_change_after_arm"),
     ("CPM-RO-001","fallback_armed_static"),("BRF2-001","fallback_armed_static"),
     ("CPM-RO-001","fallback_continued_static"),("BRF2-001","fallback_continued_static")))
 async def test_failed_second_dynamic_generation_respects_previous_freshness(
@@ -9257,6 +9258,10 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
         assert still_vacuum is not None and still_vacuum.state.value == "RECONFIGURING"
         next_source = next_input(successor_source)
+        if resolution=="activate_direct_change_after_arm":
+            next_source=next_source.model_copy(update={"member_windows":tuple(qualify_window(
+                w.model_copy(update={"candles":next_source.member_windows[0].candles}),
+                w.exchange_instrument_id in first_source.spec.candidate_ids[:2]) for w in next_source.member_windows)})
         next_snapshot = compute_generic_selection(next_source)
         async with PostgresKernelUnitOfWork(database) as uow:
             await uow.instrument_selection.save_generic_snapshot(next_snapshot,
@@ -9383,7 +9388,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
-        if resolution in {"activate","activate_refusal","activate_change_guard","activate_change_after_arm"}:
+        if resolution in {"activate","activate_refusal","activate_change_guard","activate_change_after_arm","activate_direct_change_after_arm"}:
             if resolution in {"activate","activate_refusal"}:
                 @asynccontextmanager
                 async def interrupted_recovered_activation():
@@ -9451,6 +9456,10 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     "WHERE materialization_generation_id=:gid"),{"gid":handoff.materialization_generation_id}) == 1
                 active_scope_id = await conn.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
                     "WHERE universe_version_id=:uid ORDER BY runtime_scope_id LIMIT 1"),{"uid":target_uid})
+            if resolution=="activate_direct_change_after_arm":
+                await _assert_direct_recovery_membership_successor(database,group=group,
+                    source=next_source,snapshot=next_snapshot,recovery=current_recovery.authority)
+                return
             first_close = current_recovery.authority.first_eligible_close_time_ms
             await make_warming_ready(database,universe_version_id=target_uid,
                 warm_closed_bar_time_ms=first_close,valid_until_ms=first_close+HOUR)
@@ -14250,3 +14259,110 @@ async def test_efficiency_active_runtime_sql_and_authority_drift(database, monke
             assert paused.selection_authority_id != current.authority.selection_authority_id
     finally:
         sa.event.remove(database.sync_engine, 'before_cursor_execute', capture)
+
+
+async def _assert_direct_recovery_membership_successor(database, *, group, source, snapshot, recovery):
+    """Production MPG shape: armed Recovery -> changed target, with no NO_CHANGE hop."""
+    close=recovery.first_eligible_close_time_ms
+    uid=recovery.event_binding.universe_version_id
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+    template=mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
+    delta=close-template.trigger_candle_close_time_ms
+    class FlatRecoveryMarket:
+        async def fetch_closed_candles(self,request):
+            path=template.candles_1h if request.timeframe=="1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+delta,
+                "close_time_ms":c.close_time_ms+delta}) for c in path)
+    async with database.connect() as conn:
+        scopes=tuple((await conn.execute(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid ORDER BY runtime_scope_id"),{"uid":uid})).scalars())
+    for scope in scopes:
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+            observed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),FlatRecoveryMarket(),
+                ObservationRequest(runtime_scope_id=scope,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                    trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
+        assert observed.status is ObservationStatus.NO_SIGNAL
+    async with database.connect() as conn:
+        assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exposure_episode_current "
+            "WHERE authority_recovery_id=:id AND authority_recovery_armed_at_ms IS NOT NULL"),
+            {"id":recovery.recovery_proof.recovery_close_plan.recovery_id})==len(scopes)
+    changed_source=next_input(next_input(source)).model_copy(update={"predecessor_snapshot":snapshot})
+    original_members=set(snapshot.selected_members)
+    removed=max(original_members)
+    retained=original_members-{removed}
+    extra=next(m for m in source.spec.candidate_ids if m not in original_members)
+    changed_source=changed_source.model_copy(update={"member_windows":tuple(qualify_window(
+        w.model_copy(update={"candles":changed_source.member_windows[0].candles}),
+        w.exchange_instrument_id in retained or w.exchange_instrument_id==extra)
+        for w in changed_source.member_windows)})
+    changed=compute_generic_selection(changed_source)
+    assert len(changed.selected_members)==len(snapshot.selected_members)
+    assert set(changed.selected_members)&original_members==retained
+    assert set(changed.selected_members)-original_members=={extra}
+    assert changed.effective_from_ms==recovery.expires_at_ms
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(changed,decision_at_ms=changed_source.decision_at_ms,
+            source_observed_at_ms=changed_source.source_observed_at_ms)
+    request=CoordinateGenericSnapshotRequest(selection_snapshot_id=changed.selection_snapshot_id,worker_id="direct-recovery-successor")
+    now=changed.effective_from_ms+1
+    async def tick(at):
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at)):
+            return await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda:at)
+    for offset in range(8):
+        result=await tick(now+offset)
+        if result.disposition is MaterializationDisposition.TARGET_WARMING: break
+    assert result.disposition is MaterializationDisposition.TARGET_WARMING,result
+    async with PostgresKernelUnitOfWork(database) as uow:
+        targets=await uow.strategy_universes.get_generation_universe_targets(result.materialization_generation_id)
+        before=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    assert before.authority==recovery and len(targets)==1
+    target=targets[0].universe_version_id
+    await make_warming_ready(database,universe_version_id=target,warm_closed_bar_time_ms=changed.effective_from_ms,valid_until_ms=now+HOUR)
+    template=mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
+    shift=changed.effective_from_ms-template.trigger_candle_close_time_ms
+    candles=tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+    projection=build_comparative_universe_projection(event_spec_id=source.spec.event_spec_id,
+        universe_version_id=target,strategy_group_id=group,exchange_instrument_ids=source.spec.candidate_ids,
+        closed_bar_time_ms=changed.effective_from_ms,lookback_bars=8 if group=="MPG-001" else 12,freshness_window_ms=HOUR,
+        member_windows=tuple(ComparativeMemberWindow(exchange_instrument_id=m,candles_1h=candles) for m in source.spec.candidate_ids))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.strategy_universes.save_comparative_projection(projection)
+    assert (await tick(now+10)).disposition is MaterializationDisposition.GENERATION_STAGED
+    await database.dispose()
+    from src.trading_kernel.infrastructure.pg_universe_repository import (
+        PostgresStrategyUniverseRepository,
+        UniverseInstallConflict,
+    )
+    original_activate=PostgresStrategyUniverseRepository.try_activate
+    async def drift_checkpoint_at_activation(repo,activation_request):
+        if activation_request.operation is UniverseActivationOperation.ACTIVATE_GENERIC:
+            await repo._connection.execute(sa.text("UPDATE brc_exposure_episode_current "
+                "SET authority_recovery_revision=authority_recovery_revision+1 WHERE episode_domain_key=:key"),
+                {"key":next(cursor.episode_domain_key for cursor in recovery.recovery_proof.observation_cursors
+                    if cursor.exchange_instrument_id in retained)})
+        return await original_activate(repo,activation_request)
+    with (patch.object(PostgresStrategyUniverseRepository,"try_activate",new=drift_checkpoint_at_activation),
+          pytest.raises(UniverseInstallConflict,match="GENERIC_RECOVERY_SUCCESSOR_NOT_INSTALLED")):
+        await tick(now+11)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        assert (await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)).authority==recovery
+        assert (await uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id)).lifecycle_state.value=='STAGED'
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+12)):
+        outcomes=await asyncio.gather(*(coordinate_selection_materialization_once(
+            uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request.model_copy(update={"worker_id":f"direct-concurrent-{index}"}),
+            clock_ms=lambda:now+12) for index in range(2)))
+    assert all(r.disposition is MaterializationDisposition.ACTIVE_NEW for r in outcomes),outcomes
+    assert outcomes[0].selection_authority_id==outcomes[1].selection_authority_id
+    activated=outcomes[0]
+    repeated=await tick(now+13)
+    assert repeated.selection_authority_id==activated.selection_authority_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current=await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert current.authority.selection_snapshot_id==changed.selection_snapshot_id
+        assert current.authority.event_binding.universe_version_id==target
+        assert current.authority.first_eligible_close_time_ms==changed.effective_from_ms
+        assert current.authority.continued_from_recovery_authority_id is None
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=source.spec.selection_spec_id) is None
