@@ -30,7 +30,7 @@ continue concurrently across independent Netting Domains.
 
 | Area | Directly verified state |
 | --- | --- |
-| Snapshot time | 2026-10-15 09:19–09:21 Asia/Shanghai; current PostgreSQL paired identity/Authority and systemd/journal reads; software release evidence retained |
+| Snapshot time | 2026-10-15 09:19–09:23 Asia/Shanghai; current PostgreSQL paired identity/Authority and systemd/journal reads; software release evidence retained |
 | Integration branch | `dev` |
 | Production commit | `b8e82fb6b6dc24fdce36c845ac491b801fe561e5` |
 | Production tag | `tokyo-runtime-2026.10.15.1`, annotated exact runtime tag created and pushed to origin |
@@ -59,8 +59,7 @@ PostgreSQL and exchange remain runtime authority.
 | Strategy | Current Selection control | Actual acceptance |
 | --- | --- | --- |
 | SOR-1H-001 | Dynamic, original epoch, no pending mode; enabled | Paired v2 Universe/ACTIVE_NEW Authority exact takeover PASS09:12:35 |
-| MPG / MI / BRF2 | Original Dynamic mode and epoch retained | Current ACTIVE_NEW Authorities and latest ACTIVE Generations recovered after Owner Resume |
-| CPM | Original Dynamic mode and epoch retained | Latest Generation MATERIALIZING at09:19; warming/recovery still pending, no current Authority claimed |
+| CPM / MPG / MI / BRF2 | Original Dynamic mode and epoch retained | All four current ACTIVE_NEW Authorities recovered; CPM latest Authority committed09:22:04.378 after warming |
 | SOR-001 | Permanently retired for new ENTRY | Historical Universe retained; never resumed by this release |
 
 ## Repair Evidence
@@ -116,7 +115,8 @@ The Owner completed genuine new SOR-1H enable/Dynamic controls and global
 ENTRY Resume through the Console; Policy24 supersedes the earlier paused
 maintenance posture. Official Entry promotion and real paired Dynamic takeover
 are complete. The SOR deployment monitor must not redeploy completed software.
-Natural lifecycle evidence and remaining CPM recovery are separate acceptance;
+Natural lifecycle evidence remains separate acceptance; Generic recovery
+also completed with CPM current Authority at09:22:04.378.
 protected future Owner changes retain their normal authentication requirements.
 The Owner subsequently required joint release with BRC-RECON-RELIABILITY-01:
 reconciliation expedite fairness, Universe lock ordering, superseded
