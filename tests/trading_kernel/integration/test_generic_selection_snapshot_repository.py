@@ -14168,20 +14168,26 @@ async def test_efficiency_active_runtime_sql_and_authority_drift(database, monke
     from src.trading_kernel.interfaces import (
         selection_runtime_worker as current_runtime,
     )
-    from tests.trading_kernel.support.efficiency_baseline import load_baseline
+    from tests.trading_kernel.support.efficiency_baseline import (
+        benchmark_variants,
+        load_baseline,
+    )
 
     source, _snapshot, _generation, _uid = await _exercise_generic_generation(
         database, 'CPM-RO-001', False, durable=True, first_activation=True, natural_selection=True)
     async with PostgresKernelUnitOfWork(database) as uow:
         current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
         now = current.authority.effective_from_ms + 1
-    baseline = load_baseline('src/trading_kernel/interfaces/selection_runtime_worker.py', 'baseline_selection_runtime')
-    baseline_app = load_baseline('src/trading_kernel/application/coordinate_selection_materialization.py', 'baseline_coordinate')
-    # Keep the same request classes so isinstance dispatch selects the same branch.
-    for name in ('CoordinateGenericGenerationRequest', 'CoordinateGenericPeriodRequest',
-                 'CoordinateGenericSnapshotRequest', 'CoordinateGenericStaticRequest'):
-        setattr(baseline, name, getattr(baseline_app, name))
-    baseline.coordinate_selection_materialization_once = baseline_app.coordinate_selection_materialization_once
+    modules = [current_runtime]
+    if True in benchmark_variants():
+        baseline = load_baseline('src/trading_kernel/interfaces/selection_runtime_worker.py', 'baseline_selection_runtime')
+        baseline_app = load_baseline('src/trading_kernel/application/coordinate_selection_materialization.py', 'baseline_coordinate')
+        # Keep the same request classes so isinstance dispatch selects the same branch.
+        for name in ('CoordinateGenericGenerationRequest', 'CoordinateGenericPeriodRequest',
+                     'CoordinateGenericSnapshotRequest', 'CoordinateGenericStaticRequest'):
+            setattr(baseline, name, getattr(baseline_app, name))
+        baseline.coordinate_selection_materialization_once = baseline_app.coordinate_selection_materialization_once
+        modules.insert(0, baseline)
     rows = []
     sql = []
     def capture(_conn, _cursor, statement, _params, _context, _many):
@@ -14189,7 +14195,7 @@ async def test_efficiency_active_runtime_sql_and_authority_drift(database, monke
     sa.event.listen(database.sync_engine, 'before_cursor_execute', capture)
     try:
         with patch.object(PostgresInstrumentSelectionRepository, 'read_authority_clock_ms', new=AsyncMock(return_value=now)):
-            for module in (baseline, current_runtime):
+            for module in modules:
                 count = 0
                 original = module.coordinate_selection_materialization_once
                 async def coordinate(_original=original, **kwargs):
@@ -14207,11 +14213,14 @@ async def test_efficiency_active_runtime_sql_and_authority_drift(database, monke
                                 selection_spec_id=source.spec.selection_spec_id, worker_id='efficiency', now_ms=now),
                             clock_ms=lambda:now))
                     assert {r.selection_authority_id for r in results} == {current.authority.selection_authority_id}
-                    assert {r.status.value for r in results} == ({'advanced'} if module is baseline else {'unchanged'})
+                    assert {r.status.value for r in results} == ({'unchanged'} if module is current_runtime else {'advanced'})
                     assert not any(s.lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')) for s in sql)
-                    rows.append({'baseline': module is baseline, 'ticks': 5, 'coordinator_calls': count, 'sql': len(sql)})
-            assert rows[1]['coordinator_calls'] == 5 < rows[0]['coordinator_calls']
-            assert rows[1]['sql'] < rows[0]['sql']
+                    rows.append({'baseline': module is not current_runtime, 'ticks': 5, 'coordinator_calls': count, 'sql': len(sql)})
+            assert rows[-1]['coordinator_calls'] == 5
+            assert rows[-1]['sql'] <= 130
+            if len(rows) == 2:
+                assert rows[-1]['coordinator_calls'] < rows[0]['coordinator_calls']
+                assert rows[-1]['sql'] < rows[0]['sql']
             print('EFFICIENCY_PG ' + json.dumps(rows))
             with patch.object(PostgresInstrumentSelectionRepository, 'read_authority_clock_ms',
                               new=AsyncMock(return_value=current.authority.expires_at_ms)):

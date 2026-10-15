@@ -473,8 +473,6 @@ async def run_materialization_runtime_once(
         )
     if result.reason_code in {"TERMINAL_AUTHORITY_ALREADY_COMMITTED", "OWNER_PAUSED_NO_CHANGE"}:
         status = MaterializationRuntimeStatus.UNCHANGED
-    elif result.reason_code == "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED":
-        status = MaterializationRuntimeStatus.WAITING
     elif result.disposition is MaterializationDisposition.BLOCKED:
         status = MaterializationRuntimeStatus.BLOCKED
     elif result.disposition in {
@@ -578,14 +576,22 @@ async def _run_generic_materialization_runtime_once(
     result=await coordinate_selection_materialization_once(uow_factory=uow_factory,request=step,clock_ms=clock_ms)
     if result.reason_code in {"TERMINAL_AUTHORITY_ALREADY_COMMITTED", "OWNER_PAUSED_NO_CHANGE"}:
         status = MaterializationRuntimeStatus.UNCHANGED
-    elif result.reason_code == "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED":
-        status = MaterializationRuntimeStatus.WAITING
     elif result.disposition is MaterializationDisposition.BLOCKED:
         status=MaterializationRuntimeStatus.BLOCKED
-    elif result.disposition in {MaterializationDisposition.NOT_DUE,MaterializationDisposition.WAITING_SELECTION,
-        MaterializationDisposition.WAITING_VACUUM,MaterializationDisposition.GENERATION_LEASE_HELD,
-        MaterializationDisposition.TARGET_WARMING,MaterializationDisposition.KEEP_STATIC_PENDING_DYNAMIC}:
-        status=MaterializationRuntimeStatus.WAITING
+    # Only the unfenced Desired path is ordinary waiting. Snapshot proof and
+    # STAGED activation return BLOCKED for this same reason and must stay noisy.
+    elif (
+        result.disposition is MaterializationDisposition.GENERATION_DESIRED
+        and result.reason_code == "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED"
+    ) or result.disposition in {
+        MaterializationDisposition.NOT_DUE,
+        MaterializationDisposition.WAITING_SELECTION,
+        MaterializationDisposition.WAITING_VACUUM,
+        MaterializationDisposition.GENERATION_LEASE_HELD,
+        MaterializationDisposition.TARGET_WARMING,
+        MaterializationDisposition.KEEP_STATIC_PENDING_DYNAMIC,
+    }:
+        status = MaterializationRuntimeStatus.WAITING
     else:
         status=MaterializationRuntimeStatus.ADVANCED
     return MaterializationRuntimeResult(status=status,period_anchor_ms=cutoff,disposition=result.disposition,

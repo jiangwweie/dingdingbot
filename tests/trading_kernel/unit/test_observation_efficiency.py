@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from src.trading_kernel.interfaces import observation_worker as observation
 from src.trading_kernel.interfaces import worker_process as process
+from tests.trading_kernel.support.efficiency_baseline import benchmark_variants
 
 
 class Result(BaseModel):
@@ -114,7 +115,14 @@ async def test_shadow_priority_claim_is_bounded_and_falls_back_to_observation(mo
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('active', [False, True])
-async def test_active_generation_routes_directly_but_first_activation_keeps_continuity(monkeypatch, active):
+@pytest.mark.parametrize('disposition,reason,expected_status', [
+    ('ACTIVE_NEW', None, 'advanced'),
+    ('GENERATION_DESIRED', 'GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED', 'waiting'),
+    ('BLOCKED', 'GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED', 'blocked'),
+])
+async def test_active_generation_routes_directly_but_first_activation_keeps_continuity(
+    monkeypatch, active, disposition, reason, expected_status,
+):
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateGenericGenerationRequest,
         CoordinateGenericPeriodRequest,
@@ -148,19 +156,34 @@ async def test_active_generation_routes_directly_but_first_activation_keeps_cont
     calls = []
     async def coordinate(**kwargs):
         calls.append(kwargs['request'])
-        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
-            reason_code='TERMINAL_AUTHORITY_ALREADY_COMMITTED' if active else None)
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition(disposition),
+            reason_code=('TERMINAL_AUTHORITY_ALREADY_COMMITTED' if active and reason is None else reason))
     monkeypatch.setattr(worker, 'coordinate_selection_materialization_once', coordinate)
     result = await worker.run_materialization_runtime_once(uow_factory=Uow, audit_source=None,
         request=worker.SelectionRuntimeRequest(strategy_group_id=spec.strategy_group_id, selection_spec_id=spec.selection_spec_id,
             worker_id='test', now_ms=101*3_600_000+1), clock_ms=lambda:101*3_600_000+1)
     assert [type(call) for call in calls] == ([CoordinateGenericGenerationRequest] if active else
         [CoordinateGenericPeriodRequest, CoordinateGenericSnapshotRequest])
-    assert result.status.value == ('unchanged' if active else 'advanced')
+    assert result.status.value == ('unchanged' if active and reason is None else expected_status)
+    # The same consumed-close reason must not hide a Coordinator BLOCKED result.
+    stop = asyncio.Event()
+    monkeypatch.setattr(process, '_shutdown_event', lambda: stop)
+    ticks = 0
+    logs = []
+    async def tick():
+        nonlocal ticks
+        ticks += 1
+        if ticks == 3:
+            stop.set()
+        return result
+    await process.run_worker_process_group((process.WorkerProcessLoop('materialization', tick, 1,
+        frozenset({'not_due', 'waiting', 'unchanged'})),), run_forever=True,
+        idle_log_interval_ms=300_000, emit=logs.append)
+    assert len(logs) == (3 if result.status.value in {'advanced', 'blocked'} else 1)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('baseline', [True, False])
+@pytest.mark.parametrize('baseline', benchmark_variants())
 @pytest.mark.parametrize('service_ms', [100, 1500])
 async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, service_ms):
     import scripts.trading_kernel.run_observation_worker_once as current_script
@@ -221,6 +244,10 @@ async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, ser
     if not baseline:
         assert sum(r.prefer_shadow for r in requests[:9]) == 1
         assert shadows[0] < completed[-1]
+        # Release regression budgets are independent of a historical checkout.
+        assert completed[100] <= (81_300 if service_ms == 100 else 449_500)
+        assert shadows[0] <= (5_900 if service_ms == 100 else 33_500)
+        assert len(requests) == 121
     metrics = {'baseline': baseline, 'service_ms': service_ms,
         'scope_p50_ms': completed[52], 'scope_p95_ms': completed[100], 'scope_max_ms': completed[-1],
         'shadow_first_ms': shadows[0], 'shadow_p95_ms': shadows[-1], 'task_calls': len(requests),
@@ -229,7 +256,7 @@ async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, ser
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('baseline', [True, False])
+@pytest.mark.parametrize('baseline', benchmark_variants())
 async def test_repeated_materialization_log_volume(monkeypatch, baseline):
     from tests.trading_kernel.support.efficiency_baseline import load_baseline
     runner = load_baseline('src/trading_kernel/interfaces/worker_process.py', 'baseline_log_process') if baseline else process
@@ -254,3 +281,25 @@ async def test_repeated_materialization_log_volume(monkeypatch, baseline):
         frozenset({'unchanged'})),), run_forever=True, idle_log_interval_ms=300_000, emit=logs.append)
     assert len(logs) == (150 if baseline else 2)
     print('EFFICIENCY_LOG ' + json.dumps({'baseline': baseline, 'ticks': calls, 'logs': len(logs)}))
+
+
+def test_release_benchmark_does_not_load_historical_git(monkeypatch):
+    from tests.trading_kernel.support import efficiency_baseline
+
+    monkeypatch.delenv('BRC_OBS_HISTORICAL_BENCHMARK', raising=False)
+    def forbidden(*_, **__):
+        raise AssertionError('release regression must not query historical Git')
+    monkeypatch.setattr(efficiency_baseline.subprocess, 'run', forbidden)
+    assert efficiency_baseline.benchmark_variants() == (False,)
+    with pytest.raises(RuntimeError, match='requires BRC_OBS_HISTORICAL_BENCHMARK=1'):
+        efficiency_baseline.load_baseline('unused', 'unused')
+
+
+def test_explicit_historical_experiment_fails_clearly_when_baseline_missing(monkeypatch):
+    from tests.trading_kernel.support import efficiency_baseline
+
+    monkeypatch.setenv('BRC_OBS_HISTORICAL_BENCHMARK', '1')
+    monkeypatch.setattr(efficiency_baseline.subprocess, 'run', lambda *_, **__: SimpleNamespace(returncode=128))
+    assert efficiency_baseline.benchmark_variants() == (True, False)
+    with pytest.raises(RuntimeError, match='requires Git baseline de73f279'):
+        efficiency_baseline.load_baseline('unused', 'unused')

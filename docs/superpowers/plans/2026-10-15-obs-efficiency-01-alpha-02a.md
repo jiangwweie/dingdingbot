@@ -39,7 +39,8 @@ Schema 变更，需单独实现、验收与停止/平仓/前向迁移门槛。�
 - 已暂停且本轮无需清理/推进的结果用 `OWNER_PAUSED_NO_CHANGE`。真正创建暂停 Authority、
   放弃 Generation、执行 drain 的结果仍保留进展；错误及认证异常不纳入 idle。
 - `GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED` 的应用 disposition 保持原样；worker 将它
-  归入 waiting，下一次仍重读数据库，不缓存关闭时间或授权事实。
+  仅在 disposition=GENERATION_DESIRED 时归入 waiting；Snapshot/STAGED 的 BLOCKED 保持
+  blocked，每次都输出。下一次仍重读数据库，不缓存关闭时间或授权事实。
 - 对 ready Job 的精确 ACTIVE Generation，在无 unfinished Generation、Vacuum、pending
   mode 时直接进入 Generation 协调。内部仍重新校验权限；与 Owner 操作竞态时不能获得
   新权限。没有新增 Repository 查询语义、SQL 写入或锁顺序。
@@ -99,12 +100,14 @@ SQL 结果只代表**精确 ACTIVE 快路**，不外推到所有状态。额外�
 复现命令（仓库 `.venv`，默认本地 disposable PostgreSQL）：
 
 ```bash
-.venv/bin/pytest -q -s tests/trading_kernel/unit/test_observation_efficiency.py
-.venv/bin/pytest -q -s tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py -k efficiency
+BRC_OBS_HISTORICAL_BENCHMARK=1 .venv/bin/pytest -q -s tests/trading_kernel/unit/test_observation_efficiency.py
+BRC_OBS_HISTORICAL_BENCHMARK=1 .venv/bin/pytest -q -s tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py -k efficiency
 .venv/bin/pytest -q tests/trading_kernel/integration/test_shadow_outcome_projection.py -k fair_shadow
 ```
 
-基线 loader 只在测试中读取上述精确 Git commit；两版使用相同数据库和当前未变更的
+基线 loader 仅在显式设置 BRC_OBS_HISTORICAL_BENCHMARK=1 的历史实验中读取上述精确 Git
+commit；缺少对象时报清晰错误，不联网、不自动跳过。普通测试/正式 R3 始终执行当前实现的
+延迟/调用/SQL 预算、日志、安全断言，完全不读取旧 Git 对象。两版比较使用相同数据库和当前未变更的
 Repository/Schema。基线 coordinator 同时加载，避免将新 reason code 混入旧版本。
 生产模块不读取 Git、文件或测试报告。
 
@@ -280,5 +283,24 @@ Admission/Signal 边界产生；不能用当前 Owner 状态回填历史样本�
 
 167 项集成运行早于最后补充的 Shadow 三项和日志分类断言；随后相关定向复核独立通过，
 不把重跑数量累加为不重复测试数。最终 Unit/Architecture 覆盖最后的认证日志分类变更。
-Mypy 的既存测试类型债务是发布门槛的明确限制；本轮没有弱化类型检查或修改无关测试消除数字。
+正式 R3 的 Mypy 命令是 `.venv/bin/mypy src/trading_kernel scripts/trading_kernel`，
+合并前复核执行 PASS（196 文件）。上表无参数全库 Mypy 的 1,398 个既存测试类型错误
+是独立口径，不是正式 R3 类型检查失败；未修改检查范围或无关测试消除数字。
 未新增服务、未改 CPU/内存/策略/预算/退出参数、未迁移生产、未执行交易所写操作。
+
+
+## 合并前审查收尾
+
+- 检查全部三处 consumed-close 返回：未建围栏的 Desired 等待；Snapshot NO_CHANGE
+  授权证明失败和 STAGED 激活证明失败仍是 BLOCKED。仅修正日志状态映射，不改 Coordinator、
+  Authority、Lease 或恢复规则。
+- 回归同时覆盖首次进展/重复 ACTIVE、Desired waiting、Snapshot/Generation blocked，
+  并经过实际常驻日志循环验证：相同 waiting 节流，blocked 连续三次均输出。
+- 正式 R3 不把旧版本 Python 模块当作认证依赖。历史 A/B 由显式环境开关启用；默认对当前
+  实现始终检查同一 workload 的完成延迟上限、Shadow 机会、121 次调用、5 次协调/不超过
+  130 条 SQL、零写入、过期/Owner 变化及日志数量。没有用 pytest skip 隐藏缺失历史。
+- 正式认证必须在 clean exact candidate 上执行
+  `.venv/bin/python scripts/trading_kernel/certify_release_candidate.py --release-level R3`；
+  结果以该 SHA 的 `.git/brc-release-certifications/<SHA>.json` 和本轮原始日志为准。
+  定向结果不替代认证；本节不预先声明正式 R3 PASS。
+- ALPHA-02A 设计范围未扩展，生产部署、策略/资金/授权/服务器资源不在本轮动作内。
