@@ -124,9 +124,13 @@ async def _run(args: argparse.Namespace) -> int:
             cast(PublicMarketSource, source)
         )
 
+        observations_since_shadow = 0
+
         async def observation_tick():
+            nonlocal observations_since_shadow
+            prefer_shadow = observations_since_shadow >= 8
             now_ms = args.now_ms or int(time.time() * 1_000)
-            return await run_observation_worker_once(
+            result = await run_observation_worker_once(
                 uow_factory,
                 cast(PublicMarketSource, source),
                 ObservationWorkerRequest(
@@ -137,8 +141,15 @@ async def _run(args: argparse.Namespace) -> int:
                     lease_until_ms=now_ms + args.lease_ms,
                     timeout_seconds=args.timeout_seconds,
                     retry_interval_ms=args.retry_interval_ms,
+                    prefer_shadow=prefer_shadow,
                 ),
             )
+
+            if prefer_shadow or result.shadow_outcome_id is not None:
+                observations_since_shadow = 0
+            if result.runtime_scope_id is not None:
+                observations_since_shadow += 1
+            return result
 
         async def selection_tick(strategy_group_id=SOR_STRATEGY_GROUP_ID,selection_spec_id=_SELECTION_SPEC_ID):
             now_ms = args.now_ms or int(time.time() * 1_000)
@@ -197,7 +208,7 @@ async def _run(args: argparse.Namespace) -> int:
                 WorkerProcessLoop(component_id=f"{selection_worker_id}:{group}",tick=generic_selection_tick,
                     poll_interval_ms=args.selection_poll_interval_ms,idle_statuses=frozenset({"not_due","not_installed","already_ready"})),
                 WorkerProcessLoop(component_id=f"{materialization_worker_id}:{group}",tick=generic_materialization_tick,
-                    poll_interval_ms=args.materialization_poll_interval_ms,idle_statuses=frozenset({"not_due","waiting"})),
+                    poll_interval_ms=args.materialization_poll_interval_ms,idle_statuses=frozenset({"not_due","waiting","unchanged"})),
                 WorkerProcessLoop(component_id=f"{args.worker_id}:facts:{group}",tick=current_facts_tick,
                     poll_interval_ms=args.poll_interval_ms,idle_statuses=frozenset({"no_work"})),
             ))
@@ -214,13 +225,16 @@ async def _run(args: argparse.Namespace) -> int:
                     component_id=materialization_worker_id,
                     tick=materialization_tick,
                     poll_interval_ms=args.materialization_poll_interval_ms,
-                    idle_statuses=frozenset({"not_due", "waiting"}),
+                    idle_statuses=frozenset({"not_due", "waiting", "unchanged"}),
                 ),
                 WorkerProcessLoop(
                     component_id=args.worker_id,
                     tick=observation_tick,
                     poll_interval_ms=args.poll_interval_ms,
                     idle_statuses=frozenset({"no_work"}),
+                    burst_statuses=frozenset({"observed", "shadow_completed"}),
+                    max_burst_ticks=8,
+                    max_burst_ms=2_000,
                 ),
             ),
             run_forever=True,

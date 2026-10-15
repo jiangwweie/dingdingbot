@@ -44,6 +44,9 @@ from src.trading_kernel.application.run_instrument_selection import (
     RunInstrumentSelectionRequest,
     run_instrument_selection_once,
 )
+from src.trading_kernel.domain.generic_materialization import (
+    GenericMaterializationGeneration,
+)
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS
 from src.trading_kernel.domain.orb_session_selection import (
@@ -53,6 +56,7 @@ from src.trading_kernel.domain.orb_session_selection import (
 )
 from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationClaimStatus,
+    MaterializationGenerationState,
     SelectionMode,
 )
 
@@ -72,6 +76,7 @@ class SelectionRuntimeStatus(StrEnum):
 class MaterializationRuntimeStatus(StrEnum):
     NOT_DUE = "not_due"
     ADVANCED = "advanced"
+    UNCHANGED = "unchanged"
     WAITING = "waiting"
     BLOCKED = "blocked"
 
@@ -466,7 +471,11 @@ async def run_materialization_runtime_once(
             authority_gap_audit_id=result.authority_gap_audit_id,
             clock_ms=clock_ms,
         )
-    if result.disposition is MaterializationDisposition.BLOCKED:
+    if result.reason_code in {"TERMINAL_AUTHORITY_ALREADY_COMMITTED", "OWNER_PAUSED_NO_CHANGE"}:
+        status = MaterializationRuntimeStatus.UNCHANGED
+    elif result.reason_code == "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED":
+        status = MaterializationRuntimeStatus.WAITING
+    elif result.disposition is MaterializationDisposition.BLOCKED:
         status = MaterializationRuntimeStatus.BLOCKED
     elif result.disposition in {
         MaterializationDisposition.NOT_DUE,
@@ -526,9 +535,22 @@ async def _run_generic_materialization_runtime_once(
             control.selection_mode is SelectionMode.DYNAMIC_SELECTION or first_pending_due):
             job=await uow.instrument_selection.get_selection_job(selection_spec_id=request.selection_spec_id,
                 selection_epoch_id=control.selection_epoch_id,period_anchor_ms=cutoff)
+    # An exact ACTIVE generation has already crossed this Snapshot's boundary.
+    # Its coordinator still rechecks Owner, Control, current Authority, clock and
+    # Universe. Avoid the redundant continuity and Snapshot dispatch transactions.
+    active_generation_id = None
+    if (job is not None and job.state == "SNAPSHOT_READY" and job.selection_snapshot_id is not None
+        and vacuum is None and generation is None and control.pending_selection_mode is None):
+        candidate_id = GenericMaterializationGeneration.id_for_snapshot(job.selection_snapshot_id)
+        async with uow_factory() as uow:
+            candidate = await uow.instrument_selection.get_generic_materialization_generation(candidate_id)
+        if candidate is not None and candidate.lifecycle_state is MaterializationGenerationState.ACTIVE:
+            active_generation_id = candidate_id
     step: CoordinateGenericStaticRequest | CoordinateGenericSnapshotRequest | CoordinateGenericGenerationRequest | CoordinateGenericPeriodRequest
     if control.pending_selection_mode is SelectionMode.STATIC_BASELINE:
         step=CoordinateGenericStaticRequest(strategy_group_id=request.strategy_group_id,worker_id=request.worker_id)
+    elif active_generation_id is not None:
+        step=CoordinateGenericGenerationRequest(materialization_generation_id=active_generation_id,worker_id=request.worker_id)
     elif job is not None and job.state=="SNAPSHOT_READY" and job.selection_snapshot_id is not None:
         # Continuity is independent of the Selector and precedes disposition.
         if control.selection_mode is SelectionMode.DYNAMIC_SELECTION:
@@ -540,8 +562,9 @@ async def _run_generic_materialization_runtime_once(
                 async with uow_factory() as uow:
                     latest=await uow.instrument_selection.get_generic_snapshot(job.selection_snapshot_id)
                 if latest.selected_members:
-                    return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.WAITING,period_anchor_ms=cutoff,
-                        disposition=continuity.disposition,reason_code=continuity.reason_code)
+                    return MaterializationRuntimeResult(status=(MaterializationRuntimeStatus.BLOCKED
+                        if continuity.reason_code.startswith("CERTIFICATION") else MaterializationRuntimeStatus.WAITING),
+                        period_anchor_ms=cutoff,disposition=continuity.disposition,reason_code=continuity.reason_code)
         step=CoordinateGenericSnapshotRequest(selection_snapshot_id=job.selection_snapshot_id,worker_id=request.worker_id)
     elif generation is not None:
         step=CoordinateGenericGenerationRequest(materialization_generation_id=generation.materialization_generation_id,worker_id=request.worker_id)
@@ -553,7 +576,11 @@ async def _run_generic_materialization_runtime_once(
     else:
         return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.NOT_DUE,reason_code="GENERIC_PENDING_PERIOD_NOT_DUE")
     result=await coordinate_selection_materialization_once(uow_factory=uow_factory,request=step,clock_ms=clock_ms)
-    if result.disposition is MaterializationDisposition.BLOCKED:
+    if result.reason_code in {"TERMINAL_AUTHORITY_ALREADY_COMMITTED", "OWNER_PAUSED_NO_CHANGE"}:
+        status = MaterializationRuntimeStatus.UNCHANGED
+    elif result.reason_code == "GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED":
+        status = MaterializationRuntimeStatus.WAITING
+    elif result.disposition is MaterializationDisposition.BLOCKED:
         status=MaterializationRuntimeStatus.BLOCKED
     elif result.disposition in {MaterializationDisposition.NOT_DUE,MaterializationDisposition.WAITING_SELECTION,
         MaterializationDisposition.WAITING_VACUUM,MaterializationDisposition.GENERATION_LEASE_HELD,

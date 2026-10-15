@@ -187,6 +187,7 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
     class Repo:
         async def get_selection_control(self,*_): return control
         async def get_generic_spec(self,*_): return spec
+        async def get_generic_materialization_generation(self,*_): return None
         async def get_latest_unfinished_generic_generation(self,**_):
             return SimpleNamespace(materialization_generation_id="generation:original-first") if late_first_pending else None
         async def get_current_entry_vacuum(self,**_): return None
@@ -238,7 +239,7 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(mon
     async def observe(*args):
         calls.append(("observation",None))
         observation.set()
-        return SimpleNamespace(status="no_work")
+        return SimpleNamespace(status="no_work", shadow_outcome_id=None, runtime_scope_id=None)
     async def group(loops,**kwargs):
         assert len({loop.component_id for loop in loops})==len(loops)
         await asyncio.gather(*(loop.tick() for loop in loops))
@@ -286,6 +287,7 @@ async def test_generic_readonly_separates_latest_success_age_from_membership_sou
         async def get_generic_spec(self,*_): return spec
         async def get_selection_control(self,*_): return control
         async def get_latest_generic_snapshot(self,*_,**__): return SimpleNamespace(selection_snapshot_id="snapshot:new",feature_cutoff_at_ms=100*3600000,committed_at_ms=100*3600000+1,ready_count=1,selected_members=("member",))
+        async def get_generic_materialization_generation(self,*_): return None
         async def get_latest_unfinished_generic_generation(self,**_): return None
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=SimpleNamespace(membership_freshness=fresh,selection_authority_id="authority:old",authority_outcome="PRE_FENCE_CONTINUITY"))
         async def get_current_entry_vacuum(self,**_): return None
@@ -329,6 +331,7 @@ async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defe
         async def get_generic_spec(self,*_): return spec
         async def get_selection_control(self,*_): return control
         async def get_latest_generic_snapshot(self,*_,**__): return None
+        async def get_generic_materialization_generation(self,*_): return None
         async def get_latest_unfinished_generic_generation(self,**_): return None
         async def get_current_generic_authority(self,*_): return SimpleNamespace(authority=authority)
         async def get_current_entry_vacuum(self,**_): return None
@@ -358,7 +361,8 @@ async def test_generic_status_does_not_show_clear_when_authority_is_invalid(defe
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("valid_empty",[False,True])
-async def test_materialization_waits_for_current_facts_before_fencing_ready_snapshot(monkeypatch,valid_empty):
+@pytest.mark.parametrize("reason",["WARM_READINESS_STALE","CERTIFICATION_STALE","CERTIFICATION_TEMPORARILY_UNAVAILABLE"])
+async def test_materialization_waits_for_current_facts_before_fencing_ready_snapshot(monkeypatch,valid_empty,reason):
     from src.trading_kernel.application.coordinate_selection_materialization import (
         CoordinateSelectionMaterializationResult,
         MaterializationDisposition,
@@ -371,6 +375,7 @@ async def test_materialization_waits_for_current_facts_before_fencing_ready_snap
     class Repo:
         async def get_generic_spec(self,*_): return spec
         async def get_selection_control(self,*_): return control
+        async def get_generic_materialization_generation(self,*_): return None
         async def get_latest_unfinished_generic_generation(self,**_): return None
         async def get_current_entry_vacuum(self,**_): return None
         async def get_selection_job(self,**_): return SimpleNamespace(state="SNAPSHOT_READY",selection_snapshot_id="ready:snapshot")
@@ -382,14 +387,14 @@ async def test_materialization_waits_for_current_facts_before_fencing_ready_snap
     calls=[]
     async def coordinator(**kwargs):
         calls.append(kwargs["request"])
-        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,reason_code="WARM_READINESS_STALE")
+        return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,reason_code=reason)
     monkeypatch.setattr("src.trading_kernel.interfaces.selection_runtime_worker.coordinate_selection_materialization_once",coordinator)
     result=await run_materialization_runtime_once(uow_factory=Uow,audit_source=SimpleNamespace(),
         request=SelectionRuntimeRequest(strategy_group_id="MI-001",selection_spec_id=spec.selection_spec_id,worker_id="waiting",
             now_ms=100*3600000+8),clock_ms=lambda:100*3600000+8)
     assert len(calls)==(2 if valid_empty else 1)
-    assert result.status is (MaterializationRuntimeStatus.BLOCKED if valid_empty else MaterializationRuntimeStatus.WAITING)
-    assert result.reason_code=="WARM_READINESS_STALE"
+    assert result.status is (MaterializationRuntimeStatus.BLOCKED if valid_empty or reason.startswith("CERTIFICATION") else MaterializationRuntimeStatus.WAITING)
+    assert result.reason_code==reason
 
 
 @pytest.mark.asyncio

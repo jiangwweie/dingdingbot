@@ -1271,6 +1271,7 @@ async def test_owner_pause_opens_durable_entry_vacuum_before_materialization(
         clock_ms=_Clock(SESSION_START_MS + 3_600_030),
     )
     assert terminal.disposition is MaterializationDisposition.OWNER_PAUSED
+    assert terminal.reason_code == "OWNER_PAUSED_NO_CHANGE"
     assert terminal.selection_authority_id is not None
     async with head_template_engine.connect() as connection:
         owner_pause_authority = (

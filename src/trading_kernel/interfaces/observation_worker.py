@@ -49,6 +49,7 @@ class ObservationWorkerRequest(BaseModel):
     lease_until_ms: int
     timeout_seconds: float
     retry_interval_ms: int
+    prefer_shadow: bool = False
 
     @field_validator(
         "worker_id",
@@ -88,6 +89,10 @@ async def run_observation_worker_once(
     market_source: PublicMarketSource,
     request: ObservationWorkerRequest,
 ) -> ObservationWorkerResult:
+    if request.prefer_shadow:
+        shadow = await _run_one_due_shadow(uow_factory, market_source, request)
+        if shadow.status is not ObservationWorkerStatus.NO_WORK:
+            return shadow
     async with uow_factory() as uow:
         claim = await uow.signals.claim_next_observation_scope(
             worker_id=request.worker_id,
@@ -95,6 +100,8 @@ async def run_observation_worker_once(
             lease_until_ms=request.lease_until_ms,
         )
     if claim is None:
+        if request.prefer_shadow:
+            return ObservationWorkerResult(status=ObservationWorkerStatus.NO_WORK)
         return await _run_one_due_shadow(
             uow_factory,
             market_source,
@@ -196,7 +203,7 @@ async def _run_one_due_shadow(
     market_source: PublicMarketSource,
     request: ObservationWorkerRequest,
 ) -> ObservationWorkerResult:
-    """Project at most one completed read-only horizon on an idle tick."""
+    """Project at most one completed read-only horizon within the shared budget."""
 
     async with uow_factory() as uow:
         claim = await uow.shadow_outcomes.claim_one_due(

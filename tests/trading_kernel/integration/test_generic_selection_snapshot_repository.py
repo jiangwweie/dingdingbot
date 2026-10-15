@@ -13460,6 +13460,7 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
     with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=now)):
         activated = await coordinate_selection_materialization_once(uow_factory=factory, request=request, clock_ms=lambda:now)
     assert activated.disposition == MaterializationDisposition.ACTIVE_NEW, activated
+    assert activated.reason_code != "TERMINAL_AUTHORITY_ALREADY_COMMITTED"
     # Drop pooled connections, then create fresh repositories: recovery must
     # use committed facts, not objects retained by the activating transaction.
     await database.dispose()
@@ -13506,6 +13507,7 @@ async def _assert_generic_durable_activation(database, source, generation, uid, 
         repeated = await coordinate_selection_materialization_once(uow_factory=factory, request=request.model_copy(update={"worker_id":"restarted-worker"}), clock_ms=lambda:now+1)
     assert repeated.selection_authority_id == activated.selection_authority_id
     assert repeated.disposition == MaterializationDisposition.ACTIVE_NEW
+    assert repeated.reason_code == "TERMINAL_AUTHORITY_ALREADY_COMMITTED"
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid"), {"gid":generation.materialization_generation_id}) == before
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
@@ -14158,3 +14160,84 @@ async def test_paused_failed_selection_is_quiescent_without_recovery_or_entry(da
             assert await c.scalar(sa.text("SELECT row_to_json(v)::text FROM brc_strategy_entry_vacuums_current v WHERE source_generation_id=:gid"),{"gid":gid})==before
             assert await c.scalar(sa.text("SELECT new_entry_submit_enabled FROM brc_owner_policy_current")) is False
             assert await c.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+
+
+@pytest.mark.asyncio
+async def test_efficiency_active_runtime_sql_and_authority_drift(database, monkeypatch):
+    """Same durable current facts, baseline versus candidate; no cached authority."""
+    from src.trading_kernel.interfaces import (
+        selection_runtime_worker as current_runtime,
+    )
+    from tests.trading_kernel.support.efficiency_baseline import load_baseline
+
+    source, _snapshot, _generation, _uid = await _exercise_generic_generation(
+        database, 'CPM-RO-001', False, durable=True, first_activation=True, natural_selection=True)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        now = current.authority.effective_from_ms + 1
+    baseline = load_baseline('src/trading_kernel/interfaces/selection_runtime_worker.py', 'baseline_selection_runtime')
+    baseline_app = load_baseline('src/trading_kernel/application/coordinate_selection_materialization.py', 'baseline_coordinate')
+    # Keep the same request classes so isinstance dispatch selects the same branch.
+    for name in ('CoordinateGenericGenerationRequest', 'CoordinateGenericPeriodRequest',
+                 'CoordinateGenericSnapshotRequest', 'CoordinateGenericStaticRequest'):
+        setattr(baseline, name, getattr(baseline_app, name))
+    baseline.coordinate_selection_materialization_once = baseline_app.coordinate_selection_materialization_once
+    rows = []
+    sql = []
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        sql.append(statement)
+    sa.event.listen(database.sync_engine, 'before_cursor_execute', capture)
+    try:
+        with patch.object(PostgresInstrumentSelectionRepository, 'read_authority_clock_ms', new=AsyncMock(return_value=now)):
+            for module in (baseline, current_runtime):
+                count = 0
+                original = module.coordinate_selection_materialization_once
+                async def coordinate(_original=original, **kwargs):
+                    nonlocal count
+                    count += 1
+                    return await _original(**kwargs)
+                with monkeypatch.context() as scoped:
+                    scoped.setattr(module, 'coordinate_selection_materialization_once', coordinate)
+                    sql.clear()
+                    results = []
+                    for _ in range(5):
+                        results.append(await module.run_materialization_runtime_once(
+                            uow_factory=lambda: PostgresKernelUnitOfWork(database), audit_source=None,
+                            request=module.SelectionRuntimeRequest(strategy_group_id=source.spec.strategy_group_id,
+                                selection_spec_id=source.spec.selection_spec_id, worker_id='efficiency', now_ms=now),
+                            clock_ms=lambda:now))
+                    assert {r.selection_authority_id for r in results} == {current.authority.selection_authority_id}
+                    assert {r.status.value for r in results} == ({'advanced'} if module is baseline else {'unchanged'})
+                    assert not any(s.lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')) for s in sql)
+                    rows.append({'baseline': module is baseline, 'ticks': 5, 'coordinator_calls': count, 'sql': len(sql)})
+            assert rows[1]['coordinator_calls'] == 5 < rows[0]['coordinator_calls']
+            assert rows[1]['sql'] < rows[0]['sql']
+            print('EFFICIENCY_PG ' + json.dumps(rows))
+            with patch.object(PostgresInstrumentSelectionRepository, 'read_authority_clock_ms',
+                              new=AsyncMock(return_value=current.authority.expires_at_ms)):
+                expired = await current_runtime.run_materialization_runtime_once(
+                    uow_factory=lambda: PostgresKernelUnitOfWork(database), audit_source=None,
+                    request=current_runtime.SelectionRuntimeRequest(strategy_group_id=source.spec.strategy_group_id,
+                        selection_spec_id=source.spec.selection_spec_id, worker_id='efficiency', now_ms=now), clock_ms=lambda:now)
+                assert expired.status.value == 'blocked'
+                assert expired.reason_code == 'GENERIC_ACTIVE_AUTHORITY_CHANGED'
+            # A changed Owner version is re-read on the very next tick.
+            from src.trading_kernel.application.owner_control import (
+                set_strategy_entry_state,
+            )
+            from src.trading_kernel.domain.owner_control import StrategyEntryState
+            async with PostgresKernelUnitOfWork(database) as uow:
+                owner = await uow.owner_controls.get_strategy_control(source.spec.strategy_group_id)
+                await set_strategy_entry_state(uow, strategy_group_id=source.spec.strategy_group_id,
+                    target_state=StrategyEntryState.PAUSED,
+                    request=ControlMutationRequest(expected_version=owner.control_version, reason='efficiency regression',
+                        idempotency_key='efficiency-pause', owner_identity='owner', now_ms=now+1),
+                    authentication_strength='totp_step_up')
+            paused = await current_runtime.run_materialization_runtime_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), audit_source=None,
+                request=current_runtime.SelectionRuntimeRequest(strategy_group_id=source.spec.strategy_group_id,
+                    selection_spec_id=source.spec.selection_spec_id, worker_id='efficiency', now_ms=now+2), clock_ms=lambda:now+2)
+            assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
+            assert paused.selection_authority_id != current.authority.selection_authority_id
+    finally:
+        sa.event.remove(database.sync_engine, 'before_cursor_execute', capture)

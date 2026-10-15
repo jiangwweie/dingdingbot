@@ -547,7 +547,8 @@ async def coordinate_selection_materialization_once(
                     committed_static = await uow.instrument_selection.get_generic_static_activation_proof_for_universe(current_static.universe_version_id)
                     if committed_static is not None and committed_static.result_selection_control_version==control.control_version:
                         return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
-                            materialization_generation_id=committed_static.materialization_generation_id)
+                            materialization_generation_id=committed_static.materialization_generation_id,
+                            reason_code="TERMINAL_AUTHORITY_ALREADY_COMMITTED")
             if control is None or control.pending_selection_mode is not SelectionMode.STATIC_BASELINE or (
                 control.pending_effective_period_anchor_ms is None):
                 return _blocked("GENERIC_STATIC_OWNER_INTENT_MISSING")
@@ -832,7 +833,9 @@ async def coordinate_selection_materialization_once(
                 == owner_control.control_version
             ):
                 pause_authority = current_authority.authority
+                pause_unchanged = generation is None and vacuum is not None and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
             else:
+                pause_unchanged = False
                 pause_authority = _build_owner_paused_authority(
                     selection_spec_id=spec.selection_spec_id,
                     session_start_ms=request.session_start_ms,
@@ -865,7 +868,7 @@ async def coordinate_selection_materialization_once(
                     None if vacuum is None else vacuum.source_generation_id
                 ),
                 entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
-                reason_code="OWNER_PAUSE_PRECEDES_MATERIALIZATION",
+                reason_code="OWNER_PAUSED_NO_CHANGE" if pause_unchanged else "OWNER_PAUSE_PRECEDES_MATERIALIZATION",
             )
         if (
             vacuum is None
@@ -1491,7 +1494,8 @@ async def _coordinate_generic_period(*, uow_factory: UnitOfWorkFactory,
         if prior.period==period:
             if prior.authority_outcome=="PRE_FENCE_CONTINUITY":
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.PRE_FENCE_CONTINUITY,
-                    selection_authority_id=prior.selection_authority_id)
+                    selection_authority_id=prior.selection_authority_id,
+                    reason_code="TERMINAL_AUTHORITY_ALREADY_COMMITTED")
             return _blocked("GENERIC_CONTINUITY_PERIOD_ALREADY_MATERIALIZED")
         source_fresh = (prior.recovery_proof.membership_freshness if isinstance(prior,GenericRecoveryAuthority)
             else prior.membership_freshness)
@@ -1580,7 +1584,7 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                 return _blocked("MATERIALIZATION_CONTROL_MISSING")
             if owner.entry_state is StrategyEntryState.PAUSED:
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
-                    selection_snapshot_id=snapshot.selection_snapshot_id)
+                    selection_snapshot_id=snapshot.selection_snapshot_id,reason_code="OWNER_PAUSED_NO_CHANGE")
             control = await uow.instrument_selection.get_selection_control(snapshot.strategy_group_id,for_update=True)
             if control is None or control.selection_spec_id != snapshot.selection_spec_id:
                 return _blocked("GENERIC_SELECTION_CONTROL_CHANGED")
@@ -1681,7 +1685,8 @@ async def _coordinate_generic_snapshot(*, uow_factory: UnitOfWorkFactory,
                         or prior.authority.selection_control_version != control.control_version):
                         return _blocked("GENERIC_NO_CHANGE_AUTHORITY_STALE")
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.NO_CHANGE,
-                        selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=prior.authority.selection_authority_id)
+                        selection_snapshot_id=snapshot.selection_snapshot_id,selection_authority_id=prior.authority.selection_authority_id,
+                        reason_code="TERMINAL_AUTHORITY_ALREADY_COMMITTED")
                 certified = await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=current.universe_version_id,
                     attempted_at_ms=now,operation=UniverseActivationOperation.CERTIFY_CURRENT))
                 if certified.status is not UniverseActivationStatus.ALREADY_ACTIVE:
@@ -1848,8 +1853,10 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.WAITING_VACUUM,
                 materialization_generation_id=initial.materialization_generation_id,entry_vacuum_id=vacuum.entry_vacuum_id,reason_code="OWNER_PAUSE_DEFERRED_CLEANUP")
         if owner.entry_state is StrategyEntryState.PAUSED:
+            pause_changed = False
             if initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED,
                 MaterializationGenerationState.DRAINING_ENTRY,MaterializationGenerationState.MATERIALIZING,MaterializationGenerationState.STAGED}:
+                pause_changed = True
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
                 if vacuum is None and initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}:
@@ -1872,10 +1879,12 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                     strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
                 if vacuum is not None and vacuum.source_generation_id in {None,initial.materialization_generation_id} and (
                     vacuum.state is StrategyEntryVacuumState.DRAINING_ENTRY and vacuum.first_blocker=="OWNER_PAUSED"):
+                    pause_changed = True
                     await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
                         strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,now_ms=now_ms))
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.OWNER_PAUSED,
-                materialization_generation_id=initial.materialization_generation_id)
+                materialization_generation_id=initial.materialization_generation_id,
+                reason_code=None if pause_changed else "OWNER_PAUSED_NO_CHANGE")
         if initial.lifecycle_state is MaterializationGenerationState.ABANDONED:
             vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                 strategy_group_id=initial.strategy_group_id,selection_spec_id=initial.selection_spec_id,for_update=True)
@@ -1957,7 +1966,8 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 return _blocked("GENERIC_ACTIVE_UNIVERSE_CHANGED")
             return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.ACTIVE_NEW,
                 selection_authority_id=committed.authority.selection_authority_id,selection_snapshot_id=initial.selection_snapshot_id,
-                materialization_generation_id=initial.materialization_generation_id)
+                materialization_generation_id=initial.materialization_generation_id,
+                reason_code="TERMINAL_AUTHORITY_ALREADY_COMMITTED")
         if initial.lifecycle_state in {MaterializationGenerationState.PENDING,MaterializationGenerationState.DESIRED}:
             spec=await uow.instrument_selection.get_generic_spec(initial.selection_spec_id)
             if now_ms>=initial.period_anchor_ms+(1+spec.cadence_hours)*HOUR_MS:

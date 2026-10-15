@@ -20,10 +20,15 @@ class WorkerProcessLoop:
     tick: Callable[[], Awaitable[BaseModel]]
     poll_interval_ms: int
     idle_statuses: frozenset[str]
+    burst_statuses: frozenset[str] = frozenset()
+    max_burst_ticks: int = 1
+    max_burst_ms: int = 1
 
     def __post_init__(self) -> None:
         if not self.component_id.strip():
             raise ValueError("worker component identity must be non-blank")
+        if self.max_burst_ticks <= 0 or self.max_burst_ms <= 0:
+            raise ValueError("worker burst bounds must be positive")
         if self.poll_interval_ms <= 0:
             raise ValueError("worker component poll interval must be positive")
 
@@ -126,22 +131,33 @@ async def run_worker_process_group(
 
     async def run_component(item: WorkerProcessLoop) -> None:
         last_idle_log_ms: int | None = None
+        last_payload: dict[str, object] | None = None
+        burst_ticks = 0
+        burst_started_ms = time.monotonic_ns() // 1_000_000
         while not stop.is_set():
+            continue_burst = False
             try:
                 result = await item.tick()
                 status = _status_value(result)
                 monotonic_ms = time.monotonic_ns() // 1_000_000
-                should_emit = status not in item.idle_statuses or (
+                payload = result.model_dump(mode="json")
+                should_emit = status not in item.idle_statuses or payload != last_payload or (
                     last_idle_log_ms is None
                     or monotonic_ms - last_idle_log_ms >= idle_log_interval_ms
                 )
                 if should_emit:
-                    payload = result.model_dump(mode="json")
-                    payload["component_id"] = item.component_id
-                    output(json.dumps(payload, ensure_ascii=False))
+                    output(json.dumps({**payload, "component_id": item.component_id}, ensure_ascii=False))
                     if status in item.idle_statuses:
                         last_idle_log_ms = monotonic_ms
+                last_payload = payload
+                burst_ticks += 1
+                continue_burst = (
+                    status in item.burst_statuses
+                    and burst_ticks < item.max_burst_ticks
+                    and monotonic_ms - burst_started_ms < item.max_burst_ms
+                )
             except Exception as exc:  # noqa: BLE001 - isolate one logical loop.
+                last_payload = None
                 trace = exc.__traceback__
                 while trace is not None and trace.tb_next is not None:
                     trace = trace.tb_next
@@ -161,12 +177,20 @@ async def run_worker_process_group(
                         ensure_ascii=False,
                     )
                 )
+            if stop.is_set():
+                return
+            if continue_burst:
+                # Serial work only; yield to Selection and other resident loops.
+                await asyncio.sleep(0)
+                continue
+            burst_ticks = 0
             try:
                 await asyncio.wait_for(
                     stop.wait(),
                     timeout=item.poll_interval_ms / 1_000,
                 )
             except TimeoutError:
+                burst_started_ms = time.monotonic_ns() // 1_000_000
                 continue
 
     tasks=tuple(asyncio.create_task(run_component(item)) for item in loops)

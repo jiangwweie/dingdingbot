@@ -730,3 +730,58 @@ class _FakeMarketSource:
     async def fetch_closed_candles(self, request):
         self.requests.append(request)
         return ()
+
+
+@pytest.mark.asyncio
+async def test_fair_shadow_turn_keeps_real_postgres_claim_exclusive(shadow_engine):
+    """Two resident contenders cannot fetch/project the same research sample."""
+    import asyncio
+
+    spec = _spec()
+    async with PostgresKernelUnitOfWork(shadow_engine) as uow:
+        await uow.shadow_outcomes.add_pending(spec)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    class Source(_RecordingMarketSource):
+        async def fetch_closed_candles(self, request):
+            entered.set()
+            await release.wait()
+            return await super().fetch_closed_candles(request)
+    source = Source(shadow_engine)
+    request = _worker_request(now_ms=spec.horizon_end_ms).model_copy(update={
+        'prefer_shadow': True, 'lease_until_ms': spec.horizon_end_ms+30_000})
+    first = asyncio.create_task(run_observation_worker_once(
+        lambda: PostgresKernelUnitOfWork(shadow_engine), source, request))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        second = await run_observation_worker_once(lambda: PostgresKernelUnitOfWork(shadow_engine), source,
+            request.model_copy(update={'worker_id': 'second'}))
+        assert second.status is ObservationWorkerStatus.NO_WORK
+    finally:
+        release.set()
+        result = await first
+    assert result.status is ObservationWorkerStatus.SHADOW_COMPLETED
+    assert len(source.requests) == 1 and source.checked_transaction_boundary
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('failure', ['timeout', 'network'])
+async def test_fair_shadow_source_failure_preserves_retry_and_then_completes(shadow_engine, failure):
+    import asyncio
+
+    spec = _spec()
+    async with PostgresKernelUnitOfWork(shadow_engine) as uow:
+        await uow.shadow_outcomes.add_pending(spec)
+    class Source:
+        async def fetch_closed_candles(self, _):
+            if failure == 'network':
+                raise ConnectionError('unavailable')
+            await asyncio.Event().wait()
+    request = _worker_request(now_ms=spec.horizon_end_ms).model_copy(update={
+        'prefer_shadow': True, 'timeout_seconds': .01, 'lease_until_ms': spec.horizon_end_ms+30_000})
+    result = await run_observation_worker_once(lambda: PostgresKernelUnitOfWork(shadow_engine), Source(), request)
+    assert result.status is ObservationWorkerStatus.SHADOW_RETRY_SCHEDULED
+    assert result.detail == ('TimeoutError' if failure == 'timeout' else 'ConnectionError')
+    completed = await run_observation_worker_once(lambda: PostgresKernelUnitOfWork(shadow_engine),
+        _RecordingMarketSource(shadow_engine), request.model_copy(update={'timeout_seconds': 1}))
+    assert completed.status is ObservationWorkerStatus.SHADOW_COMPLETED
