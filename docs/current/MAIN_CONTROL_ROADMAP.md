@@ -48,14 +48,14 @@ continue concurrently across independent Netting Domains.
 | Dynamic Selection postflight | Ten current Universe pointers/member manifests, Dynamic history, typed ExitProfile bindings, Owner/Selection controls and terminal lineage preserved through stopped and running target postflight. Fresh current member certifications32 over106 active scopes; official PG/exchange postflight PASS |
 | MPG state |22:00 recovery consumed and ARMED14/14 scopes. A later23:00 NO_CHANGE Authority was effective and Readiness signal_absent14/14; no Signal required to prove recovery. Future current-period authority still requires fresh runtime evidence |
 | MI state | Owner Resume is verified, but business recovery is not complete. New Generation `generation:24c10ffe57027b12b11021c4aca5d3d2440ce163fe4f172ff7e32b63a3ff608a` ACTIVE at00:01:58.108; target Universe v38 active/warmed16/16 and original Vacuum RESOLVED_ACTIVE. Current Recovery Authority `authority:recovery:a11cda8f4b9ab248caeccbc671d5fb4772b9753f047bb56406eba090ce16d722` matches Owner control3, effective/first eligible01:00 and expires02:00. At00:03 Readiness16/16 selection_recovery_not_effective; real new ENTRY remains blocked pending the01:00 legal recovery close/rebase. This is not full business-readiness acceptance |
-| Research collection | Schema0012 installed `generic_signal_path_v1` disabled, daily_limit0, control_version1. No prospective collection enabled; any quota/start remains a separate Owner decision |
+| Research collection | Owner separately approved initial collection. Official `configure_research_collection.py` enabled `generic_signal_path_v1` at2026-10-16 00:20:42.864 Asia/Shanghai, control_version1→2, daily_limit50 shared by CPM/MPG/MI/BRF2/SOR-1H per UTC day. Audited Owner identity/reason persisted. At00:23 collected0, no daily coverage row yet, research failures0; no collected-result acceptance claimed. MI recovery is independent. ENTRY/Strategy/Selection/Authority/risk-profile digests unchanged across enablement; four Workers healthy. One-hour and24/48-hour readonly follow-up configured; no automatic quota expansion |
 | SOR retirement | Crypto `SOR-001` remains permanently ENTRY-disabled; neither global nor MI Resume grants it permission |
 
 Sources: `.local/alpha-ab-mpg-r4-3c4760e3/` holds exact local R4/R2 manifests
 and complete certification log. `.local/alpha-ab-mpg-production-3c4760e3/`
 holds official deployment/API/promotion logs, stopped source baseline, exact
 Compatibility Fact, terminal closure, four Worker identities, research controls
-and fresh postflight/MI recovery samples. Generated evidence is display-only;
+and fresh postflight/MI recovery samples. `.local/alpha-02a-research-enable-50/` holds the separate research Owner authorization audit, control readback, before/after trading-authority digests, coverage/error/resource and Worker checks. Generated evidence is display-only;
 action-time PG/exchange/systemd facts remain authoritative.
 
 ### Current Dynamic acceptance boundary
@@ -112,7 +112,7 @@ then generic ALPHA-02 path Observation, then evidence-driven strategy iteration.
 ALPHA-02 design may proceed alongside natural SOR-1H evidence accumulation;
 profitability is not a prerequisite to designing evidence collection. Prefer
 reuse of existing SOR-US Signal-owned paths; preserve Shadow/real-PnL and Owner
-Regime/maintenance-pause boundaries. ALPHA-02A and OBS-EFFICIENCY-01 are deployed with MPG recovery after exact combined R4 and the preservation-gated0012 upgrade. Research collection remains disabled/daily_limit0; bounded prospective collection still requires a separate Owner decision.
+Regime/maintenance-pause boundaries. ALPHA-02A and OBS-EFFICIENCY-01 are deployed with MPG recovery after exact combined R4 and the preservation-gated0012 upgrade. The Owner subsequently approved bounded initial prospective collection50/UTC day through the official research-only control; further quota changes remain separately authorized. Initial samples are quota-limited and must disclose skipped_budget rather than represent a complete Signal population.
 Local parameter tuning is deferred; console redesign and USDC adaptation remain
 separate backlog. Research does not change capital, exits, selection or scope.
 
