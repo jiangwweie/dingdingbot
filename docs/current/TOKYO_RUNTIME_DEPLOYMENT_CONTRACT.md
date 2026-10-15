@@ -148,6 +148,16 @@ current Lifecycle worker remains the sole exchange writer.
 
 ## Deployment Model
 
+Before an R3/R4 release, consult the
+[joint-release retrospective](../releases/2026-10-15-brc-joint-release-retrospective.md)
+for the minimal reference checklist: complete database-writer inventory,
+readonly advisory preflight, affected R3/R4 paths before candidate freeze,
+and separate Software/Entry/Authority/Natural Lifecycle evidence. This is
+experience guidance, not a new approval system, runtime input or engineering
+program. Current Owner decisions, code and fresh machine/database/exchange
+facts remain authoritative. Prioritize only the observed writer-inventory and
+preflight gaps; retain already implemented proofs, ordering and bounded output.
+
 Tokyo runs committed releases only. Local SSH is the control plane; ad hoc
 server source edits are forbidden. Production workers are persistent systemd
 services with bounded polling, restart-on-failure, and a shared resource slice.
@@ -175,11 +185,15 @@ re-run the complete suite merely because an external fact, a closed bar, or
 flatness is still pending. A fix creates a new exact candidate and therefore
 one new certification, rather than repeatedly certifying an unchanged commit.
 
-After a normal switch, Observation, Lifecycle, and Reconciliation start first.
-Readonly database and exchange certification repeats against the target
-release. Entry starts last only when explicitly requested and every postflight
-gate passes. A failure after service stop writes the Entry fence and restores
-the three safety workers for fix-forward recovery.
+After a normal same-schema switch, Lifecycle and Reconciliation refresh current
+certifications while Observation remains stopped. Verify preserved history and
+controls before starting Selection-capable Observation; then refresh running
+identity, controls, membership and readonly database/exchange safety facts.
+Compatible upgrades likewise verify stopped cutover preservation before
+starting Selection-capable workers. Entry restoration remains a separate
+official promotion after current Owner authority and postflight gates pass.
+A failure after service stop writes the Entry fence and restores the safety
+workers only through the applicable fix-forward recovery path.
 
 ## Owner-Facing Release Progress
 

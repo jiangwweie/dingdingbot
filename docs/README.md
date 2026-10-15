@@ -40,6 +40,17 @@ Universe membership, capital authority, implementation status, and deployment
 state continue to come from code, PostgreSQL, exchange facts, and
 `MAIN_CONTROL_ROADMAP.md`.
 
+## Release Experience Reference
+
+[BRC joint-release retrospective](releases/2026-10-15-brc-joint-release-retrospective.md)
+records the code defects, process omissions and legitimate waits from the joint
+release. It provides a minimal future R3/R4 reference checklist and prioritizes
+complete writer inventory and readonly preflight. It is a one-time experience
+record, not current runtime authority or a new engineering program; the
+[deployment contract](current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md) remains the
+procedure authority. Natural trading validation and ALPHA-02 remain the main
+program direction.
+
 ## Generic Selection Implementation And Evidence
 
 [Generic Multi-Strategy Dynamic Selection V1 detailed design](superpowers/specs/2026-09-06-generic-multi-strategy-dynamic-selection-v1-design.md)
