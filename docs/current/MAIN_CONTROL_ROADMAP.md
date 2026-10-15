@@ -26,11 +26,11 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
-### SOR-1H and reconciliation reliability software release complete; Dynamic activation pending
+### SOR-1H and reconciliation reliability software release and paired Dynamic takeover complete
 
 | Area | Directly verified state |
 | --- | --- |
-| Snapshot time | 2026-10-15 00:04–00:08 Asia/Shanghai; official release output and bounded fresh PostgreSQL/systemd/journal reads |
+| Snapshot time | 2026-10-15 09:19–09:21 Asia/Shanghai; current PostgreSQL paired identity/Authority and systemd/journal reads; software release evidence retained |
 | Integration branch | `dev` |
 | Production commit | `b8e82fb6b6dc24fdce36c845ac491b801fe561e5` |
 | Production tag | `tokyo-runtime-2026.10.15.1`, annotated exact runtime tag created and pushed to origin |
@@ -38,28 +38,29 @@ continue concurrently across independent Netting Domains.
 | Kernel / schema | Official same-schema regular release PASS, `entry_enabled=false`; Alembic/runtime `0011_orb_session_1h_v1`; Kernel/API/static now use the same exact deployed commit |
 | Seed / Registry | Seed `sha256:98e0fe3c28c4f7dad37c96a5a63ca2be91ec38b4ccca8be791b8325f41366522`; source preservation and exact target gates PASS |
 | Source migration | Earlier `0009_capacity_policy_v0`→0010 original Dynamic intent repair is retained. Stopped0010→0011 source preservation verified39,669 source rows. Original c06 cutover completed migration/identity but its postflight was BLOCKED by target Selection preparation; the successor official regular release resolved final software acceptance without rewriting source evidence |
-| Owner controls | Policy version `23` has `new_entry_submit_enabled=false`; original capital/risk boundary retained. Existing four strategy controls and original Generic intent/negative fences preserved |
-| Runtime ownership | Observation, Lifecycle and Reconciliation active, all NRestarts0 at the post-release check; Entry inactive/disabled/write-fenced. No Entry promoter or Owner Resume occurred |
+| Owner controls | Policy version `24` has `new_entry_submit_enabled=true`; genuine Owner Resume/TOTP committed; new SOR enabled/control2 and original four strategy controls retained. Capital/risk unchanged |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation active, all NRestarts0; official promoter returned `promoted` after current Owner Resume and fresh gates; operational fence removed through the official tool |
 | Owner API / Console | Exact R2 API and R1 static official deployment/smoke PASS, maintenance window ended |
-| New SOR-1H pair | Official independent bootstrap complete for LONG/SHORT, two current Active Universes with fourteen warmed member-direction scopes. New strategy control paused/version1; Selection `static_baseline`, no pending mode, no epoch |
-| Dynamic Selection postflight | New SOR-1H has no real Dynamic Universe/Authority takeover yet; first protected enable/Selection controls require genuine Owner TOTP. Chat deployment authorization is retained and must not be replaced by another deployment confirmation request |
-| Trading facts | Official cutover external flat/order-free gates PASS; fresh post-release active Ticket/position/command/Incident counts all zero; no release-owned order dispatched |
-| Readiness |32/32 current certification and10 Active Universes passed immediately before release. Latest running readiness is false after ordinary target cadence resumes; the earlier snapshot is not reusable as later ENTRY authority |
+| New SOR-1H pair | LONG/SHORT current Universes both v2, lifecycle active and source_kind dynamic_selection; both bind `generation:orb:4e68414fccc69bc644058f9972cd995741e5cc79569068860d5e533bca4ec2c7`. Selection dynamic_selection, no pending mode; selected7 from24 candidates/23Ready |
+| Dynamic Selection postflight | Real paired takeover PASS at09:12:35.050; Authority `selection-authority:SOR_1H_OR_ATR_DYNAMIC_V1:1792022400000:1` ACTIVE_NEW binds original TOTP authorization `owner-authorization:a741b7fd8b174bf5973d965e3b27ff90`, exact epoch, Snapshot and paired Generation. First eligible close10:00; expires2026-10-16 08:00 Asia/Shanghai |
+| Trading facts | Official cutover external flat/order-free gates PASS; prior post-release activity counts were zero. After Owner Resume normal runtime may create in-scope exposure; this snapshot does not claim ongoing flatness or a natural SOR Ticket |
+| Readiness |Owner Resume promotion refreshed current readiness and exchange facts. Generic materialization can temporarily occupy warming and change global maintenance readiness; action-time trading gates remain mandatory |
 | ExitProfile postflight | Existing frozen exits retained; independent new Events use the established Crypto15m exit bindings. No exit/stop/strategy sizing change |
 | SOR retirement | Old `SOR-001` remains paused/version6 and permanently ENTRY-disabled; TradFi remains paused |
-| Remaining evidence | Genuine new strategy/Selection authentication, real paired Dynamic takeover and natural lifecycle evidence. Software release does not claim profitability, a natural Ticket or long-run soak |
+| Remaining evidence | Natural SOR-1H signal/Ticket and protected full lifecycle evidence remain unclaimed; software and real paired Dynamic takeover are complete. Profitability and long-run soak remain unclaimed |
 
 Sources: `.local/sor1h-final-regular-deployment.log`, exact certification
 manifests, official API/static release logs, official bootstrap completion,
-fresh PostgreSQL/systemd and bounded journals. Generated output is display-only;
+fresh PostgreSQL/systemd and bounded journals, original TOTP control lineage and official Entry promotion. Generated output is display-only;
 PostgreSQL and exchange remain runtime authority.
 
 ### Current Dynamic acceptance boundary
 
 | Strategy | Current Selection control | Actual acceptance |
 | --- | --- | --- |
-| SOR-1H-001 | Static baseline, no epoch or pending mode; paused | Independent pair prepared; first genuine Dynamic authorization/takeover pending |
-| CPM / MPG / MI / BRF2 | Original Dynamic mode and epoch retained | Historical failed recovery fences preserved; mode alone does not prove current Universe/Authority takeover |
+| SOR-1H-001 | Dynamic, original epoch, no pending mode; enabled | Paired v2 Universe/ACTIVE_NEW Authority exact takeover PASS09:12:35 |
+| MPG / MI / BRF2 | Original Dynamic mode and epoch retained | Current ACTIVE_NEW Authorities and latest ACTIVE Generations recovered after Owner Resume |
+| CPM | Original Dynamic mode and epoch retained | Latest Generation MATERIALIZING at09:19; warming/recovery still pending, no current Authority claimed |
 | SOR-001 | Permanently retired for new ENTRY | Historical Universe retained; never resumed by this release |
 
 ## Repair Evidence
@@ -111,11 +112,12 @@ Regime/maintenance-pause boundaries. Detailed implementation remains unstarted.
 Local parameter tuning is deferred; console redesign and USDC adaptation remain
 separate backlog. Research does not change capital, exits, selection or scope.
 
-The latest Owner instruction authorizes joint repair deployment and new SOR-1H
-Dynamic intent without repeated deployment confirmation, while explicitly
-keeping ENTRY paused. The active monitoring task continues only the remaining
-control/real-Dynamic acceptance; it must not redeploy the completed software.
-Genuine protected Owner authentication remains mandatory. Keep new ENTRY paused.
+The Owner completed genuine new SOR-1H enable/Dynamic controls and global
+ENTRY Resume through the Console; Policy24 supersedes the earlier paused
+maintenance posture. Official Entry promotion and real paired Dynamic takeover
+are complete. The SOR deployment monitor must not redeploy completed software.
+Natural lifecycle evidence and remaining CPM recovery are separate acceptance;
+protected future Owner changes retain their normal authentication requirements.
 The Owner subsequently required joint release with BRC-RECON-RELIABILITY-01:
 reconciliation expedite fairness, Universe lock ordering, superseded
 certification Claim handling and minimal stagnation visibility. Repair and exact
