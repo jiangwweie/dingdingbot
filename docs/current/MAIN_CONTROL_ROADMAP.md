@@ -26,41 +26,43 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
-### SOR-1H and reconciliation reliability software release and paired Dynamic takeover complete
+### MPG recovery R3 software release complete; genuine Owner ENTRY Resume verified
 
 | Area | Directly verified state |
 | --- | --- |
-| Snapshot time | 2026-10-15 09:19–09:23 Asia/Shanghai; current PostgreSQL paired identity/Authority and systemd/journal reads; software release evidence retained |
+| Snapshot time | 2026-10-15 20:48–21:00 Asia/Shanghai; official regular deployment, exact markers/PG identity, four Worker process identities, API health and exchange readonly facts |
 | Integration branch | `dev` |
-| Production commit | `b8e82fb6b6dc24fdce36c845ac491b801fe561e5` |
-| Production tag | `tokyo-runtime-2026.10.15.1`, annotated exact runtime tag created and pushed to origin |
-| Production-commit certification | Exact R3/R2/R1 PASS: 1,681 Unit/Architecture, 1,693 Integration, 58 Full-chain; Ruff, Mypy196 and diff PASS. Earlier exact c06 R4 covered the0010→0011 migration; it is not claimed as b8 certification |
-| Kernel / schema | Official same-schema regular release PASS, `entry_enabled=false`; Alembic/runtime `0011_orb_session_1h_v1`; Kernel/API/static now use the same exact deployed commit |
-| Seed / Registry | Seed `sha256:98e0fe3c28c4f7dad37c96a5a63ca2be91ec38b4ccca8be791b8325f41366522`; source preservation and exact target gates PASS |
-| Source migration | Earlier `0009_capacity_policy_v0`→0010 original Dynamic intent repair is retained. Stopped0010→0011 source preservation verified39,669 source rows. Original c06 cutover completed migration/identity but its postflight was BLOCKED by target Selection preparation; the successor official regular release resolved final software acceptance without rewriting source evidence |
-| Owner controls | Policy version `24` has `new_entry_submit_enabled=true`; genuine Owner Resume/TOTP committed; new SOR enabled/control2 and original four strategy controls retained. Capital/risk unchanged |
-| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation active, all NRestarts0; official promoter returned `promoted` after current Owner Resume and fresh gates; operational fence removed through the official tool |
-| Owner API / Console | Exact R2 API and R1 static official deployment/smoke PASS, maintenance window ended |
-| New SOR-1H pair | LONG/SHORT current Universes both v2, lifecycle active and source_kind dynamic_selection; both bind `generation:orb:4e68414fccc69bc644058f9972cd995741e5cc79569068860d5e533bca4ec2c7`. Selection dynamic_selection, no pending mode; selected7 from24 candidates/23Ready |
-| Dynamic Selection postflight | Real paired takeover PASS at09:12:35.050; Authority `selection-authority:SOR_1H_OR_ATR_DYNAMIC_V1:1792022400000:1` ACTIVE_NEW binds original TOTP authorization `owner-authorization:a741b7fd8b174bf5973d965e3b27ff90`, exact epoch, Snapshot and paired Generation. First eligible close10:00; expires2026-10-16 08:00 Asia/Shanghai |
-| Trading facts | Official cutover external flat/order-free gates PASS; prior post-release activity counts were zero. After Owner Resume normal runtime may create in-scope exposure; this snapshot does not claim ongoing flatness or a natural SOR Ticket |
-| Readiness |Owner Resume promotion refreshed current readiness and exchange facts. Generic materialization can temporarily occupy warming and change global maintenance readiness; action-time trading gates remain mandatory |
-| ExitProfile postflight | Existing frozen exits retained; independent new Events use the established Crypto15m exit bindings. No exit/stop/strategy sizing change |
-| SOR retirement | Old `SOR-001` remains paused/version6 and permanently ENTRY-disabled; TradFi remains paused |
-| Remaining evidence | Natural SOR-1H signal/Ticket and protected full lifecycle evidence remain unclaimed; software and real paired Dynamic takeover are complete. Profitability and long-run soak remain unclaimed |
+| Production commit | `e7f86acf1287a0cb395702331add1cd9f5354d2d` |
+| Production tag | `tokyo-runtime-2026.10.15.2`, immutable annotated tag pushed to origin at the exact production SHA |
+| Production-commit certification | Exact R3 PASS: 1,681 Unit/Architecture, 1,695 Integration, 58 Full-chain; Ruff, Mypy196 and diff PASS. Four existing periodic-resource cases are excluded by the formal portfolio, not claimed PASS. Total certification3653.140s |
+| Kernel / schema | Official regular R3 deployment PASS in199853ms, `entry_enabled=false`; Alembic/runtime `0011_orb_session_1h_v1`; no migration, no A+B deployment or research enablement |
+| Source migration | Earlier `0009_capacity_policy_v0`→0010→0011 lineage retained. This MPG regular release changes only code identity and performs no DDL or data backfill |
+| Seed / preservation | Seed `sha256:98e0fe3c28c4f7dad37c96a5a63ca2be91ec38b4ccca8be791b8325f41366522` retained; official source/target and running postflight preservation PASS for Universe/Authority/Owner controls/terminal lineage |
+| Owner controls | Policy version `26` has `new_entry_submit_enabled=true`; genuine Owner Web Resume/TOTP verified after the maintenance pause at Policy25. Deployment preserved controls; strategy, capital/risk and Dynamic authorizations were not changed |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation active/enabled, NRestarts0; each process environment identifies exact e7f86acf/0011. Official promotion preparation returned `prepared_owner_paused`; operational fence removed while paused; later genuine Owner Resume/TOTP at Policy26 restored new-entry permission |
+| Owner API / Console | Owner API stopped only for final flat write-quiescent cutover, then restarted; `/healthz` returns ok. Existing compatible API/static release retained; no frontend/API release performed |
+| Controlled closure | Owner used Web controlled exit for BRF2 ADAUSDT short Ticket `ticket:254270cf7923f2adefb6b179ddc58e77`. Official cancellation/reconciliation resolved transient unknown outcome; Ticket/Aggregate terminal, budget released, domain released, Settlement/Review complete; no manual exchange write |
+| Trading facts | At20:49 and20:54: exchange positions0/orders0, pending Commands0; no active Ticket after controlled closure. This is a timestamped sample, not ongoing flatness authority |
+| ExitProfile postflight | Existing Profile/Binding authority and frozen exits preserved; no exit-policy changes or strategy parameter changes |
+| Dynamic Selection postflight | Original Selection controls and Universe/Authority lineage retained; MPG next legal takeover is not yet claimed; Owner Resume alone is not a new valid strategy Authority |
+| MPG state | Old20:00 Generation `generation:65249c7f57166cc169f5649135bb9f14d694f02c595730de432e18b70e64a52e` had already FAILED_CLOSED at20:30 before the new code was deployed. Prior recovery Authority expired20:00. Patch hash matches exact certified source; next legal runtime takeover remains unproven; a new21:00 Generation is in normal preparation and must retain valid Proof/Authority |
+| Entry restoration | Software/postflight complete; official preparation followed by genuine Owner Console Resume/TOTP restored new-entry permission. Entry active/enabled with fence absent; no synthetic authorization or agent Policy update |
+| SOR retirement | Crypto `SOR-001` remains permanently ENTRY-disabled; no strategy or Selection scope resumed by this release |
+| A+B boundary | Historical `fcea10c8` R4 PASS preserved, not deployed. MPG fix port is preparation only; new combined SHA requires its own fresh R4 before any0012 release. Research remains disabled by default |
 
-Sources: `.local/sor1h-final-regular-deployment.log`, exact certification
-manifests, official API/static release logs, official bootstrap completion,
-fresh PostgreSQL/systemd and bounded journals, original TOTP control lineage and official Entry promotion. Generated output is display-only;
-PostgreSQL and exchange remain runtime authority.
+Sources: `.local/mpg-production-e7f86acf/deployment.log`, exact R3 manifest,
+`four-worker-identity.json`, `postdeploy-safety.json`, API health and deployment
+preservation markers; `.local/mpg-r3-e7f86acf/` retains certification and earlier
+readonly samples. Generated outputs are display-only. Action-time PG/exchange/
+systemd/marker facts remain required before any later production action.
 
 ### Current Dynamic acceptance boundary
 
-| Strategy | Current Selection control | Actual acceptance |
+| Strategy | Current boundary | Remaining evidence |
 | --- | --- | --- |
-| SOR-1H-001 | Dynamic, original epoch, no pending mode; enabled | Paired v2 Universe/ACTIVE_NEW Authority exact takeover PASS09:12:35 |
-| CPM / MPG / MI / BRF2 | Original Dynamic mode and epoch retained | All four current ACTIVE_NEW Authorities recovered; CPM latest Authority committed09:22:04.378 after warming |
-| SOR-001 | Permanently retired for new ENTRY | Historical Universe retained; never resumed by this release |
+| MPG-001 | New direct-successor recovery proof guard deployed; old failed Generation retained; global ENTRY paused | Next naturally due valid Generation/Authority takeover and recovery rebase under authorized Resume |
+| CPM / MI / BRF2 / SOR-1H | Existing Universe/Authority/Selection controls preserved by exact deployment postflight; global ENTRY resumed by Owner; action-time gates still required | Fresh per-family business availability must be read at action time; service running is not activation proof |
+| SOR-001 | Permanently retired for new ENTRY | Historical Registry/Universe cannot grant resume |
 
 ## Repair Evidence
 
@@ -107,13 +109,12 @@ then generic ALPHA-02 path Observation, then evidence-driven strategy iteration.
 ALPHA-02 design may proceed alongside natural SOR-1H evidence accumulation;
 profitability is not a prerequisite to designing evidence collection. Prefer
 reuse of existing SOR-US Signal-owned paths; preserve Shadow/real-PnL and Owner
-Regime/maintenance-pause boundaries. Detailed implementation remains unstarted.
+Regime/maintenance-pause boundaries. ALPHA-02A implementation and local R4 are complete on a separate undeployed candidate; the new combined candidate still needs exact R4.
 Local parameter tuning is deferred; console redesign and USDC adaptation remain
 separate backlog. Research does not change capital, exits, selection or scope.
 
 The Owner completed genuine new SOR-1H enable/Dynamic controls and global
-ENTRY Resume through the Console; Policy24 supersedes the earlier paused
-maintenance posture. Official Entry promotion and real paired Dynamic takeover
+ENTRY Resume through the Console; Policy24 was the earlier live posture; maintenance pause at Policy25 has now been superseded by genuine Owner Resume/TOTP at Policy26. Official Entry promotion and real paired Dynamic takeover
 are complete. The SOR deployment monitor must not redeploy completed software.
 Natural lifecycle evidence remains separate acceptance; Generic recovery
 also completed with CPM current Authority at09:22:04.378.
