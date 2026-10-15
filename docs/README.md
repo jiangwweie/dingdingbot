@@ -83,6 +83,12 @@ remains owned by the Strategy Experiment Evaluation Contract.
 defines the Owner-required joint repair gate for SOR-1H release. Design is
 recorded; implementation and joint-candidate certification are not claimed.
 
+[Tokyo resource and capacity assessment](superpowers/plans/2026-10-15-tokyo-resource-capacity-assessment.md)
+records the dated readonly baseline before ALPHA-02: host and worker resource
+headroom, PostgreSQL size, Observation/Shadow scheduling costs, and bounded
+workload scenarios. It is a one-time assessment, not current runtime authority,
+a peak-load certification, or authorization to optimize or upgrade production.
+
 ## Version Nodes
 
 Project releases under `docs/releases/` are immutable publication notes, not
