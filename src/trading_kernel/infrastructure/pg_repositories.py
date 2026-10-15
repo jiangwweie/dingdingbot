@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from hashlib import sha256
 from typing import Literal, cast
@@ -1418,6 +1421,38 @@ class PostgresShadowOutcomeRepository:
 
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    @asynccontextmanager
+    async def isolate_collection(self, *, signal_event_id: str, stage: str) -> AsyncIterator[None]:
+        """Rollback optional research before recovering the outer trading transaction.
+
+        Connection loss, rollback failure and cancellation remain outer failures:
+        a savepoint cannot repair an unusable connection or guarantee its commit.
+        """
+        try:
+            async with self._connection.begin_nested():
+                previous = (await self._connection.execute(sa.text(
+                    "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')"
+                ))).one()
+                await self._connection.execute(sa.text("SET LOCAL lock_timeout='100ms'"))
+                await self._connection.execute(sa.text("SET LOCAL statement_timeout='500ms'"))
+                yield
+                await self._connection.execute(sa.text(
+                    "SELECT set_config('lock_timeout',:lock,true),set_config('statement_timeout',:statement,true)"
+                ), {"lock": previous[0], "statement": previous[1]})
+        except (ValueError, sa.exc.DBAPIError) as exc:
+            if self._connection.invalidated or not self._connection.in_transaction():
+                raise
+            # Confirm ROLLBACK TO SAVEPOINT restored usable PostgreSQL state.
+            # If recovery failed, this query raises and the outer UoW rolls back.
+            await self._connection.execute(sa.text("SELECT 1"))
+            sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+            logging.getLogger(__name__).warning(
+                "research_collection_failed signal=%s stage=%s reason=%s sqlstate=%s",
+                signal_event_id, stage, type(exc).__name__, sqlstate,
+                extra={"signal_event_id": signal_event_id, "research_stage": stage,
+                       "research_failure_reason": type(exc).__name__, "research_failure_sqlstate": sqlstate},
+            )
 
     async def add_pending(self, spec: ShadowOutcomeSpec) -> None:
         if spec.source_kind == "signal_path":

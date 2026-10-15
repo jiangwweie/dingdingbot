@@ -1647,3 +1647,55 @@ async def test_generic_signal_path_follows_official_first_signal_and_does_not_re
         assert await connection.scalar(sa.text("SELECT admitted_count FROM brc_research_collection_daily WHERE day_start_ms=:day"),
             {'day':NOW_MS//86_400_000*86_400_000})==1
         assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fault', ['builder', 'quota_update', 'shadow_insert', 'quota_lock', 'statement_timeout'])
+async def test_optional_research_failure_commits_real_signal_and_readiness(
+    observation_engine: AsyncEngine, monkeypatch, caplog, fault,
+) -> None:
+    await _seed_six_scopes(observation_engine)
+    async with observation_engine.begin() as connection:
+        await connection.execute(sa.text('UPDATE brc_research_collection_control SET enabled=true,daily_limit=2,control_version=2'))
+        if fault in {'quota_update','shadow_insert','statement_timeout'}:
+            table = 'brc_research_collection_daily' if fault == 'quota_update' else 'brc_shadow_outcomes_current'
+            action = 'UPDATE' if fault == 'quota_update' else 'INSERT'
+            body = ("PERFORM pg_sleep(2); RETURN NEW;" if fault == 'statement_timeout' else
+                    "RAISE EXCEPTION 'injected optional research failure' USING ERRCODE='23514';")
+            await connection.execute(sa.text('CREATE FUNCTION inject_research_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN '+body+' END; $$'))
+            await connection.execute(sa.text(f'CREATE TRIGGER inject_research_fault BEFORE {action} ON {table} '
+                                            'FOR EACH ROW EXECUTE FUNCTION inject_research_fault()'))
+    if fault == 'builder':
+        def broken_builder(**kwargs):
+            raise ValueError('injected optional research builder')
+        monkeypatch.setattr(observation_module,'pending_generic_signal_path_spec',broken_builder)
+    blocker = await observation_engine.connect()
+    transaction = await blocker.begin()
+    try:
+        if fault == 'quota_lock':
+            await blocker.execute(sa.text('SELECT 1 FROM brc_research_collection_control FOR UPDATE'))
+        snapshot=cpm_long_snapshot()
+        result=await asyncio.wait_for(_observe_cpm(observation_engine,snapshot,trigger_ms=NOW_MS),timeout=5)
+        assert result.status is ObservationStatus.SIGNAL_CREATED
+        # A separate committed read proves this is not uncommitted local visibility.
+        async with PostgresKernelUnitOfWork(observation_engine) as uow:
+            signal=await uow.signals.get(result.signal_event_id)
+            assert signal is not None and signal.occurred_at_ms==NOW_MS
+            assert signal.fact_digest
+        async with observation_engine.connect() as connection:
+            ready=(await connection.execute(sa.select(readiness_current).where(
+                readiness_current.c.signal_event_id==result.signal_event_id))).mappings().one()
+            assert ready['readiness_state']=='candidate_ready' and ready['first_blocker'] is None
+            assert await connection.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current))==0
+            assert await connection.scalar(sa.text('SELECT count(*) FROM brc_research_collection_daily'))==0
+            assert await connection.scalar(sa.select(sa.func.count()).select_from(admission_decisions))==0
+        warnings=[r for r in caplog.records if r.message.startswith('research_collection_failed')]
+        assert len(warnings)==1 and warnings[0].signal_event_id==result.signal_event_id
+        assert warnings[0].research_stage=='observation'
+        assert warnings[0].research_failure_reason in {'ValueError','IntegrityError','DBAPIError'}
+        assert warnings[0].research_failure_sqlstate=={
+            'builder':None,'quota_update':'23514','shadow_insert':'23514',
+            'quota_lock':'55P03','statement_timeout':'57014'}[fault]
+    finally:
+        await transaction.rollback()
+        await blocker.close()

@@ -83,7 +83,11 @@ async def read_control(args: argparse.Namespace) -> dict[str,object]:
             control=(await connection.execute(sa.select(research_collection_control))).mappings().one()
             coverage=(await connection.execute(sa.select(research_collection_daily)
                 .where(research_collection_daily.c.day_start_ms==day))).mappings().one_or_none()
-            return {"control":dict(control),"coverage":None if coverage is None else dict(coverage)}
+            return {"control":dict(control),
+                    "sample_population":"quota_limited_prospective",
+                    "coverage":None if coverage is None else {
+                        **dict(coverage),"skipped_budget":coverage["skipped_count"]},
+                    "failure_evidence":"research_collection_failed logs keyed by signal_event_id; not included in quota counts"}
     finally:
         await engine.dispose()
 

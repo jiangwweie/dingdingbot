@@ -789,10 +789,13 @@ async def observe_strategy_scope(
             ),
         )
         if (ingest_result.status is IngestSignalStatus.CANDIDATE_READY
-            and contract.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
-            and await uow.shadow_outcomes.signal_path_enabled()):
-            path = pending_generic_signal_path_spec(signal=signal,snapshot=snapshot,runtime_commit=request.runtime_commit)
-            await uow.shadow_outcomes.add_signal_path_if_enabled(path,strategy_group_id=signal.strategy_group_id)
+            and contract.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}):
+            async with uow.shadow_outcomes.isolate_collection(
+                signal_event_id=signal.signal_event_id, stage="observation",
+            ):
+                if await uow.shadow_outcomes.signal_path_enabled():
+                    path = pending_generic_signal_path_spec(signal=signal,snapshot=snapshot,runtime_commit=request.runtime_commit)
+                    await uow.shadow_outcomes.add_signal_path_if_enabled(path,strategy_group_id=signal.strategy_group_id)
         if (
             ingest_result.status
             in {

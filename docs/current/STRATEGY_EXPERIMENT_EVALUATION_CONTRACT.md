@@ -136,6 +136,19 @@ association follows the exact AdmissionDecision/Ticket and effective Review
 pointer; absent execution evidence stays unknown. Owner Regime attribution is
 outside this MVP.
 
+Optional research at Signal creation and Admission rejection runs within a
+PostgreSQL savepoint. A recoverable builder or SQL failure rolls back all research
+writes and quota changes, then verifies that the outer trading transaction is
+usable before continuing. Research SQL has a 100ms lock wait and a 500ms per
+statement limit; the outer settings are restored. Connection loss or failed
+rollback remains an outer transaction failure and cannot be treated as success.
+`research_collection_failed` logs identify each missing Signal, stage, error type
+and SQLSTATE without logging SQL values. These failures are not budget skips.
+The readonly collection report labels the population `quota_limited_prospective`
+and explicitly discloses `skipped_budget`; it must not represent its samples as
+the complete Signal population. Disabled research retains successful legacy
+rejection sampling and creates no generic samples or quota counts.
+
 This evidence is not a fill, not simulated PnL, not realized PnL, and not a
 fee, funding, or real slippage estimate. It never creates CapacityClaim,
 Reservation, Ticket, Exchange Command, or venue mutation. If real Entry is

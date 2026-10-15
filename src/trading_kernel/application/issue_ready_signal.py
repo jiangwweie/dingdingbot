@@ -574,20 +574,21 @@ async def _refuse(
             decided_at_ms=now_ms,
         )
         await uow.admission_decisions.add(decision)
-        prospective_research_enabled = (
-            signal.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
-            and await uow.shadow_outcomes.signal_path_enabled()
-        )
-        # Observation already applied the prospective quota. A refusal must not
-        # create an unbudgeted legacy sample when that quota was exhausted.
-        if admission_snapshot is not None and not prospective_research_enabled:
-            shadow = pending_shadow_spec_for_rejection(
-                decision=decision,
-                signal=signal,
-                admission_snapshot=admission_snapshot,
+        async with uow.shadow_outcomes.isolate_collection(
+            signal_event_id=signal.signal_event_id, stage="admission_rejection",
+        ):
+            prospective_research_enabled = (
+                signal.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}
+                and await uow.shadow_outcomes.signal_path_enabled()
             )
-            if shadow is not None:
-                await uow.shadow_outcomes.add_pending(shadow)
+            # Never create an unbudgeted legacy sample after quota exhaustion
+            # or when the research control read itself failed.
+            if admission_snapshot is not None and not prospective_research_enabled:
+                shadow = pending_shadow_spec_for_rejection(
+                    decision=decision, signal=signal, admission_snapshot=admission_snapshot,
+                )
+                if shadow is not None:
+                    await uow.shadow_outcomes.add_pending(shadow)
     await _block_signal(uow, signal, blocker, now_ms)
     return IssueTicketResult(status=status, ticket_id=None)
 

@@ -49,6 +49,8 @@ async def test_generic_collection_defaults_off_and_quota_is_atomic(head_template
     assert shown['control']['daily_limit']==1
     assert shown['coverage']['coverage_counts']['CPM-RO-001/01']['admitted']==1
     assert shown['coverage']['coverage_counts']['CPM-RO-001/01']['skipped']>=1
+    assert shown['coverage']['skipped_budget']==shown['coverage']['skipped_count']
+    assert shown['sample_population']=='quota_limited_prospective'
 
 
 @pytest.mark.asyncio
@@ -401,3 +403,32 @@ async def test_generic_sampling_rejects_legacy_insert_bypass_and_digest_drift(he
     async with engine.connect() as conn:
         assert await conn.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current))==1
         assert await conn.scalar(sa.text('SELECT admitted_count FROM brc_research_collection_daily'))==1
+
+
+@pytest.mark.asyncio
+async def test_research_savepoint_restores_settings_and_does_not_swallow_connection_loss(head_template_engine: AsyncEngine):
+    from src.trading_kernel.infrastructure.pg_repositories import (
+        PostgresShadowOutcomeRepository,
+    )
+    engine=head_template_engine
+    async with engine.begin() as connection:
+        repo=PostgresShadowOutcomeRepository(connection)
+        await connection.execute(sa.text("SET LOCAL lock_timeout='3s'"))
+        await connection.execute(sa.text("SET LOCAL statement_timeout='4s'"))
+        for fail in (False, True):
+            async with repo.isolate_collection(signal_event_id='signal:settings',stage='test'):
+                assert await connection.scalar(sa.text("SHOW lock_timeout"))=='100ms'
+                assert await connection.scalar(sa.text("SHOW statement_timeout"))=='500ms'
+                if fail:
+                    await connection.execute(sa.text('SELECT 1/0'))
+            assert await connection.scalar(sa.text("SHOW lock_timeout"))=='3s'
+            assert await connection.scalar(sa.text("SHOW statement_timeout"))=='4s'
+            assert await connection.scalar(sa.text('SELECT 1'))==1
+    with pytest.raises(sa.exc.DBAPIError):
+        async with engine.begin() as connection:
+            repo=PostgresShadowOutcomeRepository(connection)
+            async with repo.isolate_collection(signal_event_id='signal:connection-loss',stage='test'):
+                pid=await connection.scalar(sa.text('SELECT pg_backend_pid()'))
+                async with engine.begin() as killer:
+                    assert await killer.scalar(sa.text('SELECT pg_terminate_backend(:pid)'),{'pid':pid})
+                await connection.execute(sa.text('SELECT 1'))

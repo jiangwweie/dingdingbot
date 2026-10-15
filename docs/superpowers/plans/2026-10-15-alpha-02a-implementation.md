@@ -129,6 +129,56 @@ Full-chain使用 `.venv/bin/python -m pytest tests/trading_kernel/full_chain`。
 没有删测试、跳慢测试、全局xdist、提高资源配额或以45–60分钟作为发布门槛。
 未来只在同范围前后测量证实收益时实施，不阻塞B交付。
 
+## 合并前安全复核：研究故障与交易事务隔离
+
+第一轮审查的风险成立。对精确源提交 `5d7e740aa78b03843e5564c73ee24ed74912f61c`
+在独立本地进程和可丢弃PG中注入构造、额度UPDATE、Shadow INSERT故障后，事务提交后的
+Signal、candidate readiness、Shadow和daily行数均为0。不能把这条旧路径称为已隔离。
+
+修复只在既有Shadow Repository增加局部Savepoint端口，同时覆盖Observation中的控制读取、
+冻结与额度写入，以及Admission拒单阶段的研究开关读取与Legacy Shadow写入。正式Signal
+ingest、readiness和AdmissionDecision仍在外层交易事务，不改变其身份或判断。
+可恢复ValueError/PG语句错误先回滚Savepoint，再用SELECT 1证明外层事务可用，才继续。
+不是在已失败的PG事务中直接吞异常。连接丢失、回滚失败、取消或外层提交失败不被伪装成
+研究成功。PG研究锁等待100ms、单语句500ms，成功时恢复原设置，回滚时由PG恢复。
+
+失败日志 `research_collection_failed` 含精确Signal、observation/admission_rejection阶段、
+异常类型与SQLSTATE，不含SQL参数或凭据。研究写入整体回滚，不留下Shadow/额度伪计数；
+故障遗漏通过日志观察，不新增研究账本或把故障冒记为预算遗漏。只读报告明确输出
+`sample_population=quota_limited_prospective`、`skipped_budget`和故障证据位置。
+
+| 真实PG故障或额度场景 | Signal / readiness / 准入证据 | 研究证据 |
+| --- | --- | --- |
+| 冻结构造ValueError | candidate提交；自然交易链2个Ticket、1个拒单，均正常闭环 | 无Shadow/daily，3个Signal均有失败日志 |
+| 额度UPDATE触发23514 | 同上 | 已插入的Shadow及daily初始化一起回滚，计数不虚增 |
+| Shadow INSERT触发23514 | 同上 | 无Shadow/daily，不扣额度 |
+| 控制读取SELECT 1/0 | 同上，拒单阶段也成功提交Decision/readiness | Observation及拒单读取故障均记录，无Legacy绕额插入 |
+| 外部连接占用control行锁 | candidate提交、readiness正确；5秒测试边界内返回 | SQLSTATE 55P03；无残留样本或计数 |
+| 研究INSERT触发pg_sleep(2) | candidate提交、readiness正确；5秒测试边界内返回 | SQLSTATE 57014；无残留样本或计数 |
+| enabled / quota=1 | 3个有效Signal中2个正常准入、1个正常拒单，均闭环 | 1样本、2个skipped_budget，策略/小时精确一致 |
+| enabled / quota=2，包括并发末槽 | 同上 | 2样本、1个skipped_budget，重复观察不计费 |
+| disabled | 同上 | 仅正常拒单产生1个Legacy Shadow；无generic/daily |
+| 后端连接被终止 | DBAPIError继续向外传播，不宣称交易已提交 | 不作为可恢复研究遗漏吞掉 |
+
+本轮未新增或改动迁移、交易经济字段、策略规则、ENTRY/Owner Authority、额度上限或服务。
+复用原有自然交易测试并参数化故障，不建立第二条交易链。
+
+| 本轮验证命令范围 | 结果 | 原始日志 |
+| --- | --- | --- |
+| 修复前4类故障回归 | 4 failed（预期RED） | brc-alpha-safety-red.log |
+| 精确源提交/修复后相同3故障探针 | 源提交Signal/readiness均回滚；修复后分别保留1个 | brc-alpha-safety-baseline-rollback.log / brc-alpha-safety-fixed-rollback.log |
+| observation_to_signal、generic_signal_path_repository、shadow_outcome_projection、runtime_authority_seed | 73 passed / 113.32s | brc-alpha-safety-affected-integration.log |
+| signal_to_ticket、capacity_claim_to_ticket、runtime_fact_workers | 40 passed / 62.86s | brc-alpha-safety-admission-regression.log |
+| 全部Full-chain | 64 passed / 112.96s | brc-alpha-safety-fullchain.log |
+| 全部Unit与Architecture | 1711 passed / 21.27s | brc-alpha-safety-fast.log |
+| 文档收尾后Architecture | 84 passed / 5.90s | brc-alpha-safety-final-docs.log |
+| 正式Mypy / Ruff | 199源文件PASS / PASS | brc-alpha-safety-mypy.log / brc-alpha-safety-ruff.log |
+| 1CPU/1GiB受限容器（DB位于容器外） | 7 passed / 4.08s；峰值148512768 bytes（141.63MiB），OOM=0 | brc-alpha-safety-resource-smoke.log |
+
+上述是开发验证，不是最终A+B R4。日志与探针保存在
+`.local/alpha-02a-safety-review-evidence/`（忽略目录）。建议本修复审查通过后冻结候选，合入dev后
+在最终精确合并SHA上完成完整R4；不沿用旧认证，不在本轮部署或启用采集。
+
 ## 最终边界
 
 本分支交付后先审查，再决定合入dev。合入后的最终精确A+B候选需要正式分类、R4及其它

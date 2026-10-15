@@ -76,6 +76,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     instrument_certification_current,
     owner_policy_current,
     owner_policy_events,
+    readiness_current,
     runtime_profiles,
     runtime_scopes_current,
     schema_metadata,
@@ -890,8 +891,15 @@ async def _install_capacity_then_upgrade(engine, request):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("concurrent_last_slot", [False, True])
-async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(capacity_engine, concurrent_last_slot) -> None:
+@pytest.mark.parametrize("concurrent_last_slot,research_case", [
+    (False, "enabled"), (True, "enabled"), (False, "budget_one"),
+    (False, "disabled"), (False, "builder_failure"),
+    (False, "quota_failure"), (False, "insert_failure"),
+    (False, "control_failure"),
+])
+async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(
+    capacity_engine, concurrent_last_slot, research_case, monkeypatch, caplog,
+) -> None:
     issue_engine = capacity_engine
     source_request = RuntimeAuthoritySeedRequest(account_id="subaccount-source-test", runtime_commit="kernel-test-head",
         schema_revision="0009_capacity_policy_v0", seeded_at_ms=NOW_MS-10_000_000)
@@ -901,10 +909,32 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
             request=ControlMutationRequest(expected_version=1,reason="owner_retired_sor", idempotency_key="capacity-natural:sor-pause",
                 owner_identity="owner",now_ms=NOW_MS-9_000_000), authentication_strength="totp_step_up")
     await _install_capacity_then_upgrade(issue_engine,source_request)
-    # Prospective research is explicitly enabled in this disposable database.
+    # Faults affect only optional research in this disposable PostgreSQL.
     async with issue_engine.begin() as connection:
         await connection.execute(sa.text("UPDATE brc_research_collection_control "
-            "SET enabled=true,daily_limit=2,control_version=2"))
+            "SET enabled=:enabled,daily_limit=:limit,control_version=2"),
+            {"enabled": research_case != "disabled", "limit": 1 if research_case == "budget_one" else 2})
+        if research_case in {"quota_failure", "insert_failure"}:
+            table = ("brc_research_collection_daily" if research_case == "quota_failure"
+                     else "brc_shadow_outcomes_current")
+            action = "UPDATE" if research_case == "quota_failure" else "INSERT"
+            await connection.execute(sa.text("CREATE FUNCTION inject_research_failure() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected research failure' "
+                "USING ERRCODE='23514'; END; $$"))
+            await connection.execute(sa.text(f"CREATE TRIGGER inject_research_failure BEFORE {action} "
+                f"ON {table} FOR EACH ROW EXECUTE FUNCTION inject_research_failure()"))
+    if research_case == "builder_failure":
+        module = importlib.import_module("src.trading_kernel.application.observe_strategy_scope")
+        def fail_builder(**kwargs):
+            raise ValueError("injected frozen research path failure")
+        monkeypatch.setattr(module, "pending_generic_signal_path_spec", fail_builder)
+    if research_case == "control_failure":
+        from src.trading_kernel.infrastructure.pg_repositories import (
+            PostgresShadowOutcomeRepository,
+        )
+        async def fail_control(self):
+            await self._connection.execute(sa.text("SELECT 1/0"))
+        monkeypatch.setattr(PostgresShadowOutcomeRepository, "signal_path_enabled", fail_control)
     market = RecordingReplayMarketSource()
     template = cpm_long_snapshot()
     market._base_responses[(SOL,"1h")] = template.candles_1h
@@ -967,7 +997,54 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
         tickets = (await connection.execute(sa.select(trade_tickets))).mappings().all()
     assert len(tickets)==2
     async with issue_engine.connect() as connection:
-        assert await connection.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current))==2
+        expected_samples = (0 if research_case.endswith("failure") else
+                            1 if research_case in {"budget_one", "disabled"} else 2)
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current))==expected_samples
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(signal_events))==3
+        decisions = (await connection.execute(sa.select(admission_decisions))).mappings().all()
+        assert sorted(row['decision_status'] for row in decisions)==['admitted','admitted','rejected']
+        ready = (await connection.execute(sa.select(readiness_current).where(
+            readiness_current.c.signal_event_id.in_([row['signal_event_id'] for row in decisions])))).mappings().all()
+        assert len(ready)==3
+        assert sorted(row['readiness_state'] for row in ready)==['blocked','processing','processing']
+        daily = (await connection.execute(sa.text('SELECT * FROM brc_research_collection_daily'))).mappings().all()
+        if research_case in {'enabled','budget_one'}:
+            assert len(daily)==1
+            assert daily[0]['admitted_count']==expected_samples
+            assert daily[0]['skipped_count']==3-expected_samples
+            assert sum(v['admitted'] for v in daily[0]['coverage_counts'].values())==expected_samples
+            assert sum(v['skipped'] for v in daily[0]['coverage_counts'].values())==3-expected_samples
+        else:
+            assert daily==[]
+        if research_case.endswith('failure'):
+            failures=[r for r in caplog.records if r.message.startswith('research_collection_failed')]
+            assert {r.signal_event_id for r in failures}=={r['signal_event_id'] for r in decisions}
+    from scripts.trading_kernel.configure_research_collection import _parser, configure
+    day = NOW_MS//86_400_000*86_400_000
+    report = await configure(_parser().parse_args([
+        '--database-url',issue_engine.url.render_as_string(hide_password=False),
+        '--show','--day-start-ms',str(day)]))
+    if research_case in {'enabled','budget_one'}:
+        assert report['coverage']['admitted_count']==expected_samples
+        assert report['coverage']['skipped_count']==3-expected_samples
+        assert report['coverage']['skipped_budget']==3-expected_samples
+        assert report['sample_population']=='quota_limited_prospective'
+        expected_coverage = {}
+        for event in sorted(decisions,key=lambda row: row['decided_at_ms']):
+            # Signal occurrence, rather than Admission delay, owns the UTC bucket.
+            async with issue_engine.connect() as connection:
+                occurred = await connection.scalar(sa.select(signal_events.c.occurred_at_ms).where(
+                    signal_events.c.signal_event_id==event['signal_event_id']))
+            hour = occurred%86_400_000//3_600_000
+            key = f'CPM-RO-001/{hour:02d}'
+            bucket = expected_coverage.setdefault(key,{'admitted':0,'skipped':0})
+            async with issue_engine.connect() as connection:
+                sampled = await connection.scalar(sa.select(sa.func.count()).select_from(shadow_outcomes_current).where(
+                    shadow_outcomes_current.c.signal_event_id==event['signal_event_id']))
+            bucket['admitted' if sampled else 'skipped']+=1
+        assert report['coverage']['coverage_counts']==expected_coverage
+    else:
+        assert report['coverage'] is None
     assert BNB in {row["exchange_instrument_id"] for row in tickets}
     assert {row["exchange_instrument_id"] for row in tickets}<={BNB,DOGE,SOL}
     assert len({row["signal_event_id"] for row in tickets})==2
@@ -1028,6 +1105,9 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(c
                 strategy_group_id=ticket.identity.runtime.strategy_group_id,position_side="long")==1-index
         from src.trading_kernel.interfaces.read_signal_path import read_signal_path
         path = await read_signal_path(issue_engine,signal_event_id=ticket.identity.signal_event_id)
+        if research_case.endswith('failure') or research_case=='disabled' or (research_case=='budget_one' and index==1):
+            assert path is None
+            continue
         assert path is not None and path.evaluation_kind=="generic_signal_path_v1"
         assert path.ticket_id==ticket_id
         assert path.review_id==f"review:capacity:{index}" and path.review_revision==1

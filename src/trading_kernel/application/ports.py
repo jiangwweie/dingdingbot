@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
@@ -1423,6 +1424,10 @@ class AdmissionDecisionRepository(Protocol):
 
 
 class ShadowOutcomeRepository(Protocol):
+    def isolate_collection(self, *, signal_event_id: str, stage: str) -> AbstractAsyncContextManager[None]:
+        """Report recoverable research failure only after isolated writes roll back."""
+        ...
+
     async def signal_path_enabled(self) -> bool: ...
 
     async def add_signal_path_if_enabled(self, spec: ShadowOutcomeSpec, *, strategy_group_id: str) -> bool: ...
