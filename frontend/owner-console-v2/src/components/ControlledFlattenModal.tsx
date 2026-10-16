@@ -56,20 +56,20 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
   return (
     <AlertDialog.Root open={open} onOpenChange={handleClose}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-xs transition-opacity" />
-        <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg border border-status-red/40 bg-surface-1 p-6 shadow-2xl">
+        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-xs transition-opacity" />
+        <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-lg border border-status-red/50 bg-surface p-6 shadow-2xl">
           {/* Header */}
-          <div className="flex items-start justify-between border-b border-border-base pb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="rounded-full bg-status-red/10 p-1.5 text-status-red">
+          <div className="flex items-start justify-between border-b border-border pb-3.5">
+            <div className="flex items-center gap-3">
+              <div className="rounded-full bg-status-red-bg p-2 text-status-red border border-status-red/20">
                 <AlertOctagon className="h-5 w-5" />
               </div>
               <div>
-                <AlertDialog.Title className="text-sm font-bold text-slate-100">
+                <AlertDialog.Title className="text-sm font-bold text-text-primary">
                   确认受控平仓全部仓位 (Controlled Flatten)
                 </AlertDialog.Title>
-                <AlertDialog.Description className="text-xs text-slate-400 mt-0.5">
-                  先暂停全局 ENTRY，再由 Lifecycle 逐笔退出当前全部 3 笔持仓。
+                <AlertDialog.Description className="text-xs text-text-secondary mt-0.5">
+                  先安全挂起全局 ENTRY，再由 Lifecycle 调度逐笔有序平仓当前全部持仓。
                 </AlertDialog.Description>
               </div>
             </div>
@@ -77,7 +77,7 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
               <button
                 type="button"
                 onClick={handleClose}
-                className="text-slate-400 hover:text-slate-200"
+                className="text-text-muted hover:text-text-primary transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -86,22 +86,22 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
 
           {completed ? (
             <div className="py-8 text-center space-y-3">
-              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-status-green-bg text-status-green">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-status-green-bg text-status-green border border-status-green/30">
                 <Check className="h-6 w-6" />
               </div>
-              <p className="text-sm font-bold text-slate-100">受控平仓指令已提交</p>
-              <p className="text-xs text-slate-400">全局 ENTRY 已挂起，Lifecycle 正在调度退出。</p>
+              <p className="text-sm font-bold text-text-primary">受控平仓指令已提交</p>
+              <p className="text-xs text-text-secondary">全局 ENTRY 已挂起，Lifecycle 正在调度有序退出。</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
               {/* Affected Tickets list from server preview */}
               <div>
-                <span className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
+                <span className="block text-xs font-bold uppercase tracking-wider text-text-muted mb-2">
                   服务端冻结范围 ({preview.tickets.length} 笔持仓受影响):
                 </span>
-                <div className="divide-y divide-border-base rounded border border-border-base bg-surface-2 font-mono">
+                <div className="divide-y divide-border rounded border border-border bg-surface-subtle font-mono">
                   {preview.tickets.map((t) => (
-                    <div key={t.ticket_id} className="flex items-center justify-between p-2.5">
+                    <div key={t.ticket_id} className="flex items-center justify-between p-3 text-xs">
                       <div className="flex items-center gap-2">
                         <span
                           className={`font-bold ${
@@ -110,15 +110,17 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                         >
                           {t.side.toUpperCase()}
                         </span>
-                        <span className="text-slate-200">{t.instrument.split(':')[1] ?? t.instrument}</span>
-                        <span className="text-slate-500 font-sans">({t.strategy_group_id})</span>
+                        <span className="text-text-primary font-medium">
+                          {t.instrument.split(':')[1] ?? t.instrument}
+                        </span>
+                        <span className="text-text-muted font-sans text-xs">({t.strategy_group_id})</span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-slate-400 font-sans">{t.stage}</span>
+                        <span className="text-text-secondary font-sans text-xs">生命周期保护中</span>
                         <strong
-                          className={
+                          className={`font-semibold ${
                             t.unrealized_r.startsWith('+') ? 'text-status-green' : 'text-status-red'
-                          }
+                          }`}
                         >
                           {t.unrealized_r}
                         </strong>
@@ -128,15 +130,15 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                 </div>
               </div>
 
-              {/* Warning notice */}
-              <div className="rounded border border-border-base bg-surface-2 p-2.5 text-slate-400 text-[11px] leading-relaxed">
-                <strong className="text-slate-200">受控退出约束: </strong>
+              {/* Warning notice: Subtle in light, restrained in dark */}
+              <div className="rounded border border-border bg-surface-subtle p-3 text-text-secondary text-xs leading-relaxed">
+                <strong className="text-text-primary">受控退出约束: </strong>
                 系统将按预设生命周期计划有序平仓，页面不支持指定平仓数量、方向或订单类型。
               </div>
 
               {/* Step 1: TOTP input */}
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-medium text-text-primary mb-1.5">
                   1. Google Authenticator 动态口令 (6 位数字)
                 </label>
                 <input
@@ -145,13 +147,13 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                   placeholder="000000"
                   value={totp}
                   onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
-                  className="w-full rounded border border-border-strong bg-canvas px-3 py-2 font-mono text-sm tracking-widest text-slate-100 placeholder:text-slate-600 focus:border-brand focus:outline-hidden"
+                  className="w-full rounded border border-border-strong bg-background px-3 py-2 font-mono text-sm tracking-widest text-text-primary placeholder:text-text-disabled focus:border-brand focus:outline-hidden"
                 />
               </div>
 
               {/* Step 2: Confirm text input */}
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-medium text-text-primary mb-1.5">
                   2. 输入“<span className="text-status-red font-bold">确认平仓全部持仓</span>”以解锁
                 </label>
                 <input
@@ -159,17 +161,17 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                   placeholder="确认平仓全部持仓"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
-                  className="w-full rounded border border-border-strong bg-canvas px-3 py-2 text-xs text-slate-100 placeholder:text-slate-600 focus:border-status-red focus:outline-hidden"
+                  className="w-full rounded border border-border-strong bg-background px-3 py-2 text-xs text-text-primary placeholder:text-text-disabled focus:border-status-red focus:outline-hidden"
                 />
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 border-t border-border-base pt-3">
+              <div className="flex items-center justify-end gap-2.5 border-t border-border pt-4">
                 <AlertDialog.Cancel asChild>
                   <button
                     type="button"
                     onClick={handleClose}
-                    className="rounded border border-border-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-surface-3 hover:text-white"
+                    className="rounded border border-border-strong bg-surface-subtle px-3.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
                   >
                     取消
                   </button>
@@ -180,8 +182,8 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                   disabled={!canSubmit}
                   className={`inline-flex items-center gap-1.5 rounded px-4 py-1.5 text-xs font-bold transition-colors ${
                     canSubmit
-                      ? 'bg-status-red text-white hover:bg-red-600'
-                      : 'bg-surface-3 text-slate-500 cursor-not-allowed border border-border-base'
+                      ? 'bg-status-red text-white hover:bg-red-700 shadow-xs'
+                      : 'bg-surface-subtle text-text-disabled cursor-not-allowed border border-border'
                   }`}
                 >
                   {isSubmitting ? (
@@ -201,3 +203,4 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
     </AlertDialog.Root>
   );
 };
+

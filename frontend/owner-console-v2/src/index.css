@@ -3,14 +3,89 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    /* LIGHT THEME TOKENS - Refined financial palette: crisp, calm, professional */
+    --color-background: #F1F4F8;
+    --color-surface: #FFFFFF;
+    --color-surface-elevated: #FFFFFF;
+    --color-surface-subtle: #F8FAFC;
+
+    --color-border: #E2E8F0;
+    --color-border-strong: #CBD5E1;
+
+    --color-text-primary: #0F172A;
+    --color-text-secondary: #475569;
+    --color-text-muted: #64748B;
+    --color-text-disabled: #94A3B8;
+
+    --color-accent: #D97706;
+    --color-accent-hover: #B45309;
+    --color-accent-subtle: rgba(217, 119, 6, 0.10);
+
+    --color-success: #059669;
+    --color-success-bg: rgba(5, 150, 105, 0.08);
+
+    --color-warning: #D97706;
+    --color-warning-bg: rgba(217, 119, 6, 0.08);
+
+    --color-danger: #DC2626;
+    --color-danger-bg: rgba(220, 38, 38, 0.08);
+    --color-danger-border: #FCA5A5;
+
+    --color-info: #2563EB;
+    --color-info-bg: rgba(37, 99, 235, 0.08);
+
+    --color-focus: #D97706;
+    --scrollbar-thumb: #CBD5E1;
+    --scrollbar-thumb-hover: #94A3B8;
+  }
+
+  .dark {
+    /* DARK THEME TOKENS - Tokyo BRC trading kernel standard: deep, focused, restrained */
+    --color-background: #080A0D;
+    --color-surface: #0F1318;
+    --color-surface-elevated: #151B22;
+    --color-surface-subtle: #121820;
+
+    --color-border: #222933;
+    --color-border-strong: #2D3745;
+
+    --color-text-primary: #F0F6FC;
+    --color-text-secondary: #94A3B8;
+    --color-text-muted: #64748B;
+    --color-text-disabled: #475569;
+
+    --color-accent: #F59E0B;
+    --color-accent-hover: #D97706;
+    --color-accent-subtle: rgba(245, 158, 11, 0.12);
+
+    --color-success: #10B981;
+    --color-success-bg: rgba(16, 185, 129, 0.12);
+
+    --color-warning: #F59E0B;
+    --color-warning-bg: rgba(245, 158, 11, 0.12);
+
+    --color-danger: #EF4444;
+    --color-danger-bg: rgba(239, 68, 68, 0.14);
+    --color-danger-border: rgba(239, 68, 68, 0.4);
+
+    --color-info: #3B82F6;
+    --color-info-bg: rgba(59, 130, 246, 0.12);
+
+    --color-focus: #F59E0B;
+    --scrollbar-thumb: #222933;
+    --scrollbar-thumb-hover: #2D3745;
+  }
+
   * {
-    border-color: #222933;
+    border-color: var(--color-border);
   }
 
   body {
-    background-color: #080A0D;
-    color: #E6EDF3;
+    background-color: var(--color-background);
+    color: var(--color-text-primary);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
 }
 
@@ -19,7 +94,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Minimal dark scrollbar */
+/* Minimal scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -28,9 +103,9 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #222933;
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2D3745;
+  background: var(--scrollbar-thumb-hover);
 }

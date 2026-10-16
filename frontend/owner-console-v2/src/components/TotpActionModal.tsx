@@ -33,22 +33,28 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
     onOpenChange(false);
   };
 
+  const handleClose = () => {
+    setTotp('');
+    onOpenChange(false);
+  };
+
   return (
-    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+    <AlertDialog.Root open={open} onOpenChange={handleClose}>
       <AlertDialog.Portal>
-        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-xs transition-opacity" />
-        <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border-base bg-surface-1 p-5 shadow-2xl">
-          <div className="flex items-start justify-between border-b border-border-base pb-3">
+        <AlertDialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-xs transition-opacity" />
+        <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-surface p-5 shadow-2xl">
+          <div className="flex items-start justify-between border-b border-border pb-3">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-brand" />
-              <AlertDialog.Title className="text-sm font-bold text-slate-100">
+              <ShieldCheck className="h-5 w-5 text-brand" />
+              <AlertDialog.Title className="text-sm font-bold text-text-primary">
                 {title}
               </AlertDialog.Title>
             </div>
             <AlertDialog.Cancel asChild>
               <button
                 type="button"
-                className="text-slate-400 hover:text-slate-200"
+                onClick={handleClose}
+                className="text-text-muted hover:text-text-primary transition-colors"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -56,13 +62,13 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
           </div>
 
           <form onSubmit={handleSubmit} className="mt-3.5 space-y-4 text-xs">
-            <AlertDialog.Description className="text-xs text-slate-400 leading-relaxed">
+            <AlertDialog.Description className="text-xs text-text-secondary leading-relaxed">
               {description}
             </AlertDialog.Description>
 
             {requireTotp && (
               <div>
-                <label className="block font-medium text-slate-300 mb-1">
+                <label className="block text-xs font-medium text-text-primary mb-1.5">
                   Google Authenticator 动态口令 (6 位数字)
                 </label>
                 <input
@@ -71,17 +77,18 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
                   placeholder="000000"
                   value={totp}
                   onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
-                  className="w-full rounded border border-border-strong bg-canvas px-3 py-2 font-mono text-sm tracking-widest text-slate-100 placeholder:text-slate-600 focus:border-brand focus:outline-hidden"
+                  className="w-full rounded border border-border-strong bg-background px-3 py-2 font-mono text-sm tracking-widest text-text-primary placeholder:text-text-disabled focus:border-brand focus:outline-hidden"
                   autoFocus
                 />
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 border-t border-border-base pt-3">
+            <div className="flex items-center justify-end gap-2.5 border-t border-border pt-3.5">
               <AlertDialog.Cancel asChild>
                 <button
                   type="button"
-                  className="rounded border border-border-strong bg-surface-2 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-surface-3 hover:text-white"
+                  onClick={handleClose}
+                  className="rounded border border-border-strong bg-surface-subtle px-3.5 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors"
                 >
                   取消
                 </button>
@@ -92,8 +99,8 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
                 disabled={!canSubmit}
                 className={`rounded px-4 py-1.5 text-xs font-bold transition-colors ${
                   canSubmit
-                    ? 'bg-brand text-slate-950 hover:bg-brand-hover'
-                    : 'bg-surface-3 text-slate-500 cursor-not-allowed border border-border-base'
+                    ? 'bg-brand text-slate-950 hover:bg-brand-hover shadow-xs'
+                    : 'bg-surface-subtle text-text-disabled cursor-not-allowed border border-border'
                 }`}
               >
                 {confirmLabel}
@@ -105,3 +112,4 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
     </AlertDialog.Root>
   );
 };
+

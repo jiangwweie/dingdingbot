@@ -11,18 +11,18 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
   activeTicketCount,
 }) => {
   return (
-    <div className="rounded border border-status-red/40 bg-surface-1 p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-4">
+    <div className="rounded border border-status-red/50 bg-surface p-4 shadow-xs">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-1.5 text-status-red">
-            <AlertOctagon className="h-4 w-4" />
+            <AlertOctagon className="h-4 w-4 flex-none" />
             <span className="text-xs font-bold uppercase tracking-wider">
               危险操作 · 紧急熔断
             </span>
           </div>
-          <h3 className="text-sm font-bold text-slate-100">受控平仓全部仓位</h3>
-          <p className="text-[11px] text-slate-400 leading-relaxed max-w-sm">
-            安全挂起全局 ENTRY，由 Lifecycle 逐笔退出全部在管持仓。页面不支持部分平仓或手动画单。
+          <h3 className="text-sm font-bold text-text-primary">受控平仓全部仓位</h3>
+          <p className="text-xs text-text-secondary leading-relaxed max-w-sm">
+            安全挂起全局 ENTRY，由 Lifecycle 调度逐笔有序平仓当前全部在管持仓。
           </p>
         </div>
 
@@ -37,3 +37,4 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
     </div>
   );
 };
+

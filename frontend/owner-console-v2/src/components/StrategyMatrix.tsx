@@ -12,32 +12,31 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
   onToggleStrategy,
 }) => {
   return (
-    <div className="rounded border border-border-base bg-surface-1 shadow-sm">
-      <div className="flex items-center justify-between border-b border-border-base px-4 py-3">
+    <div className="rounded border border-border bg-surface shadow-xs">
+      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
         <div>
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
             策略独立控制矩阵
           </h2>
-          <p className="mt-0.5 text-[11px] text-slate-400">
+          <p className="mt-0.5 text-xs text-text-secondary">
             区分配置启用状态、实时准入诊断与实际在管持仓；策略暂停不影响已有持仓退出。
           </p>
         </div>
-        <span className="font-mono text-[11px] text-slate-500">5 个在役策略 · 1 个退役归档</span>
+        <span className="font-mono text-xs text-text-muted">5 个在役策略 · 1 个退役归档</span>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="border-b border-border-base bg-surface-2/60 text-[11px] font-semibold text-slate-400">
-              <th className="py-2.5 pl-4 pr-3">策略组 (StrategyGroup)</th>
-              <th className="px-3 py-2.5">配置状态</th>
-              <th className="px-3 py-2.5">实际准入诊断 (来自事实)</th>
-              <th className="px-3 py-2.5">在管持仓占用</th>
-              <th className="px-3 py-2.5 font-mono">版本 / 变更</th>
-              <th className="py-2.5 pl-3 pr-4 text-right">控制操作</th>
+            <tr className="border-b border-border bg-surface-subtle text-xs font-semibold text-text-muted">
+              <th className="py-2.5 pl-5 pr-4 w-[28%]">策略组 (StrategyGroup)</th>
+              <th className="px-4 py-2.5 w-[14%]">配置状态</th>
+              <th className="px-4 py-2.5 w-[32%]">实际准入诊断 (来自事实)</th>
+              <th className="px-4 py-2.5 w-[14%]">在管持仓占用</th>
+              <th className="py-2.5 pl-4 pr-5 text-right w-[12%]">控制操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border-base">
+          <tbody className="divide-y divide-border">
             {strategies.map((strategy) => {
               const isEnabled = strategy.configured_state === 'enabled';
               const isRetired = strategy.is_retired;
@@ -45,64 +44,70 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
               return (
                 <tr
                   key={strategy.strategy_group_id}
-                  className={`transition-colors hover:bg-surface-2/40 ${
-                    isRetired ? 'opacity-60 bg-surface-1/40' : ''
+                  className={`transition-colors hover:bg-surface-subtle/80 ${
+                    isRetired ? 'opacity-60 bg-surface-subtle/30' : ''
                   }`}
                 >
-                  {/* Strategy ID and Name */}
-                  <td className="py-3 pl-4 pr-3">
+                  {/* Strategy ID, Name & Integrated Version/Change */}
+                  <td className="py-2.5 pl-5 pr-4">
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2">
-                        <strong className="font-mono text-xs font-bold text-slate-100">
+                        <strong className="font-mono text-sm font-bold text-text-primary">
                           {strategy.strategy_group_id}
                         </strong>
-                        <span className="font-mono text-[10px] text-slate-500">
+                        <span className="font-mono text-xs font-medium text-text-muted">
                           {strategy.timeframe}
                         </span>
                       </div>
-                      <span className="text-[11px] text-slate-400">{strategy.name_zh}</span>
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <span className="text-xs text-text-secondary">{strategy.name_zh}</span>
+                        <span className="text-text-muted opacity-40">·</span>
+                        <span className="font-mono text-[11px] text-text-muted">
+                          v{strategy.control_version} ({strategy.reason_label})
+                        </span>
+                      </div>
                     </div>
                   </td>
 
                   {/* Configured State */}
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-2.5">
                     {isRetired ? (
-                      <span className="inline-flex items-center rounded border border-slate-700 bg-slate-800/80 px-2 py-0.5 text-[11px] font-mono text-slate-400">
+                      <span className="inline-flex items-center rounded border border-border bg-surface-subtle px-2 py-0.5 font-mono text-xs text-text-muted">
                         已退役 (RETIRED)
                       </span>
                     ) : isEnabled ? (
-                      <span className="inline-flex items-center gap-1.5 font-medium text-status-green">
-                        <span className="h-1.5 w-1.5 rounded-full bg-status-green" />
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-green">
+                        <span className="h-2 w-2 rounded-full bg-status-green" />
                         已启用
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 font-medium text-slate-400">
-                        <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted">
+                        <span className="h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500" />
                         已暂停
                       </span>
                     )}
                   </td>
 
-                  {/* Actual Admission Health (Strictly distinguished from configured state) */}
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-1.5">
+                  {/* Actual Admission Health (Expanded horizontal space for Chinese readability) */}
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
                       {strategy.admission_health.status === 'cleared' && (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-status-green flex-none" />
+                        <CheckCircle2 className="h-4 w-4 text-status-green flex-none" />
                       )}
                       {strategy.admission_health.status === 'blocked' && (
-                        <AlertTriangle className="h-3.5 w-3.5 text-status-amber flex-none" />
+                        <AlertTriangle className="h-4 w-4 text-status-amber flex-none" />
                       )}
                       {strategy.admission_health.status === 'unknown' && (
-                        <HelpCircle className="h-3.5 w-3.5 text-slate-500 flex-none" />
+                        <HelpCircle className="h-4 w-4 text-text-muted flex-none" />
                       )}
 
                       <span
-                        className={`text-[11px] ${
+                        className={`text-xs ${
                           strategy.admission_health.status === 'blocked'
                             ? 'font-medium text-status-amber'
                             : strategy.admission_health.status === 'cleared'
-                            ? 'text-slate-300'
-                            : 'text-slate-500'
+                            ? 'text-text-primary'
+                            : 'text-text-muted'
                         }`}
                       >
                         {strategy.admission_health.summary}
@@ -111,24 +116,24 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                   </td>
 
                   {/* Active Positions in Flight */}
-                  <td className="px-3 py-3">
+                  <td className="px-4 py-2.5">
                     {strategy.active_tickets.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {strategy.active_tickets.map((t) => (
                           <span
                             key={t.ticket_id}
-                            className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface-2 px-1.5 py-0.5 text-[11px] font-mono"
+                            className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-2 py-0.5 text-xs font-mono"
                           >
                             <span
-                              className={
+                              className={`font-bold ${
                                 t.side === 'long' ? 'text-status-green' : 'text-status-red'
-                              }
+                              }`}
                             >
                               {t.side.toUpperCase()}
                             </span>
-                            <span className="text-slate-200">{t.symbol}</span>
+                            <span className="text-text-primary font-medium">{t.symbol}</span>
                             <span
-                              className={`tabular-numbers font-medium ${
+                              className={`tabular-numbers font-semibold ${
                                 t.pnl_r.startsWith('+') ? 'text-status-green' : 'text-status-red'
                               }`}
                             >
@@ -138,23 +143,17 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                         ))}
                       </div>
                     ) : (
-                      <span className="text-[11px] text-slate-500 font-mono">0 个占用</span>
+                      <span className="text-xs text-text-muted font-mono">0 个占用</span>
                     )}
                   </td>
 
-                  {/* Version & Reason */}
-                  <td className="px-3 py-3 font-mono text-[11px] text-slate-400">
-                    <div>v{strategy.control_version}</div>
-                    <div className="text-[10px] text-slate-500">{strategy.reason_label}</div>
-                  </td>
-
                   {/* Toggle Button */}
-                  <td className="py-3 pl-3 pr-4 text-right">
+                  <td className="py-2.5 pl-4 pr-5 text-right">
                     {isRetired ? (
                       <button
                         type="button"
                         disabled
-                        className="rounded border border-border-base bg-surface-2/40 px-2.5 py-1 text-[11px] text-slate-600 cursor-not-allowed"
+                        className="rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed"
                       >
                         禁止恢复
                       </button>
@@ -162,18 +161,18 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                       <button
                         type="button"
                         onClick={() => onToggleStrategy(strategy)}
-                        className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-slate-300 hover:bg-surface-3 hover:text-white transition-colors"
+                        className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors"
                       >
-                        <Pause className="h-3 w-3 text-status-amber" />
+                        <Pause className="h-3.5 w-3.5 text-status-amber" />
                         暂停策略
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => onToggleStrategy(strategy)}
-                        className="inline-flex items-center gap-1 rounded border border-status-green/40 bg-status-green-bg px-2.5 py-1 text-[11px] font-medium text-status-green hover:bg-status-green/20 transition-colors"
+                        className="inline-flex items-center gap-1.5 rounded border border-status-green/40 bg-status-green-bg px-3 py-1.5 text-xs font-semibold text-status-green hover:bg-status-green/20 transition-colors"
                       >
-                        <Play className="h-3 w-3" />
+                        <Play className="h-3.5 w-3.5" />
                         恢复运行
                       </button>
                     )}
@@ -187,3 +186,4 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
     </div>
   );
 };
+

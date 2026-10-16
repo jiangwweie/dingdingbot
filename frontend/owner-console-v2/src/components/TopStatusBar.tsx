@@ -18,16 +18,16 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   const isGlobalEnabled = globalEntry.configured_state === 'enabled';
 
   return (
-    <section className="mb-4 rounded border border-border-base bg-surface-1 p-3.5 shadow-sm">
+    <section className="mb-4 rounded border border-border bg-surface p-4 shadow-xs">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         {/* Left: Global ENTRY Switch with crystal clear business explanation */}
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               全局 ENTRY 准入
             </span>
             <span
-              className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-semibold ${
+              className={`inline-flex items-center gap-2 rounded px-3 py-1 text-xs font-semibold ${
                 isGlobalEnabled
                   ? 'border border-status-green/30 bg-status-green-bg text-status-green'
                   : 'border border-status-amber/30 bg-status-amber-bg text-status-amber'
@@ -42,13 +42,13 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
             </span>
           </div>
 
-          <span className="hidden sm:inline text-slate-700">|</span>
+          <span className="hidden sm:inline text-text-muted opacity-30">|</span>
 
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-text-secondary">
             {isGlobalEnabled ? (
               <span>全局新开仓通道开启中 · 存量持仓保护不受限制</span>
             ) : (
-              <span className="text-status-amber">
+              <span className="text-status-amber font-medium">
                 新信号已阻断生成 Ticket · 已有持仓与止损仍由 Lifecycle 正常保护中
               </span>
             )}
@@ -57,17 +57,17 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
 
         {/* Right: Quick toggle button & metrics */}
         <div className="flex items-center gap-4">
-          <div className="hidden xl:flex items-center gap-4 text-xs">
+          <div className="hidden xl:flex items-center gap-4 text-xs text-text-muted">
             <div>
-              <span className="text-slate-500">策略态势: </span>
-              <strong className="font-mono text-slate-200">
+              <span>策略态势: </span>
+              <strong className="font-mono text-text-primary ml-1">
                 {totalActiveStrategies - pausedStrategyCount} 运行 / {pausedStrategyCount} 暂停
               </strong>
             </div>
-            <span className="text-slate-700">·</span>
+            <span className="opacity-30">·</span>
             <div>
-              <span className="text-slate-500">在管持仓: </span>
-              <strong className="font-mono text-slate-200">
+              <span>在管持仓: </span>
+              <strong className="font-mono text-text-primary ml-1">
                 {globalEntry.active_ticket_count} 笔 (受保护)
               </strong>
             </div>
@@ -76,9 +76,9 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
           <button
             type="button"
             onClick={onToggleGlobalEntry}
-            className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`inline-flex items-center gap-2 rounded border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
               isGlobalEnabled
-                ? 'border-border-strong bg-surface-2 text-slate-200 hover:bg-surface-3 hover:text-white'
+                ? 'border-border-strong bg-surface-subtle text-text-primary hover:bg-surface-elevated'
                 : 'border-status-green/50 bg-status-green-bg text-status-green hover:bg-status-green/20'
             }`}
           >
@@ -99,3 +99,4 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
     </section>
   );
 };
+
