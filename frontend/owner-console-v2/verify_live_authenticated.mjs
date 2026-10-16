@@ -1131,11 +1131,33 @@ async function runLiveVerification() {
       barVisible && btnVisible ? 'PASS' : 'FAIL',
       { barVisible, btnVisible }
     );
+    const cursor = ticketsResp.data?.data?.next_cursor ?? ticketsResp.data?.next_cursor;
+    const nextResponse = page.waitForResponse(r => {
+      const u = new URL(r.url());
+      return u.pathname === '/api/owner/v1/tickets' && u.searchParams.get('cursor') === cursor;
+    }, {timeout:10000});
+    await loadMoreBtn.click();
+    const response = await nextResponse;
+    if (response.status() !== 200) {
+      recordAssertion('A6.8_next','Trades','Next page HTTP response','FAIL',{status:response.status()});
+    } else {
+      const body = await response.json();
+      if (!Array.isArray(body?.data?.items)) throw new Error('Invalid next-page items');
+      const combined = [...rawTickets, ...body.data.items];
+      const metrics = tradesMetricsEvidence(combined,{hasMore:Boolean(body.data.next_cursor)});
+      await page.waitForTimeout(500);
+      const ids = await tradesPageEl.locator('[data-ticket-id]').evaluateAll(els => els.map(el => el.getAttribute('data-ticket-id')));
+      const total = await cardTotal.locator('[data-testid="metric-value"]').textContent();
+      const pnl = await cardPnl.locator('[data-testid="metric-value"]').textContent();
+      recordAssertion('A6.8_next','Trades','Next page appends exact identities and recalculates metrics',
+        sameIdentities(ids,combined.map(t=>t.ticket_id)) && exactDisplay(total,String(metrics.totalCount)) && exactDisplay(pnl,metrics.formattedPnl) ? 'PASS':'FAIL',
+        {expectedCount:combined.length,actualCount:ids.length});
+    }
   } else {
     const pagStatus = page.locator('[data-testid="trades-pagination-status"]');
     const statusVisible = await pagStatus.isVisible();
     const statusText = (await pagStatus.textContent())?.trim();
-    const expectedStatusText = `已加载全量账本记录 (共 ${rawTickets.length} 笔) · 无更多历史数据`;
+    const expectedStatusText = `已加载当前 30 天范围全部账本记录 (共 ${rawTickets.length} 笔) · 该范围无更多数据`;
     const statusMatches = exactDisplay(statusText, expectedStatusText);
     const loadMoreCount = await page.locator('[data-testid="load-more-btn"]').count();
     recordAssertion(

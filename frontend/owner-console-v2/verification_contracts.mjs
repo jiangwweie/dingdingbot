@@ -71,7 +71,7 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
       ? '暂无数据'
       : hasMore
       ? '已加载范围统计 (尚有未加载数据)'
-      : `已加载全量账本 · 共 ${totalCount} 笔`;
+      : `已加载当前 30 天范围全部账本 · 共 ${totalCount} 笔`;
 
   const winRateDenominatorText =
     completedTickets.length === 0
@@ -116,6 +116,7 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
 
   return {
     complete: true,
+    hasMore,
     totalCount,
     activeCount: activeTickets.length,
     completedCount: completedTickets.length,

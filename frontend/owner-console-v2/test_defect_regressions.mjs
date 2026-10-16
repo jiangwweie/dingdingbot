@@ -998,7 +998,7 @@ async function runAllTests() {
     // Pagination / Scope
     assert.equal(metrics.isComplete, true);
     assert.equal(metrics.hasMore, false);
-    assert.equal(metrics.scopeLabel, '已加载全量账本 · 共 6 笔');
+    assert.equal(metrics.scopeLabel, '已加载当前 30 天范围全部账本 · 共 6 笔');
 
     // Empty list boundary
     const emptyMetrics = computeTradesSummaryMetrics([]);

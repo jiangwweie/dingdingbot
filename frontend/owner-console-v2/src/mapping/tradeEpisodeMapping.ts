@@ -269,7 +269,7 @@ export function computeTradesSummaryMetrics(
       ? '暂无数据'
       : hasMore
       ? '已加载范围统计 (尚有未加载数据)'
-      : `已加载全量账本 · 共 ${totalCount} 笔`;
+      : `已加载当前 30 天范围全部账本 · 共 ${totalCount} 笔`;
 
   return {
     totalCount,

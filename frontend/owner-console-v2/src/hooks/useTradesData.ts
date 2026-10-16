@@ -1,32 +1,25 @@
-import { useMemo, useCallback } from 'react';
+import { tradesPaginationOptions } from '../api/tradesPagination';
+import { useMemo, useCallback, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { fetchTickets, ticketsInfiniteQueryKey, type TicketsQueryParams } from '../api/ticketsApi';
+import { type TicketsQueryParams } from '../api/ticketsApi';
 import { mapTradeListItemToEpisode, computeTradesSummaryMetrics } from '../mapping/tradeEpisodeMapping';
 import type { TradeEpisode, TradesSummaryMetrics, TradeListItem } from '../types/trades';
 
 const TRADES_LIMIT = 100;
 
 export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
+  const [windowEnd, setWindowEnd] = useState(Date.now);
   const queryParams = useMemo<TicketsQueryParams>(
     () => ({
       limit: TRADES_LIMIT,
+      from_ms: windowEnd - 30 * 86_400_000,
+      to_ms: windowEnd,
       ...params,
     }),
-    [params]
+    [params, windowEnd]
   );
 
-  const query = useInfiniteQuery({
-    queryKey: ticketsInfiniteQueryKey(queryParams),
-    queryFn: ({ pageParam }) =>
-      fetchTickets({
-        ...queryParams,
-        cursor: pageParam ?? undefined,
-      }),
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => lastPage.data?.next_cursor ?? null,
-    staleTime: 15_000,
-    retry: false,
-  });
+  const query = useInfiniteQuery(tradesPaginationOptions(queryParams));
 
   const rawItems = useMemo<TradeListItem[]>(() => {
     return query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
@@ -55,7 +48,8 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
   }, [allTrades, hasNextPage]);
 
   const refetch = useCallback(async () => {
-    await query.refetch();
+    if (params?.from_ms !== undefined || params?.to_ms !== undefined) await query.refetch();
+    else setWindowEnd(Date.now());
   }, [query]);
 
   const fetchNextPage = useCallback(async () => {
@@ -72,7 +66,8 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    isError: query.isError,
+    isError: query.isError && !query.data,
+    paginationError: query.isFetchNextPageError ? query.error : null,
     error: query.error,
     freshness: firstPage?.freshness ?? 'unavailable',
     generatedAt: firstPage?.generated_at ?? null,

@@ -20,6 +20,7 @@ export const TradesPage: React.FC = () => {
     isFetching,
     isFetchingNextPage,
     hasNextPage,
+    paginationError,
     fetchNextPage,
     isError,
     error,
@@ -288,6 +289,11 @@ export const TradesPage: React.FC = () => {
             onSelectEpisode={(selected) => setSelectedEpisode(selected)}
           />
 
+          {paginationError && (
+            <p role="alert" data-testid="pagination-error" className="text-xs text-danger">
+              更早记录加载失败，已加载数据保留。请点击加载更多重试。
+            </p>
+          )}
           {/* Pagination Controls & Status */}
           {hasNextPage ? (
             <div
@@ -311,7 +317,7 @@ export const TradesPage: React.FC = () => {
             </div>
           ) : (
             <div data-testid="trades-pagination-status" className="py-2 text-center text-[11px] text-text-muted">
-              已加载全量账本记录 (共 {allTrades.length} 笔) · 无更多历史数据
+              已加载当前 30 天范围全部账本记录 (共 {allTrades.length} 笔) · 该范围无更多数据
             </div>
           )}
         </section>
