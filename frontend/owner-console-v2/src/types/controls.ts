@@ -5,6 +5,7 @@ export interface GlobalEntryState {
   effective_state: 'enabled' | 'paused';
   policy_version: number;
   active_ticket_count: number;
+  first_blocker?: string | null;
 }
 
 export type AdmissionStatus = 'cleared' | 'blocked' | 'unknown';
@@ -75,8 +76,18 @@ export interface AccountCapacityData {
   family_limits: {
     long_continuation: number;
     rally_failure_short: number;
+    [key: string]: number;
   };
   strategy_side_active_counts: Record<string, number>;
+  active_ticket_count?: number;
+  remaining_ticket_slots?: number;
+  gross_stop_risk?: string | null;
+  gross_stop_risk_limit?: string | null;
+  long_stop_risk?: string | null;
+  short_stop_risk?: string | null;
+  family_active_counts?: Record<string, number>;
+  source?: string;
+  [key: string]: any;
 }
 
 export interface FlattenPreviewTicket {
@@ -97,8 +108,10 @@ export interface FlattenPreviewData {
 export interface RecentOperationItem {
   authorization_id: string;
   name: string;
-  state: 'completed' | 'executing' | 'blocked' | 'needs_intervention';
+  state: string;
   ticket_count: number;
   updated_at_ms: number;
+  created_at_ms?: number;
+  result_label?: string;
   first_blocker: string | null;
 }

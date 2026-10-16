@@ -8,9 +8,10 @@ export type NavTabId = 'overview' | 'trades' | 'strategies' | 'review' | 'contro
 interface NavbarProps {
   activeTab: NavTabId;
   onSelectTab: (tab: NavTabId) => void;
+  isRealData?: boolean;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab }) => {
+export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab, isRealData = false }) => {
   const { theme, toggleTheme } = useTheme();
 
   const navItems: { id: NavTabId; label: string; en: string; badge?: string; available: boolean }[] = [
@@ -80,9 +81,19 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab }) => {
 
         {/* Right side: Mock banner & Theme Switcher & Actions */}
         <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 rounded border border-brand/40 bg-brand/10 px-2.5 py-0.5 font-mono text-[11px] font-medium text-brand">
-            <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
-            {MOCK_ENV_LABEL}
+          <span
+            className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 font-mono text-[11px] font-medium ${
+              isRealData
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                : 'border-brand/40 bg-brand/10 text-brand'
+            }`}
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                isRealData ? 'bg-emerald-500' : 'bg-brand'
+              } animate-pulse`}
+            />
+            {isRealData ? 'REAL API · 已连接 PostgreSQL' : MOCK_ENV_LABEL}
           </span>
 
           <span className="text-text-muted opacity-40">·</span>

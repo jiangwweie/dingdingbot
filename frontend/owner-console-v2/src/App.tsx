@@ -8,30 +8,40 @@ import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
 import { ControlledFlattenModal } from './components/ControlledFlattenModal';
 import { TotpActionModal } from './components/TotpActionModal';
-import {
-  initialGlobalEntry,
-  initialStrategies,
-  mockSelectionMap,
-  mockAccountCapacity,
-  mockFlattenPreview,
-  mockRecentOperations,
-} from './mock/controlsData';
-import type { StrategyControlItem, SelectionDiagnosticData } from './types/controls';
 import { OverviewPage } from './components/overview/OverviewPage';
+import { mockFlattenPreview } from './mock/controlsData';
 import type { NavTabId } from './components/Navbar';
+import type { StrategyControlItem, SelectionDiagnosticData, RecentOperationItem } from './types/controls';
+import { useControlsData } from './hooks/useControlsData';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
   // Navigation State
   const [activeTab, setActiveTab] = useState<NavTabId>('overview');
 
-  // Mock Data States
-  const [globalEntry, setGlobalEntry] = useState(initialGlobalEntry);
-  const [strategies, setStrategies] = useState(initialStrategies);
-  const [selectionMap, setSelectionMap] = useState(mockSelectionMap);
-  const [capacity] = useState(mockAccountCapacity);
-  const [operations, setOperations] = useState(mockRecentOperations);
+  // Controls Real API Integration (Phase 1A: Read-Only GET)
+  const {
+    isRealData,
+    isFetching: controlsFetching,
+    globalEntry: remoteGlobalEntry,
+    strategies: remoteStrategies,
+    capacity,
+    operations: remoteOperations,
+    selectionMap: remoteSelectionMap,
+    refetch: refetchControls,
+    generatedAtMs,
+  } = useControlsData();
+
+  // Local interaction overrides for Phase 1A UI safety
+  const [globalEntryOverride, setGlobalEntryOverride] = useState<typeof remoteGlobalEntry | null>(null);
+  const [strategiesOverride, setStrategiesOverride] = useState<StrategyControlItem[] | null>(null);
+  const [operationsOverride, setOperationsOverride] = useState<RecentOperationItem[] | null>(null);
+  const [selectionMap, setSelectionMap] = useState<Record<string, SelectionDiagnosticData>>(remoteSelectionMap);
   const [flattenPreview] = useState(mockFlattenPreview);
+
+  const globalEntry = globalEntryOverride ?? remoteGlobalEntry;
+  const strategies = strategiesOverride ?? remoteStrategies;
+  const operations = operationsOverride ?? remoteOperations;
 
   // Modal States
   const [flattenModalOpen, setFlattenModalOpen] = useState(false);
@@ -62,11 +72,11 @@ export const App: React.FC = () => {
   const handleToggleGlobalEntry = () => {
     if (globalEntry.configured_state === 'enabled') {
       // Pause does NOT require TOTP per code facts
-      setGlobalEntry((prev) => ({
-        ...prev,
+      setGlobalEntryOverride({
+        ...globalEntry,
         configured_state: 'paused',
         effective_state: 'paused',
-      }));
+      });
       showToast('全局新开仓已暂停 (存量持仓保护不受影响)');
     } else {
       // Resume REQUIRES TOTP
@@ -77,11 +87,11 @@ export const App: React.FC = () => {
         confirmLabel: '确认恢复新准入',
         requireTotp: true,
         onConfirm: () => {
-          setGlobalEntry((prev) => ({
-            ...prev,
+          setGlobalEntryOverride({
+            ...globalEntry,
             configured_state: 'enabled',
             effective_state: 'enabled',
-          }));
+          });
           showToast('全局新开仓已恢复运行');
         },
       });
@@ -94,8 +104,8 @@ export const App: React.FC = () => {
 
     if (strategy.configured_state === 'enabled') {
       // Pause
-      setStrategies((prev) =>
-        prev.map((s) =>
+      setStrategiesOverride(
+        strategies.map((s) =>
           s.strategy_group_id === strategy.strategy_group_id
             ? { ...s, configured_state: 'paused', effective_state: 'paused' }
             : s
@@ -111,8 +121,8 @@ export const App: React.FC = () => {
         confirmLabel: '确认恢复策略',
         requireTotp: true,
         onConfirm: () => {
-          setStrategies((prev) =>
-            prev.map((s) =>
+          setStrategiesOverride(
+            strategies.map((s) =>
               s.strategy_group_id === strategy.strategy_group_id
                 ? { ...s, configured_state: 'enabled', effective_state: 'enabled' }
                 : s
@@ -183,15 +193,15 @@ export const App: React.FC = () => {
     await new Promise((r) => setTimeout(r, 1200));
 
     // After flatten, Global ENTRY is paused, tickets are closed
-    setGlobalEntry((prev) => ({
-      ...prev,
+    setGlobalEntryOverride({
+      ...globalEntry,
       configured_state: 'paused',
       effective_state: 'paused',
       active_ticket_count: 0,
-    }));
+    });
 
-    setStrategies((prev) =>
-      prev.map((s) => ({
+    setStrategiesOverride(
+      strategies.map((s) => ({
         ...s,
         active_tickets: [],
         admission_health: {
@@ -205,7 +215,7 @@ export const App: React.FC = () => {
     );
 
     // Prepend to audit log
-    setOperations((prev) => [
+    setOperationsOverride([
       {
         authorization_id: `auth:flatten:${Date.now()}`,
         name: '受控平仓全部仓位',
@@ -214,17 +224,24 @@ export const App: React.FC = () => {
         updated_at_ms: Date.now(),
         first_blocker: null,
       },
-      ...prev,
+      ...operations,
     ]);
 
     showToast('受控平仓执行完毕 · 全部持仓已由 Lifecycle 退出，全局 ENTRY 已挂起');
+  };
+
+  const handleRefreshControls = async () => {
+    setGlobalEntryOverride(null);
+    setStrategiesOverride(null);
+    await refetchControls();
+    showToast('已从 PostgreSQL / API 刷新当前事实');
   };
 
   const pausedCount = strategies.filter((s) => s.configured_state === 'paused' && !s.is_retired).length;
 
   return (
     <div className="min-h-screen bg-background text-text-primary">
-      <Navbar activeTab={activeTab} onSelectTab={setActiveTab} />
+      <Navbar activeTab={activeTab} onSelectTab={setActiveTab} isRealData={isRealData} />
 
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
         {activeTab === 'overview' ? (
@@ -260,7 +277,7 @@ export const App: React.FC = () => {
         ) : (
           <div>
             {/* Page Title & Manual Refresh */}
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h1 className="text-base font-bold text-text-primary flex items-center gap-2">
                   控制中心
@@ -276,13 +293,31 @@ export const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => showToast('已刷新页面数据快照')}
-                  className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
+                  onClick={handleRefreshControls}
+                  disabled={controlsFetching}
+                  className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs disabled:opacity-60"
                 >
-                  <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
-                  刷新当前页
+                  <RefreshCw className={`h-3.5 w-3.5 text-text-muted ${controlsFetching ? 'animate-spin text-brand' : ''}`} />
+                  <span>{controlsFetching ? '正在读取真实 facts...' : '刷新当前页'}</span>
                 </button>
               </div>
+            </div>
+
+            {/* Phase 1A: Integration Status Banner */}
+            <div className="mb-3 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.2">
+                  Phase 1A: Read-Only
+                </span>
+                <span className="text-text-secondary">
+                  {isRealData
+                    ? '已成功接入真实 GET /api/owner/v1/controls 接口与 PostgreSQL 事实'
+                    : '已建立真实 API 映射契约 (当前处于离线/原型基线模式，接口就绪后自动热加载)'}
+                </span>
+              </div>
+              <span className="font-mono text-[11px] text-text-muted">
+                快照时间: {new Date(generatedAtMs).toLocaleTimeString('zh-CN', { hour12: false })}
+              </span>
             </div>
 
             {/* Level 1: System Status Ribbon */}
