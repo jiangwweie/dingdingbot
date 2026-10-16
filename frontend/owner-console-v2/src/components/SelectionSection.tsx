@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSelectionPreview } from '../hooks/useControlsData';
 import { SelectionDrawer } from './SelectionDrawer';
 import { formatAgeFromTimestamp } from '../utils/time';
@@ -20,7 +20,9 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { data: rawPreview, isLoading, isError, refetch } = useSelectionPreview(activeTab);
-  const current = mapPreviewToDiagnostic(activeTab, rawPreview);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  const current = mapPreviewToDiagnostic(activeTab, rawPreview, now);
 
   const isDynamic = current ? current.selection_mode === 'dynamic_selection' : true;
 
@@ -142,7 +144,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
               {/* Authority Status */}
               <div className="flex items-center gap-1 text-xs">
                 <ShieldCheck className="h-4 w-4 text-status-green flex-none" />
-                <span className="font-semibold text-text-primary">
+                <span data-testid="authority-status" data-authority-id={current.kind === 'orb' ? current.authority_id ?? '' : current.current_authority_id ?? ''} className="font-semibold text-text-primary">
                   {current.authority_status_zh}
                 </span>
               </div>

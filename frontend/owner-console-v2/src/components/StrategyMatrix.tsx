@@ -134,6 +134,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                           <button
                             type="button"
                             key={t.ticket_id}
+                            data-ticket-id={t.ticket_id}
                             onClick={() => onSelectTicket?.(t.ticket_id)}
                             className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-2 py-0.5 text-xs font-mono hover:border-brand hover:bg-surface-elevated transition-colors cursor-pointer"
                             title={`点击查看 ${t.symbol} 交易因果`}

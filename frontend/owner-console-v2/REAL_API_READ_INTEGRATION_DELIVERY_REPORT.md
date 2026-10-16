@@ -1,3 +1,12 @@
+# Codex 后续修复状态
+
+- 本地验证：26 项应用回归通过；16 项验收契约断言通过；TypeScript/Vite 构建通过；脚本语法检查通过。
+- Authority：通过界面刷新捕获同次响应，核对身份、状态和时间边界；最多两次边界采样，失败请求不回退旧证据。
+- 数值：容量、收益、价格与数量使用字段级精确比较；策略行和 Ticket 徽章比较完整身份集合。
+- 显示修正：Generic 无身份不再显示连续有效，到期显示过期；页面每秒本地更新时间判断，不增加轮询请求。
+
+以下浏览器结果为历史提交证据，不覆盖本次修改。当前修复的真实生产浏览器验收尚未重跑。Generic API 未暴露 Authority 生效起点，只能验证身份、outcome 和成员截止时间，不宣称完成起点核验。
+
 # Owner Console V2 真实只读集成验收整改交付报告
 
 - **交付日期**: 2026-10-16
@@ -16,7 +25,7 @@
 | :--- | :--- | :--- | :--- | :--- |
 | **1. 必需 API 前置断言与严谨契约** | 原脚本存在最大容量兜底 `?? 3`；缺失响应转为空数组隐瞒故障；缺少明确的响应解析与状态码前置卡点。 | `verify_live_authenticated.mjs`<br>`src/hooks/useOverviewData.ts` | 1. 设立 **Category 0 (P0.1, P0.2, P0.3)**：在运行任何 UI 断言前，强制核验 `/overview`, `/tickets`, `/controls` 的 HTTP 200、JSON 解析有效性与关键信封字段。<br>2. 彻底删除 `?? 3` 兜底，严格读取 `controls.account_capacity.max_concurrent_tickets`，类型非 number 直接判 FAIL。<br>3. 建立四态判定模型：`PASS`, `FAIL`, `INCOMPLETE_EVIDENCE`, `SCENARIO_NA`。只有 0 FAIL 且 0 INCOMPLETE 才能全量 PASS。<br>4. 分页未触发时记录 `SCENARIO_NA`，同时反向断言界面绝无虚假截断提示。 | **VERIFIED PASS** |
 | **2. 对象级绑定断言，杜绝全页模糊匹配** | 原先使用宽泛的 `body.includes(...)` 代替具体卡片核验；因果抽屉只核对标题与 Ticket ID，未核对实际因果快照事实；未考虑 4h/24h 周期边界。 | `verify_live_authenticated.mjs`<br>`src/components/StrategyMatrix.tsx`<br>`src/components/overview/ActiveEpisodesSection.tsx`<br>`src/components/overview/CausalityDrawer.tsx` | 1. **策略矩阵逐行核验**：通过 `tr[data-strategy-id]` 分别核对 7 个策略的 `control_version`、真实准入健康文案（动态对齐容量满载 3/3 阻断、退役、暂停事实）、在管 Ticket 徽章，多项或漏项即报 FAIL。<br>2. **在管持仓逐卡核验**：通过 `[data-ticket-id]` 核验每张卡片的 symbol、side、strategyId，严查遗漏与多余卡片。<br>3. **因果抽屉深度核验**：绑定真实 `causality` 接口响应，严格比对入场价 (`7.408`)、初始止损 (`7.55`)、数量 (`54`)、当前阶段 (`保护安装 (Protection)`) 及 8 阶段时间线。<br>4. **周期边界有界重取**：选币权威状态比对采用有界重取，严格对齐当前轮动周期的最新事实 (`ACTIVE_NEW`)。 | **VERIFIED PASS** |
-| **3. 替换自证测试，调用真实 Auth 源码** | `test_defect_regressions.mjs` 中刷新守卫直接复制 `useAuth` 内部表达式，缓存清理自行调用 `mockQueryClient.clear()`，属于自证测试。 | `src/utils/authVerification.ts`<br>`src/hooks/useAuth.ts`<br>`test_defect_regressions.mjs` | 1. 将认证状态求值 `evaluateAuthState`、存储守卫检查 `isSessionBlockedByStorage`、登出完整执行工作流 `executeAuthLogout` 提取为公共纯函数。<br>2. `useAuth` 彻底委托给这些公共函数，实现敏感页面在登出中途 (`isLoggingOut`) 及未确认状态 (`isLogoutUnconfirmed`) 下的严格封闭。<br>3. 测试直接调用真实函数，并增加**变异测试断言 (Mutation Assertions)**：证明一旦移除缓存清理或刷新守卫，测试必然立即 FAIL。 | **VERIFIED PASS** |
+| **3. 替换自证测试，调用真实 Auth 源码** | `test_defect_regressions.mjs` 中刷新守卫直接复制 `useAuth` 内部表达式，缓存清理自行调用 `mockQueryClient.clear()`，属于自证测试。 | `src/utils/authVerification.ts`<br>`src/hooks/useAuth.ts`<br>`test_defect_regressions.mjs` | 1. 将认证状态求值 `evaluateAuthState`、存储守卫检查 `isSessionBlockedByStorage`、登出完整执行工作流 `executeAuthLogout` 提取为公共纯函数。<br>2. `useAuth` 彻底委托给这些公共函数，实现敏感页面在登出中途 (`isLoggingOut`) 及未确认状态 (`isLogoutUnconfirmed`) 下的严格封闭。<br>3. 测试直接调用真实函数，并增加**负向对照测试**：对照手写错误守卫；缓存清理由真实工作流回归覆盖。未对真实源码执行变异测试。 | **VERIFIED PASS** |
 
 ---
 
@@ -126,7 +135,7 @@ VERIFICATION PASSED ALL REQUIRED ASSERTIONS WITH SOLID EVIDENCE! (Exit code 0)
 
 ---
 
-## 三、单元与变异回归测试执行结果
+## 三、单元与负向对照回归测试执行结果
 
 运行命令：`node test_defect_regressions.mjs`
 执行结果：**26 Passed, 0 Failed (100% 通过)**。
@@ -172,7 +181,7 @@ Running Owner Console V2 Defect Regression Suite (Real Modules)
   ✓ PASS: Logout: Network error on POST sets unconfirmed=true with detail and preserves storage flag
   ✓ PASS: Logout: Real refresh guard initializes from storage and blocks isAuthenticated via evaluateAuthState
   ✓ PASS: Logout: executeAuthLogout invokes real workflow, purges queryClient on unconfirmed logout, and verifies view closure
-  ✓ PASS: Logout: Mutation assertion proves that removing guard or cache-clearing causes test failure
+  ✓ PASS: Logout: Negative controls illustrate guard failures; real workflow assertions cover cache clearing
 
 --- Test Group 8: Ticket Mapping & Unloaded Active Count ---
   ✓ PASS: computeUnloadedActiveCount calculates unloaded tickets without negative numbers

@@ -1,3 +1,4 @@
+import { exactDisplay, sameIdentities, authorityEvidence } from './verification_contracts.mjs';
 import pkg from '../owner-console/node_modules/@playwright/test/index.js';
 import fs from 'fs';
 import path from 'path';
@@ -302,7 +303,7 @@ async function runLiveVerification() {
     const expectedActive = capacityData.active_ticket_count ?? activeTicketsList.length;
     const expectedMax = capacityData.max_concurrent_tickets; // Pure fact, NO fallback 3!
     const pulseText = await capacityPulseEl.textContent();
-    const capacityMatches = pulseText?.includes(`${expectedActive}`) && pulseText?.includes(`${expectedMax}`);
+    const capacityMatches = exactDisplay(pulseText, `容量占用: ${expectedActive} / ${expectedMax}`);
     recordAssertion(
       'A1.1',
       'Overview',
@@ -318,8 +319,8 @@ async function runLiveVerification() {
   const pnlCardEl = page.locator('[data-testid="net-pnl-card"]');
   if (rawOverview?.today_net_pnl) {
     const formattedPnl = formatMoneyMetric(rawOverview.today_net_pnl);
-    const pnlCardText = await pnlCardEl.textContent();
-    const pnlMatches = formattedPnl === '--' ? pnlCardText?.includes('--') : pnlCardText?.includes(formattedPnl);
+    const pnlCardText = await pnlCardEl.locator('[data-testid="metric-value"]').textContent();
+    const pnlMatches = exactDisplay(pnlCardText, formattedPnl);
     recordAssertion(
       'A1.2',
       'Overview',
@@ -335,8 +336,8 @@ async function runLiveVerification() {
   const rCardEl = page.locator('[data-testid="net-r-card"]');
   if (rawOverview?.today_net_r) {
     const formattedR = formatMoneyMetric(rawOverview.today_net_r);
-    const rCardText = await rCardEl.textContent();
-    const rMatches = formattedR === '--' ? rCardText?.includes('--') : rCardText?.includes(formattedR);
+    const rCardText = await rCardEl.locator('[data-testid="metric-value"]').textContent();
+    const rMatches = exactDisplay(rCardText, formattedR);
     recordAssertion(
       'A1.3',
       'Overview',
@@ -545,18 +546,18 @@ async function runLiveVerification() {
         const initialStopEl = causalityDrawer.locator('[data-testid="causality-initial-stop"]');
         const quantityEl = causalityDrawer.locator('[data-testid="causality-quantity"]');
 
-        const entryPriceText = await entryPriceEl.textContent();
-        const initialStopText = await initialStopEl.textContent();
-        const quantityText = await quantityEl.textContent();
+        const entryPriceText = await entryPriceEl.locator('[data-testid="plan-value"]').textContent();
+        const initialStopText = await initialStopEl.locator('[data-testid="plan-value"]').textContent();
+        const quantityText = await quantityEl.locator('[data-testid="plan-value"]').textContent();
 
         const expectedEntry = formatPriceOrQty(plan.actual_entry_price ?? plan.entry_reference_price);
         const expectedStop = formatPriceOrQty(plan.initial_stop_price);
         const expectedQty = formatPriceOrQty(plan.ticket_quantity);
 
         const pricePlanMatches =
-          entryPriceText?.includes(expectedEntry) &&
-          initialStopText?.includes(expectedStop) &&
-          quantityText?.includes(expectedQty);
+          exactDisplay(entryPriceText, expectedEntry) &&
+          exactDisplay(initialStopText, expectedStop) &&
+          exactDisplay(quantityText, expectedQty);
 
         recordAssertion(
           'A2.5',
@@ -604,7 +605,8 @@ async function runLiveVerification() {
   recordAssertion('A3.1', 'Controls', 'Strategy matrix table visible in Controls console', tableVisible ? 'PASS' : 'FAIL', { tableVisible });
 
   // Verify each strategy row individually by data-strategy-id
-  let allRowsAccurate = true;
+  const actualStrategyIds = await matrixTable.locator('tr[data-strategy-id]').evaluateAll(els => els.map(el => el.getAttribute('data-strategy-id')));
+  let allRowsAccurate = sameIdentities(actualStrategyIds, controlsStrategies.map(s => s.strategy_group_id));
   const rowErrors = [];
 
   for (const s of controlsStrategies) {
@@ -659,6 +661,11 @@ async function runLiveVerification() {
 
     // Check active ticket occupations for this strategy
     const matchingTickets = activeTicketsList.filter((t) => t.strategy_group_id === s.strategy_group_id);
+    const badgeIds = await rowEl.locator('[data-ticket-id]').evaluateAll(els => els.map(el => el.getAttribute('data-ticket-id')));
+    if (!sameIdentities(badgeIds, matchingTickets.map(t => t.ticket_id))) {
+      allRowsAccurate = false;
+      rowErrors.push({strategy_group_id:s.strategy_group_id,error:'Ticket identity set mismatch'});
+    }
     if (matchingTickets.length > 0) {
       for (const t of matchingTickets) {
         const symbolClean = cleanSymbol(t.exchange_instrument_id);
@@ -698,6 +705,33 @@ async function runLiveVerification() {
   const selSectionVisible = await selSection.isVisible();
   recordAssertion('A4.1', 'Selection', 'Selection section #selection-section visible', selSectionVisible ? 'PASS' : 'FAIL', { selSectionVisible });
 
+  // Refresh through the UI so the compared response is also the one rendered.
+  async function verifyAuthority(id, kind, assertionId) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const responsePromise = page.waitForResponse(r => new URL(r.url()).pathname.endsWith(`/strategies/${id}/selection`), {timeout:10000});
+      await selSection.getByRole('button', {name:'刷新', exact:true}).click();
+      const response = await responsePromise;
+      if (response.status() !== 200) {
+        recordAssertion(assertionId,'Selection','Authority response', 'FAIL',{status:response.status()}); return;
+      }
+      const preview = await response.json();
+      interceptedResponses[kind === 'orb' ? 'sorSelection' : 'genericSelection'] = {status:200, data:preview, error:null};
+      const before = authorityEvidence(kind, preview, Date.now());
+      if (!before.complete) {
+        recordAssertion(assertionId,'Selection','Authority contract','INCOMPLETE_EVIDENCE',before); return;
+      }
+      const status = selSection.locator('[data-testid="authority-status"]');
+      await page.waitForTimeout(1100);
+      const actual = await status.textContent();
+      const actualId = await status.getAttribute('data-authority-id');
+      const after = authorityEvidence(kind, preview, Date.now());
+      if (before.state !== after.state) continue;
+      const matches = exactDisplay(actual, after.label) && actualId === (after.id ?? '');
+      recordAssertion(assertionId,'Selection','Authority identity and time validity', matches?'PASS':'FAIL',{...after,actual,actualId}); return;
+    }
+    recordAssertion(assertionId,'Selection','Authority boundary stable sample','INCOMPLETE_EVIDENCE',{reason:'Time boundary crossed during both bounded samples'});
+  }
+
   // 4.1 Generic Selection (CPM-RO-001)
   const cpmTab = selSection.getByRole('button', { name: 'CPM-RO-001' });
   await cpmTab.click();
@@ -711,30 +745,15 @@ async function runLiveVerification() {
   } else {
     recordAssertion('A4.2', 'Selection', 'Generic selection API HTTP 200 for CPM-RO-001', 'PASS', { status: 200 });
 
-    const cpmData = cpmResp.data;
+    let cpmData = cpmResp.data;
     const cpmSectionText = await selSection.textContent();
 
     // Verify 4h cadence (not 24h)
     const cadenceMatches = cpmSectionText?.includes('4h 周期') || cpmSectionText?.includes('4h');
     recordAssertion('A4.3', 'Selection', 'Generic Selection (CPM-RO-001) reports 4h cadence (not 24h)', cadenceMatches ? 'PASS' : 'FAIL', { cadenceMatches });
 
-    // Verify Authority outcome (with bounded re-fetch across cycle boundaries)
-    const liveSelection = await page.evaluate(async (id) => {
-      try {
-        const r = await fetch(`/api/owner/v1/controls/strategies/${id}/selection`);
-        return await r.json();
-      } catch (e) {
-        return null;
-      }
-    }, 'CPM-RO-001');
-
-    const outcome = liveSelection?.runtime?.current_authority_outcome ?? cpmData?.runtime?.current_authority_outcome;
-    if (outcome) {
-      const outcomeMatches = cpmSectionText?.includes(outcome);
-      recordAssertion('A4.4', 'Selection', `Generic authority outcome matches API (${outcome})`, outcomeMatches ? 'PASS' : 'FAIL', { expectedOutcome: outcome, found: outcomeMatches });
-    } else {
-      recordAssertion('A4.4', 'Selection', 'Generic authority outcome present', 'INCOMPLETE_EVIDENCE', { reason: 'current_authority_outcome is missing' });
-    }
+    await verifyAuthority('CPM-RO-001', 'generic', 'A4.4');
+    cpmData = interceptedResponses.genericSelection.data;
 
     // Open Selection Drawer
     const inspectBtn = selSection.getByRole('button', { name: '标的明细与诊断' });
@@ -791,7 +810,8 @@ async function runLiveVerification() {
   } else {
     recordAssertion('A4.8', 'Selection', 'SOR-1H selection API HTTP 200', 'PASS', { status: 200 });
 
-    const sorData = sorResp.data;
+    await verifyAuthority('SOR-1H-001', 'orb', 'A4.12');
+    const sorData = interceptedResponses.sorSelection.data;
     const sorSectionText = await selSection.textContent();
 
     // Verify strictly 24h cadence

@@ -152,12 +152,16 @@ export function mapPreviewToDiagnostic(
   const currentBlocker = runtime.first_blocker ?? null;
 
   let authorityStatusZh = '权威未生效 / 缺失';
-  if (currentBlocker) {
+  if (!runtime.current_authority_id) {
+    authorityStatusZh = '权威未生效 / 缺失';
+  } else if (runtime.membership_valid_until_ms != null && nowMs >= runtime.membership_valid_until_ms) {
+    authorityStatusZh = `权威已过期 (${currentOutcome ?? 'EXPIRED'})`;
+  } else if (currentBlocker) {
     authorityStatusZh = `准入阻断 · ${currentBlocker}`;
   } else if (currentOutcome) {
     authorityStatusZh = `权威有效 · ${currentOutcome}`;
-  } else if (runtime.installed) {
-    authorityStatusZh = '权威有效 · 承接上一周期连续性';
+  } else {
+    authorityStatusZh = '权威未生效 / 缺失';
   }
 
   const latestReadyCount = runtime.latest_ready_count ?? members.length;

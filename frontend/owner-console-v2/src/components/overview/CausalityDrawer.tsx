@@ -134,25 +134,25 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
                 <div data-testid="causality-entry-price" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">入场执行价</div>
-                  <div className="font-bold text-text-primary mt-0.5">
+                  <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
                     {formatPriceOrQty(causality.price_plan.actual_entry_price ?? causality.price_plan.entry_reference_price)}
                   </div>
                 </div>
                 <div data-testid="causality-initial-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">初始止损价</div>
-                  <div className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                  <div data-testid="plan-value" className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">
                     {formatPriceOrQty(causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
                 <div data-testid="causality-active-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">当前活动止损</div>
-                  <div className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  <div data-testid="plan-value" className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                     {formatPriceOrQty(causality.price_plan.active_stop_price ?? causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
                 <div data-testid="causality-quantity" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">头寸数量</div>
-                  <div className="font-bold text-text-primary mt-0.5">
+                  <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
                     {formatPriceOrQty(causality.price_plan.ticket_quantity)}
                   </div>
                 </div>

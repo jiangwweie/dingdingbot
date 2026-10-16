@@ -19,7 +19,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
           <TrendingUp className="h-4 w-4 text-emerald-500" />
         </div>
         <div className="mt-2 flex items-baseline gap-2">
-          <span
+          <span data-testid="metric-value"
             className={`font-mono text-2xl font-bold tracking-tight ${
               pnlIsUnavailable
                 ? 'text-text-muted'
@@ -45,7 +45,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
           <Target className="h-4 w-4 text-brand" />
         </div>
         <div className="mt-2 flex items-baseline gap-2">
-          <span
+          <span data-testid="metric-value"
             className={`font-mono text-2xl font-bold tracking-tight ${
               rIsUnavailable
                 ? 'text-text-muted'

@@ -314,7 +314,9 @@ async function runAllTests() {
       },
     };
 
-    const diag = mapPreviewToDiagnostic('CPM-RO-001', genericPreview);
+    const diag = mapPreviewToDiagnostic('CPM-RO-001', genericPreview, 1760620000000);
+    assert.equal(mapPreviewToDiagnostic('CPM-RO-001', genericPreview, 1760630400000).authority_status_zh, '权威已过期 (VALID_NEW)');
+    assert.equal(mapPreviewToDiagnostic('CPM-RO-001', {...genericPreview, runtime:{...genericPreview.runtime, current_authority_id:null}}, 1760620000000).authority_status_zh, '权威未生效 / 缺失');
     assert.equal(diag.kind, 'generic');
     assert.equal(diag.strategy_group_id, 'CPM-RO-001');
     assert.equal(diag.cadence_hours, 4);
@@ -727,7 +729,7 @@ async function runAllTests() {
     assert.equal(authAfterUnconfirmed, false, 'Sensitive view must remain closed after unconfirmed logout');
   });
 
-  await test('Logout: Mutation assertion proves that removing guard or cache-clearing causes test failure', async () => {
+  await test('Logout: Negative controls illustrate guard failures; real workflow assertions cover cache clearing', async () => {
     // Mutation 1: If evaluateAuthState ignored isLogoutUnconfirmed, unconfirmed logout would leak access
     const mutatedEvaluateWithoutGuard = (ctx) => !ctx.isLoggingOut && ctx.sessionSuccess && ctx.authenticated === true;
     const leakOccurred = mutatedEvaluateWithoutGuard({
