@@ -10,6 +10,7 @@ interface NavbarProps {
   onSelectTab: (tab: NavTabId) => void;
   isRealData?: boolean;
   onLogout?: () => void;
+  isLoggingOut?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -17,6 +18,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   isRealData = true,
   onLogout,
+  isLoggingOut = false,
 }) => {
   const { theme, toggleTheme } = useTheme();
 
@@ -116,10 +118,13 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             aria-label="退出登录"
             data-testid="navbar-logout-btn"
-            className="text-xs text-text-muted hover:text-danger transition-colors cursor-pointer"
+            disabled={isLoggingOut}
+            className={`text-xs transition-colors cursor-pointer ${
+              isLoggingOut ? 'text-text-muted opacity-50 cursor-not-allowed' : 'text-text-muted hover:text-danger'
+            }`}
             onClick={onLogout}
           >
-            退出
+            {isLoggingOut ? '正在退出...' : '退出'}
           </button>
         </div>
       </div>

@@ -31,20 +31,32 @@ export interface StrategyControlItem {
   configured_state: ConfiguredState;
   effective_state: string;
   control_version: number;
+  strategy_version_id?: string | null;
   updated_at_ms: number;
   reason_label: string;
   admission_health: StrategyAdmissionHealth;
   active_tickets: ActiveTicketMini[];
+  active_ticket_count?: number;
   is_retired?: boolean;
 }
 
-export interface UniverseMemberItem {
+export interface GenericMemberFacts {
   exchange_instrument_id: string;
-  selected: boolean;
+  runtime_scope_id: string;
+  policy_enabled: boolean | null;
+  scope_entry_enabled: boolean;
+  entry_submit_enabled: boolean | null;
+  warm_valid_until_ms: number | null;
+  policy_version: number | null;
+}
+
+export interface GenericUniverseMember {
+  facts: GenericMemberFacts;
   first_blocker: string | null;
 }
 
-export interface SelectionDiagnosticData {
+export interface GenericSelectionDiagnostic {
+  kind: 'generic';
   strategy_group_id: string;
   installed: boolean;
   cadence_hours: number;
@@ -54,21 +66,56 @@ export interface SelectionDiagnosticData {
   rollback_baseline_id: string | null;
   selection_epoch_id: string | null;
   control_version: number;
-  current_authority_outcome: string;
+  current_authority_id: string | null;
+  current_authority_outcome: string | null;
   authority_status_zh: string;
-  membership_valid_until_ms: number;
-  consecutive_missed_periods: number;
-  latest_ready_count: number;
-  latest_selected_count: number;
-  materialization_state: string;
+  first_blocker: string | null;
+  membership_valid_until_ms: number | null;
+  consecutive_missed_periods: number | null;
+  latest_ready_count: number | null;
+  latest_selected_count: number | null;
+  materialization_generation_id: string | null;
+  materialization_state: string | null;
   materialization_deadline_ms: number | null;
-  vacuum_state: string;
+  vacuum_state: string | null;
   vacuum_fenced_at_ms: number | null;
-  latest_successful_completion_age_ms: number;
-  latest_successful_cutoff_age_ms: number;
-  membership_source_age_ms: number;
-  members: UniverseMemberItem[];
+  latest_successful_completion_age_ms: number | null;
+  latest_successful_cutoff_age_ms: number | null;
+  membership_source_age_ms: number | null;
+  members: GenericUniverseMember[];
 }
+
+export interface OrbSelectionDiagnostic {
+  kind: 'orb';
+  strategy_group_id: string;
+  installed: boolean;
+  cadence_hours: 24;
+  selection_mode: 'dynamic_selection' | 'static_baseline' | 'disabled';
+  pending_selection_mode: 'dynamic_selection' | 'static_baseline' | null;
+  pending_effective_period_anchor_ms: number | null;
+  rollback_baseline_id: string | null;
+  selection_epoch_id: string | null;
+  control_version: number;
+  authority_status_zh: string;
+  authority_outcome: string | null;
+  authority_id: string | null;
+  authority_effective_from_ms: number | null;
+  authority_expires_at_ms: number | null;
+  first_eligible_close_time_ms: number | null;
+  snapshot_expires_at_ms: number | null;
+  snapshot_cutoff_at_ms: number | null;
+  snapshot_decision_at_ms: number | null;
+  snapshot_created_at_ms: number | null;
+  candidate_count: number;
+  ready_count: number;
+  selected_count: number;
+  selected_members: string[];
+  materialization_state: string;
+  vacuum_state: string;
+  vacuum_is_blocking: boolean;
+}
+
+export type SelectionDiagnosticData = GenericSelectionDiagnostic | OrbSelectionDiagnostic;
 
 export interface AccountCapacityData {
   max_concurrent_tickets: number;

@@ -61,11 +61,19 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                           {strategy.timeframe}
                         </span>
                       </div>
-                      <div className="mt-0.5 flex items-center gap-2">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-2">
                         <span className="text-xs text-text-secondary">{strategy.name_zh}</span>
+                        {strategy.strategy_version_id && (
+                          <>
+                            <span className="text-text-muted opacity-40">·</span>
+                            <span className="font-mono text-[11px] text-text-muted" title="真实策略版本号 (strategy_version_id)">
+                              {strategy.strategy_version_id}
+                            </span>
+                          </>
+                        )}
                         <span className="text-text-muted opacity-40">·</span>
-                        <span className="font-mono text-[11px] text-text-muted">
-                          v{strategy.control_version} ({strategy.reason_label})
+                        <span className="font-mono text-[11px] text-text-muted" title="控制记录版本与原因">
+                          控制: v{strategy.control_version} ({strategy.reason_label})
                         </span>
                       </div>
                     </div>
@@ -117,7 +125,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                     </div>
                   </td>
 
-                  {/* Active Positions in Flight */}
+                  {/* Active Positions in Flight (Never fabricate fake ticket buttons) */}
                   <td className="px-4 py-2.5">
                     {strategy.active_tickets.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
@@ -147,6 +155,13 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                           </button>
                         ))}
                       </div>
+                    ) : strategy.active_ticket_count && strategy.active_ticket_count > 0 ? (
+                      <span
+                        className="inline-flex items-center rounded border border-border bg-surface-subtle px-2 py-0.5 font-mono text-xs text-status-amber"
+                        title="账户容量事实记录在管持仓，当前首屏未加载详细 Ticket 实例"
+                      >
+                        {strategy.active_ticket_count} 个占用
+                      </span>
                     ) : (
                       <span className="text-xs text-text-muted font-mono">0 个占用</span>
                     )}

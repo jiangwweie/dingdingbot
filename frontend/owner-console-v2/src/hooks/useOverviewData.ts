@@ -1,8 +1,10 @@
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
 import { fetchControls, controlsQueryKey } from '../api/controlsApi';
 import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
 import { fetchStrategies, strategiesQueryKey } from '../api/strategiesApi';
+import { getUtcDayStartMs } from '../utils/time';
 import type {
   SystemPulseData,
   TodayPerformanceMetrics,
@@ -51,17 +53,13 @@ function formatMetric(metric?: { value: string | null; unit: string; unavailable
   return `${sign}${formattedNum}${unitSuffix}`;
 }
 
-export function cleanSymbol(rawSymbol: string): string {
-  if (!rawSymbol) return rawSymbol;
-  // e.g. "binance-usdm:TRXUSDT:perpetual" -> "TRXUSDT"
-  const parts = rawSymbol.split(':');
-  if (parts.length >= 2) {
-    return parts[1];
-  }
-  return rawSymbol;
-}
+import { cleanSymbol } from '../utils/symbol';
+export { cleanSymbol };
 
 export function useOverviewData() {
+  // Stable UTC day start timestamp (00:00:00.000 UTC) matching backend utc_day_start_ms
+  const [todayStartMs, setTodayStartMs] = useState(() => getUtcDayStartMs());
+
   const overviewQuery = useQuery({
     queryKey: overviewQueryKey,
     queryFn: fetchOverview,
@@ -76,16 +74,26 @@ export function useOverviewData() {
     retry: false,
   });
 
+  const ticketsParams = useMemo(() => ({ limit: 100 }), []);
   const ticketsQuery = useQuery({
-    queryKey: ticketsQueryKey,
-    queryFn: () => fetchTickets({ limit: 50 }),
+    queryKey: ticketsQueryKey(ticketsParams),
+    queryFn: () => fetchTickets(ticketsParams),
     staleTime: 15_000,
     retry: false,
   });
 
+  // Query strategies strictly bounded to Today (from_ms: todayStartMs)
+  const strategiesParams = useMemo(
+    () => ({
+      from_ms: todayStartMs,
+      view: 'current' as const,
+    }),
+    [todayStartMs]
+  );
+
   const strategiesQuery = useQuery({
-    queryKey: strategiesQueryKey,
-    queryFn: () => fetchStrategies({ view: 'current' }),
+    queryKey: strategiesQueryKey(strategiesParams),
+    queryFn: () => fetchStrategies(strategiesParams),
     staleTime: 15_000,
     retry: false,
   });
@@ -100,37 +108,39 @@ export function useOverviewData() {
   const rawStrategies = strategiesQuery.data?.data?.items ?? [];
 
   // Active tickets mapping (terminal_at_ms === null means actively in flight)
+  const authoritativeActiveCount = rawOverview?.active_ticket_count ?? null;
   const activeTicketIdSet = new Set(rawOverview?.active_ticket_ids ?? []);
-  const activeTickets = rawTickets.filter(
+  const matchingActiveTickets = rawTickets.filter(
     (t) =>
       t.terminal_at_ms === null ||
       t.ticket_status === 'active' ||
       activeTicketIdSet.has(t.ticket_id)
   );
 
-  const activeTicketCount =
-    activeTickets.length > 0
-      ? activeTickets.length
-      : rawOverview?.active_ticket_count ??
-        rawControls?.account_capacity?.active_ticket_count ??
-        0;
+  // If ticketsQuery failed, we do NOT pretend active tickets is 0
+  const activeTicketCount = authoritativeActiveCount ?? matchingActiveTickets.length;
+  const unloadedActiveCount =
+    authoritativeActiveCount != null && authoritativeActiveCount > matchingActiveTickets.length
+      ? authoritativeActiveCount - matchingActiveTickets.length
+      : 0;
 
+  // Account capacity - strictly no default 3!
   const maxCapacity =
     rawControls?.account_capacity?.max_concurrent_tickets ??
     (rawOverview?.ticket_capacity != null && rawOverview.ticket_capacity > 0
-      ? activeTicketCount + rawOverview.ticket_capacity
-      : 3);
+      ? (activeTicketCount ?? 0) + rawOverview.ticket_capacity
+      : null);
 
   // Count active tickets per strategy
   const activeCountByStrategy = new Map<string, number>();
-  activeTickets.forEach((t) => {
+  matchingActiveTickets.forEach((t) => {
     activeCountByStrategy.set(
       t.strategy_group_id,
       (activeCountByStrategy.get(t.strategy_group_id) ?? 0) + 1
     );
   });
-  // Also check strategy_side_active_counts from account capacity if activeTickets is pending
-  if (activeTickets.length === 0 && rawControls?.account_capacity?.strategy_side_active_counts) {
+  // Also check strategy_side_active_counts from account capacity if matchingActiveTickets is empty
+  if (matchingActiveTickets.length === 0 && rawControls?.account_capacity?.strategy_side_active_counts) {
     Object.entries(rawControls.account_capacity.strategy_side_active_counts).forEach(
       ([scopeKey, count]) => {
         const strategyId = scopeKey.split(':')[0];
@@ -231,87 +241,122 @@ export function useOverviewData() {
     pnl_unavailable_reason: rawOverview?.today_net_pnl?.unavailable_reason,
   };
 
-  // 3. Active Episodes (mapped strictly from real Ticket items)
-  const episodes: TradeEpisodeSummary[] = activeTickets.map((t) => {
-    const meta = STRATEGY_META[t.strategy_group_id] ?? {
-      name_zh: t.strategy_group_id,
-      timeframe: '1h close',
-    };
-    const stageZh = STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage;
+  // 3. Active Episodes (mapped strictly from real Ticket items, empty if tickets query failed)
+  const episodes: TradeEpisodeSummary[] = ticketsQuery.isError
+    ? []
+    : matchingActiveTickets.map((t) => {
+        const meta = STRATEGY_META[t.strategy_group_id] ?? {
+          name_zh: t.strategy_group_id,
+          timeframe: '1h close',
+        };
+        const stageZh = STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage;
 
-    return {
-      ticket_id: t.ticket_id,
-      strategy_id: t.strategy_group_id,
-      strategy_name_zh: meta.name_zh,
-      symbol: cleanSymbol(t.exchange_instrument_id),
-      side: t.position_side,
-      lifecycle_stage: t.lifecycle_stage,
-      lifecycle_stage_zh: stageZh,
-      completed_stage_count: t.completed_stage_count,
-      total_stage_count: t.total_stage_count,
-      ticket_status: t.ticket_status,
-      issued_at_ms: t.issued_at_ms,
-      issued_at_formatted: new Date(t.issued_at_ms).toLocaleTimeString('zh-CN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-      }),
-      attention_items: t.attention_items ?? [],
-      net_pnl_formatted: formatMetric(t.net_pnl),
-      net_r_formatted: formatMetric(t.net_r),
-    };
-  });
+        return {
+          ticket_id: t.ticket_id,
+          strategy_id: t.strategy_group_id,
+          strategy_name_zh: meta.name_zh,
+          symbol: cleanSymbol(t.exchange_instrument_id),
+          side: t.position_side,
+          lifecycle_stage: t.lifecycle_stage,
+          lifecycle_stage_zh: stageZh,
+          completed_stage_count: t.completed_stage_count,
+          total_stage_count: t.total_stage_count,
+          ticket_status: t.ticket_status,
+          issued_at_ms: t.issued_at_ms,
+          issued_at_formatted: new Date(t.issued_at_ms).toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          }),
+          attention_items: t.attention_items ?? [],
+          net_pnl_formatted: formatMetric(t.net_pnl),
+          net_r_formatted: formatMetric(t.net_r),
+        };
+      });
 
-  // 4. Strategy Contributions
-  const strategyItems: StrategyPerformanceItem[] =
-    rawStrategies.length > 0
-      ? rawStrategies.map((s) => {
-          const meta = STRATEGY_META[s.strategy_group_id] ?? {
-            name_zh: s.strategy_group_display_name ?? s.strategy_group_id,
-            timeframe: '1h close',
-          };
-          const ctrl = rawControls?.strategies?.find(
-            (c) => c.strategy_group_id === s.strategy_group_id
-          );
-          const isPaused = ctrl?.configured_state === 'paused';
+  // 4. Strategy Contributions - Strictly Scoped to Today (from_ms: todayStartMs)
+  const strategyItems: StrategyPerformanceItem[] = (() => {
+    if (strategiesQuery.isError) {
+      // If strategies query failed, do NOT fabricate 0 wins or 0 USDT
+      return (rawControls?.strategies ?? []).map((s) => {
+        const meta = STRATEGY_META[s.strategy_group_id] ?? {
+          name_zh: s.strategy_group_id,
+          timeframe: '1h close',
+        };
+        const isPaused = s.configured_state === 'paused';
+        return {
+          strategy_id: s.strategy_group_id,
+          strategy_version_id: null,
+          name_zh: meta.name_zh,
+          timeframe: meta.timeframe,
+          status: isPaused ? 'paused' : 'running',
+          status_label: isPaused ? '已暂停' : '运行中',
+          ticket_count: undefined,
+          win_count: 0,
+          loss_count: 0,
+          net_pnl_formatted: '读取失败',
+          net_r_formatted: '读取失败',
+          active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
+          is_metrics_available: false,
+        };
+      });
+    }
 
-          return {
-            strategy_id: s.strategy_group_id,
-            name_zh: meta.name_zh,
-            timeframe: meta.timeframe,
-            status: isPaused ? 'paused' : 'running',
-            status_label: isPaused ? '已暂停' : '运行中',
-            ticket_count: s.ticket_count,
-            win_count: s.win_count,
-            loss_count: s.loss_count,
-            net_pnl_formatted: formatMetric(s.net_pnl),
-            net_r_formatted: formatMetric(s.net_r),
-            active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
-          };
-        })
-      : (rawControls?.strategies ?? []).map((s) => {
-          const meta = STRATEGY_META[s.strategy_group_id] ?? {
-            name_zh: s.strategy_group_id,
-            timeframe: '1h close',
-          };
-          const isPaused = s.configured_state === 'paused';
-          return {
-            strategy_id: s.strategy_group_id,
-            name_zh: meta.name_zh,
-            timeframe: meta.timeframe,
-            status: isPaused ? 'paused' : 'running',
-            status_label: isPaused ? '已暂停' : '运行中',
-            ticket_count: 0,
-            win_count: 0,
-            loss_count: 0,
-            net_pnl_formatted: '--',
-            net_r_formatted: '--',
-            active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
-          };
-        });
+    if (rawStrategies.length > 0) {
+      return rawStrategies.map((s) => {
+        const meta = STRATEGY_META[s.strategy_group_id] ?? {
+          name_zh: s.strategy_group_display_name ?? s.strategy_group_id,
+          timeframe: '1h close',
+        };
+        const ctrl = rawControls?.strategies?.find(
+          (c) => c.strategy_group_id === s.strategy_group_id
+        );
+        const isPaused = ctrl?.configured_state === 'paused';
 
-  // 5. Attention Items (Never report healthy if evidence is unavailable or attention level)
+        return {
+          strategy_id: s.strategy_group_id,
+          strategy_version_id: s.strategy_version_id,
+          name_zh: meta.name_zh,
+          timeframe: meta.timeframe,
+          status: isPaused ? 'paused' : 'running',
+          status_label: isPaused ? '已暂停' : '运行中',
+          ticket_count: s.ticket_count,
+          win_count: s.win_count,
+          loss_count: s.loss_count,
+          net_pnl_formatted: formatMetric(s.net_pnl),
+          net_r_formatted: formatMetric(s.net_r),
+          active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
+          is_metrics_available: true,
+        };
+      });
+    }
+
+    return (rawControls?.strategies ?? []).map((s) => {
+      const meta = STRATEGY_META[s.strategy_group_id] ?? {
+        name_zh: s.strategy_group_id,
+        timeframe: '1h close',
+      };
+      const isPaused = s.configured_state === 'paused';
+      return {
+        strategy_id: s.strategy_group_id,
+        strategy_version_id: null,
+        name_zh: meta.name_zh,
+        timeframe: meta.timeframe,
+        status: isPaused ? 'paused' : 'running',
+        status_label: isPaused ? '已暂停' : '运行中',
+        ticket_count: 0,
+        win_count: 0,
+        loss_count: 0,
+        net_pnl_formatted: '--',
+        net_r_formatted: '--',
+        active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
+        is_metrics_available: false,
+      };
+    });
+  })();
+
+  // 5. Attention Items
   const isTrulyHealthy =
     freshness === 'fresh' &&
     conclusionLevel === 'no_action' &&
@@ -360,7 +405,6 @@ export function useOverviewData() {
 
   if (rawOverview?.attention_summary && rawOverview.attention_summary.length > 0) {
     rawOverview.attention_summary.forEach((att, idx) => {
-      // Avoid duplicate conclusion summary
       if (att !== rawOverview?.conclusion?.summary) {
         attentionList.push({
           id: `att-${idx}`,
@@ -390,6 +434,8 @@ export function useOverviewData() {
   }
 
   const refetch = async () => {
+    // Refresh the day start boundary in case UTC day rolled over
+    setTodayStartMs(getUtcDayStartMs());
     await Promise.all([
       overviewQuery.refetch(),
       controlsQuery.refetch(),
@@ -408,7 +454,16 @@ export function useOverviewData() {
         ? ticketsQuery.error.message
         : '无法读取 Ticket 列表'
       : null,
+    unloadedActiveCount,
+    strategiesLoading: strategiesQuery.isLoading,
+    strategiesError: strategiesQuery.isError
+      ? strategiesQuery.error instanceof Error
+        ? strategiesQuery.error.message
+        : '无法读取策略表现数据'
+      : null,
+    todayStartMs,
     refetchTickets: () => ticketsQuery.refetch(),
+    refetchStrategies: () => strategiesQuery.refetch(),
     pulse,
     todayMetrics,
     episodes,

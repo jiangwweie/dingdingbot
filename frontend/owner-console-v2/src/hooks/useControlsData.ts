@@ -7,6 +7,11 @@ import {
   type ControlsResponse,
 } from '../api/controlsApi';
 import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
+import {
+  fetchStrategies,
+  strategiesQueryKey,
+  type StrategyVersionSummary,
+} from '../api/strategiesApi';
 import { cleanSymbol } from './useOverviewData';
 import type {
   GlobalEntryState,
@@ -54,14 +59,22 @@ export function useControlsData() {
   });
 
   const ticketsQuery = useQuery({
-    queryKey: ticketsQueryKey,
-    queryFn: () => fetchTickets({ limit: 50 }),
+    queryKey: ticketsQueryKey({ limit: 100 }),
+    queryFn: () => fetchTickets({ limit: 100 }),
     retry: false,
     staleTime: 15_000,
   });
 
+  const strategiesQuery = useQuery({
+    queryKey: strategiesQueryKey({ view: 'current' }),
+    queryFn: () => fetchStrategies({ view: 'current' }),
+    retry: false,
+    staleTime: 30_000,
+  });
+
   const raw: ControlsResponse | undefined = query.data;
   const rawTickets = ticketsQuery.data?.data?.items ?? [];
+  const rawStrategies = strategiesQuery.data?.data?.items ?? [];
 
   // 1. Map Global Entry
   const globalEntry: GlobalEntryState | null = raw?.global_entry
@@ -96,19 +109,20 @@ export function useControlsData() {
           admissionSummary = '受限挂起 · 全局 ENTRY 已由 Owner 暂停';
         } else if (isCapacityFull) {
           admissionStatus = 'blocked';
-          admissionSummary = `准入阻断 · 全局总容量已达上限 (${raw?.account_capacity?.active_ticket_count ?? 3}/${raw?.account_capacity?.max_concurrent_tickets ?? 3})`;
+          const act = raw?.account_capacity?.active_ticket_count ?? '—';
+          const max = raw?.account_capacity?.max_concurrent_tickets ?? '—';
+          admissionSummary = `准入阻断 · 全局总容量已达上限 (${act}/${max})`;
         } else if (s.configured_state === 'paused') {
           admissionStatus = 'blocked';
           admissionSummary = '策略已暂停 · 仅继续存量生命周期保护';
         }
 
-        // Map real active tickets for this strategy
+        // Map real active tickets for this strategy (never fabricate fake tickets)
         const matchingTickets = rawTickets.filter(
           (t) => t.strategy_group_id === s.strategy_group_id && t.terminal_at_ms === null
         );
 
         let activeTickets: ActiveTicketMini[] = [];
-
         if (matchingTickets.length > 0) {
           activeTickets = matchingTickets.map((t) => {
             const rVal = t.net_r?.value;
@@ -125,25 +139,26 @@ export function useControlsData() {
               stage: STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage,
             };
           });
-        } else if (raw.account_capacity?.strategy_side_active_counts) {
-          // If tickets not loaded yet or filtered out, check strategy_side_active_counts
+        }
+
+        // Count from account capacity if matching ticket list items are not loaded
+        let countFromCapacity = 0;
+        if (raw?.account_capacity?.strategy_side_active_counts) {
           Object.entries(raw.account_capacity.strategy_side_active_counts).forEach(
             ([scope, count]) => {
-              if (scope.startsWith(`${s.strategy_group_id}:`) && count > 0) {
-                const side = scope.split(':')[1] as 'long' | 'short';
-                for (let i = 0; i < count; i++) {
-                  activeTickets.push({
-                    ticket_id: `scope-active-${s.strategy_group_id}-${i}`,
-                    symbol: '在管持仓',
-                    side: side ?? 'long',
-                    pnl_r: '执行中',
-                    stage: '生命周期保护',
-                  });
-                }
+              if (scope.startsWith(`${s.strategy_group_id}:`)) {
+                countFromCapacity += count;
               }
             }
           );
         }
+        const activeTicketCount = matchingTickets.length > 0 ? matchingTickets.length : countFromCapacity;
+
+        // Retrieve real strategy_version_id
+        const stratItem = rawStrategies.find(
+          (item: StrategyVersionSummary) => item.strategy_group_id === s.strategy_group_id
+        );
+        const strategyVersionId = stratItem?.strategy_version_id ?? null;
 
         return {
           strategy_group_id: s.strategy_group_id,
@@ -152,6 +167,8 @@ export function useControlsData() {
           configured_state: s.configured_state,
           effective_state: s.effective_state,
           control_version: s.control_version,
+          strategy_version_id: strategyVersionId,
+          active_ticket_count: activeTicketCount,
           updated_at_ms: s.updated_at_ms,
           reason_label: formatReasonLabel(s.reason),
           is_retired: isRetired,
@@ -210,7 +227,7 @@ export function useControlsData() {
     : [];
 
   const refetch = async () => {
-    await Promise.all([query.refetch(), ticketsQuery.refetch()]);
+    await Promise.all([query.refetch(), ticketsQuery.refetch(), strategiesQuery.refetch()]);
   };
 
   return {

@@ -18,6 +18,7 @@ interface ActiveEpisodesSectionProps {
   isLoading?: boolean;
   isError?: boolean;
   errorMessage?: string | null;
+  unloadedActiveCount?: number;
   onRetry?: () => void;
 }
 
@@ -27,6 +28,7 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
   isLoading = false,
   isError = false,
   errorMessage,
+  unloadedActiveCount = 0,
   onRetry,
 }) => {
   return (
@@ -201,6 +203,13 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
               </div>
             );
           })}
+          {unloadedActiveCount > 0 && (
+            <div className="mt-2.5 flex items-center justify-between rounded border border-border bg-surface-subtle p-3 text-xs text-text-secondary font-sans">
+              <span>
+                另有 <strong className="font-mono text-text-primary">{unloadedActiveCount}</strong> 笔在管持仓未在首页展示 (受首屏 100 笔限制，遵循分页契约)
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -9,12 +9,7 @@ export type CausalityEnvelope = components['schemas']['ApiEnvelope_TradeCausalit
 export type TradeCausalityDetail = components['schemas']['TradeCausalityDetail'];
 export type LifecycleStageView = components['schemas']['LifecycleStageView'];
 
-export const ticketsQueryKey = ['owner', 'tickets'] as const;
-
-export const causalityQueryKey = (ticketId: string) =>
-  ['owner', 'causality', ticketId] as const;
-
-export async function fetchTickets(params?: {
+export interface TicketsQueryParams {
   from_ms?: number;
   to_ms?: number;
   limit?: number;
@@ -22,10 +17,19 @@ export async function fetchTickets(params?: {
   strategy_group_id?: string;
   exchange_instrument_id?: string;
   position_side?: 'long' | 'short';
-}): Promise<TicketListEnvelope> {
+}
+
+export const ticketsQueryKey = (params?: TicketsQueryParams) =>
+  ['owner', 'tickets', params ?? { limit: 100 }] as const;
+
+export const causalityQueryKey = (ticketId: string) =>
+  ['owner', 'causality', ticketId] as const;
+
+export async function fetchTickets(params?: TicketsQueryParams): Promise<TicketListEnvelope> {
+  const queryParams = params ?? { limit: 100 };
   const { data, error, response } = await apiClient.GET('/api/owner/v1/tickets', {
     params: {
-      query: params,
+      query: queryParams,
     },
   });
   if (!response.ok) {

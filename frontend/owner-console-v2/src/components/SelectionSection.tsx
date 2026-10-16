@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import type { SelectionDiagnosticData, UniverseMemberItem } from '../types/controls';
 import { useSelectionPreview } from '../hooks/useControlsData';
-import { cleanSymbol } from '../hooks/useOverviewData';
-import type { GenericSelectionPreview, OrbSelectionPreview } from '../api/controlsApi';
 import { SelectionDrawer } from './SelectionDrawer';
+import { formatAgeFromTimestamp } from '../utils/time';
 import { RefreshCw, RotateCcw, ShieldCheck, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react';
+import { mapPreviewToDiagnostic } from '../mapping/selectionMapping';
+
+export { mapPreviewToDiagnostic };
 
 interface SelectionSectionProps {
   onTriggerFallback?: (groupId: string) => void;
@@ -12,125 +13,56 @@ interface SelectionSectionProps {
   onRefreshData?: (groupId: string) => void;
 }
 
-const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-001'];
-
-function mapPreviewToDiagnostic(
-  strategyGroupId: string,
-  preview: GenericSelectionPreview | OrbSelectionPreview | undefined
-): SelectionDiagnosticData | null {
-  if (!preview) return null;
-  const isOrb = 'strategy_label' in preview || strategyGroupId === 'SOR-1H-001';
-  const runtime = (preview as any).runtime ?? {};
-  const control = (preview as any).control ?? {};
-
-  if (isOrb) {
-    const snapshotDisp = runtime.snapshot_disposition ?? {};
-    const snapshot = snapshotDisp.snapshot ?? {};
-    const currentAuth = runtime.current_authority?.authority ?? {};
-    const selectedMembersRaw: string[] = snapshotDisp.selected_members ?? [];
-
-    const candidateCount = snapshot.candidate_count ?? 24;
-    const selectedCount = snapshot.selected_count ?? selectedMembersRaw.length;
-    const readyCount = snapshot.ready_count ?? candidateCount;
-
-    // Selected members list
-    const members: UniverseMemberItem[] = selectedMembersRaw.map((m: string) => ({
-      exchange_instrument_id: cleanSymbol(m),
-      selected: true,
-      first_blocker: null,
-    }));
-
-    const cadenceHours = 24; // SOR-1H ORB 日周期轮动 (24h)
-
-    const outcome = currentAuth.authority_outcome ?? 'ACTIVE_NEW';
-    const epochId = currentAuth.selection_epoch_id ?? null;
-    const authorityStatusZh = `权威有效 · ${outcome}`;
-    const completionAgeMs = snapshot.created_at_ms
-      ? Math.max(0, Date.now() - snapshot.created_at_ms)
-      : 0;
-
-    return {
-      strategy_group_id: strategyGroupId,
-      installed: (preview as any).installed ?? true,
-      cadence_hours: cadenceHours,
-      selection_mode: (control.selection_mode as any) ?? 'dynamic_selection',
-      pending_selection_mode: control.pending_selection_mode ?? null,
-      pending_effective_period_anchor_ms: control.pending_effective_period_anchor_ms ?? null,
-      rollback_baseline_id: control.rollback_baseline_id ?? null,
-      selection_epoch_id: epochId,
-      control_version: control.control_version ?? 1,
-      current_authority_outcome: outcome,
-      authority_status_zh: authorityStatusZh,
-      membership_valid_until_ms: snapshot.expires_at_ms ?? 0,
-      consecutive_missed_periods: 0,
-      latest_ready_count: readyCount,
-      latest_selected_count: selectedCount,
-      materialization_state: runtime.materialization_generation ? 'active' : 'idle',
-      materialization_deadline_ms: null,
-      vacuum_state: (runtime.entry_vacuums?.length ?? 0) > 0 ? 'vacuum_active' : 'clear',
-      vacuum_fenced_at_ms: null,
-      latest_successful_completion_age_ms: completionAgeMs,
-      latest_successful_cutoff_age_ms: completionAgeMs,
-      membership_source_age_ms: completionAgeMs,
-      members,
-    };
-  }
-
-  // Generic Selection (CPM, BRF2, MI, MPG)
-  const isGeneric = 'cadence_hours' in preview;
-  const members: UniverseMemberItem[] = (runtime.members ?? []).map((m: any) => ({
-    exchange_instrument_id: cleanSymbol(m.exchange_instrument_id),
-    selected: Boolean(m.selected),
-    first_blocker: m.first_blocker ?? null,
-  }));
-
-  const cadenceHours = isGeneric ? (preview as GenericSelectionPreview).cadence_hours : 4;
-  const selectionMode = control.selection_mode ?? 'dynamic_selection';
-  const selectedCount = runtime.latest_selected_count ?? members.filter((m) => m.selected).length;
-  const readyCount = runtime.latest_ready_count ?? members.length;
-
-  return {
-    strategy_group_id: strategyGroupId,
-    installed: runtime.installed ?? true,
-    cadence_hours: cadenceHours,
-    selection_mode: selectionMode,
-    pending_selection_mode: control.pending_selection_mode ?? null,
-    pending_effective_period_anchor_ms: control.pending_effective_period_anchor_ms ?? null,
-    rollback_baseline_id: control.rollback_baseline_id ?? null,
-    selection_epoch_id: runtime.selection_epoch_id ?? null,
-    control_version: control.control_version ?? 1,
-    current_authority_outcome: runtime.current_authority_outcome ?? '权威有效',
-    authority_status_zh: runtime.current_authority_outcome
-      ? `权威有效 · ${runtime.current_authority_outcome}`
-      : '权威有效 · 承接上一周期连续性',
-    membership_valid_until_ms: runtime.membership_valid_until_ms ?? 0,
-    consecutive_missed_periods: runtime.consecutive_missed_periods ?? 0,
-    latest_ready_count: readyCount,
-    latest_selected_count: selectedCount,
-    materialization_state: runtime.materialization_state ?? 'active',
-    materialization_deadline_ms: runtime.materialization_deadline_ms ?? null,
-    vacuum_state: runtime.vacuum_state ?? 'clear',
-    vacuum_fenced_at_ms: runtime.vacuum_fenced_at_ms ?? null,
-    latest_successful_completion_age_ms: runtime.latest_successful_completion_age_ms ?? 0,
-    latest_successful_cutoff_age_ms: runtime.latest_successful_cutoff_age_ms ?? 0,
-    membership_source_age_ms: runtime.membership_source_age_ms ?? 0,
-    members,
-  };
-}
+export const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-001'] as const;
 
 export const SelectionSection: React.FC<SelectionSectionProps> = () => {
-  const [activeTab, setActiveTab] = useState('CPM-RO-001');
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>('CPM-RO-001');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const { data: rawPreview, isLoading, isError, refetch } = useSelectionPreview(activeTab);
   const current = mapPreviewToDiagnostic(activeTab, rawPreview);
 
   const isDynamic = current ? current.selection_mode === 'dynamic_selection' : true;
-  const selectedCount = current?.latest_selected_count ?? 0;
-  const totalPool = current
-    ? Math.max(current.latest_ready_count, current.members.length, 24)
-    : 24;
-  const filteredCount = Math.max(0, totalPool - selectedCount);
+
+  // Selected & Unselected count labels adhering to facts
+  const counts = (() => {
+    if (!current) return { selected: 0, unselected: 0, total: 0, label: '0 入选' };
+    if (current.kind === 'orb') {
+      const total = current.candidate_count;
+      const selected = current.selected_count;
+      const unselected = Math.max(0, total - selected);
+      return {
+        selected,
+        unselected,
+        total,
+        label: `${selected} 入选 / ${unselected} 未入选 (候选总数 ${total})`,
+      };
+    } else {
+      const selected = current.latest_selected_count ?? current.members.filter((m) => m.first_blocker === null).length;
+      const total = current.latest_ready_count ?? current.members.length;
+      const unselected = Math.max(0, total - selected);
+      return {
+        selected,
+        unselected,
+        total,
+        label: `${selected} 入选 / ${unselected} 未入选 (配置在役 ${current.members.length})`,
+      };
+    }
+  })();
+
+  const ageLabel = (() => {
+    if (!current) return '—';
+    if (current.kind === 'orb') {
+      const ts = current.snapshot_decision_at_ms ?? current.snapshot_created_at_ms;
+      return ts ? formatAgeFromTimestamp(ts).labelZh : '未知';
+    } else {
+      if (current.latest_successful_completion_age_ms != null) {
+        const h = Math.round(current.latest_successful_completion_age_ms / 3600000);
+        return h > 0 ? `${h}h 前` : '近期生成';
+      }
+      return '未知';
+    }
+  })();
 
   return (
     <div className="rounded border border-border bg-surface shadow-xs">
@@ -164,7 +96,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
         </div>
       </div>
 
-      {/* Main Body for Active Strategy: Unified Single-Row Command Bar */}
+      {/* Main Body for Active Strategy */}
       <div className="p-3.5">
         {isLoading ? (
           <div className="flex items-center justify-center py-6 gap-2 text-xs text-text-muted">
@@ -219,18 +151,18 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
 
               {/* Candidates Counts */}
               <div className="flex items-center gap-1 text-xs font-medium text-text-secondary">
-                <span className="text-status-green font-semibold">{selectedCount}</span> 入围 /{' '}
-                <span className="text-text-muted">{filteredCount}</span> 过滤
+                <span className="text-status-green font-semibold">{counts.selected}</span> 入选 /{' '}
+                <span className="text-text-muted">{counts.unselected}</span> 未入选
+                <span className="text-text-muted text-[11px]">
+                  ({current.kind === 'orb' ? `候选总数 ${counts.total}` : `配置在役 ${current.members.length}`})
+                </span>
               </div>
 
               <span className="text-text-muted opacity-30">·</span>
 
               {/* Freshness / Age */}
               <span className="font-mono text-xs text-text-muted">
-                年龄:{' '}
-                {current.latest_successful_completion_age_ms > 0
-                  ? `${Math.round(current.latest_successful_completion_age_ms / 3600000)}h 前`
-                  : '近期生成'}
+                年龄: {ageLabel}
               </span>
             </div>
 
@@ -261,7 +193,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
               <button
                 type="button"
                 onClick={() => refetch()}
-                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
+                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs cursor-pointer"
                 title="重新读取该策略选币快照"
               >
                 <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
@@ -271,7 +203,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
               <button
                 type="button"
                 onClick={() => setDrawerOpen(true)}
-                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-semibold text-brand hover:bg-surface-elevated transition-colors shadow-xs"
+                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-semibold text-brand hover:bg-surface-elevated transition-colors shadow-xs cursor-pointer"
               >
                 <span>标的明细与诊断</span>
                 <ExternalLink className="h-3.5 w-3.5" />

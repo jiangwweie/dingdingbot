@@ -15,14 +15,14 @@ export const StrategyContributionSection: React.FC<StrategyContributionSectionPr
         <div className="flex items-center gap-2">
           <Layers className="h-4 w-4 text-brand" />
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-            今日策略表现 (Strategy Matrix & Contribution)
+            今日策略表现 (UTC 今日累计)
           </h3>
           <span className="text-xs text-text-muted">
             ({strategies.length} 个生产策略组)
           </span>
         </div>
         <span className="text-[11px] text-text-muted">
-          来自 /api/owner/v1/strategies 真实快照
+          来自 /api/owner/v1/strategies (今日窗口)
         </span>
       </div>
 
@@ -50,11 +50,16 @@ export const StrategyContributionSection: React.FC<StrategyContributionSectionPr
                   {/* 1. 策略名与 ID */}
                   <td className="py-2.5 pr-3 font-sans">
                     <div className="font-mono text-xs font-bold text-text-primary">
-                      {st.strategy_id}
+                       {st.strategy_id}
                     </div>
                     <div className="text-[11px] text-text-muted">
                       {st.name_zh} · {st.timeframe}
                     </div>
+                    {st.strategy_version_id && (
+                      <div className="font-mono text-[10px] text-text-muted opacity-80" title="真实策略版本号 (strategy_version_id)">
+                        {st.strategy_version_id}
+                      </div>
+                    )}
                   </td>
 
                   {/* 2. 状态 */}

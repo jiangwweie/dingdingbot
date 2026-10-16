@@ -20,6 +20,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
     error,
     ticketsLoading,
     ticketsError,
+    unloadedActiveCount,
     refetchTickets,
     pulse,
     todayMetrics,
@@ -94,6 +95,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
         isLoading={ticketsLoading}
         isError={Boolean(ticketsError)}
         errorMessage={ticketsError}
+        unloadedActiveCount={unloadedActiveCount}
         onRetry={refetchTickets}
       />
 

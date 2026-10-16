@@ -69,8 +69,8 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
             <Activity className="h-3.5 w-3.5 text-brand" />
             <span>
               容量占用:{' '}
-              <strong className="font-mono text-text-primary">{pulse.active_ticket_count}</strong> /{' '}
-              {pulse.ticket_capacity_total}
+              <strong className="font-mono text-text-primary">{pulse.active_ticket_count ?? 0}</strong> /{' '}
+              <span className="font-mono">{pulse.ticket_capacity_total != null ? pulse.ticket_capacity_total : '未知'}</span>
             </span>
           </div>
 

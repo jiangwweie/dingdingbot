@@ -16,7 +16,7 @@ export interface SystemPulseData {
   incidents_count: number;
   active_ticket_count?: number;
   ticket_capacity_used?: number;
-  ticket_capacity_total: number;
+  ticket_capacity_total?: number | null;
   data_freshness_seconds?: number;
   snapshot_id?: string;
   generated_at?: string;
@@ -84,6 +84,7 @@ export interface CausalityStageNode {
 
 export interface StrategyPerformanceItem {
   strategy_id: string;
+  strategy_version_id?: string | null;
   name_zh: string;
   timeframe: string;
   status: 'running' | 'waiting' | 'paused' | 'blocked';
@@ -94,7 +95,7 @@ export interface StrategyPerformanceItem {
   net_pnl_formatted?: string;
   net_r_formatted?: string;
   active_tickets_count: number;
-  // Optional prototype fixture fields
+  is_metrics_available?: boolean;
   today_r?: number;
   today_trades_count?: number;
 }

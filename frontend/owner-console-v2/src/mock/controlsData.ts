@@ -1,7 +1,6 @@
 import type {
   GlobalEntryState,
   StrategyControlItem,
-  SelectionDiagnosticData,
   AccountCapacityData,
   FlattenPreviewData,
   RecentOperationItem,
@@ -122,7 +121,7 @@ export const initialStrategies: StrategyControlItem[] = [
   },
 ];
 
-export const mockSelectionMap: Record<string, SelectionDiagnosticData> = {
+export const mockSelectionMap: Record<string, any> = {
   'CPM-RO-001': {
     strategy_group_id: 'CPM-RO-001',
     installed: true,

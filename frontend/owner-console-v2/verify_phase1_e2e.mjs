@@ -130,6 +130,16 @@ async function runE2E() {
 
   const page = await context.newPage();
 
+  const consoleErrors = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
+    }
+  });
+  page.on('pageerror', (err) => {
+    consoleErrors.push(err.message);
+  });
+
   const setDarkMode = async () => {
     await page.evaluate(() => {
       document.documentElement.classList.add('dark');
@@ -249,8 +259,8 @@ async function runE2E() {
   if (!selectionText.includes('DYNAMIC (24h 日周期)')) {
     throw new Error('SOR-1H-001 does not show 24h cadence');
   }
-  if (!selectionText.includes('7 入围') || !selectionText.includes('17 过滤')) {
-    throw new Error(`SOR-1H-001 does not show 7 入围 / 17 过滤. Text: ${selectionText}`);
+  if (!selectionText.includes('7 入选 / 17 未入选') || !selectionText.includes('候选总数 24')) {
+    throw new Error(`SOR-1H-001 does not show 7 入选 / 17 未入选 (候选总数 24). Text: ${selectionText}`);
   }
   if (!selectionText.includes('ACTIVE_NEW')) {
     throw new Error('SOR-1H-001 missing ACTIVE_NEW authority badge');
@@ -271,8 +281,8 @@ async function runE2E() {
   await page.waitForTimeout(600);
 
   const selDrawerText = await page.textContent('[role="dialog"]');
-  if (!selDrawerText.includes('ATOMUSDT') || !selDrawerText.includes('SOLUSDT') || !selDrawerText.includes('7 入围 / 17 过滤')) {
-    throw new Error('Selection drawer missing 7 tokens or 17 filtered count');
+  if (!selDrawerText.includes('ATOMUSDT') || !selDrawerText.includes('SOLUSDT') || !selDrawerText.includes('7 入选 / 17 未入选')) {
+    throw new Error('Selection drawer missing 7 tokens or 17 unselected count');
   }
 
   await page.screenshot({ path: path.join(outDir, 'screenshot_selection_drawer_dark.png'), fullPage: false });
@@ -293,8 +303,13 @@ async function runE2E() {
   const postCount = requestLog.length;
   const requestsIn10s = postCount - preCount;
   console.log(`Requests during 10s idle period: ${requestsIn10s}`);
-  if (requestsIn10s > 8) {
+  if (requestsIn10s > 0) {
     throw new Error(`Query stampede detected! ${requestsIn10s} requests in 10s idle.`);
+  }
+
+  // Verify zero unhandled console errors
+  if (consoleErrors.length > 0) {
+    throw new Error(`Console errors detected: ${JSON.stringify(consoleErrors)}`);
   }
 
   // ==========================================
