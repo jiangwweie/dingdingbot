@@ -13,6 +13,7 @@ import {
   type StrategyVersionSummary,
 } from '../api/strategiesApi';
 import { cleanSymbol } from './useOverviewData';
+import { evaluateStrategyAdmissionHealth } from '../mapping/admissionHealthMapping';
 import type {
   GlobalEntryState,
   StrategyControlItem,
@@ -95,27 +96,14 @@ export function useControlsData() {
           timeframe: '1h close',
         };
         const isRetired = meta.is_retired || s.strategy_group_id === 'SOR-001';
-        const isGlobalPaused = raw?.global_entry?.configured_state === 'paused';
-        const isCapacityFull = (raw?.account_capacity?.remaining_ticket_slots ?? 0) <= 0;
 
-        let admissionStatus: 'cleared' | 'blocked' = 'cleared';
-        let admissionSummary = '准入畅通 · 观察 Worker 运行正常';
-
-        if (isRetired) {
-          admissionStatus = 'blocked';
-          admissionSummary = '已永久退役 · 仅留存审计，禁止恢复';
-        } else if (isGlobalPaused) {
-          admissionStatus = 'blocked';
-          admissionSummary = '受限挂起 · 全局 ENTRY 已由 Owner 暂停';
-        } else if (isCapacityFull) {
-          admissionStatus = 'blocked';
-          const act = raw?.account_capacity?.active_ticket_count ?? '—';
-          const max = raw?.account_capacity?.max_concurrent_tickets ?? '—';
-          admissionSummary = `准入阻断 · 全局总容量已达上限 (${act}/${max})`;
-        } else if (s.configured_state === 'paused') {
-          admissionStatus = 'blocked';
-          admissionSummary = '策略已暂停 · 仅继续存量生命周期保护';
-        }
+        const admissionHealth = evaluateStrategyAdmissionHealth({
+          strategy: s,
+          globalEntry: raw?.global_entry,
+          runtimeAuthority: raw?.runtime_entry_authority,
+          capacity: raw?.account_capacity,
+          isRetired,
+        });
 
         // Map real active tickets for this strategy (never fabricate fake tickets)
         const matchingTickets = rawTickets.filter(
@@ -172,11 +160,7 @@ export function useControlsData() {
           updated_at_ms: s.updated_at_ms,
           reason_label: formatReasonLabel(s.reason),
           is_retired: isRetired,
-          admission_health: {
-            status: admissionStatus,
-            summary: admissionSummary,
-            source: 'server_admission_fact',
-          },
+          admission_health: admissionHealth,
           active_tickets: activeTickets,
         };
       })

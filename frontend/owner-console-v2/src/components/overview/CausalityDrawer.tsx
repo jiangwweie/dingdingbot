@@ -123,8 +123,8 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
                     : episode.lifecycle_stage_zh}
                 </strong>
               </span>
-              <span className="font-mono text-text-muted text-[11px]">
-                发出时间: {episode.issued_at_formatted}
+              <span className="font-mono text-text-muted text-[11px]" title={episode.ticket_id} data-ticket-id={episode.ticket_id}>
+                Ticket ID: {episode.ticket_id} · 发出时间: {episode.issued_at_formatted}
               </span>
             </div>
 

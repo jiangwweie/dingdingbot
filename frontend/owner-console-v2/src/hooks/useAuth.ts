@@ -8,8 +8,7 @@ import {
   type LoginRequest,
 } from '../api/authApi';
 import { isUnauthorized } from '../api/errors';
-
-const LOGOUT_UNCONFIRMED_KEY = 'brc_owner_logout_unconfirmed';
+import { performLogoutVerification, LOGOUT_UNCONFIRMED_KEY } from '../utils/authVerification.ts';
 
 export function useAuth() {
   const queryClient = useQueryClient();
@@ -47,51 +46,20 @@ export function useAuth() {
     setIsLoggingOut(true);
     setLogoutError(null);
 
-    let postSucceeded = false;
-    let postErrorDetail = '';
-
-    try {
-      await apiLogout();
-      postSucceeded = true;
-    } catch (err) {
-      postErrorDetail = err instanceof Error ? err.message : '网络或服务异常';
-    }
-
-    // Explicitly verify server session invalidation via GET /api/owner/v1/auth/session
-    let serverSessionInvalidated = false;
-    try {
-      await getAuthSession();
-      // If getAuthSession succeeded without throwing 401, the session is still active on server!
-      serverSessionInvalidated = false;
-    } catch (err) {
-      if (isUnauthorized(err)) {
-        serverSessionInvalidated = true;
-      }
-    }
+    const storage = typeof window !== 'undefined' ? sessionStorage : null;
+    const res = await performLogoutVerification(apiLogout, getAuthSession, storage);
 
     setIsLoggingOut(false);
 
-    if (postSucceeded && serverSessionInvalidated) {
-      // Confirmed genuine server logout
-      if (typeof window !== 'undefined') {
-        sessionStorage.removeItem(LOGOUT_UNCONFIRMED_KEY);
-      }
+    if (res.success) {
       setIsLogoutUnconfirmed(false);
       setLogoutError(null);
       queryClient.clear();
       queryClient.setQueryData(authSessionQueryKey, null);
       return true;
     } else {
-      // Server logout unconfirmed
-      if (typeof window !== 'undefined') {
-        sessionStorage.setItem(LOGOUT_UNCONFIRMED_KEY, 'true');
-      }
       setIsLogoutUnconfirmed(true);
-      const detail = !postSucceeded
-        ? `注销接口请求失败 (${postErrorDetail})`
-        : '服务端 Session 校验未返回 401，未能确认销毁';
-      const errMsg = `服务端退出未确认：${detail}`;
-      setLogoutError(errMsg);
+      setLogoutError(res.errorDetail);
       // For privacy, clear sensitive cached query data
       queryClient.clear();
       return false;

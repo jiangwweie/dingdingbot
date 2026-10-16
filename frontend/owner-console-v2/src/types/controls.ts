@@ -9,11 +9,12 @@ export interface GlobalEntryState {
 }
 
 export type AdmissionStatus = 'cleared' | 'blocked' | 'unknown';
+export type AdmissionFactSource = 'server_admission_fact' | 'client_derived' | 'unknown_fact';
 
 export interface StrategyAdmissionHealth {
   status: AdmissionStatus;
   summary: string;
-  source: 'server_admission_fact' | 'unknown_fact';
+  source: AdmissionFactSource;
 }
 
 export interface ActiveTicketMini {

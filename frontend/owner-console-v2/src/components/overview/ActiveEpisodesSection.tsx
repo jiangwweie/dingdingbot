@@ -32,7 +32,7 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
   onRetry,
 }) => {
   return (
-    <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+    <div id="active-episodes" className="rounded-lg border border-border bg-surface p-4 shadow-sm">
       <div className="flex items-center justify-between pb-3 border-b border-border">
         <div className="flex items-center gap-2">
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">

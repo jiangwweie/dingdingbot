@@ -389,7 +389,7 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
                           当前列表为本策略组在役范围事实配置成员。
                         </p>
                         <p className="mt-0.5 text-[11px] text-text-muted leading-relaxed">
-                          候选全量名单、排名及仲裁归因依据后端接口未提供。
+                          接口未提供候选名单与过滤仲裁流水（候选全量名单、排名及仲裁归因依据后端接口未提供）。
                         </p>
                       </div>
                     </div>

@@ -5,6 +5,7 @@ import { fetchControls, controlsQueryKey } from '../api/controlsApi';
 import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
 import { fetchStrategies, strategiesQueryKey } from '../api/strategiesApi';
 import { getUtcDayStartMs } from '../utils/time';
+import { computeUnloadedActiveCount } from '../mapping/ticketMapping';
 import type {
   SystemPulseData,
   TodayPerformanceMetrics,
@@ -119,10 +120,10 @@ export function useOverviewData() {
 
   // If ticketsQuery failed, we do NOT pretend active tickets is 0
   const activeTicketCount = authoritativeActiveCount ?? matchingActiveTickets.length;
-  const unloadedActiveCount =
-    authoritativeActiveCount != null && authoritativeActiveCount > matchingActiveTickets.length
-      ? authoritativeActiveCount - matchingActiveTickets.length
-      : 0;
+  const unloadedActiveCount = computeUnloadedActiveCount(
+    authoritativeActiveCount,
+    matchingActiveTickets.length
+  );
 
   // Account capacity - strictly no default 3!
   const maxCapacity =
