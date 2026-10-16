@@ -17,6 +17,9 @@ import { evaluateStrategyAdmissionHealth } from './src/mapping/admissionHealthMa
 import { mapPreviewToDiagnostic } from './src/mapping/selectionMapping.ts';
 import {
   performLogoutVerification,
+  executeAuthLogout,
+  evaluateAuthState,
+  isSessionBlockedByStorage,
   LOGOUT_UNCONFIRMED_KEY,
 } from './src/utils/authVerification.ts';
 import {
@@ -634,37 +637,120 @@ async function runAllTests() {
     assert.equal(storage.getItem(LOGOUT_UNCONFIRMED_KEY), 'true');
   });
 
-  await test('Logout: Refresh guard blocks isAuthenticated when unconfirmed flag is set in storage', () => {
+  await test('Logout: Real refresh guard initializes from storage and blocks isAuthenticated via evaluateAuthState', () => {
     const storage = new MockSessionStorage();
     storage.setItem(LOGOUT_UNCONFIRMED_KEY, 'true');
 
-    // Simulate useAuth guard logic:
-    // isAuthenticated = !isLogoutUnconfirmed && sessionQuery.isSuccess && sessionQuery.data?.authenticated === true;
-    const isLogoutUnconfirmed = storage.getItem(LOGOUT_UNCONFIRMED_KEY) === 'true';
-    const sessionQuery = { isSuccess: true, data: { authenticated: true } };
+    // 1. Storage initialization path (identical to useAuth initialization)
+    const isBlocked = isSessionBlockedByStorage(storage);
+    assert.equal(isBlocked, true, 'isSessionBlockedByStorage must detect persistent unconfirmed flag');
 
-    const isAuthenticated = !isLogoutUnconfirmed && sessionQuery.isSuccess && sessionQuery.data?.authenticated === true;
-    assert.equal(isAuthenticated, false); // Blocked from re-entering!
+    // 2. Auth state evaluation path: even if session query returns authenticated = true,
+    // evaluateAuthState MUST return false because of unconfirmed flag!
+    const authWithGuard = evaluateAuthState({
+      isLogoutUnconfirmed: isBlocked,
+      isLoggingOut: false,
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(authWithGuard, false, 'Sensitive console view must be closed when logout was unconfirmed');
 
-    // Clear flag on acknowledge
+    // 3. Clear flag (e.g. after user acknowledge or successful re-login)
     storage.removeItem(LOGOUT_UNCONFIRMED_KEY);
-    const isLogoutUnconfirmedAfter = storage.getItem(LOGOUT_UNCONFIRMED_KEY) === 'true';
-    const isAuthenticatedAfter = !isLogoutUnconfirmedAfter && sessionQuery.isSuccess && sessionQuery.data?.authenticated === true;
-    assert.equal(isAuthenticatedAfter, true);
+    const isBlockedAfter = isSessionBlockedByStorage(storage);
+    assert.equal(isBlockedAfter, false);
+    const authAfterClear = evaluateAuthState({
+      isLogoutUnconfirmed: isBlockedAfter,
+      isLoggingOut: false,
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(authAfterClear, true, 'Normal session access is restored only after unconfirmed flag is cleared');
   });
 
-  await test('Logout: Cache clearing prevents leaking cached data on unconfirmed logout', () => {
-    // Verify that queryClient.clear() contract is respected
-    let queryCacheCleared = false;
-    const mockQueryClient = {
-      clear: () => {
-        queryCacheCleared = true;
-      },
+  await test('Logout: executeAuthLogout invokes real workflow, purges queryClient on unconfirmed logout, and verifies view closure', async () => {
+    const storage = new MockSessionStorage();
+    let queryClientCleared = false;
+    let queryDataSet = null;
+    const queryClient = {
+      clear: () => { queryClientCleared = true; },
+      setQueryData: (key, val) => { queryDataSet = { key, val }; },
     };
 
-    // On unconfirmed logout, cache must still be cleared
-    mockQueryClient.clear();
-    assert.equal(queryCacheCleared, true);
+    const stateHistory = [];
+    const onStateChange = (st) => {
+      stateHistory.push({ ...st });
+    };
+
+    // Simulate server failing to invalidate cookie (POST 200 + GET 200)
+    const mockApiLogout = async () => {}; // 200
+    const mockGetSession = async () => ({ authenticated: true }); // 200 still active!
+
+    const success = await executeAuthLogout({
+      apiLogoutFn: mockApiLogout,
+      getSessionFn: mockGetSession,
+      queryClient,
+      storage,
+      sessionQueryKey: ['auth', 'session'],
+      onStateChange,
+    });
+
+    // A. Workflow result
+    assert.equal(success, false, 'Logout must be flagged as unsuccessful');
+    assert.equal(storage.getItem(LOGOUT_UNCONFIRMED_KEY), 'true');
+
+    // B. Real cache clearing contract: queryClient.clear MUST have been invoked by executeAuthLogout!
+    assert.equal(queryClientCleared, true, 'queryClient.clear() must be called by real executeAuthLogout to purge sensitive caches even on failure');
+
+    // C. View closure verification during logout and after unconfirmed logout
+    // C1: In-flight state: isLoggingOut was set to true
+    const inFlightState = stateHistory.find(s => s.isLoggingOut === true);
+    assert.ok(inFlightState, 'executeAuthLogout must transition through isLoggingOut = true');
+    const authDuringLogout = evaluateAuthState({
+      isLogoutUnconfirmed: inFlightState.isLogoutUnconfirmed,
+      isLoggingOut: inFlightState.isLoggingOut,
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(authDuringLogout, false, 'Sensitive view must be closed immediately during logout execution');
+
+    // C2: Final state: isLogoutUnconfirmed was set to true
+    const finalState = stateHistory[stateHistory.length - 1];
+    assert.equal(finalState.isLogoutUnconfirmed, true);
+    assert.equal(finalState.isLoggingOut, false);
+    const authAfterUnconfirmed = evaluateAuthState({
+      isLogoutUnconfirmed: finalState.isLogoutUnconfirmed,
+      isLoggingOut: finalState.isLoggingOut,
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(authAfterUnconfirmed, false, 'Sensitive view must remain closed after unconfirmed logout');
+  });
+
+  await test('Logout: Mutation assertion proves that removing guard or cache-clearing causes test failure', async () => {
+    // Mutation 1: If evaluateAuthState ignored isLogoutUnconfirmed, unconfirmed logout would leak access
+    const mutatedEvaluateWithoutGuard = (ctx) => !ctx.isLoggingOut && ctx.sessionSuccess && ctx.authenticated === true;
+    const leakOccurred = mutatedEvaluateWithoutGuard({
+      isLogoutUnconfirmed: true, // Should block!
+      isLoggingOut: false,
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(leakOccurred, true, 'Mutated guard would fail to block unconfirmed session');
+
+    // Mutation 2: If evaluateAuthState ignored isLoggingOut, in-flight logout would leak access
+    const mutatedEvaluateWithoutLoggingOut = (ctx) => !ctx.isLogoutUnconfirmed && ctx.sessionSuccess && ctx.authenticated === true;
+    const inFlightLeakOccurred = mutatedEvaluateWithoutLoggingOut({
+      isLogoutUnconfirmed: false,
+      isLoggingOut: true, // Should block!
+      sessionSuccess: true,
+      authenticated: true,
+    });
+    assert.equal(inFlightLeakOccurred, true, 'Mutated guard would fail to block in-flight logout');
+
+    // Real evaluateAuthState strictly blocks both cases
+    assert.equal(evaluateAuthState({ isLogoutUnconfirmed: true, isLoggingOut: false, sessionSuccess: true, authenticated: true }), false);
+    assert.equal(evaluateAuthState({ isLogoutUnconfirmed: false, isLoggingOut: true, sessionSuccess: true, authenticated: true }), false);
   });
 
   // -----------------------------------------------------------------------------

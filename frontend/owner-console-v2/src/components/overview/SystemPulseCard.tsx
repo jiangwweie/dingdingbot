@@ -65,7 +65,7 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
 
         {/* Right: Operational Facts & Link to Controls */}
         <div className="flex items-center gap-4 text-xs">
-          <div className="hidden md:flex items-center gap-2 border-r border-border pr-4 text-text-muted">
+          <div data-testid="capacity-pulse" className="hidden md:flex items-center gap-2 border-r border-border pr-4 text-text-muted">
             <Activity className="h-3.5 w-3.5 text-brand" />
             <span>
               容量占用:{' '}

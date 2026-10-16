@@ -46,6 +46,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
               return (
                 <tr
                   key={strategy.strategy_group_id}
+                  data-strategy-id={strategy.strategy_group_id}
                   className={`transition-colors hover:bg-surface-subtle/80 ${
                     isRetired ? 'opacity-60 bg-surface-subtle/30' : ''
                   }`}

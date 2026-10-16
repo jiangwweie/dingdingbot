@@ -65,7 +65,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
   })();
 
   return (
-    <div className="rounded border border-border bg-surface shadow-xs">
+    <div id="selection-section" className="rounded border border-border bg-surface shadow-xs">
       {/* Header & Tabs */}
       <div className="flex flex-col gap-3 border-b border-border px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
         <div>

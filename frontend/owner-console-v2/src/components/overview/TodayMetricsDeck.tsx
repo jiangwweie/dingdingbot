@@ -13,7 +13,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
       {/* 1. 今日净收益 (Net PnL) */}
-      <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div data-testid="net-pnl-card" className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="flex items-center justify-between text-xs text-text-secondary">
           <span className="font-medium">今日净收益 (Net PnL)</span>
           <TrendingUp className="h-4 w-4 text-emerald-500" />
@@ -39,7 +39,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
       </div>
 
       {/* 2. 今日净 R (Net R) */}
-      <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
+      <div data-testid="net-r-card" className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="flex items-center justify-between text-xs text-text-secondary">
           <span className="font-medium">今日累计收益 (Net R)</span>
           <Target className="h-4 w-4 text-brand" />

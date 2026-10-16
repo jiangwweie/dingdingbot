@@ -103,6 +103,7 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
             return (
               <div
                 key={ep.ticket_id}
+                data-ticket-id={ep.ticket_id}
                 className="group flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded border border-border bg-surface-subtle p-3 hover:border-brand/40 hover:bg-surface-elevated transition-all"
               >
                 {/* 1. 策略与标的方向 */}

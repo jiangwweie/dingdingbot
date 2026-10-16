@@ -68,6 +68,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
 
   return (
     <div
+      data-testid="causality-drawer"
       className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
       aria-labelledby="slide-over-title"
       role="dialog"
@@ -117,7 +118,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
             <div className="mt-2.5 flex flex-wrap items-baseline justify-between text-xs gap-2">
               <span className="text-text-secondary">
                 {episode.strategy_name_zh} · 当前阶段:{' '}
-                <strong className="text-brand font-semibold">
+                <strong data-testid="causality-current-stage" className="text-brand font-semibold">
                   {causality?.current_stage
                     ? STAGE_LABELS_ZH[causality.current_stage] ?? causality.current_stage
                     : episode.lifecycle_stage_zh}
@@ -131,25 +132,25 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
             {/* Price Plan Quick Bar (if available from real causality) */}
             {causality?.price_plan && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
-                <div className="rounded border border-border bg-surface p-2">
+                <div data-testid="causality-entry-price" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">入场执行价</div>
                   <div className="font-bold text-text-primary mt-0.5">
                     {formatPriceOrQty(causality.price_plan.actual_entry_price ?? causality.price_plan.entry_reference_price)}
                   </div>
                 </div>
-                <div className="rounded border border-border bg-surface p-2">
+                <div data-testid="causality-initial-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">初始止损价</div>
                   <div className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">
                     {formatPriceOrQty(causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
-                <div className="rounded border border-border bg-surface p-2">
+                <div data-testid="causality-active-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">当前活动止损</div>
                   <div className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
                     {formatPriceOrQty(causality.price_plan.active_stop_price ?? causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
-                <div className="rounded border border-border bg-surface p-2">
+                <div data-testid="causality-quantity" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">头寸数量</div>
                   <div className="font-bold text-text-primary mt-0.5">
                     {formatPriceOrQty(causality.price_plan.ticket_quantity)}

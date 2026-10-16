@@ -8,16 +8,18 @@ import {
   type LoginRequest,
 } from '../api/authApi';
 import { isUnauthorized } from '../api/errors';
-import { performLogoutVerification, LOGOUT_UNCONFIRMED_KEY } from '../utils/authVerification.ts';
+import {
+  executeAuthLogout,
+  evaluateAuthState,
+  isSessionBlockedByStorage,
+  LOGOUT_UNCONFIRMED_KEY,
+} from '../utils/authVerification.ts';
 
 export function useAuth() {
   const queryClient = useQueryClient();
 
   const [isLogoutUnconfirmed, setIsLogoutUnconfirmed] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem(LOGOUT_UNCONFIRMED_KEY) === 'true';
-    }
-    return false;
+    return isSessionBlockedByStorage(typeof window !== 'undefined' ? sessionStorage : null);
   });
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -43,27 +45,19 @@ export function useAuth() {
   });
 
   const logout = useCallback(async (): Promise<boolean> => {
-    setIsLoggingOut(true);
-    setLogoutError(null);
-
     const storage = typeof window !== 'undefined' ? sessionStorage : null;
-    const res = await performLogoutVerification(apiLogout, getAuthSession, storage);
-
-    setIsLoggingOut(false);
-
-    if (res.success) {
-      setIsLogoutUnconfirmed(false);
-      setLogoutError(null);
-      queryClient.clear();
-      queryClient.setQueryData(authSessionQueryKey, null);
-      return true;
-    } else {
-      setIsLogoutUnconfirmed(true);
-      setLogoutError(res.errorDetail);
-      // For privacy, clear sensitive cached query data
-      queryClient.clear();
-      return false;
-    }
+    return executeAuthLogout({
+      apiLogoutFn: apiLogout,
+      getSessionFn: getAuthSession,
+      queryClient,
+      storage,
+      sessionQueryKey: authSessionQueryKey,
+      onStateChange: (st) => {
+        setIsLoggingOut(st.isLoggingOut);
+        setIsLogoutUnconfirmed(st.isLogoutUnconfirmed);
+        setLogoutError(st.logoutError);
+      },
+    });
   }, [queryClient]);
 
   const acknowledgeUnconfirmedSession = useCallback(() => {
@@ -75,10 +69,12 @@ export function useAuth() {
     sessionQuery.refetch();
   }, [sessionQuery]);
 
-  const isAuthenticated =
-    !isLogoutUnconfirmed &&
-    sessionQuery.isSuccess &&
-    sessionQuery.data?.authenticated === true;
+  const isAuthenticated = evaluateAuthState({
+    isLogoutUnconfirmed,
+    isLoggingOut,
+    sessionSuccess: sessionQuery.isSuccess,
+    authenticated: sessionQuery.data?.authenticated,
+  });
 
   const isUnauthorizedError = isUnauthorized(sessionQuery.error);
 
