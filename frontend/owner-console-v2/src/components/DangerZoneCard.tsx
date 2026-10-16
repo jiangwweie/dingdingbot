@@ -2,14 +2,14 @@ import React from 'react';
 import { AlertOctagon } from 'lucide-react';
 
 interface DangerZoneCardProps {
-  onTriggerFlatten: () => void;
+  onTriggerFlatten?: () => void;
   activeTicketCount: number;
 }
 
 export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
-  onTriggerFlatten,
   activeTicketCount,
 }) => {
+
   return (
     <div className="rounded border border-status-red/50 bg-surface p-4 shadow-xs">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -28,11 +28,13 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
 
         <button
           type="button"
-          onClick={onTriggerFlatten}
-          className="flex-none rounded border border-status-red/60 bg-status-red/10 px-3.5 py-2 text-xs font-bold text-status-red hover:bg-status-red hover:text-white transition-all shadow-xs"
+          disabled
+          title="Phase 1 · 只读模式 (受控平仓写操作未开放)"
+          className="flex-none rounded border border-border bg-surface-subtle px-3.5 py-2 text-xs font-bold text-text-muted opacity-60 cursor-not-allowed shadow-none"
         >
-          受控平仓全部仓位 ({activeTicketCount})
+          受控平仓全部仓位 ({activeTicketCount}) · 只读
         </button>
+
       </div>
     </div>
   );

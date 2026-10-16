@@ -6,15 +6,15 @@ interface TopStatusBarProps {
   globalEntry: GlobalEntryState;
   pausedStrategyCount: number;
   totalActiveStrategies: number;
-  onToggleGlobalEntry: () => void;
+  onToggleGlobalEntry?: () => void;
 }
 
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   globalEntry,
   pausedStrategyCount,
   totalActiveStrategies,
-  onToggleGlobalEntry,
 }) => {
+
   const isGlobalEnabled = globalEntry.configured_state === 'enabled';
 
   return (
@@ -75,25 +75,23 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
 
           <button
             type="button"
-            onClick={onToggleGlobalEntry}
-            className={`inline-flex items-center gap-2 rounded border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              isGlobalEnabled
-                ? 'border-border-strong bg-surface-subtle text-text-primary hover:bg-surface-elevated'
-                : 'border-status-green/50 bg-status-green-bg text-status-green hover:bg-status-green/20'
-            }`}
+            disabled
+            title="Phase 1 · 只读模式 (写操作未开放)"
+            className="inline-flex items-center gap-2 rounded border border-border bg-surface-subtle px-3.5 py-1.5 text-xs font-semibold text-text-muted opacity-60 cursor-not-allowed shadow-none"
           >
             {isGlobalEnabled ? (
               <>
-                <Pause className="h-3.5 w-3.5 text-status-amber" />
-                暂停全局新开仓
+                <Pause className="h-3.5 w-3.5 text-text-muted" />
+                暂停全局 (Phase 1 只读)
               </>
             ) : (
               <>
-                <Play className="h-3.5 w-3.5 text-status-green" />
-                恢复全局新开仓 (需 TOTP)
+                <Play className="h-3.5 w-3.5 text-text-muted" />
+                恢复全局 (Phase 1 只读)
               </>
             )}
           </button>
+
         </div>
       </div>
     </section>

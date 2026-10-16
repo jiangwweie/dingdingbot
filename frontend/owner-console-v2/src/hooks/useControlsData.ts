@@ -1,21 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchControls, controlsQueryKey, type ControlsResponse } from '../api/controlsApi';
+import {
+  fetchControls,
+  fetchSelectionPreview,
+  controlsQueryKey,
+  selectionQueryKey,
+  type ControlsResponse,
+} from '../api/controlsApi';
 import type {
   GlobalEntryState,
   StrategyControlItem,
   AccountCapacityData,
   RecentOperationItem,
-  SelectionDiagnosticData,
 } from '../types/controls';
-import {
-  initialGlobalEntry,
-  initialStrategies,
-  mockAccountCapacity,
-  mockRecentOperations,
-  mockSelectionMap,
-} from '../mock/controlsData';
 
-// Strategy display dictionary
+
 const STRATEGY_META: Record<string, { name_zh: string; timeframe: string; is_retired?: boolean }> = {
   'CPM-RO-001': { name_zh: '均线回踩做多', timeframe: '1h close' },
   'BRF2-001': { name_zh: '假反弹衰竭做空', timeframe: '1h close' },
@@ -42,11 +40,10 @@ export function useControlsData() {
     staleTime: 10_000,
   });
 
-  const isRealData = query.isSuccess && !!query.data;
   const raw: ControlsResponse | undefined = query.data;
 
   // 1. Map Global Entry
-  const globalEntry: GlobalEntryState = isRealData && raw
+  const globalEntry: GlobalEntryState | null = raw
     ? {
         configured_state: raw.global_entry.configured_state,
         effective_state: raw.global_entry.effective_state,
@@ -54,10 +51,10 @@ export function useControlsData() {
         active_ticket_count: raw.global_entry.active_ticket_count,
         first_blocker: raw.global_entry.first_blocker ?? null,
       }
-    : initialGlobalEntry;
+    : null;
 
   // 2. Map Strategies
-  const strategies: StrategyControlItem[] = isRealData && raw
+  const strategies: StrategyControlItem[] = raw
     ? raw.strategies.map((s) => {
         const meta = STRATEGY_META[s.strategy_group_id] ?? {
           name_zh: s.strategy_group_id,
@@ -102,10 +99,10 @@ export function useControlsData() {
           active_tickets: [],
         };
       })
-    : initialStrategies;
+    : [];
 
   // 3. Map Capacity
-  const capacity: AccountCapacityData = isRealData && raw
+  const capacity: AccountCapacityData | null = raw
     ? {
         max_concurrent_tickets: raw.account_capacity.max_concurrent_tickets,
         active_ticket_count: raw.account_capacity.active_ticket_count,
@@ -132,38 +129,43 @@ export function useControlsData() {
         strategy_side_active_counts: (raw.account_capacity as any).strategy_side_active_counts ?? {},
         source: raw.account_capacity.source ?? 'current_projection',
       }
-    : mockAccountCapacity;
+    : null;
 
   // 4. Map Operations
-  const operations: RecentOperationItem[] = isRealData && raw
+  const operations: RecentOperationItem[] = raw
     ? raw.recent_operations.map((op) => ({
         authorization_id: op.authorization_id,
         name: '受控平仓全部仓位',
-        ticket_count: 3,
+        ticket_count: 0,
         updated_at_ms: op.created_at_ms,
         created_at_ms: op.created_at_ms,
         state: op.state,
         result_label: op.state === 'completed' ? (op.first_blocker ? '曾需关注，现已完成' : '已完成') : op.state,
         first_blocker: op.first_blocker ?? null,
       }))
-    : mockRecentOperations;
-
-  // 5. Selection Map
-  const selectionMap: Record<string, SelectionDiagnosticData> = mockSelectionMap;
+    : [];
 
   return {
-    isRealData,
+    isSuccess: query.isSuccess,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     isError: query.isError,
     error: query.error,
     generatedAtMs: raw?.generated_at_ms ?? Date.now(),
     refetch: query.refetch,
-    // Data objects
     globalEntry,
     strategies,
     capacity,
     operations,
-    selectionMap,
   };
+}
+
+export function useSelectionPreview(strategyGroupId: string) {
+  return useQuery({
+    queryKey: selectionQueryKey(strategyGroupId),
+    queryFn: () => fetchSelectionPreview(strategyGroupId),
+    enabled: Boolean(strategyGroupId),
+    staleTime: 30_000,
+    retry: false,
+  });
 }

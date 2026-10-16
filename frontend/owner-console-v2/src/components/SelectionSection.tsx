@@ -1,32 +1,77 @@
 import React, { useState } from 'react';
-import type { SelectionDiagnosticData } from '../types/controls';
+import type { SelectionDiagnosticData, UniverseMemberItem } from '../types/controls';
+import { useSelectionPreview } from '../hooks/useControlsData';
+import type { GenericSelectionPreview, OrbSelectionPreview } from '../api/controlsApi';
 import { SelectionDrawer } from './SelectionDrawer';
-import { RefreshCw, RotateCcw, ShieldCheck, ExternalLink, ShieldAlert } from 'lucide-react';
+import { RefreshCw, RotateCcw, ShieldCheck, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react';
 
 interface SelectionSectionProps {
-  selectionMap: Record<string, SelectionDiagnosticData>;
-  onTriggerFallback: (groupId: string) => void;
-  onTriggerReauthorize: (groupId: string) => void;
-  onRefreshData: (groupId: string) => void;
+  onTriggerFallback?: (groupId: string) => void;
+  onTriggerReauthorize?: (groupId: string) => void;
+  onRefreshData?: (groupId: string) => void;
 }
 
 const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-001'];
 
-export const SelectionSection: React.FC<SelectionSectionProps> = ({
-  selectionMap,
-  onTriggerFallback,
-  onTriggerReauthorize,
-  onRefreshData,
-}) => {
+function mapPreviewToDiagnostic(
+  strategyGroupId: string,
+  preview: GenericSelectionPreview | OrbSelectionPreview | undefined
+): SelectionDiagnosticData | null {
+  if (!preview) return null;
+  const isGeneric = 'cadence_hours' in preview;
+  const runtime = (preview as any).runtime ?? {};
+  const control = (preview as any).control ?? {};
+
+  const members: UniverseMemberItem[] = (runtime.members ?? []).map((m: any) => ({
+    exchange_instrument_id: m.exchange_instrument_id,
+    selected: Boolean(m.selected),
+    first_blocker: m.first_blocker ?? null,
+  }));
+
+  const cadenceHours = isGeneric ? (preview as GenericSelectionPreview).cadence_hours : 4;
+  const selectionMode = control.selection_mode ?? 'dynamic_selection';
+  const selectedCount = runtime.latest_selected_count ?? members.filter((m) => m.selected).length;
+  const readyCount = runtime.latest_ready_count ?? members.length;
+
+  return {
+    strategy_group_id: strategyGroupId,
+    installed: runtime.installed ?? true,
+    cadence_hours: cadenceHours,
+    selection_mode: selectionMode,
+    pending_selection_mode: control.pending_selection_mode ?? null,
+    pending_effective_period_anchor_ms: control.pending_effective_period_anchor_ms ?? null,
+    rollback_baseline_id: control.rollback_baseline_id ?? null,
+    selection_epoch_id: runtime.selection_epoch_id ?? null,
+    control_version: control.control_version ?? 1,
+    current_authority_outcome: runtime.current_authority_outcome ?? '权威有效',
+    authority_status_zh: runtime.current_authority_outcome
+      ? `权威有效 · ${runtime.current_authority_outcome}`
+      : '权威有效 · 承接上一周期连续性',
+    membership_valid_until_ms: runtime.membership_valid_until_ms ?? 0,
+    consecutive_missed_periods: runtime.consecutive_missed_periods ?? 0,
+    latest_ready_count: readyCount,
+    latest_selected_count: selectedCount,
+    materialization_state: runtime.materialization_state ?? 'active',
+    materialization_deadline_ms: runtime.materialization_deadline_ms ?? null,
+    vacuum_state: runtime.vacuum_state ?? 'clear',
+    vacuum_fenced_at_ms: runtime.vacuum_fenced_at_ms ?? null,
+    latest_successful_completion_age_ms: runtime.latest_successful_completion_age_ms ?? 0,
+    latest_successful_cutoff_age_ms: runtime.latest_successful_cutoff_age_ms ?? 0,
+    membership_source_age_ms: runtime.membership_source_age_ms ?? 0,
+    members,
+  };
+}
+
+export const SelectionSection: React.FC<SelectionSectionProps> = () => {
   const [activeTab, setActiveTab] = useState('CPM-RO-001');
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const current = selectionMap[activeTab];
-  if (!current) return null;
+  const { data: rawPreview, isLoading, isError, refetch } = useSelectionPreview(activeTab);
+  const current = mapPreviewToDiagnostic(activeTab, rawPreview);
 
-  const isDynamic = current.selection_mode === 'dynamic_selection';
-  const selectedCount = current.latest_selected_count;
-  const filteredCount = current.members.length - selectedCount;
+  const isDynamic = current ? current.selection_mode === 'dynamic_selection' : true;
+  const selectedCount = current?.latest_selected_count ?? 0;
+  const filteredCount = current ? Math.max(0, current.members.length - selectedCount) : 0;
 
   return (
     <div className="rounded border border-border bg-surface shadow-xs">
@@ -62,100 +107,125 @@ export const SelectionSection: React.FC<SelectionSectionProps> = ({
 
       {/* Main Body for Active Strategy: Unified Single-Row Command Bar */}
       <div className="p-3.5">
-        <div className="flex flex-col gap-2 rounded border border-border bg-surface-subtle px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-          {/* Left: Mode, Authority, Counts & Freshness */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Mode badge */}
-            <span
-              className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${
-                isDynamic
-                  ? 'border border-status-blue/30 bg-status-blue-bg text-status-blue'
-                  : 'border border-status-amber/30 bg-status-amber-bg text-status-amber'
-              }`}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-6 gap-2 text-xs text-text-muted">
+            <Loader2 className="h-4 w-4 animate-spin text-brand" />
+            <span>正在读取 {activeTab} 选币真实快照...</span>
+          </div>
+        ) : isError || !current ? (
+          <div className="flex items-center justify-between rounded border border-border bg-surface-subtle px-4 py-3 text-xs text-text-muted">
+            <span>该策略当前暂无可用的选币事实或尚未安装。</span>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated"
             >
+              <RefreshCw className="h-3 w-3" />
+              重试
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 rounded border border-border bg-surface-subtle px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            {/* Left: Mode, Authority, Counts & Freshness */}
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Mode badge */}
               <span
-                className={`h-2 w-2 rounded-full ${
-                  isDynamic ? 'bg-status-blue' : 'bg-status-amber'
+                className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-semibold ${
+                  isDynamic
+                    ? 'border border-status-blue/30 bg-status-blue-bg text-status-blue'
+                    : 'border border-status-amber/30 bg-status-amber-bg text-status-amber'
                 }`}
-              />
-              {isDynamic ? `DYNAMIC (${current.cadence_hours}h)` : 'STATIC 基线'}
-            </span>
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    isDynamic ? 'bg-status-blue' : 'bg-status-amber'
+                  }`}
+                />
+                {isDynamic ? `DYNAMIC (${current.cadence_hours}h)` : 'STATIC 基线'}
+              </span>
 
-            {/* Authority Status */}
-            <div className="flex items-center gap-1 text-xs">
-              <ShieldCheck className="h-4 w-4 text-status-green flex-none" />
-              <span className="font-semibold text-text-primary">
-                {current.authority_status_zh}
+              {/* Authority Status */}
+              <div className="flex items-center gap-1 text-xs">
+                <ShieldCheck className="h-4 w-4 text-status-green flex-none" />
+                <span className="font-semibold text-text-primary">
+                  {current.authority_status_zh}
+                </span>
+              </div>
+
+              <span className="text-text-muted opacity-30">·</span>
+
+              {/* Candidates Counts */}
+              <div className="flex items-center gap-1 text-xs font-medium text-text-secondary">
+                <span className="text-status-green font-semibold">{selectedCount}</span> 入围 /{' '}
+                <span className="text-text-muted">{filteredCount}</span> 过滤
+              </div>
+
+              <span className="text-text-muted opacity-30">·</span>
+
+              {/* Freshness / Age */}
+              <span className="font-mono text-xs text-text-muted">
+                年龄:{' '}
+                {current.latest_successful_completion_age_ms > 0
+                  ? `${Math.round(current.latest_successful_completion_age_ms / 3600000)}h 前`
+                  : '近期生成'}
               </span>
             </div>
 
-            <span className="text-text-muted opacity-30">·</span>
+            {/* Right: Actions & Drawer Trigger */}
+            <div className="flex items-center gap-2">
+              {isDynamic ? (
+                <button
+                  type="button"
+                  disabled
+                  title="Phase 1 · 只读模式 (选币模式切换写操作未开放)"
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed shadow-none"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-text-muted" />
+                  回退 Static (只读)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  title="Phase 1 · 只读模式 (选币模式切换写操作未开放)"
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed shadow-none"
+                >
+                  <ShieldAlert className="h-3.5 w-3.5 text-text-muted" />
+                  授权 Dynamic (只读)
+                </button>
+              )}
 
-            {/* Candidates Counts */}
-            <div className="flex items-center gap-1 text-xs font-medium text-text-secondary">
-              <span className="text-status-green font-semibold">{selectedCount}</span> 入围 /{' '}
-              <span className="text-text-muted">{filteredCount}</span> 过滤
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
+                title="重新读取该策略选币快照"
+              >
+                <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
+                刷新
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(true)}
+                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-semibold text-brand hover:bg-surface-elevated transition-colors shadow-xs"
+              >
+                <span>标的明细与诊断</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </button>
             </div>
-
-            <span className="text-text-muted opacity-30">·</span>
-
-            {/* Freshness / Age */}
-            <span className="font-mono text-xs text-text-muted">
-              年龄: {Math.round(current.latest_successful_completion_age_ms / 3600000)}h 前
-            </span>
           </div>
-
-          {/* Right: Actions & Drawer Trigger */}
-          <div className="flex items-center gap-2">
-            {isDynamic ? (
-              <button
-                type="button"
-                onClick={() => onTriggerFallback(activeTab)}
-                className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated hover:text-brand transition-colors shadow-xs"
-              >
-                <RotateCcw className="h-3.5 w-3.5 text-status-amber" />
-                回退 Static
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onTriggerReauthorize(activeTab)}
-                className="inline-flex items-center gap-1 rounded border border-status-blue/50 bg-status-blue-bg px-2.5 py-1 text-xs font-semibold text-status-blue hover:bg-status-blue/20 transition-colors shadow-xs"
-              >
-                <ShieldAlert className="h-3.5 w-3.5" />
-                授权 Dynamic
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => onRefreshData(activeTab)}
-              className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
-              title="重新读取该策略选币快照"
-            >
-              <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
-              刷新
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="inline-flex items-center gap-1 rounded border border-border-strong bg-surface px-2.5 py-1 text-xs font-semibold text-brand hover:bg-surface-elevated transition-colors shadow-xs"
-            >
-              <span>标的明细与诊断</span>
-              <ExternalLink className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Drawer */}
-      <SelectionDrawer
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        data={current}
-      />
+      {current && (
+        <SelectionDrawer
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
+          data={current}
+        />
+      )}
     </div>
   );
 };
-

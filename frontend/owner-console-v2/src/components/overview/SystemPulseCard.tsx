@@ -16,15 +16,42 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Left: Health Pulse & Human Headline */}
         <div className="flex items-start sm:items-center gap-3">
-          <div className="flex h-9 w-9 flex-none items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+          <div
+            className={`flex h-9 w-9 flex-none items-center justify-center rounded-md border ${
+              pulse.status === 'danger'
+                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                : pulse.status === 'attention'
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+            }`}
+          >
             <ShieldCheck className="h-5 w-5" />
           </div>
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  pulse.status === 'danger'
+                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                    : pulse.status === 'attention'
+                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    pulse.status === 'danger'
+                      ? 'bg-rose-500 animate-ping'
+                      : pulse.status === 'attention'
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500 animate-pulse'
+                  }`}
+                />
                 {pulse.status_label}
+              </span>
+              <span className="font-mono text-[10px] uppercase font-semibold px-1.5 py-0.2 rounded bg-surface-subtle border border-border text-text-muted">
+                {pulse.freshness_label}
               </span>
               <h2 className="text-sm font-bold text-text-primary">
                 {pulse.summary}
@@ -40,12 +67,21 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
         <div className="flex items-center gap-4 text-xs">
           <div className="hidden md:flex items-center gap-2 border-r border-border pr-4 text-text-muted">
             <Activity className="h-3.5 w-3.5 text-brand" />
-            <span>容量占用: <strong className="font-mono text-text-primary">{pulse.ticket_capacity_used}</strong> / {pulse.ticket_capacity_total}</span>
+            <span>
+              容量占用:{' '}
+              <strong className="font-mono text-text-primary">{pulse.active_ticket_count}</strong> /{' '}
+              {pulse.ticket_capacity_total}
+            </span>
           </div>
 
           <div className="hidden lg:flex items-center gap-1.5 text-text-muted">
             <Clock className="h-3.5 w-3.5" />
-            <span>对账同步: {pulse.data_freshness_seconds}s 前</span>
+            <span>
+              快照:{' '}
+              {pulse.generated_at
+                ? new Date(pulse.generated_at).toLocaleTimeString('zh-CN', { hour12: false })
+                : '实时'}
+            </span>
           </div>
 
           <button
@@ -59,5 +95,6 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
         </div>
       </div>
     </div>
+
   );
 };

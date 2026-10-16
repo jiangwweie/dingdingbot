@@ -1,6 +1,6 @@
 import React from 'react';
 import type { TradeEpisodeSummary } from '../../types/overview';
-import { Shield, ArrowUpRight, ArrowDownRight, Clock, ChevronRight } from 'lucide-react';
+import { Shield, ArrowUpRight, ArrowDownRight, Clock, ChevronRight, AlertTriangle } from 'lucide-react';
 
 interface ActiveEpisodesSectionProps {
   episodes: TradeEpisodeSummary[];
@@ -23,7 +23,7 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
           </span>
         </div>
         <span className="text-[11px] text-text-muted">
-          严格遵循独立 Netting Domain · 均已安装交易所保护单
+          来自生产 Ticket 账本事实 · 严格遵循独立 Netting Domain
         </span>
       </div>
 
@@ -33,14 +33,13 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
             当前市场无活动持仓
           </p>
           <p className="mt-1 text-[11px] text-text-muted">
-            5 个生产策略组正在 Observation 链路中持续扫描行情机会
+            生产策略组正在 Observation 链路中持续扫描行情机会
           </p>
         </div>
       ) : (
         <div className="mt-3 space-y-2.5">
           {episodes.map((ep) => {
             const isLong = ep.side === 'long';
-            const isPnlPositive = ep.pnl_r >= 0;
 
             return (
               <div
@@ -77,6 +76,9 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
                       >
                         {isLong ? '做多 (LONG)' : '做空 (SHORT)'}
                       </span>
+                      <span className="font-mono text-[10px] text-text-muted">
+                        #{ep.ticket_id.slice(-8)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-text-muted">
                       <span className="font-mono text-brand font-medium">
@@ -88,57 +90,46 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
                   </div>
                 </div>
 
-                {/* 2. 入场与盈亏 */}
-                <div className="flex items-center gap-6 text-xs">
+                {/* 2. 真实生命周期进度与状态 */}
+                <div className="flex flex-wrap items-center gap-4 text-xs">
                   <div>
-                    <div className="text-[10px] text-text-muted uppercase">入场 / 现价</div>
-                    <div className="font-mono font-medium text-text-primary">
-                      {ep.entry_price} <span className="text-text-muted">→</span> {ep.current_price}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] text-text-muted uppercase">当前浮盈 (R / $)</div>
-                    <div className="flex items-baseline gap-1 font-mono font-bold">
-                      <span
-                        className={
-                          isPnlPositive
-                            ? 'text-emerald-600 dark:text-emerald-400'
-                            : 'text-rose-600 dark:text-rose-400'
-                        }
-                      >
-                        {isPnlPositive ? `+${ep.pnl_r.toFixed(2)}` : ep.pnl_r.toFixed(2)} R
+                    <div className="text-[10px] text-text-muted uppercase">当前生命周期</div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Shield className="h-3.5 w-3.5 text-brand" />
+                      <span className="font-semibold text-text-primary">
+                        {ep.lifecycle_stage_zh}
                       </span>
-                      <span className="text-[11px] font-normal text-text-muted">
-                        ({isPnlPositive ? `+$${ep.pnl_usd.toFixed(2)}` : `-$${Math.abs(ep.pnl_usd).toFixed(2)}`})
+                      <span className="font-mono text-[11px] text-text-muted">
+                        ({ep.completed_stage_count}/{ep.total_stage_count})
                       </span>
                     </div>
                   </div>
 
-                  {/* 3. 保护状态 */}
-                  <div className="hidden md:block">
-                    <div className="text-[10px] text-text-muted uppercase">保护机制</div>
-                    <div className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                      <Shield className="h-3 w-3" />
-                      <span>{ep.protection_label}</span>
-                      <span className="font-mono text-text-muted">({ep.stop_price})</span>
+                  <div>
+                    <div className="text-[10px] text-text-muted uppercase">发出时间</div>
+                    <div className="flex items-center gap-1 mt-0.5 text-text-secondary">
+                      <Clock className="h-3 w-3 text-text-muted" />
+                      <span className="font-mono">{ep.issued_at_formatted}</span>
                     </div>
                   </div>
 
-                  {/* 4. 持仓时长与因果详情按钮 */}
-                  <div className="flex items-center gap-3">
-                    <div className="hidden lg:flex items-center gap-1 text-[11px] text-text-muted">
-                      <Clock className="h-3 w-3" />
-                      <span className="font-mono">{ep.duration_formatted}</span>
+                  {Boolean(ep.attention_items && ep.attention_items.length > 0) && (
+                    <div className="flex items-center gap-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[11px] border border-amber-500/20">
+                      <AlertTriangle className="h-3 w-3" />
+                      <span>{ep.attention_items!.join(', ')}</span>
                     </div>
+                  )}
 
+
+                  {/* 3. 查看交易因果全链路按钮 */}
+                  <div>
                     <button
                       type="button"
                       onClick={() => onSelectEpisode(ep)}
-                      className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:border-brand hover:text-brand transition-colors"
+                      className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-primary hover:border-brand hover:text-brand transition-colors shadow-xs"
                     >
                       <span>查看交易因果</span>
-                      <ChevronRight className="h-3 w-3 text-text-muted group-hover:text-brand" />
+                      <ChevronRight className="h-3.5 w-3.5 text-text-muted group-hover:text-brand" />
                     </button>
                   </div>
                 </div>

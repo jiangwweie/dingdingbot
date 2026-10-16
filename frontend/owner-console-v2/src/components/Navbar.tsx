@@ -1,7 +1,7 @@
 import React from 'react';
-import { MOCK_ENV_LABEL } from '../mock/controlsData';
 import { useTheme } from '../context/ThemeContext';
 import { Sun, Moon } from 'lucide-react';
+
 
 export type NavTabId = 'overview' | 'trades' | 'strategies' | 'review' | 'controls';
 
@@ -9,9 +9,15 @@ interface NavbarProps {
   activeTab: NavTabId;
   onSelectTab: (tab: NavTabId) => void;
   isRealData?: boolean;
+  onLogout?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab, isRealData = false }) => {
+export const Navbar: React.FC<NavbarProps> = ({
+  activeTab,
+  onSelectTab,
+  isRealData = true,
+  onLogout,
+}) => {
   const { theme, toggleTheme } = useTheme();
 
   const navItems: { id: NavTabId; label: string; en: string; badge?: string; available: boolean }[] = [
@@ -79,22 +85,13 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab, isRealDa
           </nav>
         </div>
 
-        {/* Right side: Mock banner & Theme Switcher & Actions */}
+        {/* Right side: Real API tag & Theme Switcher & Logout */}
         <div className="flex items-center gap-3">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 font-mono text-[11px] font-medium ${
-              isRealData
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                : 'border-brand/40 bg-brand/10 text-brand'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                isRealData ? 'bg-emerald-500' : 'bg-brand'
-              } animate-pulse`}
-            />
-            {isRealData ? 'REAL API · 已连接 PostgreSQL' : MOCK_ENV_LABEL}
+          <span className="inline-flex items-center gap-1.5 rounded border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            {isRealData ? 'REAL API · PROD' : 'OFFLINE'}
           </span>
+
 
           <span className="text-text-muted opacity-40">·</span>
 
@@ -117,8 +114,8 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab, isRealDa
 
           <button
             type="button"
-            className="text-xs text-text-muted hover:text-text-primary transition-colors"
-            onClick={() => alert('Mock 环境：退出交互演示')}
+            className="text-xs text-text-muted hover:text-danger transition-colors"
+            onClick={onLogout}
           >
             退出
           </button>
@@ -127,3 +124,4 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab, isRealDa
     </header>
   );
 };
+

@@ -4,13 +4,13 @@ import { Pause, Play, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-rea
 
 interface StrategyMatrixProps {
   strategies: StrategyControlItem[];
-  onToggleStrategy: (strategy: StrategyControlItem) => void;
+  onToggleStrategy?: (strategy: StrategyControlItem) => void;
 }
 
 export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
   strategies,
-  onToggleStrategy,
 }) => {
+
   return (
     <div className="rounded border border-border bg-surface shadow-xs">
       <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
@@ -160,22 +160,25 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                     ) : isEnabled ? (
                       <button
                         type="button"
-                        onClick={() => onToggleStrategy(strategy)}
-                        className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors"
+                        disabled
+                        title="Phase 1 · 只读模式 (写操作未开放)"
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed"
                       >
-                        <Pause className="h-3.5 w-3.5 text-status-amber" />
-                        暂停策略
+                        <Pause className="h-3.5 w-3.5 text-text-muted" />
+                        暂停 (只读)
                       </button>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => onToggleStrategy(strategy)}
-                        className="inline-flex items-center gap-1.5 rounded border border-status-green/40 bg-status-green-bg px-3 py-1.5 text-xs font-semibold text-status-green hover:bg-status-green/20 transition-colors"
+                        disabled
+                        title="Phase 1 · 只读模式 (写操作未开放)"
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed"
                       >
-                        <Play className="h-3.5 w-3.5" />
-                        恢复运行
+                        <Play className="h-3.5 w-3.5 text-text-muted" />
+                        恢复 (只读)
                       </button>
                     )}
+
                   </td>
                 </tr>
               );

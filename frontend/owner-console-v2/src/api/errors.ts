@@ -32,3 +32,15 @@ export function apiErrorFromResponse(response: Response, payload: unknown): ApiE
 export function isUnauthorized(error: unknown): error is ApiError {
   return error instanceof ApiError && error.status === 401;
 }
+
+export function isForbidden(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 403;
+}
+
+export function isConflict(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 409;
+}
+
+export function isServerError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status >= 500;
+}
