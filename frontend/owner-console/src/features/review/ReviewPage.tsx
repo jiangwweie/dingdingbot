@@ -84,25 +84,53 @@ function ReviewFilters({ filters, onChange }: { filters: ReviewSearchParams; onC
     onChange({ ...filters, [name]: value.trim() || undefined, cursor: undefined } as ReviewSearchParams);
   };
   const setStatus = (event: ChangeEvent<HTMLSelectElement>) => {
-    onChange({ ...filters, review_status: event.target.value ? event.target.value as ReviewSearchParams["review_status"] : undefined, cursor: undefined });
+    onChange({ ...filters, review_status: event.target.value ? (event.target.value as ReviewSearchParams["review_status"]) : undefined, cursor: undefined });
   };
-  return <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="复盘筛选条件">
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">策略组<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setText} /></label>
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">复盘状态<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" value={filters.review_status ?? ""} onChange={setStatus}><option value="">全部</option><option value="complete">完整</option><option value="incomplete_evidence">证据不完整</option><option value="waiting_for_review">等待复盘</option><option value="waiting_for_settlement">等待结算</option></select></label>
-    <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
-  </form>;
+  return (
+    <form className="mb-3 grid grid-cols-2 gap-2.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] p-2.5 shadow-sm md:grid-cols-4" aria-label="复盘筛选条件">
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
+        策略组
+        <input
+          className="h-8 min-w-0 rounded border border-[var(--color-divider)] bg-[var(--color-background)] px-2.5 text-[12px] text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-emphasis)] focus:ring-1 focus:ring-[var(--color-emphasis)]"
+          name="strategy_group_id"
+          placeholder="例如 SOR-LONG"
+          value={filters.strategy_group_id ?? ""}
+          onChange={setText}
+        />
+      </label>
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
+        复盘状态
+        <select
+          className="h-8 rounded border border-[var(--color-divider)] bg-[var(--color-background)] px-2.5 text-[12px] text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-emphasis)] focus:ring-1 focus:ring-[var(--color-emphasis)]"
+          value={filters.review_status ?? ""}
+          onChange={setStatus}
+        >
+          <option value="">全部</option>
+          <option value="complete">完整</option>
+          <option value="incomplete_evidence">证据不完整</option>
+          <option value="waiting_for_review">等待复盘</option>
+          <option value="waiting_for_settlement">等待结算</option>
+        </select>
+      </label>
+      <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
+    </form>
+  );
 }
 
 function ReviewDetail({ item }: { item: ReviewItem }) {
   return (
-    <div className="grid gap-3">
+    <div className="grid gap-3 p-1">
       {item.review.sentences.map((sentence) => (
-        <article className="grid gap-1" key={sentence.template_id}>
-          <p className="m-0 text-[12px] leading-5 text-[var(--color-text-primary)]">{sentence.text}</p>
+        <article className="grid gap-1.5 rounded border border-[var(--color-divider)] bg-[var(--color-surface)] p-3" key={sentence.template_id}>
+          <p className="m-0 text-[12px] leading-relaxed text-[var(--color-text-primary)]">{sentence.text}</p>
           <EvidenceLinks evidence={sentence.evidence} ticketId={item.ticket_id} />
         </article>
       ))}
-      {item.review.attention_items.length > 0 ? <div className="border-t border-[var(--color-divider)] pt-2 text-[11px] text-[var(--color-danger)]">{item.review.attention_items.join(" · ")}</div> : null}
+      {item.review.attention_items.length > 0 ? (
+        <div className="rounded border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 p-2.5 text-[11px] text-[var(--color-danger)]">
+          {item.review.attention_items.join(" · ")}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -127,10 +155,33 @@ export function ReviewPage() {
   const data = envelope.data;
   const status = freshnessPresentation(envelope.freshness);
   const columns: DenseTableColumnDef<ReviewItem>[] = [
-    { id: "instrument", header: "Instrument / Side", cell: ({ row }) => { const item = row.original; const expanded = expandedTicketId === item.ticket_id; return <div className="flex min-w-0 items-center gap-1"><button className="grid h-5 w-5 flex-none place-items-center bg-transparent p-0 text-[var(--color-text-secondary)]" type="button" aria-expanded={expanded} aria-label={`${expanded ? "收起" : "展开"} ${item.exchange_instrument_id} ${item.position_side.toUpperCase()} 复盘`} onClick={() => setExpandedTicketId(expanded ? null : item.ticket_id)}><ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-90" : ""}`} /></button><Link className="min-w-0 truncate text-[var(--color-emphasis)] hover:underline" to={`/trades/${encodeURIComponent(item.ticket_id)}`}>{item.exchange_instrument_id} {item.position_side.toUpperCase()}</Link></div>; } },
-    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
+    {
+      id: "instrument",
+      header: "Instrument / Side",
+      cell: ({ row }) => {
+        const item = row.original;
+        const expanded = expandedTicketId === item.ticket_id;
+        return (
+          <div className="flex min-w-0 items-center gap-1.5">
+            <button
+              className="grid h-5 w-5 flex-none place-items-center rounded bg-transparent p-0 text-[var(--color-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--color-text-primary)]"
+              type="button"
+              aria-expanded={expanded}
+              aria-label={`${expanded ? "收起" : "展开"} ${item.exchange_instrument_id} ${item.position_side.toUpperCase()} 复盘`}
+              onClick={() => setExpandedTicketId(expanded ? null : item.ticket_id)}
+            >
+              <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} />
+            </button>
+            <Link className="min-w-0 truncate font-semibold text-[var(--color-emphasis)] transition-colors hover:underline hover:text-[var(--color-emphasis-hover)]" to={`/trades/${encodeURIComponent(item.ticket_id)}`}>
+              {item.exchange_instrument_id} {item.position_side.toUpperCase()}
+            </Link>
+          </div>
+        );
+      },
+    },
+    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate text-[12px] font-medium">{String(getValue())}</span> },
     { id: "execution", header: "执行质量", cell: ({ row }) => <span title={row.original.review.execution_classification}><StatusTag tone={executionTone(row.original.review.execution_classification)}>{executionLabel(row.original.review.execution_classification)}</StatusTag></span> },
-    { id: "exit", header: "退出原因", cell: ({ row }) => <span className="block truncate" title={row.original.review.exit_reason ?? "exit_reason_unavailable"}>{row.original.review.exit_reason ? formatOwnerReason(row.original.review.exit_reason).label : "—"}</span> },
+    { id: "exit", header: "退出原因", cell: ({ row }) => <span className="block truncate text-[11px] text-[var(--color-text-secondary)]" title={row.original.review.exit_reason ?? "exit_reason_unavailable"}>{row.original.review.exit_reason ? formatOwnerReason(row.original.review.exit_reason).label : "—"}</span> },
     { id: "net_pnl", header: "净盈亏", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_pnl} sign /> },
     { id: "net_r", header: "净 R", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.net_r} /> },
     { id: "fees", header: "费用", cell: ({ row }) => <MetricValue metric={row.original.review.economic_summary.fees} /> },
@@ -153,13 +204,75 @@ export function ReviewPage() {
       {pageHeader}
       {reviews.isRefetchError ? <div className="refresh-error" role="status">刷新失败<span>继续显示上一次成功快照</span></div> : null}
       <ReviewFilters filters={filters} onChange={updateFilters} />
-      <section className="mb-2 grid grid-cols-2 border border-[var(--color-divider)] bg-[var(--color-surface)] sm:grid-cols-4 xl:grid-cols-7" aria-label="复盘摘要">{summary.map((item, index) => <div className={`grid min-h-[48px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={item.label}><span className="text-[10px] text-[var(--color-text-secondary)]">{item.label}</span><strong className="min-w-0 text-[14px] tabular-number">{item.value}</strong></div>)}</section>
-      {data.items.length === 0 ? <div className="panel compact-empty px-2">当前筛选范围内没有完成 Ticket</div> : <DenseTable ariaLabel="完成 Ticket 复盘列表" columnWidths={REVIEW_COLUMN_WIDTHS} columns={columns} data={data.items} getRowId={(item) => item.ticket_id} expandedRowId={expandedTicketId} renderExpandedRow={(item, columnCount) => <InlineDetailRow colSpan={columnCount}><ReviewDetail item={item} /></InlineDetailRow>} />}
+      <section className="mb-3 grid grid-cols-2 overflow-hidden rounded border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-sm sm:grid-cols-4 xl:grid-cols-7" aria-label="复盘摘要">
+        {summary.map((item, index) => (
+          <div className={`grid min-h-[52px] content-center gap-0.5 px-3 py-1.5 transition-colors hover:bg-white/[0.02] ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={item.label}>
+            <span className="text-[11px] font-medium text-[var(--color-text-secondary)]">{item.label}</span>
+            <strong className="min-w-0 text-[14px] font-bold tabular-number text-[var(--color-text-primary)]">{item.value}</strong>
+          </div>
+        ))}
+      </section>
+      {data.items.length === 0 ? (
+        <div className="panel compact-empty px-3 py-6 text-center text-[var(--color-text-secondary)]">当前筛选范围内没有完成 Ticket</div>
+      ) : (
+        <DenseTable
+          ariaLabel="完成 Ticket 复盘列表"
+          columnWidths={REVIEW_COLUMN_WIDTHS}
+          columns={columns}
+          data={data.items}
+          getRowId={(item) => item.ticket_id}
+          expandedRowId={expandedTicketId}
+          renderExpandedRow={(item, columnCount) => (
+            <InlineDetailRow colSpan={columnCount}>
+              <ReviewDetail item={item} />
+            </InlineDetailRow>
+          )}
+        />
+      )}
       <CursorPagination hasNextPage={data.next_cursor !== null} label="还有更多终态 Review" onNextPage={() => updateFilters({ ...filters, cursor: data.next_cursor ?? undefined })} />
-      <div className="mt-2 grid gap-2 lg:grid-cols-3">
-        <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">StrategyGroup Evidence</h2><div className="grid">{data.strategy_group_samples.map((item) => <div className="grid min-h-[42px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.strategy_group_id}><strong className="truncate text-[12px]">{item.strategy_group_id}</strong><span className="tabular-number text-[11px] text-[var(--color-text-secondary)]">{item.sample_count}</span><StatusTag tone={item.evidence_state === "observe_only" ? "attention" : "neutral"}>{item.evidence_state === "observe_only" ? "Observe Only" : "No Evidence"}</StatusTag></div>)}</div></section>
-        <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Execution Classification</h2><div className="grid">{data.execution_quality_breakdown.map((item) => <div className="flex min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.label}><span className="truncate text-[12px]">{item.label}</span><strong className="tabular-number text-[12px]">{item.ticket_count}</strong></div>)}</div></section>
-        <section className="border border-[var(--color-divider)] bg-[var(--color-surface)]"><h2 className="m-0 flex min-h-[30px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 text-[11px] font-medium text-[var(--color-text-secondary)]">Exit Reason</h2><div className="grid">{data.exit_reason_breakdown.map((item) => <div className="flex min-w-0 min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-2 last:border-b-0" key={item.label}><span className="min-w-0 truncate text-[12px]" title={item.label}>{item.label}</span><strong className="tabular-number text-[12px]">{item.ticket_count}</strong></div>)}</div></section>
+      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+        <section className="overflow-hidden rounded border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-sm">
+          <h2 className="m-0 flex min-h-[34px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-3 text-[12px] font-bold text-[var(--color-text-primary)]">
+            StrategyGroup Evidence
+          </h2>
+          <div className="grid">
+            {data.strategy_group_samples.map((item) => (
+              <div className="grid min-h-[42px] grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-[var(--color-divider)] px-3 transition-colors hover:bg-white/[0.02] last:border-b-0" key={item.strategy_group_id}>
+                <strong className="truncate text-[12px] font-semibold text-[var(--color-text-primary)]">{item.strategy_group_id}</strong>
+                <span className="tabular-number text-[11px] text-[var(--color-text-secondary)]">{item.sample_count}</span>
+                <StatusTag tone={item.evidence_state === "observe_only" ? "attention" : "neutral"}>
+                  {item.evidence_state === "observe_only" ? "Observe Only" : "No Evidence"}
+                </StatusTag>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="overflow-hidden rounded border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-sm">
+          <h2 className="m-0 flex min-h-[34px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-3 text-[12px] font-bold text-[var(--color-text-primary)]">
+            Execution Classification
+          </h2>
+          <div className="grid">
+            {data.execution_quality_breakdown.map((item) => (
+              <div className="flex min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-3 transition-colors hover:bg-white/[0.02] last:border-b-0" key={item.label}>
+                <span className="truncate text-[12px] text-[var(--color-text-secondary)]">{item.label}</span>
+                <strong className="tabular-number text-[12px] font-bold text-[var(--color-text-primary)]">{item.ticket_count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="overflow-hidden rounded border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-sm">
+          <h2 className="m-0 flex min-h-[34px] items-center border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-3 text-[12px] font-bold text-[var(--color-text-primary)]">
+            Exit Reason
+          </h2>
+          <div className="grid">
+            {data.exit_reason_breakdown.map((item) => (
+              <div className="flex min-w-0 min-h-[42px] items-center justify-between gap-2 border-b border-[var(--color-divider)] px-3 transition-colors hover:bg-white/[0.02] last:border-b-0" key={item.label}>
+                <span className="min-w-0 truncate text-[12px] text-[var(--color-text-secondary)]" title={item.label}>{item.label}</span>
+                <strong className="tabular-number text-[12px] font-bold text-[var(--color-text-primary)]">{item.ticket_count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
     </AppShell>
   );

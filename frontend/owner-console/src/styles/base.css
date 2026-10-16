@@ -9,6 +9,25 @@
     box-sizing: border-box;
   }
 
+  /* Sleek Binance Pro dark scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-background);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-divider);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-secondary);
+  }
+
   html,
   body,
   #root {
@@ -18,10 +37,12 @@
 
   html {
     font-family: Inter, "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system,
-      BlinkMacSystemFont, "Segoe UI", sans-serif;
+      BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color: var(--color-text-primary);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
@@ -30,30 +51,43 @@
     color: var(--color-text-primary);
     background: var(--color-background);
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
   button,
-  input {
+  input,
+  select,
+  textarea {
     font: inherit;
   }
 
   button {
     box-shadow: none;
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: rgba(240, 185, 11, 0.25);
+    color: var(--color-text-primary);
   }
 }
 
 @layer components {
+  /* Fluid responsive layout container */
   .app-container {
     width: min(calc(100% - 32px), var(--layout-max-width));
     margin-inline: auto;
   }
 
+  /* Binance Web Pro Navigation Header */
   .top-navigation {
+    position: sticky;
+    top: 0;
+    z-index: 40;
     height: var(--height-navigation);
     border-bottom: 1px solid var(--color-divider);
     background: var(--color-surface);
-    box-shadow: var(--shadow-decorative);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   }
 
   .top-navigation__inner {
@@ -63,58 +97,78 @@
     gap: var(--space-3);
   }
 
+  /* Brand Mark with Binance geometric accent */
   .brand-mark {
     display: inline-flex;
     align-items: center;
+    gap: 8px;
     flex: none;
     color: var(--color-text-primary);
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    user-select: none;
   }
 
   .brand-mark--link {
     text-decoration: none;
+    transition: opacity var(--transition-base);
+  }
+
+  .brand-mark--link:hover {
+    opacity: 0.9;
   }
 
   .primary-navigation {
     display: flex;
     min-width: 0;
     align-items: stretch;
-    gap: var(--space-3);
+    gap: 2px;
   }
 
   .primary-navigation__link {
     position: relative;
     display: inline-flex;
     align-items: center;
+    padding-inline: 12px;
     color: var(--color-text-secondary);
     font-size: 13px;
     font-weight: 500;
     text-decoration: none;
+    transition: color var(--transition-base), background-color var(--transition-base);
+  }
+
+  .primary-navigation__link:hover {
+    color: var(--color-text-primary);
+    background-color: rgba(255, 255, 255, 0.03);
   }
 
   .primary-navigation__link[aria-current="page"] {
-    color: var(--color-text-primary);
+    color: var(--color-emphasis);
+    font-weight: 600;
   }
 
   .primary-navigation__link[aria-current="page"]::after {
     position: absolute;
-    right: 0;
+    right: 8px;
     bottom: 0;
-    left: 0;
+    left: 8px;
     height: 2px;
+    border-radius: 1px 1px 0 0;
     background: var(--color-emphasis);
+    box-shadow: 0 -1px 6px rgba(240, 185, 11, 0.6);
     content: "";
   }
 
-.runtime-summary {
+  /* Right-side runtime summary and status */
+  .runtime-summary {
     display: flex;
     align-items: center;
     gap: var(--space-1);
     margin-left: auto;
     color: var(--color-text-secondary);
     white-space: nowrap;
+    font-size: 12px;
   }
 
   .runtime-summary__separator {
@@ -125,9 +179,10 @@
     padding-block: var(--space-3);
   }
 
+  /* Page Header and Toolbars */
   .page-header {
     display: flex;
-    min-height: 40px;
+    min-height: 44px;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
@@ -140,9 +195,11 @@
   }
 
   .page-header__title {
+    color: var(--color-text-primary);
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 700;
     line-height: 1.25;
+    letter-spacing: -0.01em;
   }
 
   .page-header__description {
@@ -172,11 +229,13 @@
     line-height: 1.25;
   }
 
+  /* Binance Pro Card & Panel */
   .panel {
     border: 1px solid var(--color-divider);
-    border-radius: 0;
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
     box-shadow: var(--shadow-decorative);
+    overflow: hidden;
   }
 
   .panel__header {
@@ -188,7 +247,8 @@
     background: var(--color-surface-secondary);
     color: var(--color-text-secondary);
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.02em;
   }
 
   .panel__body {
@@ -197,43 +257,54 @@
 
   .unavailable-panel {
     display: grid;
-    min-height: 112px;
+    min-height: 120px;
     place-content: center;
-    gap: 4px;
+    gap: 6px;
     padding: var(--space-3);
     color: var(--color-text-secondary);
     text-align: center;
+    background: rgba(24, 26, 32, 0.6);
+    border-radius: var(--radius-panel);
   }
 
   .unavailable-panel strong {
     color: var(--color-text-primary);
+    font-size: 14px;
   }
 
   .refresh-error {
     display: flex;
-    min-height: 32px;
+    min-height: 36px;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2);
     margin-bottom: var(--space-2);
     padding-inline: var(--space-2);
-    border: 1px solid rgb(246 70 93 / 45%);
-    background: rgb(246 70 93 / 6%);
+    border: 1px solid rgba(246, 70, 93, 0.4);
+    border-radius: var(--radius-panel);
+    background: rgba(246, 70, 93, 0.08);
     color: var(--color-danger);
     font-size: 12px;
+    font-weight: 500;
   }
 
   .refresh-error span {
     color: var(--color-text-secondary);
   }
 
+  /* Overview Conclusion Alert Banner */
   .overview-conclusion {
     display: grid;
     min-height: 72px;
     grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr);
     align-items: stretch;
     margin-bottom: var(--space-2);
-    border-left: 2px solid var(--color-success);
+    border: 1px solid var(--color-divider);
+    border-left: 3px solid var(--color-success);
+    border-radius: var(--radius-panel);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-decorative);
+    overflow: hidden;
   }
 
   .overview-conclusion[data-level="attention"] {
@@ -257,6 +328,7 @@
     overflow-wrap: anywhere;
     font-size: 14px;
     font-weight: 600;
+    color: var(--color-text-primary);
   }
 
   .overview-conclusion__action {
@@ -268,10 +340,11 @@
     color: var(--color-text-secondary);
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
   }
 
+  /* Overview Grid Layouts */
   .overview-primary-grid,
   .overview-secondary-grid {
     display: grid;
@@ -321,6 +394,7 @@
   .execution-summary span {
     color: var(--color-text-secondary);
     font-size: 11px;
+    font-weight: 500;
   }
 
   .fact-cell strong,
@@ -329,9 +403,10 @@
     overflow: hidden;
     color: var(--color-text-primary);
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: -0.01em;
   }
 
   .fact-cell small,
@@ -361,6 +436,8 @@
   .capacity-row__main strong,
   .execution-summary strong {
     font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text-primary);
   }
 
   .capacity-row__main span {
@@ -374,11 +451,11 @@
 
   [data-value-tone="positive"],
   .positive-text {
-    color: var(--color-success);
+    color: var(--color-success) !important;
   }
 
   [data-value-tone="negative"] {
-    color: var(--color-danger);
+    color: var(--color-danger) !important;
   }
 
   .active-ticket-list {
@@ -396,6 +473,7 @@
     border-top: 1px solid var(--color-divider);
     color: var(--color-text-primary);
     text-decoration: none;
+    transition: background-color var(--transition-base);
   }
 
   .active-ticket-row:first-child {
@@ -409,6 +487,7 @@
   .active-ticket-row span:last-child {
     color: var(--color-emphasis);
     font-size: 11px;
+    font-weight: 600;
     white-space: nowrap;
   }
 
@@ -449,6 +528,7 @@
     font-variant-numeric: tabular-nums lining-nums;
   }
 
+  /* Binance Pro Button System */
   .owner-button {
     display: inline-flex;
     align-items: center;
@@ -457,39 +537,70 @@
     padding-inline: var(--space-2);
     border: 1px solid var(--color-emphasis);
     border-radius: var(--radius-control);
-    background: transparent;
+    background: rgba(240, 185, 11, 0.08);
     color: var(--color-emphasis);
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
-    box-shadow: var(--shadow-decorative);
+    box-shadow: none;
     cursor: pointer;
+    transition: all var(--transition-base);
+    user-select: none;
   }
 
   .owner-button:hover {
-    background: rgb(240 185 11 / 8%);
+    background: var(--color-emphasis);
+    color: #181a20;
+    box-shadow: 0 2px 6px rgba(240, 185, 11, 0.3);
+  }
+
+  .owner-button:active {
+    transform: scale(0.98);
   }
 
   .owner-button:focus-visible {
-    outline: 1px solid var(--color-emphasis);
+    outline: 2px solid var(--color-emphasis);
     outline-offset: 2px;
   }
 
   .owner-button:disabled {
     border-color: var(--color-divider);
+    background: transparent;
     color: var(--color-text-secondary);
+    opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
   }
 
+  .owner-button--danger {
+    border-color: var(--color-danger);
+    background: var(--color-danger);
+    color: #ffffff;
+  }
+
+  .owner-button--danger:hover {
+    background: var(--color-danger-hover);
+    border-color: var(--color-danger-hover);
+    color: #ffffff;
+    box-shadow: 0 2px 8px rgba(246, 70, 93, 0.35);
+  }
+
+  /* Binance Pro Status Tag - Refined Pill Badge */
   .status-tag {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     width: fit-content;
+    padding: 2px 8px;
+    border: 1px solid rgba(132, 142, 156, 0.2);
+    border-radius: 9999px;
+    background: rgba(132, 142, 156, 0.08);
     color: var(--color-text-secondary);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    line-height: 1;
+    line-height: 1.2;
+    white-space: nowrap;
   }
 
   .status-tag::before {
@@ -499,33 +610,43 @@
     border-radius: 50%;
     background: currentColor;
     content: "";
+    box-shadow: 0 0 4px currentColor;
   }
 
   .status-tag[data-tone="success"] {
     color: var(--color-success);
+    background: var(--color-success-subtle);
+    border-color: rgba(14, 203, 129, 0.3);
   }
 
   .status-tag[data-tone="danger"] {
     color: var(--color-danger);
+    background: var(--color-danger-subtle);
+    border-color: rgba(246, 70, 93, 0.3);
   }
 
   .status-tag[data-tone="attention"] {
     color: var(--color-emphasis);
+    background: var(--color-emphasis-subtle);
+    border-color: rgba(240, 185, 11, 0.3);
   }
 
+  /* Login Experience - Binance Security Panel */
   .login-layout {
     display: grid;
     min-height: 100vh;
     place-items: center;
     padding: 32px 16px;
+    background: radial-gradient(circle at 50% 20%, rgba(240, 185, 11, 0.04) 0%, transparent 60%), var(--color-background);
   }
 
   .login-panel {
-    width: min(100%, 380px);
+    width: min(100%, 390px);
     border: 1px solid var(--color-divider);
-    border-radius: 0;
+    border-radius: var(--radius-panel);
     background: var(--color-surface);
-    box-shadow: var(--shadow-decorative);
+    box-shadow: var(--shadow-dropdown);
+    overflow: hidden;
   }
 
   .login-panel__header {
@@ -533,14 +654,21 @@
     height: var(--height-navigation);
     align-items: center;
     justify-content: space-between;
-    padding-inline: var(--space-2);
+    padding-inline: var(--space-3);
     border-bottom: 1px solid var(--color-divider);
     background: var(--color-surface-secondary);
   }
 
   .login-panel__environment {
-    color: var(--color-text-secondary);
-    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 6px;
+    border: 1px solid rgba(14, 203, 129, 0.3);
+    border-radius: 2px;
+    background: rgba(14, 203, 129, 0.1);
+    color: var(--color-success);
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .login-form {
@@ -550,7 +678,7 @@
   }
 
   .login-form__heading {
-    margin-bottom: 4px;
+    margin-bottom: 6px;
   }
 
   .login-form__heading h1,
@@ -559,8 +687,9 @@
   }
 
   .login-form__heading h1 {
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text-primary);
   }
 
   .login-form__heading p {
@@ -571,53 +700,71 @@
 
   .login-field {
     display: grid;
-    gap: 4px;
+    gap: 5px;
     color: var(--color-text-secondary);
     font-size: 12px;
+    font-weight: 500;
   }
 
   .login-field input {
     width: 100%;
     height: var(--height-control);
-    padding-inline: var(--space-1);
+    padding-inline: 10px;
     border: 1px solid var(--color-divider);
     border-radius: var(--radius-control);
     outline: none;
     background: var(--color-background);
     color: var(--color-text-primary);
+    font-size: 13px;
+    transition: border-color var(--transition-base), box-shadow var(--transition-base);
   }
 
   .login-field input:focus-visible {
     border-color: var(--color-emphasis);
+    box-shadow: 0 0 0 1px var(--color-emphasis);
   }
 
   .login-field input[aria-invalid="true"] {
     border-color: var(--color-danger);
+    box-shadow: 0 0 0 1px var(--color-danger);
   }
 
   .login-field__error {
     min-height: 17px;
     color: var(--color-danger);
+    font-size: 11px;
   }
 
   .login-form__notice {
     margin: 0;
-    padding: 8px 10px;
-    border: 1px solid rgb(240 185 11 / 45%);
-    background: rgb(240 185 11 / 8%);
+    padding: 8px 12px;
+    border: 1px solid rgba(240, 185, 11, 0.4);
+    border-radius: var(--radius-control);
+    background: rgba(240, 185, 11, 0.08);
     color: var(--color-emphasis);
     font-size: 12px;
   }
 
   .login-form__submit {
     width: 100%;
+    height: 38px;
+    background: var(--color-emphasis);
+    color: #181a20;
+    font-weight: 700;
+    border: none;
+  }
+
+  .login-form__submit:hover {
+    background: var(--color-emphasis-hover);
+    color: #181a20;
+    box-shadow: 0 2px 8px rgba(240, 185, 11, 0.35);
   }
 
   .login-route-error {
     position: fixed;
     top: calc(50% + 226px);
     left: 50%;
-    width: min(calc(100% - 32px), 380px);
+    width: min(calc(100% - 32px), 390px);
     transform: translateX(-50%);
     color: var(--color-danger);
     font-size: 12px;
@@ -636,6 +783,7 @@
   }
 }
 
+/* Logout button in runtime summary */
 .runtime-summary__logout {
   border: 0;
   border-left: 1px solid var(--color-divider);
@@ -643,7 +791,9 @@
   color: var(--color-text-secondary);
   padding: 0 0 0 10px;
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
+  transition: color var(--transition-base);
 }
 
 .runtime-summary__logout:hover {
@@ -655,18 +805,22 @@
   opacity: 0.55;
 }
 
+/* Control plane styling */
 .control-summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: var(--space-2);
   border: 1px solid var(--color-divider);
+  border-radius: var(--radius-panel);
   background: var(--color-surface);
+  box-shadow: var(--shadow-decorative);
+  overflow: hidden;
 }
 
 .control-summary-strip > div {
   display: grid;
   gap: 3px;
-  min-height: 54px;
+  min-height: 56px;
   align-content: center;
   padding-inline: var(--space-2);
   border-left: 1px solid var(--color-divider);
@@ -686,13 +840,22 @@
 
 .control-summary-strip strong {
   font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
 }
 
 .control-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 100px 150px auto;
+  grid-template-columns: minmax(140px, 1fr) auto auto auto;
   gap: var(--space-2);
   align-items: center;
+}
+
+.control-row > button,
+.strategy-control-table__row > button {
+  flex-shrink: 0;
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .control-row__identity,
@@ -700,31 +863,42 @@
 .strategy-control-table__row > div {
   display: grid;
   gap: 3px;
+  min-width: 0;
 }
 
 .strategy-control-table {
   margin: calc(var(--space-2) * -1);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .strategy-control-table__head,
 .strategy-control-table__row {
   display: grid;
-  grid-template-columns: minmax(190px, 1.25fr) 120px 150px minmax(170px, 1fr) 72px;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(68px, auto) minmax(68px, auto) minmax(110px, 1fr) auto;
   gap: var(--space-2);
   align-items: center;
   padding-inline: var(--space-2);
+  min-width: 0;
 }
 
 .strategy-control-table__head {
-  min-height: 30px;
+  min-height: 32px;
   background: var(--color-surface-secondary);
   color: var(--color-text-secondary);
   font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }
 
 .strategy-control-table__row {
   min-height: 48px;
   border-top: 1px solid var(--color-divider);
+  transition: background-color var(--transition-base);
+}
+
+.strategy-control-table__row:hover {
+  background: var(--color-surface-secondary);
 }
 
 .operation-line,
@@ -745,6 +919,7 @@
   border-top: 0;
 }
 
+/* Danger Zone - Binance Pro Critical Protection Area */
 .danger-zone {
   display: flex;
   align-items: center;
@@ -752,8 +927,10 @@
   gap: var(--space-3);
   margin-block: var(--space-2);
   padding: var(--space-3);
-  border: 1px solid rgb(246 70 93 / 55%);
-  background: rgb(246 70 93 / 4%);
+  border: 1px solid rgba(246, 70, 93, 0.4);
+  border-radius: var(--radius-panel);
+  background: rgba(246, 70, 93, 0.05);
+  box-shadow: 0 0 12px rgba(246, 70, 93, 0.08);
 }
 
 .danger-zone h2,
@@ -764,6 +941,8 @@
 .danger-zone h2 {
   margin-block: 4px;
   font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-primary);
 }
 
 .danger-zone p {
@@ -779,22 +958,19 @@
   letter-spacing: 0.08em;
 }
 
-.owner-button--danger {
-  border-color: rgb(246 70 93 / 70%);
-  background: var(--color-danger);
-  color: white;
-}
-
+/* Control Dialog Modals */
 .control-dialog__overlay {
   position: fixed;
-  z-index: 30;
+  z-index: 50;
   inset: 0;
-  background: rgb(0 0 0 / 72%);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 150ms ease-out;
 }
 
 .control-dialog {
   position: fixed;
-  z-index: 31;
+  z-index: 51;
   top: 50%;
   left: 50%;
   display: grid;
@@ -805,11 +981,25 @@
   overflow: auto;
   transform: translate(-50%, -50%);
   border: 1px solid var(--color-divider);
+  border-radius: var(--radius-panel);
   background: var(--color-surface);
+  box-shadow: var(--shadow-dropdown);
+  animation: modalIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translate(-50%, -48%) scale(0.97); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 .control-dialog--danger {
-  border-color: rgb(246 70 93 / 65%);
+  border-color: rgba(246, 70, 93, 0.6);
+  box-shadow: 0 4px 24px rgba(246, 70, 93, 0.15);
 }
 
 .control-dialog h2,
@@ -817,8 +1007,16 @@
   margin: 0;
 }
 
+.control-dialog h2 {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  font-weight: 700;
+}
+
 .control-dialog p {
   color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .control-dialog__actions {
@@ -830,26 +1028,32 @@
 
 .control-dialog__error {
   color: var(--color-danger) !important;
+  font-size: 12px;
 }
 
 .control-field {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   color: var(--color-text-secondary);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .control-field input {
   height: var(--height-control);
-  padding-inline: var(--space-1);
+  padding-inline: 10px;
   border: 1px solid var(--color-divider);
+  border-radius: var(--radius-control);
   outline: none;
   background: var(--color-background);
   color: var(--color-text-primary);
+  font-size: 13px;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
 
 .control-field input:focus-visible {
   border-color: var(--color-emphasis);
+  box-shadow: 0 0 0 1px var(--color-emphasis);
 }
 
 .flatten-ticket-list {
@@ -857,11 +1061,13 @@
   gap: 4px;
   padding: var(--space-2);
   border: 1px solid var(--color-divider);
-  background: var(--color-background);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-subtle);
   color: var(--color-text-secondary);
   font-size: 12px;
 }
 
+/* Responsive adjustments */
 @media (max-width: 720px) {
   .runtime-summary__time,
   .primitive-row .optional-detail {

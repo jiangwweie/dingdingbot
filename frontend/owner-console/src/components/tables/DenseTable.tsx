@@ -41,33 +41,33 @@ export function DenseTable<TData extends RowData>({
   });
 
   return (
-    <div className="w-full overflow-x-auto border border-[var(--color-divider)] bg-[var(--color-surface)]">
+    <div className="w-full overflow-x-auto rounded-[var(--radius-panel)] border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-[var(--shadow-decorative)]">
       <table className="w-full min-w-[960px] table-fixed border-collapse text-left" aria-label={ariaLabel}>
         {columnWidths ? (
           <colgroup>
             {columnWidths.map((width, index) => <col key={`${index}:${width}`} style={{ width }} />)}
           </colgroup>
         ) : null}
-        <thead className="h-[30px] border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] text-[11px] font-medium text-[var(--color-text-secondary)]">
+        <thead className="h-[32px] border-b border-[var(--color-divider)] bg-[var(--color-surface-secondary)] text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
-                <th className="px-2 align-middle font-medium" key={header.id} scope="col">
+                <th className="px-3 align-middle font-semibold" key={header.id} scope="col">
                   {header.isPlaceholder ? null : <table.FlexRender header={header} />}
                 </th>
               ))}
             </tr>
           ))}
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-[var(--color-divider)]">
           {table.getRowModel().rows.map((row) => (
             <Fragment key={row.id}>
               <tr
-                className="h-[38px] border-b border-[var(--color-divider)] text-[12px] last:border-b-0 hover:bg-[var(--color-surface-secondary)]"
+                className="h-[38px] text-[12px] transition-colors duration-150 hover:bg-[#20252e]"
                 key={row.id}
               >
                 {row.getAllCells().map((cell) => (
-                  <td className="px-2 align-middle" key={cell.id}>
+                  <td className="px-3 align-middle text-[var(--color-text-primary)]" key={cell.id}>
                     <table.FlexRender cell={cell} />
                   </td>
                 ))}

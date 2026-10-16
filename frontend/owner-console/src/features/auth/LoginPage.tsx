@@ -49,7 +49,12 @@ export function LoginPage({ onAuthenticated, onError, notice = null }: LoginPage
     <main className="login-layout">
       <section className="login-panel" aria-labelledby="login-title">
         <header className="login-panel__header">
-          <span className="brand-mark">BRC OWNER</span>
+          <div className="flex items-center gap-2">
+            <svg className="h-4 w-4 text-[var(--color-emphasis)]" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L6 8l2.5 2.5L12 7l3.5 3.5L18 8l-6-6zm-6 8l-3.5 3.5L12 23l2.5-2.5-6-6-2.5-2.5zm12 0l-2.5 2.5 6 6 2.5-2.5-6-6zM12 9.5L8.5 13 12 16.5 15.5 13 12 9.5z" />
+            </svg>
+            <span className="brand-mark">BRC OWNER</span>
+          </div>
           <span className="login-panel__environment tabular-number">PROD</span>
         </header>
         <form className="login-form" onSubmit={submit} noValidate>

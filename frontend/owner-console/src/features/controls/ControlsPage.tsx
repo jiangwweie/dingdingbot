@@ -62,12 +62,16 @@ function operationTone(operation: OwnerControlOperation): "success" | "attention
   return "attention";
 }
 
+const SELECTION_GROUPS = ["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"] as const;
+type SelectionTabKey = (typeof SELECTION_GROUPS)[number] | "SOR-1H" | "all";
+
 export function ControlsPage() {
   const controls = useQuery({ queryKey: controlsQueryKey, queryFn: getControls });
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [totpCode, setTotpCode] = useState("");
   const [flattenPreview, setFlattenPreview] = useState<FlattenPreview | null>(null);
   const [confirmationText, setConfirmationText] = useState("");
+  const [selectionTab, setSelectionTab] = useState<SelectionTabKey>("CPM-RO-001");
 
   const refresh = async () => {
     await Promise.all([
@@ -154,97 +158,229 @@ export function ControlsPage() {
     >
       {pageHeader}
 
-      <section className="control-summary-strip">
+      <section className="control-summary-strip mb-3">
         <div><span>全局 ENTRY</span><strong>{globalPaused ? "已暂停" : "运行中"}</strong></div>
         <div><span>暂停策略</span><strong className="tabular-number">{pausedCount}</strong></div>
         <div><span>活动 Ticket</span><strong className="tabular-number">{data.global_entry.active_ticket_count}</strong></div>
         <div><span>当前受控操作</span><strong>{operation ? operationResult(operation) : "无"}</strong></div>
       </section>
 
-      <Panel title="全局 ENTRY 控制">
-        <div className="control-row control-row--global">
-          <div className="control-row__identity">
-            <strong>全部策略新开仓</strong>
-            <span>Policy v{data.global_entry.policy_version} · 已有 Ticket 生命周期不受影响</span>
-          </div>
-          <StatusTag tone={globalPaused ? "attention" : "success"}>{globalPaused ? "已暂停" : "运行中"}</StatusTag>
-          <div className="control-row__facts">
-            <span>当前状态</span><strong>{formatOwnerStatus(data.global_entry.effective_state)}</strong>
-          </div>
-          <Button onClick={() => setPendingAction({ kind: "global", action: globalPaused ? "resume" : "pause", version: data.global_entry.policy_version })}>
-            {globalPaused ? "恢复新开仓" : "暂停新开仓"}
-          </Button>
-        </div>
-      </Panel>
-
-      <Panel title="组合容量（只读）">
-        <dl className="grid grid-cols-2 gap-3">
-          <div><dt>同策略同方向上限</dt><dd>{data.account_capacity.max_same_strategy_side ?? "无额外上限（旧 Policy）"}</dd></div>
-          <div><dt>全局 Ticket 上限</dt><dd>{data.account_capacity.max_concurrent_tickets}</dd></div>
-          <div><dt>long_continuation 上限</dt><dd>{data.account_capacity.family_limits.long_continuation}</dd></div>
-          <div><dt>rally_failure_short 上限</dt><dd>{data.account_capacity.family_limits.rally_failure_short}</dd></div>
-        </dl>
-        <p>Policy v{data.global_entry.policy_version} · 严格 Family、方向风险与 Netting Domain 约束仍生效；容量不授予策略 ENTRY 权限。</p>
-        {Object.entries(data.account_capacity.strategy_side_active_counts ?? {}).map(([scope,count]) => (
-          <div key={scope}>{scope}：{count} 个占用</div>
-        ))}
-      </Panel>
-
-      <Panel title="StrategyGroup 控制">
-        <div className="strategy-control-table" role="table">
-          <div className="strategy-control-table__head" role="row">
-            <span>StrategyGroup</span><span>配置状态</span><span>有效状态</span><span>最近变更</span><span>操作</span>
-          </div>
-          {data.strategies.map((strategy) => {
-            const paused = strategy.configured_state === "paused";
-            return (
-              <div className="strategy-control-table__row" role="row" key={strategy.strategy_group_id}>
-                <div><strong>{strategy.strategy_group_id}</strong><small title={strategy.reason}>{formatOwnerReason(strategy.reason).label}</small></div>
-                <StatusTag tone={strategy.strategy_group_id === "SOR-001" ? "neutral" : paused ? "attention" : "success"}>{strategy.strategy_group_id === "SOR-001" ? "已退役" : paused ? "已暂停" : "已启用"}</StatusTag>
-                <span>{formatOwnerStatus(strategy.effective_state)}</span>
-                <span className="tabular-number">v{strategy.control_version} · {formatTime(strategy.updated_at_ms)}</span>
-                <Button disabled={strategy.strategy_group_id === "SOR-001"} onClick={() => setPendingAction({ kind: "strategy", action: paused ? "resume" : "pause", strategyGroupId: strategy.strategy_group_id, version: strategy.control_version })}>
-                  {paused ? "恢复" : "暂停"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      </Panel>
-
-      {(["CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"] as const).map(group => <SelectionControlPanel key={group} strategyGroupId={group} />)}
-      <OrbSelectionControlPanel />
-      <Panel title="旧 SOR-001 已退役"><p>仅保留历史记录，不再提供恢复入场或 Dynamic 激活。</p></Panel>
-
-      <Panel title="当前受控操作">
-        {operation ? (
-          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
-            <StatusTag tone={operationTone(operation)}>{operationResult(operation)}</StatusTag>
-            <span className="min-w-0 truncate">{operationName(operation)}</span>
-            <span className="tabular-number text-[var(--color-text-secondary)]">{operation.target_ticket_ids.length} 个 Ticket</span>
-          </div>
-        ) : <div className="compact-empty">当前没有进行中的受控操作</div>}
-      </Panel>
-
-      <section className="danger-zone">
+      <section className="danger-zone mb-3.5">
         <div>
-          <span className="danger-zone__eyebrow">危险操作</span>
+          <span className="danger-zone__eyebrow">危险操作 · 紧急熔断</span>
           <h2>受控平仓全部仓位</h2>
           <p>先暂停全局 ENTRY，再由 Lifecycle 请求退出服务器冻结的全部活动 Ticket。页面不能选择数量、方向或订单类型。</p>
         </div>
-        <Button className="owner-button--danger" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate()}>
+        <Button className="owner-button--danger flex-none" disabled={previewMutation.isPending} onClick={() => previewMutation.mutate()}>
           {previewMutation.isPending ? "读取权威事实" : "受控平仓全部仓位"}
         </Button>
       </section>
 
-      <Panel title="控制操作历史">
-        {data.recent_operations.length ? data.recent_operations.map((item) => (
-          <div className="grid min-h-[52px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-[var(--color-divider)] py-2 first:border-t-0" key={item.authorization_id}>
-            <div className="grid min-w-0 gap-1"><strong className="truncate text-[12px]">{operationName(item)}</strong><span className="truncate text-[11px] text-[var(--color-text-secondary)]">{item.target_ticket_ids.length} 个 Ticket · {formatTime(item.updated_at_ms)}</span>{item.first_blocker ? <small className="truncate text-[10px] text-[var(--color-text-secondary)]" title={item.first_blocker}>过程关注：{formatOwnerReason(item.first_blocker).label}</small> : null}</div>
-            <StatusTag tone={operationTone(item)}>{operationResult(item)}</StatusTag>
+      <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-12">
+        <div className="space-y-3.5 lg:col-span-8">
+          <Panel title="全局 ENTRY 控制">
+            <div className="control-row control-row--global">
+              <div className="control-row__identity">
+                <strong className="text-[14px] font-bold text-[var(--color-text-primary)]">全部策略新开仓</strong>
+                <span>Policy v{data.global_entry.policy_version} · 已有 Ticket 生命周期不受影响</span>
+              </div>
+              <StatusTag tone={globalPaused ? "attention" : "success"}>{globalPaused ? "已暂停" : "运行中"}</StatusTag>
+              <div className="control-row__facts">
+                <span>当前状态</span><strong>{formatOwnerStatus(data.global_entry.effective_state)}</strong>
+              </div>
+              <Button onClick={() => setPendingAction({ kind: "global", action: globalPaused ? "resume" : "pause", version: data.global_entry.policy_version })}>
+                {globalPaused ? "恢复新开仓" : "暂停新开仓"}
+              </Button>
+            </div>
+          </Panel>
+
+          <Panel title="StrategyGroup 控制">
+            <div className="strategy-control-table" role="table">
+              <div className="strategy-control-table__head" role="row">
+                <span>StrategyGroup</span><span>配置状态</span><span>有效状态</span><span>最近变更</span><span>操作</span>
+              </div>
+              {data.strategies.map((strategy) => {
+                const paused = strategy.configured_state === "paused";
+                return (
+                  <div className="strategy-control-table__row" role="row" key={strategy.strategy_group_id}>
+                    <div>
+                      <strong className="font-semibold text-[var(--color-text-primary)]">{strategy.strategy_group_id}</strong>
+                      <small title={strategy.reason}>{formatOwnerReason(strategy.reason).label}</small>
+                    </div>
+                    <StatusTag tone={strategy.strategy_group_id === "SOR-001" ? "neutral" : paused ? "attention" : "success"}>
+                      {strategy.strategy_group_id === "SOR-001" ? "已退役" : paused ? "已暂停" : "已启用"}
+                    </StatusTag>
+                    <span className="text-[12px] font-medium">{formatOwnerStatus(strategy.effective_state)}</span>
+                    <span className="tabular-number text-[11px] text-[var(--color-text-secondary)]">
+                      v{strategy.control_version} · {formatTime(strategy.updated_at_ms)}
+                    </span>
+                    <Button
+                      disabled={strategy.strategy_group_id === "SOR-001"}
+                      onClick={() =>
+                        setPendingAction({
+                          kind: "strategy",
+                          action: paused ? "resume" : "pause",
+                          strategyGroupId: strategy.strategy_group_id,
+                          version: strategy.control_version,
+                        })
+                      }
+                    >
+                      {paused ? "恢复" : "暂停"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-divider)] pb-2.5">
+              <div>
+                <h3 className="m-0 text-[13px] font-bold text-[var(--color-text-primary)]">动态选币与轮动管理</h3>
+                <p className="m-0 mt-0.5 text-[11px] text-[var(--color-text-secondary)]">各策略组独立的 Dynamic 准入授权与 Static 回退</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1 rounded bg-[var(--color-surface-secondary)] p-1 border border-[var(--color-divider)]">
+                {SELECTION_GROUPS.map((group) => (
+                  <button
+                    key={group}
+                    type="button"
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      selectionTab === group
+                        ? "bg-[var(--color-emphasis)] text-[#181a20] font-bold shadow-sm"
+                        : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                    }`}
+                    onClick={() => setSelectionTab(group)}
+                  >
+                    {group}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    selectionTab === "SOR-1H"
+                      ? "bg-[var(--color-emphasis)] text-[#181a20] font-bold shadow-sm"
+                      : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  }`}
+                  onClick={() => setSelectionTab("SOR-1H")}
+                >
+                  SOR-1H
+                </button>
+                <button
+                  type="button"
+                  className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    selectionTab === "all"
+                      ? "bg-[var(--color-emphasis)] text-[#181a20] font-bold shadow-sm"
+                      : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  }`}
+                  onClick={() => setSelectionTab("all")}
+                >
+                  全部平铺
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {selectionTab === "all" ? (
+                <>
+                  {SELECTION_GROUPS.map((group) => (
+                    <SelectionControlPanel key={group} strategyGroupId={group} />
+                  ))}
+                  <OrbSelectionControlPanel />
+                </>
+              ) : selectionTab === "SOR-1H" ? (
+                <OrbSelectionControlPanel />
+              ) : (
+                <SelectionControlPanel key={selectionTab} strategyGroupId={selectionTab} />
+              )}
+            </div>
           </div>
-        )) : <div className="compact-empty">暂无受控平仓操作记录</div>}
-      </Panel>
+        </div>
+
+        <div className="space-y-3.5 lg:col-span-4">
+          <Panel title="组合容量（只读）">
+            <dl className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded border border-[var(--color-divider)] bg-[var(--color-surface-secondary)] p-2.5">
+                <dt className="text-[11px] font-medium text-[var(--color-text-secondary)]">同策略同方向上限</dt>
+                <dd className="m-0 mt-1 text-[15px] font-bold text-[var(--color-text-primary)]">
+                  {data.account_capacity.max_same_strategy_side ?? "无额外上限（旧 Policy）"}
+                </dd>
+              </div>
+              <div className="rounded border border-[var(--color-divider)] bg-[var(--color-surface-secondary)] p-2.5">
+                <dt className="text-[11px] font-medium text-[var(--color-text-secondary)]">全局 Ticket 上限</dt>
+                <dd className="m-0 mt-1 text-[15px] font-bold text-[var(--color-text-primary)]">
+                  {data.account_capacity.max_concurrent_tickets}
+                </dd>
+              </div>
+              <div className="rounded border border-[var(--color-divider)] bg-[var(--color-surface-secondary)] p-2.5">
+                <dt className="text-[11px] font-medium text-[var(--color-text-secondary)]">long_continuation 上限</dt>
+                <dd className="m-0 mt-1 text-[15px] font-bold text-[var(--color-text-primary)]">
+                  {data.account_capacity.family_limits.long_continuation}
+                </dd>
+              </div>
+              <div className="rounded border border-[var(--color-divider)] bg-[var(--color-surface-secondary)] p-2.5">
+                <dt className="text-[11px] font-medium text-[var(--color-text-secondary)]">rally_failure_short 上限</dt>
+                <dd className="m-0 mt-1 text-[15px] font-bold text-[var(--color-text-primary)]">
+                  {data.account_capacity.family_limits.rally_failure_short}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-2.5 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+              Policy v{data.global_entry.policy_version} · 严格 Family、方向风险与 Netting Domain 约束仍生效；容量不授予策略 ENTRY 权限。
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-[var(--color-divider)] pt-2.5">
+              {Object.entries(data.account_capacity.strategy_side_active_counts ?? {}).map(([scope, count]) => (
+                <span className="rounded border border-[var(--color-divider)] bg-[var(--color-surface-secondary)] px-2 py-0.5 text-[11px] text-[var(--color-text-secondary)]" key={scope}>
+                  {scope}：<strong className="text-[var(--color-text-primary)]">{count}</strong> 个占用
+                </span>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="旧 SOR-001 已退役">
+            <div className="flex items-center gap-2">
+              <StatusTag tone="neutral">RETIRED</StatusTag>
+              <p className="m-0 text-[12px] text-[var(--color-text-secondary)]">仅保留历史记录，不再提供恢复入场或 Dynamic 激活。</p>
+            </div>
+          </Panel>
+
+          <Panel title="当前受控操作">
+            {operation ? (
+              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+                <StatusTag tone={operationTone(operation)}>{operationResult(operation)}</StatusTag>
+                <span className="min-w-0 truncate font-semibold text-[var(--color-text-primary)]">{operationName(operation)}</span>
+                <span className="tabular-number text-[var(--color-text-secondary)]">{operation.target_ticket_ids.length} 个 Ticket</span>
+              </div>
+            ) : (
+              <div className="compact-empty">当前没有进行中的受控操作</div>
+            )}
+          </Panel>
+
+          <Panel title="控制操作历史">
+            {data.recent_operations.length ? (
+              <div className="space-y-1">
+                {data.recent_operations.map((item) => (
+                  <div className="grid min-h-[52px] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t border-[var(--color-divider)] py-2.5 first:border-t-0" key={item.authorization_id}>
+                    <div className="grid min-w-0 gap-1">
+                      <strong className="truncate text-[12px] font-semibold text-[var(--color-text-primary)]">{operationName(item)}</strong>
+                      <span className="truncate text-[11px] text-[var(--color-text-secondary)]">
+                        {item.target_ticket_ids.length} 个 Ticket · {formatTime(item.updated_at_ms)}
+                      </span>
+                      {item.first_blocker ? (
+                        <small className="truncate text-[10px] text-[var(--color-text-secondary)]" title={item.first_blocker}>
+                          过程关注：{formatOwnerReason(item.first_blocker).label}
+                        </small>
+                      ) : null}
+                    </div>
+                    <StatusTag tone={operationTone(item)}>{operationResult(item)}</StatusTag>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="compact-empty">暂无受控平仓操作记录</div>
+            )}
+          </Panel>
+        </div>
+      </div>
 
       <AlertDialog.Root open={pendingAction !== null} onOpenChange={(open) => { if (!open) { setPendingAction(null); setTotpCode(""); } }}>
         <AlertDialog.Portal>

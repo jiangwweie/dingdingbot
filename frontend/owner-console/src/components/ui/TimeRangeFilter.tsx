@@ -10,7 +10,7 @@ interface TimeRangeFilterProps {
   onChange: (value: TimeRangeValue) => void;
 }
 
-const inputClass = "h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]";
+const inputClass = "h-[32px] min-w-0 rounded-[var(--radius-control)] border border-[var(--color-divider)] bg-[var(--color-background)] px-2.5 text-[12px] text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-emphasis)] focus:ring-1 focus:ring-[var(--color-emphasis)]";
 
 function toLocalInputValue(value: number | undefined): string {
   if (value === undefined) return "";
@@ -54,21 +54,25 @@ export function TimeRangeFilter({ value, onChange }: TimeRangeFilterProps) {
   return (
     <fieldset className="col-span-full grid gap-2 border-0 p-0" aria-label="时间范围">
       <legend className="sr-only">时间范围</legend>
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="mr-1 text-[11px] text-[var(--color-text-secondary)]">时间范围</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[11px] font-semibold text-[var(--color-text-secondary)]">时间范围</span>
         {(["today", "24h", "7d", "30d"] as const).map((range) => (
-          <button className="owner-button h-7 px-2 text-[11px]" key={range} type="button" onClick={() => applyPreset(range)}>
+          <button className="owner-button h-7 rounded-[var(--radius-control)] px-2.5 text-[11px]" key={range} type="button" onClick={() => applyPreset(range)}>
             {{ today: "今日", "24h": "近 24h", "7d": "近 7 天", "30d": "近 30 天" }[range]}
           </button>
         ))}
-        {(value.from_ms !== undefined || value.to_ms !== undefined) ? <button className="ml-1 bg-transparent p-1 text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-emphasis)]" type="button" onClick={() => onChange({})}>清除</button> : null}
+        {(value.from_ms !== undefined || value.to_ms !== undefined) ? (
+          <button className="ml-1 bg-transparent p-1 text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-emphasis)]" type="button" onClick={() => onChange({})}>
+            清除
+          </button>
+        ) : null}
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
+        <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
           开始时间
           <input aria-label="开始时间" className={inputClass} type="datetime-local" value={toLocalInputValue(value.from_ms)} onChange={updateBoundary("from_ms")} />
         </label>
-        <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">
+        <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">
           结束时间
           <input aria-label="结束时间" className={inputClass} type="datetime-local" value={toLocalInputValue(value.to_ms)} onChange={updateBoundary("to_ms")} />
         </label>

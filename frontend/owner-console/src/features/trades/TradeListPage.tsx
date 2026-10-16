@@ -77,22 +77,26 @@ function TradeFilters({ filters, onChange }: { filters: TradeSearchParams; onCha
     onChange({ ...filters, [name]: value || undefined, cursor: undefined } as TradeSearchParams);
   };
 
-  return <form className="mb-2 grid grid-cols-2 gap-2 border border-[var(--color-divider)] bg-[var(--color-surface)] p-2 md:grid-cols-4" aria-label="Ticket 筛选条件">
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">策略组<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setTextFilter} /></label>
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">交易对<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="exchange_instrument_id" value={filters.exchange_instrument_id ?? ""} onChange={setTextFilter} /></label>
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">方向<select className="h-[30px] border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="position_side" value={filters.position_side ?? ""} onChange={setSelectFilter}><option value="">全部</option><option value="long">做多</option><option value="short">做空</option></select></label>
-    <label className="grid gap-1 text-[11px] text-[var(--color-text-secondary)]">状态<input className="h-[30px] min-w-0 border border-[var(--color-divider)] bg-[var(--color-background)] px-2 text-[12px] text-[var(--color-text-primary)] outline-none focus:border-[var(--color-emphasis)]" name="aggregate_status" value={filters.aggregate_status ?? ""} onChange={setTextFilter} /></label>
-    <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
-  </form>;
+  const inputClass = "h-[32px] min-w-0 rounded-[var(--radius-control)] border border-[var(--color-divider)] bg-[var(--color-background)] px-2.5 text-[12px] text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-emphasis)] focus:ring-1 focus:ring-[var(--color-emphasis)]";
+
+  return (
+    <form className="mb-2 grid grid-cols-2 gap-2 rounded-[var(--radius-panel)] border border-[var(--color-divider)] bg-[var(--color-surface)] p-2.5 shadow-[var(--shadow-decorative)] md:grid-cols-4" aria-label="Ticket 筛选条件">
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">策略组<input className={inputClass} name="strategy_group_id" value={filters.strategy_group_id ?? ""} onChange={setTextFilter} /></label>
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">交易对<input className={inputClass} name="exchange_instrument_id" value={filters.exchange_instrument_id ?? ""} onChange={setTextFilter} /></label>
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">方向<select className={inputClass} name="position_side" value={filters.position_side ?? ""} onChange={setSelectFilter}><option value="">全部</option><option value="long">做多</option><option value="short">做空</option></select></label>
+      <label className="grid gap-1 text-[11px] font-medium text-[var(--color-text-secondary)]">状态<input className={inputClass} name="aggregate_status" value={filters.aggregate_status ?? ""} onChange={setTextFilter} /></label>
+      <TimeRangeFilter value={filters} onChange={(range) => onChange({ ...filters, ...range, cursor: undefined })} />
+    </form>
+  );
 }
 
 function TradeSummary({ trade }: { trade: TradeItem }) {
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12px] sm:grid-cols-4">
-      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">Ticket</small><strong className="break-all">{trade.ticket_id}</strong></span>
-      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">生命周期</small><strong className="tabular-number">{trade.completed_stage_count}/{trade.total_stage_count}</strong></span>
-      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">经济事实</small><strong>{formatOwnerStatus(trade.economics_completeness ?? "in_progress")}</strong></span>
-      <span><small className="block text-[11px] text-[var(--color-text-secondary)]">关注</small><strong className="break-words">{trade.attention_items.join(" · ") || "无"}</strong></span>
+      <span><small className="block text-[11px] font-medium text-[var(--color-text-secondary)]">Ticket</small><strong className="break-all font-semibold text-[var(--color-text-primary)]">{trade.ticket_id}</strong></span>
+      <span><small className="block text-[11px] font-medium text-[var(--color-text-secondary)]">生命周期</small><strong className="tabular-number font-semibold text-[var(--color-text-primary)]">{trade.completed_stage_count}/{trade.total_stage_count}</strong></span>
+      <span><small className="block text-[11px] font-medium text-[var(--color-text-secondary)]">经济事实</small><strong className="font-semibold text-[var(--color-text-primary)]">{formatOwnerStatus(trade.economics_completeness ?? "in_progress")}</strong></span>
+      <span><small className="block text-[11px] font-medium text-[var(--color-text-secondary)]">关注</small><strong className="break-words font-semibold text-[var(--color-text-primary)]">{trade.attention_items.join(" · ") || "无"}</strong></span>
     </div>
   );
 }
@@ -135,24 +139,56 @@ export function TradeListPage() {
         const trade = row.original;
         const isExpanded = expandedTicketId === trade.ticket_id;
         const returnParams = new URLSearchParams({ return: currentListPath });
+        const isLong = trade.position_side === "long";
         return (
-          <div className="flex min-w-0 items-center gap-1">
-            <button className="grid h-5 w-5 flex-none place-items-center bg-transparent p-0 text-[var(--color-text-secondary)]" type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? "收起" : "展开"} ${trade.exchange_instrument_id} ${trade.position_side.toUpperCase()} 概要`} onClick={() => setExpandedTicketId(isExpanded ? null : trade.ticket_id)}>
-              <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} strokeWidth={1.8} />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <button
+              className="grid h-5 w-5 flex-none place-items-center rounded bg-transparent p-0 text-[var(--color-text-secondary)] transition-colors hover:bg-white/[0.06] hover:text-[var(--color-text-primary)]"
+              type="button"
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? "收起" : "展开"} ${trade.exchange_instrument_id} ${trade.position_side.toUpperCase()} 概要`}
+              onClick={() => setExpandedTicketId(isExpanded ? null : trade.ticket_id)}
+            >
+              <ChevronRight aria-hidden="true" className={`h-3.5 w-3.5 transition-transform duration-150 ${isExpanded ? "rotate-90 text-[var(--color-emphasis)]" : ""}`} strokeWidth={2} />
             </button>
-            <Link className="min-w-0 truncate text-[var(--color-emphasis)] hover:underline" state={{ returnPath: currentListPath, ticketIds: items.map((item) => item.ticket_id) }} to={`/trades/${encodeURIComponent(trade.ticket_id)}?${returnParams.toString()}`}>{trade.exchange_instrument_id} {trade.position_side.toUpperCase()}</Link>
+            <Link
+              className="min-w-0 truncate font-semibold text-[var(--color-emphasis)] hover:underline"
+              state={{ returnPath: currentListPath, ticketIds: items.map((item) => item.ticket_id) }}
+              to={`/trades/${encodeURIComponent(trade.ticket_id)}?${returnParams.toString()}`}
+            >
+              {trade.exchange_instrument_id}{" "}
+              <span className={`inline-block rounded px-1 py-0.2 text-[10px] font-bold ${isLong ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"}`}>
+                {trade.position_side.toUpperCase()}
+              </span>
+            </Link>
           </div>
         );
       },
     },
-    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate">{String(getValue())}</span> },
+    { accessorKey: "strategy_group_id", header: "策略组", cell: ({ getValue }) => <span className="block truncate font-medium">{String(getValue())}</span> },
     { accessorKey: "aggregate_status", header: "状态", cell: ({ row }) => <StatusTag tone={row.original.terminal_at_ms === null ? "attention" : "success"}>{formatOwnerStatus(row.original.aggregate_status)}</StatusTag> },
-    { accessorKey: "lifecycle_stage", header: "生命周期", cell: ({ row }) => <span className="tabular-number">{formatOwnerStatus(row.original.lifecycle_stage)} {row.original.completed_stage_count}/{row.original.total_stage_count}</span> },
-    { accessorKey: "exit_reason", header: "退出原因", cell: ({ row }) => { const reason = row.original.exit_reason ?? row.original.exit_reason_unavailable_reason; return <span className="block truncate" title={reason ?? undefined}>{reason ? formatOwnerReason(reason).label : "—"}</span>; } },
-    { accessorKey: "net_pnl", header: "净盈亏", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_pnl)}</span> },
-    { accessorKey: "net_r", header: "净 R", cell: ({ row }) => <span className="tabular-number whitespace-nowrap">{metricLabel(row.original.net_r)}</span> },
+    { accessorKey: "lifecycle_stage", header: "生命周期", cell: ({ row }) => <span className="tabular-number text-[var(--color-text-primary)]">{formatOwnerStatus(row.original.lifecycle_stage)} {row.original.completed_stage_count}/{row.original.total_stage_count}</span> },
+    { accessorKey: "exit_reason", header: "退出原因", cell: ({ row }) => { const reason = row.original.exit_reason ?? row.original.exit_reason_unavailable_reason; return <span className="block truncate text-[var(--color-text-secondary)]" title={reason ?? undefined}>{reason ? formatOwnerReason(reason).label : "—"}</span>; } },
+    {
+      accessorKey: "net_pnl",
+      header: "净盈亏",
+      cell: ({ row }) => {
+        const val = row.original.net_pnl.value;
+        const tone = val === null || /^-?0(?:\.0+)?$/.test(val) ? "text-[var(--color-text-primary)]" : val.startsWith("-") ? "text-[var(--color-danger)] font-semibold" : "text-[var(--color-success)] font-semibold";
+        return <span className={`tabular-number whitespace-nowrap ${tone}`}>{metricLabel(row.original.net_pnl)}</span>;
+      },
+    },
+    {
+      accessorKey: "net_r",
+      header: "净 R",
+      cell: ({ row }) => {
+        const val = row.original.net_r.value;
+        const tone = val === null || /^-?0(?:\.0+)?$/.test(val) ? "text-[var(--color-text-primary)]" : val.startsWith("-") ? "text-[var(--color-danger)] font-semibold" : "text-[var(--color-success)] font-semibold";
+        return <span className={`tabular-number whitespace-nowrap ${tone}`}>{metricLabel(row.original.net_r)}</span>;
+      },
+    },
     { accessorKey: "attention_items", header: "关注项", cell: ({ row }) => <span className="block truncate text-[var(--color-text-secondary)]" title={row.original.attention_items.join(" · ")}>{row.original.attention_items.length > 0 ? row.original.attention_items.length : "—"}</span> },
-    { accessorKey: "issued_at_ms", header: "创建时间", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap">{formatTimestamp(Number(getValue()))}</span> },
+    { accessorKey: "issued_at_ms", header: "创建时间", cell: ({ getValue }) => <span className="tabular-number whitespace-nowrap text-[var(--color-text-secondary)]">{formatTimestamp(Number(getValue()))}</span> },
   ];
 
   const summary = [
@@ -169,8 +205,13 @@ export function TradeListPage() {
       {pageHeader}
       {trades.isRefetchError ? <div className="refresh-error" role="status">刷新失败 · {new Date(trades.errorUpdatedAt).toLocaleTimeString("zh-CN", { hour12: false })}<span>继续显示上一次成功快照</span></div> : null}
       <TradeFilters filters={filters} onChange={updateFilters} />
-      <section className="mb-2 grid grid-cols-3 border border-[var(--color-divider)] bg-[var(--color-surface)] md:grid-cols-6" aria-label="交易摘要">
-        {summary.map(([label, value], index) => <div className={`grid min-h-[48px] content-center gap-1 px-2 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}><span className="text-[11px] text-[var(--color-text-secondary)]">{label}</span><strong className="tabular-number truncate text-[15px]" title={value}>{value}</strong></div>)}
+      <section className="mb-2 grid grid-cols-3 rounded-[var(--radius-panel)] border border-[var(--color-divider)] bg-[var(--color-surface)] shadow-[var(--shadow-decorative)] overflow-hidden md:grid-cols-6" aria-label="交易摘要">
+        {summary.map(([label, value], index) => (
+          <div className={`grid min-h-[50px] content-center gap-1 px-3 ${index > 0 ? "border-l border-[var(--color-divider)]" : ""}`} key={label}>
+            <span className="text-[11px] font-medium text-[var(--color-text-secondary)]">{label}</span>
+            <strong className="tabular-number truncate text-[15px] font-bold text-[var(--color-text-primary)]" title={value}>{value}</strong>
+          </div>
+        ))}
       </section>
       {items.length === 0 ? <div className="panel compact-empty px-2">当前筛选范围内没有 Ticket</div> : <DenseTable ariaLabel="Ticket 交易列表" columnWidths={TRADE_COLUMN_WIDTHS} columns={columns} data={items} getRowId={(item) => item.ticket_id} expandedRowId={expandedTicketId} renderExpandedRow={(item, columnCount) => <InlineDetailRow colSpan={columnCount}><TradeSummary trade={item} /></InlineDetailRow>} />}
       <CursorPagination hasNextPage={envelope.data.next_cursor !== null} onNextPage={() => updateFilters({ ...filters, cursor: envelope.data.next_cursor ?? undefined })} />

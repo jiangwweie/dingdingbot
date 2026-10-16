@@ -39,7 +39,15 @@ export function AppShell({ children, dataTime, statusLabel, statusTone }: AppShe
       <header className="top-navigation">
         <div className="app-container top-navigation__inner">
           <Link className="brand-mark brand-mark--link" to="/overview">
-            BRC OWNER
+            <svg
+              className="h-4 w-4 text-[var(--color-emphasis)] flex-none transition-transform hover:scale-110"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 2L4 12l8 10 8-10L12 2zm0 4.236L17.412 12 12 18.764 6.588 12 12 6.236z" />
+            </svg>
+            <span>BRC OWNER</span>
           </Link>
           <nav className="primary-navigation" aria-label="一级导航">
             {navigationItems.map((item) => (
@@ -49,7 +57,9 @@ export function AppShell({ children, dataTime, statusLabel, statusTone }: AppShe
             ))}
           </nav>
           <div className="runtime-summary" aria-label="运行摘要">
-            <span className="tabular-number">PROD</span>
+            <span className="tabular-number inline-flex items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
+              PROD
+            </span>
             <span className="runtime-summary__separator" aria-hidden="true">
               ·
             </span>
@@ -57,8 +67,10 @@ export function AppShell({ children, dataTime, statusLabel, statusTone }: AppShe
             <span className="runtime-summary__separator runtime-summary__time" aria-hidden="true">
               ·
             </span>
-            <span className="runtime-summary__time tabular-number">{dataTime}</span>
-            <button className="runtime-summary__logout" disabled={isLoggingOut} type="button" onClick={() => void handleLogout()}>{isLoggingOut ? "退出中" : "退出"}</button>
+            <span className="runtime-summary__time tabular-number text-[var(--color-text-secondary)]">{dataTime}</span>
+            <button className="runtime-summary__logout" disabled={isLoggingOut} type="button" onClick={() => void handleLogout()}>
+              {isLoggingOut ? "退出中" : "退出"}
+            </button>
           </div>
         </div>
       </header>
