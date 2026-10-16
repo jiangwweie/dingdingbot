@@ -3,15 +3,33 @@ import { MOCK_ENV_LABEL } from '../mock/controlsData';
 import { useTheme } from '../context/ThemeContext';
 import { Sun, Moon } from 'lucide-react';
 
-export const Navbar: React.FC = () => {
+export type NavTabId = 'overview' | 'trades' | 'strategies' | 'review' | 'controls';
+
+interface NavbarProps {
+  activeTab: NavTabId;
+  onSelectTab: (tab: NavTabId) => void;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({ activeTab, onSelectTab }) => {
   const { theme, toggleTheme } = useTheme();
+
+  const navItems: { id: NavTabId; label: string; en: string; badge?: string; available: boolean }[] = [
+    { id: 'overview', label: '总览态势', en: 'Overview', available: true },
+    { id: 'trades', label: '交易因果', en: 'Trades', badge: '规划中', available: false },
+    { id: 'strategies', label: '策略选币', en: 'Strategies', badge: '规划中', available: false },
+    { id: 'review', label: '复盘评估', en: 'Review', badge: '规划中', available: false },
+    { id: 'controls', label: '主控中心', en: 'Controls', available: true },
+  ];
 
   return (
     <header className="border-b border-border bg-surface">
       <div className="mx-auto flex h-12 max-w-[1520px] items-center justify-between px-4 sm:px-6">
-        {/* Brand and primary navigation */}
+        {/* Brand and 4+1 primary navigation */}
         <div className="flex items-center gap-8">
-          <div className="flex items-center gap-2.5">
+          <div
+            className="flex items-center gap-2.5 cursor-pointer"
+            onClick={() => onSelectTab('overview')}
+          >
             <svg
               className="h-4 w-4 text-brand flex-none"
               viewBox="0 0 24 24"
@@ -26,21 +44,37 @@ export const Navbar: React.FC = () => {
           </div>
 
           <nav className="hidden md:flex items-center gap-1" aria-label="主导航">
-            <span className="px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary cursor-not-allowed transition-colors">
-              总览
-            </span>
-            <span className="px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary cursor-not-allowed transition-colors">
-              策略
-            </span>
-            <span className="px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary cursor-not-allowed transition-colors">
-              交易
-            </span>
-            <span className="px-3 py-1.5 text-xs font-medium text-text-muted hover:text-text-primary cursor-not-allowed transition-colors">
-              复盘
-            </span>
-            <span className="relative px-3 py-1.5 text-xs font-semibold text-text-primary after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-brand">
-              控制中心
-            </span>
+            {navItems.map((item) => {
+              const isActive = activeTab === item.id;
+
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (item.available) {
+                      onSelectTab(item.id);
+                    } else {
+                      alert(`${item.label} (${item.en}) 遵循 4+1 IA 架构正在规划中，请先审阅总览与主控中心。`);
+                    }
+                  }}
+                  className={`relative flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
+                    isActive
+                      ? 'font-semibold text-text-primary after:absolute after:bottom-0 after:left-3 after:right-3 after:h-0.5 after:bg-brand'
+                      : item.available
+                      ? 'font-medium text-text-secondary hover:text-text-primary'
+                      : 'font-normal text-text-muted hover:text-text-secondary cursor-pointer'
+                  }`}
+                >
+                  <span>{item.label}</span>
+                  {item.badge && (
+                    <span className="rounded bg-surface-subtle px-1 py-0.2 font-mono text-[9px] text-text-muted border border-border/40">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </nav>
         </div>
 
@@ -82,4 +116,3 @@ export const Navbar: React.FC = () => {
     </header>
   );
 };
-

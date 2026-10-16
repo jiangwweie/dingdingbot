@@ -17,9 +17,14 @@ import {
   mockRecentOperations,
 } from './mock/controlsData';
 import type { StrategyControlItem, SelectionDiagnosticData } from './types/controls';
+import { OverviewPage } from './components/overview/OverviewPage';
+import type { NavTabId } from './components/Navbar';
 import { RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export const App: React.FC = () => {
+  // Navigation State
+  const [activeTab, setActiveTab] = useState<NavTabId>('overview');
+
   // Mock Data States
   const [globalEntry, setGlobalEntry] = useState(initialGlobalEntry);
   const [strategies, setStrategies] = useState(initialStrategies);
@@ -219,80 +224,114 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-text-primary">
-      <Navbar />
+      <Navbar activeTab={activeTab} onSelectTab={setActiveTab} />
 
-      <main className="mx-auto max-w-[1520px] px-4 py-5 sm:px-6">
-        {/* Page Title & Manual Refresh */}
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
+        {activeTab === 'overview' ? (
           <div>
-            <h1 className="text-base font-bold text-text-primary flex items-center gap-2">
-              控制中心
-              <span className="font-mono text-xs font-normal text-text-muted">
-                (Owner Controls Console)
-              </span>
-            </h1>
-            <p className="text-xs text-text-secondary mt-0.5">
-              统一调度全局准入、策略启停、动态选币授权与紧急生命周期干预；任何操作均具备真实不可逆防御。
-            </p>
+            {/* Page Title & Manual Refresh */}
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h1 className="text-base font-bold text-text-primary flex items-center gap-2">
+                  总览态势
+                  <span className="font-mono text-xs font-normal text-text-muted">
+                    (System Pulse & Performance)
+                  </span>
+                </h1>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  快速掌握系统运行脉搏、今日不对称收益与在管交易；0 关注项即代表一切平稳。
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => showToast('已刷新总览数据快照')}
+                  className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
+                  刷新快照
+                </button>
+              </div>
+            </div>
+
+            <OverviewPage onNavigateToControls={() => setActiveTab('controls')} />
           </div>
+        ) : (
+          <div>
+            {/* Page Title & Manual Refresh */}
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h1 className="text-base font-bold text-text-primary flex items-center gap-2">
+                  控制中心
+                  <span className="font-mono text-xs font-normal text-text-muted">
+                    (Owner Controls Console)
+                  </span>
+                </h1>
+                <p className="text-xs text-text-secondary mt-0.5">
+                  统一调度全局准入、策略启停、动态选币授权与紧急生命周期干预；任何操作均具备真实不可逆防御。
+                </p>
+              </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => showToast('已刷新页面数据快照')}
-              className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
-            >
-              <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
-              刷新当前页
-            </button>
-          </div>
-        </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => showToast('已刷新页面数据快照')}
+                  className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs"
+                >
+                  <RefreshCw className="h-3.5 w-3.5 text-text-muted" />
+                  刷新当前页
+                </button>
+              </div>
+            </div>
 
-        {/* Level 1: System Status Ribbon */}
-        <TopStatusBar
-          globalEntry={globalEntry}
-          pausedStrategyCount={pausedCount}
-          totalActiveStrategies={5}
-          onToggleGlobalEntry={handleToggleGlobalEntry}
-        />
-
-        {/* Main Workstation 2-Column Split */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Left Column (8 of 12 cols): Operations & Governance */}
-          <div className="space-y-4 lg:col-span-8">
-            {/* Strategy Matrix */}
-            <StrategyMatrix
-              strategies={strategies}
-              onToggleStrategy={handleToggleStrategy}
+            {/* Level 1: System Status Ribbon */}
+            <TopStatusBar
+              globalEntry={globalEntry}
+              pausedStrategyCount={pausedCount}
+              totalActiveStrategies={5}
+              onToggleGlobalEntry={handleToggleGlobalEntry}
             />
 
-            {/* Selection Governance & Fallback */}
-            <SelectionSection
-              selectionMap={selectionMap}
-              onTriggerFallback={handleTriggerFallback}
-              onTriggerReauthorize={handleTriggerReauthorize}
-              onRefreshData={handleRefreshData}
-            />
+            {/* Main Workstation 2-Column Split */}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+              {/* Left Column (8 of 12 cols): Operations & Governance */}
+              <div className="space-y-4 lg:col-span-8">
+                {/* Strategy Matrix */}
+                <StrategyMatrix
+                  strategies={strategies}
+                  onToggleStrategy={handleToggleStrategy}
+                />
+
+                {/* Selection Governance & Fallback */}
+                <SelectionSection
+                  selectionMap={selectionMap}
+                  onTriggerFallback={handleTriggerFallback}
+                  onTriggerReauthorize={handleTriggerReauthorize}
+                  onRefreshData={handleRefreshData}
+                />
+              </div>
+
+              {/* Right Column (4 of 12 cols): Safety Guard, Quotas & Audit */}
+              <div className="space-y-4 lg:col-span-4">
+                {/* High-risk Emergency Flatten Card */}
+                <DangerZoneCard
+                  onTriggerFlatten={() => setFlattenModalOpen(true)}
+                  activeTicketCount={globalEntry.active_ticket_count}
+                />
+
+                {/* Capacity & Quotas (Concise, no 0s clutter) */}
+                <CapacitySection
+                  capacity={capacity}
+                  activeTicketCount={globalEntry.active_ticket_count}
+                />
+
+                {/* Recent Operations */}
+                <RecentOperations operations={operations} />
+              </div>
+            </div>
           </div>
-
-          {/* Right Column (4 of 12 cols): Safety Guard, Quotas & Audit */}
-          <div className="space-y-4 lg:col-span-4">
-            {/* High-risk Emergency Flatten Card */}
-            <DangerZoneCard
-              onTriggerFlatten={() => setFlattenModalOpen(true)}
-              activeTicketCount={globalEntry.active_ticket_count}
-            />
-
-            {/* Capacity & Quotas (Concise, no 0s clutter) */}
-            <CapacitySection
-              capacity={capacity}
-              activeTicketCount={globalEntry.active_ticket_count}
-            />
-
-            {/* Recent Operations */}
-            <RecentOperations operations={operations} />
-          </div>
-        </div>
+        )}
       </main>
 
       {/* Controlled Flatten Modal */}
