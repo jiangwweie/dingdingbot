@@ -1,4 +1,4 @@
-import { exactDisplay, sameIdentities, authorityEvidence } from './verification_contracts.mjs';
+import { exactDisplay, sameIdentities, authorityEvidence, tradesMetricsEvidence } from './verification_contracts.mjs';
 import pkg from '../owner-console/node_modules/@playwright/test/index.js';
 import fs from 'fs';
 import path from 'path';
@@ -861,21 +861,100 @@ async function runLiveVerification() {
     { total: rawTickets.length, active: activeTicketsList.length, completed: completedTicketsList.length }
   );
 
-  // 6.3 L1 Summary Metrics Ribbon
+  // 6.3 L1 Summary Metrics Deck (Exact Object-Bound Assertions & Negative Controls)
   const metricsRibbon = page.locator('[data-testid="trades-metrics-ribbon"]');
   const metricsRibbonVisible = await metricsRibbon.isVisible();
-  const metricsText = await metricsRibbon.textContent();
-  const totalMatches = metricsText?.includes(String(rawTickets.length));
-  const activeMatches = metricsText?.includes(String(activeTicketsList.length));
-  const completedMatches = metricsText?.includes(String(completedTicketsList.length));
 
+  const paginationInfo = {
+    hasMore: Boolean(ticketsResp.data?.data?.next_cursor ?? ticketsResp.data?.next_cursor),
+  };
+  const expectedTrades = tradesMetricsEvidence(rawTickets, paginationInfo);
+
+  const cardTotal = page.locator('[data-testid="metric-total-trades"]');
+  const cardActive = page.locator('[data-testid="metric-active-trades"]');
+  const cardCompleted = page.locator('[data-testid="metric-completed-trades"]');
+  const cardPnl = page.locator('[data-testid="metric-total-pnl"]');
+  const cardR = page.locator('[data-testid="metric-total-r"]');
+
+  const totalVal = (await cardTotal.locator('[data-testid="metric-value"]').textContent())?.trim();
+  const totalSub = (await cardTotal.locator('[data-testid="metric-subtext"]').textContent())?.trim();
+
+  const activeVal = (await cardActive.locator('[data-testid="metric-value"]').textContent())?.trim();
+  const activeSub = (await cardActive.locator('[data-testid="metric-subtext"]').textContent())?.trim();
+
+  const completedVal = (await cardCompleted.locator('[data-testid="metric-value"]').textContent())?.trim();
+  const completedSub = (await cardCompleted.locator('[data-testid="metric-subtext"]').textContent())?.trim();
+
+  const pnlVal = (await cardPnl.locator('[data-testid="metric-value"]').textContent())?.trim();
+  const pnlSub = (await cardPnl.locator('[data-testid="metric-subtext"]').textContent())?.trim();
+
+  const rVal = (await cardR.locator('[data-testid="metric-value"]').textContent())?.trim();
+  const rSub = (await cardR.locator('[data-testid="metric-subtext"]').textContent())?.trim();
+
+  // A6.3a Total Trades card: exact count & scope
+  const totalExact = exactDisplay(totalVal, String(expectedTrades.totalCount)) && exactDisplay(totalSub, expectedTrades.scopeLabel);
   recordAssertion(
-    'A6.3',
+    'A6.3a',
     'Trades',
-    `L1 Metrics ribbon matches total (${rawTickets.length}), active (${activeTicketsList.length}), and completed (${completedTicketsList.length}) counts`,
-    metricsRibbonVisible && totalMatches && activeMatches && completedMatches ? 'PASS' : 'FAIL',
-    { metricsText: metricsText?.replace(/\s+/g, ' ').trim() }
+    `L1 Metric 1 (Total Trades): exact count (${expectedTrades.totalCount}) & honest scope label`,
+    metricsRibbonVisible && totalExact ? 'PASS' : 'FAIL',
+    { expected: { count: expectedTrades.totalCount, scope: expectedTrades.scopeLabel }, actual: { totalVal, totalSub } }
   );
+
+  // A6.3b Active Trades card: exact active count & neutral status
+  const activeExact = exactDisplay(activeVal, String(expectedTrades.activeCount)) && exactDisplay(activeSub, '生命周期在管中 · 依阶段保护或退出');
+  recordAssertion(
+    'A6.3b',
+    'Trades',
+    `L1 Metric 2 (Active Trades): exact count (${expectedTrades.activeCount}) & neutral status`,
+    metricsRibbonVisible && activeExact ? 'PASS' : 'FAIL',
+    { expected: { count: expectedTrades.activeCount, sub: '生命周期在管中 · 依阶段保护或退出' }, actual: { activeVal, activeSub } }
+  );
+
+  // A6.3c Completed Trades card: exact count, win rate %, and truthful denominator
+  const completedExact = exactDisplay(completedVal, expectedTrades.winRateDisplay) && exactDisplay(completedSub, expectedTrades.winRateDenominatorText);
+  recordAssertion(
+    'A6.3c',
+    'Trades',
+    `L1 Metric 3 (Completed / Win Rate): exact count & win rate (${expectedTrades.winRateDisplay}) and truthful denominator`,
+    metricsRibbonVisible && completedExact ? 'PASS' : 'FAIL',
+    { expected: { val: expectedTrades.winRateDisplay, sub: expectedTrades.winRateDenominatorText }, actual: { completedVal, completedSub } }
+  );
+
+  // A6.3d Realized PnL card: exact amount and coverage/gap statement
+  const pnlExact = exactDisplay(pnlVal, expectedTrades.formattedPnl) && exactDisplay(pnlSub, expectedTrades.pnlCoverageText);
+  recordAssertion(
+    'A6.3d',
+    'Trades',
+    `L1 Metric 4 (Realized PnL): exact amount (${expectedTrades.formattedPnl}) & gap/coverage status`,
+    metricsRibbonVisible && pnlExact ? 'PASS' : 'FAIL',
+    { expected: { val: expectedTrades.formattedPnl, sub: expectedTrades.pnlCoverageText }, actual: { pnlVal, pnlSub } }
+  );
+
+  // A6.3e Realized R card: exact R multiple and coverage/gap statement
+  const rExact = exactDisplay(rVal, expectedTrades.formattedR) && exactDisplay(rSub, expectedTrades.rCoverageText);
+  recordAssertion(
+    'A6.3e',
+    'Trades',
+    `L1 Metric 5 (Realized R): exact multiple (${expectedTrades.formattedR}) & gap/coverage status`,
+    metricsRibbonVisible && rExact ? 'PASS' : 'FAIL',
+    { expected: { val: expectedTrades.formattedR, sub: expectedTrades.rCoverageText }, actual: { rVal, rSub } }
+  );
+
+  // A6.3_neg Negative controls: assert exactDisplay strictly rejects falsified data & retired status
+  const negTotalRejected = !exactDisplay(totalVal, '99999');
+  const negActiveRejected = !exactDisplay(activeSub, '严格受保护在途');
+  const negCompletedRejected = !exactDisplay(completedVal, `${expectedTrades.completedCount} (100%)`);
+  const negPnlRejected = !exactDisplay(pnlVal, '+999999.00 USDT');
+  const allNegRejected = negTotalRejected && negActiveRejected && negCompletedRejected && negPnlRejected;
+  recordAssertion(
+    'A6.3_neg',
+    'Trades',
+    'Negative controls: exactDisplay strictly rejects falsified totals, retired "严格受保护在途", and manipulated PnL/WinRate',
+    allNegRejected ? 'PASS' : 'FAIL',
+    { negTotalRejected, negActiveRejected, negCompletedRejected, negPnlRejected }
+  );
+
 
   // 6.4 Active Episodes Section
   const activeSection = page.locator('[data-testid="active-trade-episodes"]');
@@ -1039,7 +1118,36 @@ async function runLiveVerification() {
     );
   }
 
-  // 6.8 Capture Full Trades Page Screenshots (Dark / Light)
+  // 6.8 Pagination Status & Load More Truth
+  if (expectedTrades.hasMore) {
+    const pagBar = page.locator('[data-testid="trades-pagination-bar"]');
+    const loadMoreBtn = page.locator('[data-testid="load-more-btn"]');
+    const barVisible = await pagBar.isVisible();
+    const btnVisible = await loadMoreBtn.isVisible();
+    recordAssertion(
+      'A6.8',
+      'Trades',
+      'Pagination bar & load more button visible when hasMore is true',
+      barVisible && btnVisible ? 'PASS' : 'FAIL',
+      { barVisible, btnVisible }
+    );
+  } else {
+    const pagStatus = page.locator('[data-testid="trades-pagination-status"]');
+    const statusVisible = await pagStatus.isVisible();
+    const statusText = (await pagStatus.textContent())?.trim();
+    const expectedStatusText = `已加载全量账本记录 (共 ${rawTickets.length} 笔) · 无更多历史数据`;
+    const statusMatches = exactDisplay(statusText, expectedStatusText);
+    const loadMoreCount = await page.locator('[data-testid="load-more-btn"]').count();
+    recordAssertion(
+      'A6.8',
+      'Trades',
+      `Pagination status accurately declares full ledger loaded (${rawTickets.length} tickets) with zero load-more button`,
+      statusVisible && statusMatches && loadMoreCount === 0 ? 'PASS' : 'FAIL',
+      { statusVisible, statusMatches, expectedStatusText, actualStatusText: statusText, loadMoreCount }
+    );
+  }
+
+  // 6.9 Capture Full Trades Page Screenshots (Dark / Light)
   console.log('Capturing real Trades Page screenshots (Dark / Light)...');
   const brainArtifactsDir = '/Users/jiangwei/.gemini/antigravity/brain/82ad12e5-f9c1-484d-8225-c73a22e79a9d';
   await setDarkMode();

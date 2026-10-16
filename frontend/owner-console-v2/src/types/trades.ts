@@ -57,7 +57,19 @@ export interface TradesSummaryMetrics {
   winCount: number;
   lossCount: number;
   breakevenCount: number;
+  evaluatedTradesCount: number;
+  excludedFromWinRateCount: number;
   winRatePercent: number | null;
+  winRateDenominatorText: string;
   totalNetPnlFormatted: string;
+  pnlEvaluatedCount: number;
+  hasPnlGaps: boolean;
+  pnlCoverageText: string;
   totalNetRFormatted: string;
+  rEvaluatedCount: number;
+  hasRGaps: boolean;
+  rCoverageText: string;
+  isComplete: boolean;
+  hasMore: boolean;
+  scopeLabel: string;
 }

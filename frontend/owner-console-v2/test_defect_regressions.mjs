@@ -39,7 +39,7 @@ import {
 } from './src/mapping/tradeEpisodeMapping.ts';
 import { cleanSymbol } from './src/utils/symbol.ts';
 import { strategiesQueryKey } from './src/api/strategiesApi.ts';
-import { ticketsQueryKey } from './src/api/ticketsApi.ts';
+import { ticketsQueryKey, ticketsInfiniteQueryKey } from './src/api/ticketsApi.ts';
 import { ApiError } from './src/api/errors.ts';
 
 let passCount = 0;
@@ -963,7 +963,7 @@ async function runAllTests() {
     assert.equal(episode.exit_reason_zh, '外部平仓已确认');
   });
 
-  await test('computeTradesSummaryMetrics calculates accurate metrics across mixed episodes', () => {
+  await test('computeTradesSummaryMetrics calculates accurate metrics across mixed episodes with honest coverage and win rate denominator', () => {
     const mockEpisodes = [
       { isActive: true, outcome: 'in_progress', net_pnl_val: null, net_r_val: null },
       { isActive: true, outcome: 'in_progress', net_pnl_val: null, net_r_val: null },
@@ -973,7 +973,7 @@ async function runAllTests() {
       { isActive: false, outcome: 'breakeven', net_pnl_val: 0, net_r_val: 0 },
     ];
 
-    const metrics = computeTradesSummaryMetrics(mockEpisodes);
+    const metrics = computeTradesSummaryMetrics(mockEpisodes, { hasMore: false });
     assert.equal(metrics.totalCount, 6);
     assert.equal(metrics.activeCount, 2);
     assert.equal(metrics.completedCount, 4);
@@ -982,25 +982,74 @@ async function runAllTests() {
     assert.equal(metrics.breakevenCount, 1);
     // Win rate: 2 wins / (2 wins + 1 loss) = 67%
     assert.equal(metrics.winRatePercent, 67);
+    assert.equal(metrics.evaluatedTradesCount, 3);
+    assert.equal(metrics.excludedFromWinRateCount, 1);
+    assert.equal(metrics.winRateDenominatorText, '基准: 2 胜 / 1 负 (排除 1 笔平保/未评)');
     // Net PnL: 120 + 80 - 100 + 0 = +100.00 USDT
     assert.equal(metrics.totalNetPnlFormatted, '+100.00 USDT');
+    assert.equal(metrics.pnlEvaluatedCount, 4);
+    assert.equal(metrics.hasPnlGaps, false);
+    assert.equal(metrics.pnlCoverageText, '全量结清 · 覆盖 4 笔');
     // Net R: 1.5 + 1.0 - 1.0 + 0 = +1.50 R
     assert.equal(metrics.totalNetRFormatted, '+1.50 R');
+    assert.equal(metrics.rEvaluatedCount, 4);
+    assert.equal(metrics.hasRGaps, false);
+    assert.equal(metrics.rCoverageText, '单位风险倍数 (R) · 覆盖 4 笔');
+    // Pagination / Scope
+    assert.equal(metrics.isComplete, true);
+    assert.equal(metrics.hasMore, false);
+    assert.equal(metrics.scopeLabel, '已加载全量账本 · 共 6 笔');
 
     // Empty list boundary
     const emptyMetrics = computeTradesSummaryMetrics([]);
     assert.equal(emptyMetrics.totalCount, 0);
     assert.equal(emptyMetrics.winRatePercent, null);
+    assert.equal(emptyMetrics.winRateDenominatorText, '暂无历史平仓');
     assert.equal(emptyMetrics.totalNetPnlFormatted, '—');
+    assert.equal(emptyMetrics.scopeLabel, '暂无数据');
   });
 
-  await test('ticketsQueryKey produces stable query keys without timestamps or random tokens', () => {
+  await test('computeTradesSummaryMetrics explicitly flags gaps and paginated partial scope', () => {
+    // 3 completed trades, but 1 is missing PnL and R
+    const episodesWithGaps = [
+      { isActive: false, outcome: 'win', net_pnl_val: 100, net_r_val: 1.0 },
+      { isActive: false, outcome: 'loss', net_pnl_val: -50, net_r_val: -0.5 },
+      { isActive: false, outcome: 'closed', net_pnl_val: null, net_r_val: null }, // Gap!
+    ];
+
+    const metrics = computeTradesSummaryMetrics(episodesWithGaps, { hasMore: true });
+    assert.equal(metrics.totalCount, 3);
+    assert.equal(metrics.completedCount, 3);
+    assert.equal(metrics.hasPnlGaps, true);
+    assert.equal(metrics.pnlEvaluatedCount, 2);
+    assert.equal(metrics.pnlCoverageText, '已记录合计 · 覆盖 2/3 笔 (存在缺口)');
+    assert.equal(metrics.hasRGaps, true);
+    assert.equal(metrics.rEvaluatedCount, 2);
+    assert.equal(metrics.rCoverageText, '已记录合计 · 覆盖 2/3 笔 (存在缺口)');
+    // Win rate denominator
+    assert.equal(metrics.excludedFromWinRateCount, 1);
+    assert.equal(metrics.winRateDenominatorText, '基准: 1 胜 / 1 负 (排除 1 笔平保/未评)');
+    // Scope label reflects partial loaded scope
+    assert.equal(metrics.hasMore, true);
+    assert.equal(metrics.isComplete, false);
+    assert.equal(metrics.scopeLabel, '已加载范围统计 (尚有未加载数据)');
+  });
+
+  await test('ticketsQueryKey and ticketsInfiniteQueryKey produce stable query keys without timestamps or random tokens', () => {
     const key1 = ticketsQueryKey({ limit: 100 });
     const key2 = ticketsQueryKey({ limit: 100 });
     assert.deepEqual(key1, key2);
     assert.equal(key1[0], 'owner');
     assert.equal(key1[1], 'tickets');
     assert.equal(key1[2].limit, 100);
+
+    const infKey1 = ticketsInfiniteQueryKey({ limit: 100 });
+    const infKey2 = ticketsInfiniteQueryKey({ limit: 100 });
+    assert.deepEqual(infKey1, infKey2);
+    assert.equal(infKey1[0], 'owner');
+    assert.equal(infKey1[1], 'tickets');
+    assert.equal(infKey1[2], 'infinite');
+    assert.equal(infKey1[3].limit, 100);
   });
 
   console.log('\n================================================================');

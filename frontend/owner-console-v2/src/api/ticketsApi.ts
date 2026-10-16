@@ -13,6 +13,7 @@ export interface TicketsQueryParams {
   from_ms?: number;
   to_ms?: number;
   limit?: number;
+  cursor?: string | null;
   aggregate_status?: string;
   strategy_group_id?: string;
   exchange_instrument_id?: string;
@@ -21,6 +22,9 @@ export interface TicketsQueryParams {
 
 export const ticketsQueryKey = (params?: TicketsQueryParams) =>
   ['owner', 'tickets', params ?? { limit: 100 }] as const;
+
+export const ticketsInfiniteQueryKey = (params?: TicketsQueryParams) =>
+  ['owner', 'tickets', 'infinite', params ?? { limit: 100 }] as const;
 
 export const causalityQueryKey = (ticketId: string) =>
   ['owner', 'causality', ticketId] as const;

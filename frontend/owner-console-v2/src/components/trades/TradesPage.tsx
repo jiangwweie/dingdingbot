@@ -18,9 +18,13 @@ export const TradesPage: React.FC = () => {
   const {
     isLoading,
     isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
     isError,
     error,
     freshness,
+    allTrades,
     activeTrades,
     completedTrades,
     metrics,
@@ -156,64 +160,72 @@ export const TradesPage: React.FC = () => {
 
       {/* 2. Top Summary Metrics Deck (L1 Owner Summary) */}
       <div data-testid="trades-metrics-ribbon" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <div className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
+        <div data-testid="metric-total-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <Activity className="h-3.5 w-3.5 text-brand" />
             <span>总交易数</span>
           </div>
-          <div className="mt-1 font-mono text-lg font-bold text-text-primary">
+          <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalCount}
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">30 天滚动窗口账本</div>
+          <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5 truncate" title={metrics.scopeLabel}>
+            {metrics.scopeLabel}
+          </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
+        <div data-testid="metric-active-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
             <span>当前在管交易</span>
           </div>
-          <div className="mt-1 font-mono text-lg font-bold text-brand">
+          <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-brand">
             {metrics.activeCount}
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">严格受保护在途</div>
+          <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5">
+            生命周期在管中 · 依阶段保护或退出
+          </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
+        <div data-testid="metric-completed-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <CheckCircle2 className="h-3.5 w-3.5 text-text-secondary" />
             <span>历史平仓 / 胜率</span>
           </div>
-          <div className="mt-1 font-mono text-lg font-bold text-text-primary">
+          <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.completedCount}{' '}
-            <span className="text-xs font-normal text-text-muted">
+            <span data-testid="metric-win-rate" className="text-xs font-normal text-text-muted">
               ({metrics.winRatePercent != null ? `${metrics.winRatePercent}%` : '—'})
             </span>
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">
-            {metrics.winCount} 胜 / {metrics.lossCount} 负
+          <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5 truncate" title={metrics.winRateDenominatorText}>
+            {metrics.winRateDenominatorText}
           </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
+        <div data-testid="metric-total-pnl" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <TrendingUp className="h-3.5 w-3.5 text-brand" />
-            <span>累计已结收益</span>
+            <span>{metrics.hasPnlGaps ? '已记录已结收益' : '累计已结收益'}</span>
           </div>
-          <div className="mt-1 font-mono text-lg font-bold text-text-primary">
+          <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalNetPnlFormatted}
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">扣除手续费与滑点</div>
+          <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5 truncate" title={metrics.pnlCoverageText}>
+            {metrics.pnlCoverageText}
+          </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
+        <div data-testid="metric-total-r" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <Layers className="h-3.5 w-3.5 text-brand" />
-            <span>累计风险回报</span>
+            <span>{metrics.hasRGaps ? '已记录风险回报' : '累计风险回报'}</span>
           </div>
-          <div className="mt-1 font-mono text-lg font-bold text-text-primary">
+          <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalNetRFormatted}
           </div>
-          <div className="text-[10px] text-text-muted mt-0.5">单位风险倍数 (R)</div>
+          <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5 truncate" title={metrics.rCoverageText}>
+            {metrics.rCoverageText}
+          </div>
         </div>
       </div>
 
@@ -275,6 +287,33 @@ export const TradesPage: React.FC = () => {
             episodes={completedTrades}
             onSelectEpisode={(selected) => setSelectedEpisode(selected)}
           />
+
+          {/* Pagination Controls & Status */}
+          {hasNextPage ? (
+            <div
+              data-testid="trades-pagination-bar"
+              className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs"
+            >
+              <div className="text-xs text-text-secondary">
+                <span className="font-semibold text-text-primary">当前已加载前 {allTrades.length} 笔交易</span>
+                <span className="text-text-muted ml-1.5">(首屏统计基于已加载范围，尚有更早历史记录)</span>
+              </div>
+              <button
+                type="button"
+                data-testid="load-more-btn"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-subtle px-4 py-2 text-xs font-semibold text-text-primary hover:bg-surface-elevated hover:border-brand/40 transition-colors shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isFetchingNextPage ? 'animate-spin text-brand' : ''}`} />
+                <span>{isFetchingNextPage ? '正在加载更早记录...' : '加载更多历史交易 (Load More)'}</span>
+              </button>
+            </div>
+          ) : (
+            <div data-testid="trades-pagination-status" className="py-2 text-center text-[11px] text-text-muted">
+              已加载全量账本记录 (共 {allTrades.length} 笔) · 无更多历史数据
+            </div>
+          )}
         </section>
       )}
 

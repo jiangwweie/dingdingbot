@@ -186,7 +186,10 @@ export function mapTradeListItemToEpisode(
   };
 }
 
-export function computeTradesSummaryMetrics(episodes: TradeEpisode[]): TradesSummaryMetrics {
+export function computeTradesSummaryMetrics(
+  episodes: TradeEpisode[],
+  pagination?: { hasMore?: boolean }
+): TradesSummaryMetrics {
   const totalCount = episodes.length;
   const activeCount = episodes.filter((t) => t.isActive).length;
   const completedEpisodes = episodes.filter((t) => !t.isActive);
@@ -196,9 +199,9 @@ export function computeTradesSummaryMetrics(episodes: TradeEpisode[]): TradesSum
   let lossCount = 0;
   let breakevenCount = 0;
   let sumNetPnl = 0;
-  let hasPnl = false;
+  let pnlEvaluatedCount = 0;
   let sumNetR = 0;
-  let hasR = false;
+  let rEvaluatedCount = 0;
 
   completedEpisodes.forEach((t) => {
     if (t.outcome === 'win') winCount++;
@@ -207,31 +210,66 @@ export function computeTradesSummaryMetrics(episodes: TradeEpisode[]): TradesSum
 
     if (t.net_pnl_val !== null && t.net_pnl_val !== undefined) {
       sumNetPnl += t.net_pnl_val;
-      hasPnl = true;
+      pnlEvaluatedCount++;
     }
     if (t.net_r_val !== null && t.net_r_val !== undefined) {
       sumNetR += t.net_r_val;
-      hasR = true;
+      rEvaluatedCount++;
     }
   });
 
-  const evaluatedTrades = winCount + lossCount;
+  const evaluatedTradesCount = winCount + lossCount;
+  const excludedFromWinRateCount = completedCount - evaluatedTradesCount;
   const winRatePercent =
-    evaluatedTrades > 0 ? Math.round((winCount / evaluatedTrades) * 100) : null;
+    evaluatedTradesCount > 0 ? Math.round((winCount / evaluatedTradesCount) * 100) : null;
 
-  const totalNetPnlFormatted = hasPnl
+  const winRateDenominatorText =
+    completedCount === 0
+      ? '暂无历史平仓'
+      : evaluatedTradesCount > 0
+      ? excludedFromWinRateCount > 0
+        ? `基准: ${winCount} 胜 / ${lossCount} 负 (排除 ${excludedFromWinRateCount} 笔平保/未评)`
+        : `基准: ${winCount} 胜 / ${lossCount} 负 (全量评估)`
+      : `未产生胜负评定 (${completedCount} 笔平保或未评)`;
+
+  const hasPnlGaps = completedCount > 0 && pnlEvaluatedCount < completedCount;
+  const totalNetPnlFormatted = pnlEvaluatedCount > 0
     ? `${sumNetPnl > 0 ? '+' : ''}${sumNetPnl.toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })} USDT`
     : '—';
 
-  const totalNetRFormatted = hasR
+  const pnlCoverageText =
+    completedCount === 0
+      ? '暂无历史记录'
+      : hasPnlGaps
+      ? `已记录合计 · 覆盖 ${pnlEvaluatedCount}/${completedCount} 笔 (存在缺口)`
+      : `全量结清 · 覆盖 ${completedCount} 笔`;
+
+  const hasRGaps = completedCount > 0 && rEvaluatedCount < completedCount;
+  const totalNetRFormatted = rEvaluatedCount > 0
     ? `${sumNetR > 0 ? '+' : ''}${sumNetR.toLocaleString('en-US', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })} R`
     : '—';
+
+  const rCoverageText =
+    completedCount === 0
+      ? '暂无历史记录'
+      : hasRGaps
+      ? `已记录合计 · 覆盖 ${rEvaluatedCount}/${completedCount} 笔 (存在缺口)`
+      : `单位风险倍数 (R) · 覆盖 ${completedCount} 笔`;
+
+  const hasMore = Boolean(pagination?.hasMore);
+  const isComplete = !hasMore;
+  const scopeLabel =
+    totalCount === 0
+      ? '暂无数据'
+      : hasMore
+      ? '已加载范围统计 (尚有未加载数据)'
+      : `已加载全量账本 · 共 ${totalCount} 笔`;
 
   return {
     totalCount,
@@ -240,8 +278,20 @@ export function computeTradesSummaryMetrics(episodes: TradeEpisode[]): TradesSum
     winCount,
     lossCount,
     breakevenCount,
+    evaluatedTradesCount,
+    excludedFromWinRateCount,
     winRatePercent,
+    winRateDenominatorText,
     totalNetPnlFormatted,
+    pnlEvaluatedCount,
+    hasPnlGaps,
+    pnlCoverageText,
     totalNetRFormatted,
+    rEvaluatedCount,
+    hasRGaps,
+    rCoverageText,
+    isComplete,
+    hasMore,
+    scopeLabel,
   };
 }
