@@ -175,6 +175,30 @@ async def test_cookie_payload_is_only_session_id_and_bad_cookies_are_generic() -
         assert await service.validate_cookie(invalid, now_ms=BASE_MS + 1) is False
 
 
+@pytest.mark.parametrize(
+    ("elapsed_ms", "expected"),
+    [(31 * 60_000, True), (4 * 60 * 60_000 - 1, True), (4 * 60 * 60_000, False)],
+)
+async def test_default_session_uses_four_hour_idle_boundary(elapsed_ms: int, expected: bool) -> None:
+    settings = OwnerAuthSettings(**auth_settings().model_dump(
+        exclude={"idle_timeout_ms", "absolute_timeout_ms"},
+    ))
+    service = OwnerAuthService(settings)
+    session = await login(service)
+    assert await service.validate_cookie(session.cookie, now_ms=BASE_MS + elapsed_ms) is expected
+
+
+async def test_default_session_still_expires_after_twelve_hours_despite_activity() -> None:
+    settings = OwnerAuthSettings(**auth_settings().model_dump(
+        exclude={"idle_timeout_ms", "absolute_timeout_ms"},
+    ))
+    service = OwnerAuthService(settings)
+    session = await login(service)
+    for elapsed_ms in (3 * 3_600_000, 6 * 3_600_000, 9 * 3_600_000, 12 * 3_600_000 - 1):
+        assert await service.validate_cookie(session.cookie, now_ms=BASE_MS + elapsed_ms)
+    assert not await service.validate_cookie(session.cookie, now_ms=BASE_MS + 12 * 3_600_000)
+
+
 async def test_idle_slides_but_idle_and_absolute_boundaries_expire() -> None:
     sliding = OwnerAuthService(auth_settings())
     session = await login(sliding)
