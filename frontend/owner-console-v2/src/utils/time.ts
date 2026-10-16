@@ -89,3 +89,31 @@ export function formatAgeFromTimestamp(
   const hours = (ageMs / 3_600_000).toFixed(1);
   return { seconds: `${totalSeconds}s`, labelZh: `${hours}小时前` };
 }
+
+/**
+ * Format duration in milliseconds into human-readable Chinese string.
+ * Example: 7200000 -> "2小时", 8640000 -> "2小时24分", 45000 -> "45秒"
+ */
+export function formatDuration(durationMs: number | null | undefined): string {
+  if (durationMs == null || durationMs < 0 || isNaN(durationMs)) {
+    return '—';
+  }
+  const totalSeconds = Math.floor(durationMs / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}秒`;
+  }
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) {
+    const sec = totalSeconds % 60;
+    return sec > 0 ? `${totalMinutes}分${sec}秒` : `${totalMinutes}分钟`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const remMinutes = totalMinutes % 60;
+  if (hours < 24) {
+    return remMinutes > 0 ? `${hours}小时${remMinutes}分` : `${hours}小时`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}天${remHours}小时` : `${days}天`;
+}
+

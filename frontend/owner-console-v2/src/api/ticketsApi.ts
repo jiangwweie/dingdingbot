@@ -1,6 +1,6 @@
-import { apiClient } from './client';
-import { ApiError, apiErrorFromResponse } from './errors';
-import type { components } from './schema';
+import { apiClient } from './client.ts';
+import { ApiError, apiErrorFromResponse } from './errors.ts';
+import type { components } from './schema.d.ts';
 
 export type TicketListEnvelope = components['schemas']['ApiEnvelope_TradeListPage_'];
 export type TradeListPage = components['schemas']['TradeListPage'];

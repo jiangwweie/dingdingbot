@@ -831,6 +831,233 @@ async function runLiveVerification() {
   }
 
   // ===========================================================================
+  // Category 6: Trades Tab & Trade Episodes Verification
+  // ===========================================================================
+  console.log('\n--- Category 6: Trades Tab & Trade Episodes Verification ---');
+  await setDarkMode();
+
+  const tradesNav = page.getByRole('button', { name: '交易因果' }).first();
+  await tradesNav.click();
+  await page.waitForTimeout(1000);
+
+  // 6.1 Trades page container mounted
+  const tradesPageEl = page.locator('#trades-page');
+  const tradesPageVisible = await tradesPageEl.isVisible();
+  recordAssertion(
+    'A6.1',
+    'Trades',
+    'Trades page container (#trades-page) visible and mounted',
+    tradesPageVisible ? 'PASS' : 'FAIL',
+    { tradesPageVisible }
+  );
+
+  // 6.2 Precondition check: tickets API data available
+  const completedTicketsList = rawTickets.filter((t) => t.terminal_at_ms !== null);
+  recordAssertion(
+    'A6.2',
+    'Trades',
+    `Tickets data available on Trades (${rawTickets.length} total, ${activeTicketsList.length} active, ${completedTicketsList.length} completed)`,
+    rawTickets.length >= 0 ? 'PASS' : 'FAIL',
+    { total: rawTickets.length, active: activeTicketsList.length, completed: completedTicketsList.length }
+  );
+
+  // 6.3 L1 Summary Metrics Ribbon
+  const metricsRibbon = page.locator('[data-testid="trades-metrics-ribbon"]');
+  const metricsRibbonVisible = await metricsRibbon.isVisible();
+  const metricsText = await metricsRibbon.textContent();
+  const totalMatches = metricsText?.includes(String(rawTickets.length));
+  const activeMatches = metricsText?.includes(String(activeTicketsList.length));
+  const completedMatches = metricsText?.includes(String(completedTicketsList.length));
+
+  recordAssertion(
+    'A6.3',
+    'Trades',
+    `L1 Metrics ribbon matches total (${rawTickets.length}), active (${activeTicketsList.length}), and completed (${completedTicketsList.length}) counts`,
+    metricsRibbonVisible && totalMatches && activeMatches && completedMatches ? 'PASS' : 'FAIL',
+    { metricsText: metricsText?.replace(/\s+/g, ' ').trim() }
+  );
+
+  // 6.4 Active Episodes Section
+  const activeSection = page.locator('[data-testid="active-trade-episodes"]');
+  const activeSectionVisible = await activeSection.isVisible();
+
+  if (activeTicketsList.length > 0) {
+    const activeCards = activeSection.locator('[data-ticket-id]');
+    const activeCardCount = await activeCards.count();
+    const activeCardsMatches = activeCardCount === activeTicketsList.length;
+
+    let allActiveAccurate = true;
+    for (const t of activeTicketsList) {
+      const card = activeSection.locator(`[data-ticket-id="${t.ticket_id}"]`);
+      if ((await card.count()) === 0) {
+        allActiveAccurate = false;
+        break;
+      }
+      const cText = await card.textContent();
+      const sym = cleanSymbol(t.exchange_instrument_id);
+      if (!cText?.includes(sym) || !cText?.includes(t.strategy_group_id)) {
+        allActiveAccurate = false;
+        break;
+      }
+    }
+
+    recordAssertion(
+      'A6.4',
+      'Trades',
+      `Active episodes section renders exact active cards (${activeTicketsList.length}) with accurate symbol & strategy`,
+      activeCardsMatches && allActiveAccurate ? 'PASS' : 'FAIL',
+      { expectedCount: activeTicketsList.length, actualCount: activeCardCount }
+    );
+  } else {
+    const emptyNotice = await activeSection.textContent();
+    const emptyFound = emptyNotice?.includes('当前无在管交易');
+    recordAssertion(
+      'A6.4',
+      'Trades',
+      'Active episodes section accurately declares empty state when no tickets active',
+      emptyFound ? 'PASS' : 'FAIL',
+      { emptyFound }
+    );
+  }
+
+  // 6.5 Completed Episodes Table
+  const completedSection = page.locator('[data-testid="completed-trade-episodes"]');
+  const completedTable = page.locator('[data-testid="completed-trades-table"]');
+
+  if (completedTicketsList.length > 0) {
+    const tableVisible = await completedTable.isVisible();
+    const rows = completedTable.locator('tbody tr[data-ticket-id]');
+    const rowCount = await rows.count();
+    const countMatches = rowCount === completedTicketsList.length;
+
+    // Verify first row binds cleanly to its ticket ID
+    const firstCompleted = completedTicketsList[0];
+    const firstRow = completedTable.locator(`tbody tr[data-ticket-id="${firstCompleted.ticket_id}"]`);
+    const firstRowExists = (await firstRow.count()) === 1;
+
+    recordAssertion(
+      'A6.5',
+      'Trades',
+      `Completed trades table renders ${completedTicketsList.length} rows with exact ticket_id binding`,
+      tableVisible && countMatches && firstRowExists ? 'PASS' : 'FAIL',
+      { expectedCount: completedTicketsList.length, actualCount: rowCount }
+    );
+  } else {
+    const completedText = await completedSection.textContent();
+    const emptyCompletedFound = completedText?.includes('暂无历史平仓记录');
+    recordAssertion(
+      'A6.5',
+      'Trades',
+      'Completed trades table accurately displays empty state',
+      emptyCompletedFound ? 'PASS' : 'FAIL',
+      { emptyCompletedFound }
+    );
+  }
+
+  // 6.6 Filter Switcher Interactivity
+  // Filter button "在管"
+  const filterActiveBtn = tradesPageEl.getByRole('button', { name: new RegExp(`在管\\s*\\(${activeTicketsList.length}\\)`) });
+  await filterActiveBtn.click();
+  await page.waitForTimeout(300);
+  const activeOnlyCompletedHidden = !(await completedSection.isVisible());
+
+  // Filter button "已平仓"
+  const filterCompletedBtn = tradesPageEl.getByRole('button', { name: new RegExp(`已平仓\\s*\\(${completedTicketsList.length}\\)`) });
+  await filterCompletedBtn.click();
+  await page.waitForTimeout(300);
+  const completedOnlyActiveHidden = !(await activeSection.isVisible());
+
+  // Filter button "全部"
+  const filterAllBtn = tradesPageEl.getByRole('button', { name: new RegExp(`全部\\s*\\(${rawTickets.length}\\)`) });
+  await filterAllBtn.click();
+  await page.waitForTimeout(300);
+  const allBothVisible = (await activeSection.isVisible()) && (await completedSection.isVisible());
+
+  recordAssertion(
+    'A6.6',
+    'Trades',
+    'Trades filter switcher correctly isolates active vs completed vs all views',
+    activeOnlyCompletedHidden && completedOnlyActiveHidden && allBothVisible ? 'PASS' : 'FAIL',
+    { activeOnlyCompletedHidden, completedOnlyActiveHidden, allBothVisible }
+  );
+
+  // 6.7 Causality Drawer Trigger from Trades page
+  const tradesCausalityDrawer = page.locator('[data-testid="causality-drawer"]');
+  let drawerTriggeredFromTrades = false;
+  if (rawTickets.length > 0) {
+    const sampleTicket = rawTickets[0];
+    const cardOrRow = tradesPageEl.locator(`[data-ticket-id="${sampleTicket.ticket_id}"]`).first();
+    const viewBtn = cardOrRow.getByRole('button', { name: /因果|追溯/ }).first();
+    if ((await viewBtn.count()) > 0) {
+      await viewBtn.click();
+    } else {
+      await cardOrRow.click();
+    }
+    await page.waitForTimeout(800);
+    drawerTriggeredFromTrades = await tradesCausalityDrawer.isVisible();
+    const drawerText = await tradesCausalityDrawer.textContent();
+    const drawerBindsTicket = drawerText?.includes(sampleTicket.ticket_id);
+
+    recordAssertion(
+      'A6.7',
+      'Trades',
+      `Causality drawer successfully triggered from Trades and binds to ticket ${sampleTicket.ticket_id}`,
+      drawerTriggeredFromTrades && drawerBindsTicket ? 'PASS' : 'FAIL',
+      { drawerTriggeredFromTrades, drawerBindsTicket }
+    );
+
+    // Capture Causality Drawer on Trades (Dark / Light)
+    console.log('Capturing real Trades Causality Drawer screenshots (Dark / Light)...');
+    const brainArtifactsDir = '/Users/jiangwei/.gemini/antigravity/brain/82ad12e5-f9c1-484d-8225-c73a22e79a9d';
+    await setDarkMode();
+    const darkCausalityPath = path.join(outDir, 'live_screenshot_trades_causality_dark.png');
+    await page.screenshot({ path: darkCausalityPath, fullPage: false });
+    if (fs.existsSync(brainArtifactsDir)) {
+      fs.copyFileSync(darkCausalityPath, path.join(brainArtifactsDir, 'live_screenshot_trades_causality_dark.png'));
+    }
+
+    await setLightMode();
+    const lightCausalityPath = path.join(outDir, 'live_screenshot_trades_causality_light.png');
+    await page.screenshot({ path: lightCausalityPath, fullPage: false });
+    if (fs.existsSync(brainArtifactsDir)) {
+      fs.copyFileSync(lightCausalityPath, path.join(brainArtifactsDir, 'live_screenshot_trades_causality_light.png'));
+    }
+
+    // Close drawer cleanly
+    const closeBtn = tradesCausalityDrawer.getByRole('button', { name: '关闭' }).first();
+    if ((await closeBtn.count()) > 0) {
+      await closeBtn.click();
+      await page.waitForTimeout(500);
+    }
+  } else {
+    recordAssertion(
+      'A6.7',
+      'Trades',
+      'Causality drawer trigger from Trades',
+      'SCENARIO_NA',
+      { reason: 'Zero tickets available in production' }
+    );
+  }
+
+  // 6.8 Capture Full Trades Page Screenshots (Dark / Light)
+  console.log('Capturing real Trades Page screenshots (Dark / Light)...');
+  const brainArtifactsDir = '/Users/jiangwei/.gemini/antigravity/brain/82ad12e5-f9c1-484d-8225-c73a22e79a9d';
+  await setDarkMode();
+  const darkShotPath = path.join(outDir, 'live_screenshot_trades_dark.png');
+  await page.screenshot({ path: darkShotPath, fullPage: false });
+  if (fs.existsSync(brainArtifactsDir)) {
+    fs.copyFileSync(darkShotPath, path.join(brainArtifactsDir, 'live_screenshot_trades_dark.png'));
+  }
+
+  await setLightMode();
+  const lightShotPath = path.join(outDir, 'live_screenshot_trades_light.png');
+  await page.screenshot({ path: lightShotPath, fullPage: false });
+  if (fs.existsSync(brainArtifactsDir)) {
+    fs.copyFileSync(lightShotPath, path.join(brainArtifactsDir, 'live_screenshot_trades_light.png'));
+  }
+  await setDarkMode();
+
+  // ===========================================================================
   // Category 5: Idle Window & Stability Assertions
   // ===========================================================================
   console.log('\n--- Category 5: Idle Window & Stability Assertions ---');

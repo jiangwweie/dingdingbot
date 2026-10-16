@@ -30,9 +30,16 @@ import {
   getUtcDayStartMs,
   formatRelativeCountdown,
   formatAgeFromTimestamp,
+  formatDuration,
 } from './src/utils/time.ts';
+import {
+  mapTradeListItemToEpisode,
+  computeTradesSummaryMetrics,
+  formatMoneyMetric,
+} from './src/mapping/tradeEpisodeMapping.ts';
 import { cleanSymbol } from './src/utils/symbol.ts';
 import { strategiesQueryKey } from './src/api/strategiesApi.ts';
+import { ticketsQueryKey } from './src/api/ticketsApi.ts';
 import { ApiError } from './src/api/errors.ts';
 
 let passCount = 0;
@@ -800,6 +807,200 @@ async function runAllTests() {
     assert.equal(badgesEmpty.length, 1);
     assert.equal(badgesEmpty[0].type, 'empty');
     assert.equal(badgesEmpty[0].label, '0 个占用');
+  });
+
+  // -----------------------------------------------------------------------------
+  // Test Group 9: Trades Domain Mapping & Fact Formatting
+  // -----------------------------------------------------------------------------
+  console.log('\n--- Test Group 9: Trades Domain Mapping & Fact Formatting ---');
+
+  await test('formatDuration correctly handles boundaries (seconds, minutes, hours, days, invalid)', () => {
+    assert.equal(formatDuration(0), '0秒');
+    assert.equal(formatDuration(45_000), '45秒');
+    assert.equal(formatDuration(60_000), '1分钟');
+    assert.equal(formatDuration(125_000), '2分5秒');
+    assert.equal(formatDuration(3_600_000), '1小时');
+    assert.equal(formatDuration(8_100_000), '2小时15分');
+    assert.equal(formatDuration(86_400_000), '1天');
+    assert.equal(formatDuration(90_000_000), '1天1小时');
+    assert.equal(formatDuration(null), '—');
+    assert.equal(formatDuration(-100), '—');
+  });
+
+  await test('formatMoneyMetric distinguishes active, missing, positive, negative and zero without faking 0', () => {
+    // Case A: Positive money
+    const pos = formatMoneyMetric({ value: '124.5', unit: 'USDT' });
+    assert.equal(pos.formatted, '+124.50 USDT');
+    assert.equal(pos.value, 124.5);
+    assert.equal(pos.isPositive, true);
+
+    // Case B: Negative R
+    const neg = formatMoneyMetric({ value: '-1.00', unit: 'R' });
+    assert.equal(neg.formatted, '-1.00 R');
+    assert.equal(neg.value, -1);
+    assert.equal(neg.isPositive, false);
+
+    // Case C: Active ticket - honest placeholder
+    const active = formatMoneyMetric(
+      { value: null, unavailable_reason: 'ticket_active', unit: 'USDT' },
+      '持仓中 · 未结'
+    );
+    assert.equal(active.formatted, '持仓中 · 未结');
+    assert.equal(active.value, null);
+    assert.equal(active.isPositive, null);
+
+    // Case D: Missing / unavailable metric - displays '—', NEVER fake 0
+    const missing = formatMoneyMetric({ value: null, unavailable_reason: 'missing', unit: 'USDT' });
+    assert.equal(missing.formatted, '—');
+    assert.equal(missing.value, null);
+  });
+
+  await test('mapTradeListItemToEpisode: Active ticket preserves truthful non-terminal state', () => {
+    const rawActive = {
+      ticket_id: 'tkt-act-001',
+      strategy_group_id: 'CPM-RO-001',
+      event_spec_id: 'cpm_v04_long',
+      exchange_instrument_id: 'binance-usdm:ETHUSDT:perpetual',
+      position_side: 'long',
+      ticket_status: 'ticket_active',
+      aggregate_status: 'position_protected',
+      lifecycle_stage: 'protection',
+      completed_stage_count: 4,
+      total_stage_count: 8,
+      issued_at_ms: 1776300000000,
+      terminal_at_ms: null,
+      net_pnl: { value: null, unavailable_reason: 'ticket_active', unit: 'USDT' },
+      net_r: { value: null, unavailable_reason: 'ticket_active', unit: 'R' },
+      gross_pnl: { value: null, unavailable_reason: 'ticket_active', unit: 'USDT' },
+      fees: { value: null, unavailable_reason: 'ticket_active', unit: 'USDT' },
+      funding: { value: null, unavailable_reason: 'ticket_active', unit: 'USDT' },
+      exit_reason: null,
+      exit_reason_unavailable_reason: 'ticket_active',
+      attention_items: ['protection_active'],
+    };
+
+    const episode = mapTradeListItemToEpisode(rawActive, 1776303600000); // 1 hour later
+    assert.equal(episode.ticket_id, 'tkt-act-001');
+    assert.equal(episode.isActive, true);
+    assert.equal(episode.symbol, 'ETHUSDT');
+    assert.equal(episode.strategy_name_zh, '均线回踩做多');
+    assert.equal(episode.lifecycle_stage_zh, '保护安装 (Protection)');
+    assert.equal(episode.outcome, 'in_progress');
+    assert.equal(episode.outcome_zh, '进行中');
+    assert.equal(episode.is_protected, true);
+    assert.equal(episode.protection_state, '已受保护 (Protected)');
+    assert.equal(episode.net_pnl_formatted, '持仓中 · 未结');
+    assert.equal(episode.net_r_formatted, '持仓中 · 未结');
+    assert.equal(episode.duration_formatted, '1小时');
+    assert.equal(episode.closed_at_formatted, null);
+  });
+
+  await test('mapTradeListItemToEpisode: Completed win ticket maps duration and exit reason truthfully', () => {
+    const rawWin = {
+      ticket_id: 'tkt-win-001',
+      strategy_group_id: 'BRF2-001',
+      event_spec_id: 'brf2_short',
+      exchange_instrument_id: 'binance-usdm:SOLUSDT:perpetual',
+      position_side: 'short',
+      ticket_status: 'ticket_terminal',
+      aggregate_status: 'closed',
+      lifecycle_stage: 'review',
+      completed_stage_count: 8,
+      total_stage_count: 8,
+      issued_at_ms: 1776300000000,
+      terminal_at_ms: 1776308100000, // 2h 15m duration
+      net_pnl: { value: '250.00', unit: 'USDT' },
+      net_r: { value: '2.50', unit: 'R' },
+      gross_pnl: { value: '255.00', unit: 'USDT' },
+      fees: { value: '5.00', unit: 'USDT' },
+      funding: { value: '0.00', unit: 'USDT' },
+      exit_reason: 'TP1 + Runner Exit',
+      exit_reason_unavailable_reason: null,
+      attention_items: [],
+    };
+
+    const episode = mapTradeListItemToEpisode(rawWin);
+    assert.equal(episode.ticket_id, 'tkt-win-001');
+    assert.equal(episode.isActive, false);
+    assert.equal(episode.outcome, 'win');
+    assert.equal(episode.outcome_zh, '盈利 (Win)');
+    assert.equal(episode.net_pnl_formatted, '+250.00 USDT');
+    assert.equal(episode.net_r_formatted, '+2.50 R');
+    assert.equal(episode.duration_formatted, '2小时15分');
+    assert.equal(episode.exit_reason_zh, '止盈平保 (TP1 + Runner Exit)');
+    assert.ok(episode.closed_at_formatted !== null);
+  });
+
+  await test('mapTradeListItemToEpisode: Completed loss ticket maps honest exit fallback', () => {
+    const rawLoss = {
+      ticket_id: 'tkt-loss-001',
+      strategy_group_id: 'MI-001',
+      event_spec_id: 'mi_long',
+      exchange_instrument_id: 'binance-usdm:DOGEUSDT:perpetual',
+      position_side: 'long',
+      ticket_status: 'ticket_terminal',
+      aggregate_status: 'closed',
+      lifecycle_stage: 'review',
+      completed_stage_count: 8,
+      total_stage_count: 8,
+      issued_at_ms: 1776300000000,
+      terminal_at_ms: 1776301200000, // 20m duration
+      net_pnl: { value: '-100.00', unit: 'USDT' },
+      net_r: { value: '-1.00', unit: 'R' },
+      gross_pnl: { value: '-98.00', unit: 'USDT' },
+      fees: { value: '2.00', unit: 'USDT' },
+      funding: { value: '0.00', unit: 'USDT' },
+      exit_reason: null,
+      exit_reason_unavailable_reason: 'External Flat / Exit Fills Unavailable',
+      attention_items: [],
+    };
+
+    const episode = mapTradeListItemToEpisode(rawLoss);
+    assert.equal(episode.outcome, 'loss');
+    assert.equal(episode.outcome_zh, '亏损 (Loss)');
+    assert.equal(episode.net_pnl_formatted, '-100.00 USDT');
+    assert.equal(episode.net_r_formatted, '-1.00 R');
+    assert.equal(episode.exit_reason_zh, '外部平仓已确认');
+  });
+
+  await test('computeTradesSummaryMetrics calculates accurate metrics across mixed episodes', () => {
+    const mockEpisodes = [
+      { isActive: true, outcome: 'in_progress', net_pnl_val: null, net_r_val: null },
+      { isActive: true, outcome: 'in_progress', net_pnl_val: null, net_r_val: null },
+      { isActive: false, outcome: 'win', net_pnl_val: 120, net_r_val: 1.5 },
+      { isActive: false, outcome: 'win', net_pnl_val: 80, net_r_val: 1.0 },
+      { isActive: false, outcome: 'loss', net_pnl_val: -100, net_r_val: -1.0 },
+      { isActive: false, outcome: 'breakeven', net_pnl_val: 0, net_r_val: 0 },
+    ];
+
+    const metrics = computeTradesSummaryMetrics(mockEpisodes);
+    assert.equal(metrics.totalCount, 6);
+    assert.equal(metrics.activeCount, 2);
+    assert.equal(metrics.completedCount, 4);
+    assert.equal(metrics.winCount, 2);
+    assert.equal(metrics.lossCount, 1);
+    assert.equal(metrics.breakevenCount, 1);
+    // Win rate: 2 wins / (2 wins + 1 loss) = 67%
+    assert.equal(metrics.winRatePercent, 67);
+    // Net PnL: 120 + 80 - 100 + 0 = +100.00 USDT
+    assert.equal(metrics.totalNetPnlFormatted, '+100.00 USDT');
+    // Net R: 1.5 + 1.0 - 1.0 + 0 = +1.50 R
+    assert.equal(metrics.totalNetRFormatted, '+1.50 R');
+
+    // Empty list boundary
+    const emptyMetrics = computeTradesSummaryMetrics([]);
+    assert.equal(emptyMetrics.totalCount, 0);
+    assert.equal(emptyMetrics.winRatePercent, null);
+    assert.equal(emptyMetrics.totalNetPnlFormatted, '—');
+  });
+
+  await test('ticketsQueryKey produces stable query keys without timestamps or random tokens', () => {
+    const key1 = ticketsQueryKey({ limit: 100 });
+    const key2 = ticketsQueryKey({ limit: 100 });
+    assert.deepEqual(key1, key2);
+    assert.equal(key1[0], 'owner');
+    assert.equal(key1[1], 'tickets');
+    assert.equal(key1[2].limit, 100);
   });
 
   console.log('\n================================================================');

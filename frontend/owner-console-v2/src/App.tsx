@@ -5,6 +5,7 @@ import { cleanSymbol } from './hooks/useOverviewData';
 import { LoginPage } from './components/auth/LoginPage';
 import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
+import { TradesPage } from './components/trades/TradesPage';
 import { CausalityDrawer } from './components/overview/CausalityDrawer';
 import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
@@ -120,9 +121,15 @@ export const App: React.FC = () => {
       />
 
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
-        {activeTab === 'overview' ? (
+        {activeTab === 'overview' && (
           <OverviewPage onNavigateToControls={() => setActiveTab('controls')} />
-        ) : (
+        )}
+
+        {activeTab === 'trades' && (
+          <TradesPage />
+        )}
+
+        {activeTab === 'controls' && (
           <div>
             {/* Controls Header & Refresh */}
             <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

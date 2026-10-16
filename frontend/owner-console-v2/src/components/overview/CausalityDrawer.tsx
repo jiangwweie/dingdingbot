@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTicketCausality, causalityQueryKey } from '../../api/ticketsApi';
 import type { TradeEpisodeSummary } from '../../types/overview';
+import type { TradeEpisode } from '../../types/trades';
 import {
   X,
   CheckCircle2,
@@ -16,7 +17,7 @@ import {
 
 
 interface CausalityDrawerProps {
-  episode: TradeEpisodeSummary | null;
+  episode: TradeEpisodeSummary | TradeEpisode | null;
   onClose: () => void;
 }
 
@@ -116,14 +117,30 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
 
             {/* Subheader facts */}
             <div className="mt-2.5 flex flex-wrap items-baseline justify-between text-xs gap-2">
-              <span className="text-text-secondary">
-                {episode.strategy_name_zh} · 当前阶段:{' '}
-                <strong data-testid="causality-current-stage" className="text-brand font-semibold">
-                  {causality?.current_stage
-                    ? STAGE_LABELS_ZH[causality.current_stage] ?? causality.current_stage
-                    : episode.lifecycle_stage_zh}
-                </strong>
-              </span>
+              <div className="flex flex-wrap items-center gap-2 text-text-secondary">
+                <span>{episode.strategy_name_zh}</span>
+                <span>·</span>
+                <span>
+                  当前阶段:{' '}
+                  <strong data-testid="causality-current-stage" className="text-brand font-semibold">
+                    {causality?.current_stage
+                      ? STAGE_LABELS_ZH[causality.current_stage] ?? causality.current_stage
+                      : episode.lifecycle_stage_zh}
+                  </strong>
+                </span>
+                {causality?.exit_reason && (
+                  <span className="inline-flex items-center rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
+                    退出原因: {causality.exit_reason.label || causality.exit_reason.code}
+                  </span>
+                )}
+                {episode.net_r_formatted &&
+                  episode.net_r_formatted !== '—' &&
+                  episode.net_r_formatted !== '持仓中 · 未结' && (
+                    <span className="font-mono font-bold text-text-primary">
+                      {episode.net_r_formatted} ({episode.net_pnl_formatted})
+                    </span>
+                  )}
+              </div>
               <span className="font-mono text-text-muted text-[11px]" title={episode.ticket_id} data-ticket-id={episode.ticket_id}>
                 Ticket ID: {episode.ticket_id} · 发出时间: {episode.issued_at_formatted}
               </span>
