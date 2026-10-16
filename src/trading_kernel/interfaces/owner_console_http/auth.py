@@ -78,7 +78,7 @@ class OwnerAuthSettings(FrozenModel):
         max_length=_MAX_SIGNING_KEY_LENGTH,
         repr=False,
     )
-    idle_timeout_ms: int = Field(default=30 * 60_000, gt=0)
+    idle_timeout_ms: int = Field(default=4 * 60 * 60_000, gt=0)
     absolute_timeout_ms: int = Field(default=12 * 60 * 60_000, gt=0)
 
     @field_validator(
