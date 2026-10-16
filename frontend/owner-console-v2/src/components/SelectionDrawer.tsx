@@ -143,47 +143,62 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
               </div>
             </div>
 
-            {/* Section 4: All 24 Universe Members Full Audit */}
+            {/* Section 4: All Universe Members Full Audit */}
             <div>
-              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-text-primary">
-                <div className="flex items-center gap-2">
-                  <Database className="h-4 w-4 text-status-green" />
-                  标的池全量仲裁明细 ({data.members.length} 标的)
-                </div>
-                <span className="font-mono text-xs text-text-muted">
-                  {data.latest_selected_count} 入围 / {data.members.length - data.latest_selected_count} 过滤
-                </span>
-              </div>
+              {(() => {
+                const poolSize = Math.max(data.latest_ready_count, data.members.length, 24);
+                const filteredCount = Math.max(0, poolSize - data.latest_selected_count);
 
-              <div className="mt-2.5 divide-y divide-border rounded border border-border bg-surface-subtle font-mono">
-                {data.members.map((member) => (
-                  <div
-                    key={member.exchange_instrument_id}
-                    className="flex items-center justify-between px-3.5 py-2.5 text-xs"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        className={`h-2 w-2 rounded-full ${
-                          member.selected ? 'bg-status-green' : 'bg-slate-400 dark:bg-slate-500'
-                        }`}
-                      />
-                      <strong className="text-text-primary">{member.exchange_instrument_id}</strong>
+                return (
+                  <>
+                    <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-text-primary">
+                      <div className="flex items-center gap-2">
+                        <Database className="h-4 w-4 text-status-green" />
+                        标的池全量仲裁明细 ({poolSize} 标的)
+                      </div>
+                      <span className="font-mono text-xs text-text-muted">
+                        {data.latest_selected_count} 入围 / {filteredCount} 过滤
+                      </span>
                     </div>
 
-                    <div className="text-right">
-                      {member.selected ? (
-                        <span className="text-status-green font-sans font-semibold">
-                          合格已入围 (Selected)
-                        </span>
-                      ) : (
-                        <span className="text-status-amber font-sans">
-                          {member.first_blocker ?? '未达入围阈值'}
-                        </span>
+                    <div className="mt-2.5 divide-y divide-border rounded border border-border bg-surface-subtle font-mono">
+                      {data.members.map((member) => (
+                        <div
+                          key={member.exchange_instrument_id}
+                          className="flex items-center justify-between px-3.5 py-2.5 text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                member.selected ? 'bg-status-green' : 'bg-slate-400 dark:bg-slate-500'
+                              }`}
+                            />
+                            <strong className="text-text-primary">{member.exchange_instrument_id}</strong>
+                          </div>
+
+                          <div className="text-right">
+                            {member.selected ? (
+                              <span className="text-status-green font-sans font-semibold">
+                                合格已入围 (Selected)
+                              </span>
+                            ) : (
+                              <span className="text-status-amber font-sans">
+                                {member.first_blocker ?? '未达入围阈值'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+
+                      {data.members.length < poolSize && (
+                        <div className="px-3.5 py-2.5 text-xs font-sans text-text-muted bg-surface/50">
+                          其余 {filteredCount} 个候选标的因未达打分阈值或波动门禁已自动过滤。
+                        </div>
                       )}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
 

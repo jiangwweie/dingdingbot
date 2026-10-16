@@ -32,7 +32,7 @@ export async function login(credentials: LoginRequest): Promise<void> {
 
 export async function logout(): Promise<void> {
   const { error, response } = await apiClient.POST('/api/owner/v1/auth/logout');
-  if (!response.ok) {
+  if (!response.ok && response.status !== 401) {
     throw apiErrorFromResponse(response, error);
   }
 }

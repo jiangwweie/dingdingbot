@@ -114,7 +114,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             type="button"
-            className="text-xs text-text-muted hover:text-danger transition-colors"
+            aria-label="退出登录"
+            data-testid="navbar-logout-btn"
+            className="text-xs text-text-muted hover:text-danger transition-colors cursor-pointer"
             onClick={onLogout}
           >
             退出

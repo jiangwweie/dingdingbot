@@ -18,6 +18,9 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
     isLoading,
     isError,
     error,
+    ticketsLoading,
+    ticketsError,
+    refetchTickets,
     pulse,
     todayMetrics,
     episodes,
@@ -88,6 +91,10 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
       <ActiveEpisodesSection
         episodes={episodes}
         onSelectEpisode={(ep) => setSelectedEpisode(ep)}
+        isLoading={ticketsLoading}
+        isError={Boolean(ticketsError)}
+        errorMessage={ticketsError}
+        onRetry={refetchTickets}
       />
 
       {/* 4. 双栏平衡区：左侧策略矩阵真实表现 + 右侧真实关注与异常 */}

@@ -31,49 +31,61 @@ const STAGE_LABELS: Record<string, string> = {
   review: '复盘',
 };
 
-function getUtcDayStartMs(nowMs = Date.now()): number {
-  const d = new Date(nowMs);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
 function formatMetric(metric?: { value: string | null; unit: string; unavailable_reason?: string | null } | null): string {
   if (!metric || metric.value === null || metric.value === undefined) {
     return '--';
   }
+  if (metric.value === '0') {
+    return `0 ${metric.unit}`;
+  }
   const num = Number(metric.value);
+  if (isNaN(num)) {
+    return `${metric.value} ${metric.unit}`;
+  }
   const sign = num > 0 ? '+' : '';
-  const unitSuffix = metric.unit === 'USDT' ? ' USDT' : metric.unit === 'R' ? ' R' : '';
-  return `${sign}${metric.value}${unitSuffix}`;
+  const formattedNum = num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const unitSuffix = metric.unit ? ` ${metric.unit}` : '';
+  return `${sign}${formattedNum}${unitSuffix}`;
+}
+
+export function cleanSymbol(rawSymbol: string): string {
+  if (!rawSymbol) return rawSymbol;
+  // e.g. "binance-usdm:TRXUSDT:perpetual" -> "TRXUSDT"
+  const parts = rawSymbol.split(':');
+  if (parts.length >= 2) {
+    return parts[1];
+  }
+  return rawSymbol;
 }
 
 export function useOverviewData() {
-  const nowMs = Date.now();
-  const todayStartMs = getUtcDayStartMs(nowMs);
-
   const overviewQuery = useQuery({
     queryKey: overviewQueryKey,
     queryFn: fetchOverview,
-    staleTime: 10_000,
+    staleTime: 15_000,
     retry: false,
   });
 
   const controlsQuery = useQuery({
     queryKey: controlsQueryKey,
     queryFn: fetchControls,
-    staleTime: 10_000,
+    staleTime: 15_000,
     retry: false,
   });
 
   const ticketsQuery = useQuery({
-    queryKey: ticketsQueryKey({ from_ms: nowMs - 7 * 86_400_000, to_ms: nowMs }),
-    queryFn: () => fetchTickets({ from_ms: nowMs - 7 * 86_400_000, to_ms: nowMs, limit: 50 }),
-    staleTime: 10_000,
+    queryKey: ticketsQueryKey,
+    queryFn: () => fetchTickets({ limit: 50 }),
+    staleTime: 15_000,
     retry: false,
   });
 
   const strategiesQuery = useQuery({
-    queryKey: strategiesQueryKey({ from_ms: todayStartMs, to_ms: nowMs, view: 'current' }),
-    queryFn: () => fetchStrategies({ from_ms: todayStartMs, to_ms: nowMs, view: 'current' }),
+    queryKey: strategiesQueryKey,
+    queryFn: () => fetchStrategies({ view: 'current' }),
     staleTime: 15_000,
     retry: false,
   });
@@ -86,6 +98,51 @@ export function useOverviewData() {
   const rawControls = controlsQuery.data;
   const rawTickets = ticketsQuery.data?.data?.items ?? [];
   const rawStrategies = strategiesQuery.data?.data?.items ?? [];
+
+  // Active tickets mapping (terminal_at_ms === null means actively in flight)
+  const activeTicketIdSet = new Set(rawOverview?.active_ticket_ids ?? []);
+  const activeTickets = rawTickets.filter(
+    (t) =>
+      t.terminal_at_ms === null ||
+      t.ticket_status === 'active' ||
+      activeTicketIdSet.has(t.ticket_id)
+  );
+
+  const activeTicketCount =
+    activeTickets.length > 0
+      ? activeTickets.length
+      : rawOverview?.active_ticket_count ??
+        rawControls?.account_capacity?.active_ticket_count ??
+        0;
+
+  const maxCapacity =
+    rawControls?.account_capacity?.max_concurrent_tickets ??
+    (rawOverview?.ticket_capacity != null && rawOverview.ticket_capacity > 0
+      ? activeTicketCount + rawOverview.ticket_capacity
+      : 3);
+
+  // Count active tickets per strategy
+  const activeCountByStrategy = new Map<string, number>();
+  activeTickets.forEach((t) => {
+    activeCountByStrategy.set(
+      t.strategy_group_id,
+      (activeCountByStrategy.get(t.strategy_group_id) ?? 0) + 1
+    );
+  });
+  // Also check strategy_side_active_counts from account capacity if activeTickets is pending
+  if (activeTickets.length === 0 && rawControls?.account_capacity?.strategy_side_active_counts) {
+    Object.entries(rawControls.account_capacity.strategy_side_active_counts).forEach(
+      ([scopeKey, count]) => {
+        const strategyId = scopeKey.split(':')[0];
+        if (strategyId) {
+          activeCountByStrategy.set(
+            strategyId,
+            (activeCountByStrategy.get(strategyId) ?? 0) + count
+          );
+        }
+      }
+    );
+  }
 
   // 1. System Pulse
   const freshness = overviewQuery.data?.freshness ?? 'unavailable';
@@ -115,7 +172,12 @@ export function useOverviewData() {
     !globalEntryEnabled
   ) {
     healthStatus = 'attention';
-    statusLabel = freshness === 'stale' ? '数据陈旧' : freshness === 'unavailable' ? '数据不可用' : '需要关注';
+    statusLabel =
+      freshness === 'stale'
+        ? '数据陈旧'
+        : freshness === 'unavailable'
+        ? '数据不可用'
+        : '需要关注';
     summary = `${totalStrategies} 个策略 · ${entryStatusLabel} · ${
       incidentCount > 0 ? `${incidentCount} 项异常待核实` : '存在需关注事实'
     }`;
@@ -130,7 +192,7 @@ export function useOverviewData() {
         ? '观察、准入、生命周期服务持续运转中'
         : freshness === 'stale'
         ? '数据生成时间已滞后，请核实后台监控 Worker 状态'
-        : '事实数据生成中或当前不可用',
+        : '事实数据生成中或当前只读证据不可用',
     conclusion: conclusionLevel,
     freshness,
     freshness_label:
@@ -145,9 +207,8 @@ export function useOverviewData() {
     active_strategy_count: activeStrategies,
     entry_status_label: entryStatusLabel,
     incidents_count: incidentCount,
-    active_ticket_count: rawOverview?.active_ticket_count ?? rawControls?.account_capacity?.active_ticket_count ?? 0,
-    ticket_capacity_total:
-      rawOverview?.ticket_capacity ?? rawControls?.account_capacity?.max_concurrent_tickets ?? 2,
+    active_ticket_count: activeTicketCount,
+    ticket_capacity_total: maxCapacity,
     snapshot_id: overviewQuery.data?.snapshot_id,
     generated_at: overviewQuery.data?.generated_at,
   };
@@ -158,9 +219,11 @@ export function useOverviewData() {
 
   const todayMetrics: TodayPerformanceMetrics = {
     net_pnl_formatted: formatMetric(rawOverview?.today_net_pnl),
-    net_pnl_is_positive: netPnlVal !== null && netPnlVal !== undefined ? Number(netPnlVal) >= 0 : null,
+    net_pnl_is_positive:
+      netPnlVal !== null && netPnlVal !== undefined ? Number(netPnlVal) >= 0 : null,
     net_r_formatted: formatMetric(rawOverview?.today_net_r),
-    net_r_is_positive: netRVal !== null && netRVal !== undefined ? Number(netRVal) >= 0 : null,
+    net_r_is_positive:
+      netRVal !== null && netRVal !== undefined ? Number(netRVal) >= 0 : null,
     today_signal_count: rawOverview?.today_signal_count ?? 0,
     admitted_signal_count: rawOverview?.admitted_signal_count ?? 0,
     rejected_signal_count: rawOverview?.rejected_signal_count ?? 0,
@@ -169,14 +232,6 @@ export function useOverviewData() {
   };
 
   // 3. Active Episodes (mapped strictly from real Ticket items)
-  const activeTicketIdSet = new Set(rawOverview?.active_ticket_ids ?? []);
-  const activeTickets = rawTickets.filter(
-    (t) =>
-      t.terminal_at_ms === null ||
-      t.ticket_status === 'active' ||
-      activeTicketIdSet.has(t.ticket_id)
-  );
-
   const episodes: TradeEpisodeSummary[] = activeTickets.map((t) => {
     const meta = STRATEGY_META[t.strategy_group_id] ?? {
       name_zh: t.strategy_group_id,
@@ -188,7 +243,7 @@ export function useOverviewData() {
       ticket_id: t.ticket_id,
       strategy_id: t.strategy_group_id,
       strategy_name_zh: meta.name_zh,
-      symbol: t.exchange_instrument_id,
+      symbol: cleanSymbol(t.exchange_instrument_id),
       side: t.position_side,
       lifecycle_stage: t.lifecycle_stage,
       lifecycle_stage_zh: stageZh,
@@ -216,7 +271,9 @@ export function useOverviewData() {
             name_zh: s.strategy_group_display_name ?? s.strategy_group_id,
             timeframe: '1h close',
           };
-          const ctrl = rawControls?.strategies?.find((c) => c.strategy_group_id === s.strategy_group_id);
+          const ctrl = rawControls?.strategies?.find(
+            (c) => c.strategy_group_id === s.strategy_group_id
+          );
           const isPaused = ctrl?.configured_state === 'paused';
 
           return {
@@ -230,7 +287,7 @@ export function useOverviewData() {
             loss_count: s.loss_count,
             net_pnl_formatted: formatMetric(s.net_pnl),
             net_r_formatted: formatMetric(s.net_r),
-            active_tickets_count: 0,
+            active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
           };
         })
       : (rawControls?.strategies ?? []).map((s) => {
@@ -250,21 +307,70 @@ export function useOverviewData() {
             loss_count: 0,
             net_pnl_formatted: '--',
             net_r_formatted: '--',
-            active_tickets_count: 0,
+            active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
           };
         });
 
-  // 5. Attention Items
+  // 5. Attention Items (Never report healthy if evidence is unavailable or attention level)
+  const isTrulyHealthy =
+    freshness === 'fresh' &&
+    conclusionLevel === 'no_action' &&
+    incidentCount === 0 &&
+    globalEntryEnabled &&
+    (!rawOverview?.attention_summary || rawOverview.attention_summary.length === 0);
+
   const attentionList: AttentionItem[] = [];
-  if (rawOverview?.attention_summary && rawOverview.attention_summary.length > 0) {
-    rawOverview.attention_summary.forEach((att, idx) => {
-      attentionList.push({
-        id: `att-${idx}`,
-        type: 'warning',
-        title: att,
-      });
+
+  if (rawOverview?.conclusion?.summary && conclusionLevel !== 'no_action') {
+    attentionList.push({
+      id: 'conclusion-summary',
+      type: conclusionLevel === 'intervention' ? 'alert' : 'warning',
+      title: rawOverview.conclusion.summary,
+      detail:
+        conclusionLevel === 'attention'
+          ? '请核实后台 Worker 水印与只读证据状态'
+          : '需立即介入核实',
     });
   }
+
+  if (freshness === 'unavailable') {
+    attentionList.push({
+      id: 'freshness-unavailable',
+      type: 'warning',
+      title: '数据新鲜度为 UNAVAILABLE',
+      detail: '概览事实数据正在生成中或后台只读证据水印滞后。',
+    });
+  } else if (freshness === 'stale') {
+    attentionList.push({
+      id: 'freshness-stale',
+      type: 'warning',
+      title: '数据新鲜度为 STALE (滞后)',
+      detail: '概览事实数据已滞后，请核实后台监控 Worker 状态。',
+    });
+  }
+
+  if (!globalEntryEnabled) {
+    attentionList.push({
+      id: 'global-entry-paused',
+      type: 'warning',
+      title: '全局 ENTRY 入场处于暂停状态',
+      detail: '新入场被阻断，存量持仓继续受生命周期保护。',
+    });
+  }
+
+  if (rawOverview?.attention_summary && rawOverview.attention_summary.length > 0) {
+    rawOverview.attention_summary.forEach((att, idx) => {
+      // Avoid duplicate conclusion summary
+      if (att !== rawOverview?.conclusion?.summary) {
+        attentionList.push({
+          id: `att-${idx}`,
+          type: 'warning',
+          title: att,
+        });
+      }
+    });
+  }
+
   if (incidentCount > 0) {
     attentionList.push({
       id: 'incident-count',
@@ -273,7 +379,8 @@ export function useOverviewData() {
       detail: '请核实命令流水与对账状态',
     });
   }
-  if (attentionList.length === 0) {
+
+  if (isTrulyHealthy && attentionList.length === 0) {
     attentionList.push({
       id: 'clean-state',
       type: 'info',
@@ -295,6 +402,13 @@ export function useOverviewData() {
     isLoading,
     isError,
     error,
+    ticketsLoading: ticketsQuery.isLoading,
+    ticketsError: ticketsQuery.isError
+      ? ticketsQuery.error instanceof Error
+        ? ticketsQuery.error.message
+        : '无法读取 Ticket 列表'
+      : null,
+    refetchTickets: () => ticketsQuery.refetch(),
     pulse,
     todayMetrics,
     episodes,

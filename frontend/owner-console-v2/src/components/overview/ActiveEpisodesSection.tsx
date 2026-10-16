@@ -1,15 +1,33 @@
 import React from 'react';
 import type { TradeEpisodeSummary } from '../../types/overview';
-import { Shield, ArrowUpRight, ArrowDownRight, Clock, ChevronRight, AlertTriangle } from 'lucide-react';
+import {
+  Shield,
+  ArrowUpRight,
+  ArrowDownRight,
+  Clock,
+  ChevronRight,
+  AlertTriangle,
+  AlertCircle,
+  RefreshCw,
+  Loader2,
+} from 'lucide-react';
 
 interface ActiveEpisodesSectionProps {
   episodes: TradeEpisodeSummary[];
   onSelectEpisode: (episode: TradeEpisodeSummary) => void;
+  isLoading?: boolean;
+  isError?: boolean;
+  errorMessage?: string | null;
+  onRetry?: () => void;
 }
 
 export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
   episodes,
   onSelectEpisode,
+  isLoading = false,
+  isError = false,
+  errorMessage,
+  onRetry,
 }) => {
   return (
     <div className="rounded-lg border border-border bg-surface p-4 shadow-sm">
@@ -18,16 +36,55 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
             当前在管交易 (Active Trade Episodes)
           </h3>
-          <span className="inline-flex items-center rounded-full bg-brand/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand">
-            {episodes.length} 笔在管
-          </span>
+          {isLoading ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-surface-subtle px-2 py-0.5 font-mono text-[11px] text-text-muted border border-border">
+              <Loader2 className="h-3 w-3 animate-spin text-brand" />
+              读取中...
+            </span>
+          ) : isError ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-danger border border-danger/20">
+              <AlertCircle className="h-3 w-3" />
+              读取失败
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-full bg-brand/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand">
+              {episodes.length} 笔在管
+            </span>
+          )}
         </div>
         <span className="text-[11px] text-text-muted">
           来自生产 Ticket 账本事实 · 严格遵循独立 Netting Domain
         </span>
       </div>
 
-      {episodes.length === 0 ? (
+      {isLoading ? (
+        <div className="py-8 text-center">
+          <div className="inline-flex items-center justify-center gap-2 text-xs text-text-muted">
+            <Loader2 className="h-4 w-4 animate-spin text-brand" />
+            <span>正在读取在管持仓事实 (/api/owner/v1/tickets)...</span>
+          </div>
+        </div>
+      ) : isError ? (
+        <div className="my-3 flex items-center justify-between rounded border border-danger/30 bg-danger/5 p-3.5 text-xs">
+          <div className="flex items-center gap-2 text-danger">
+            <AlertCircle className="h-4 w-4 flex-none" />
+            <div>
+              <span className="font-bold">在管持仓事实读取失败: </span>
+              <span className="opacity-90">{errorMessage ?? '网络错误或服务端无响应'}</span>
+            </div>
+          </div>
+          {onRetry && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-1 rounded border border-danger/30 bg-surface px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger/10 transition-colors"
+            >
+              <RefreshCw className="h-3 w-3" />
+              <span>重试</span>
+            </button>
+          )}
+        </div>
+      ) : episodes.length === 0 ? (
         <div className="py-8 text-center">
           <p className="text-xs font-medium text-text-secondary">
             当前市场无活动持仓
@@ -113,13 +170,21 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
                     </div>
                   </div>
 
+                  {ep.net_r_formatted && ep.net_r_formatted !== '--' && (
+                    <div>
+                      <div className="text-[10px] text-text-muted uppercase">浮动盈亏</div>
+                      <div className="font-mono font-bold mt-0.5 text-xs text-text-primary">
+                        {ep.net_r_formatted}
+                      </div>
+                    </div>
+                  )}
+
                   {Boolean(ep.attention_items && ep.attention_items.length > 0) && (
                     <div className="flex items-center gap-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[11px] border border-amber-500/20">
                       <AlertTriangle className="h-3 w-3" />
                       <span>{ep.attention_items!.join(', ')}</span>
                     </div>
                   )}
-
 
                   {/* 3. 查看交易因果全链路按钮 */}
                   <div>

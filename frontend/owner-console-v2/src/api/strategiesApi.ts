@@ -6,17 +6,17 @@ export type StrategySummaryEnvelope = components['schemas']['ApiEnvelope_Strateg
 export type StrategySummaryPage = components['schemas']['StrategySummaryPage'];
 export type StrategyVersionSummary = components['schemas']['StrategyVersionSummary'];
 
-export const strategiesQueryKey = (params?: { from_ms?: number; to_ms?: number; view?: 'current' | 'all' }) =>
-  ['owner', 'strategies', params] as const;
+export const strategiesQueryKey = ['owner', 'strategies'] as const;
 
 export async function fetchStrategies(params?: {
   from_ms?: number;
   to_ms?: number;
   view?: 'current' | 'all';
 }): Promise<StrategySummaryEnvelope> {
+  const queryParams = params ?? { view: 'current' as const };
   const { data, error, response } = await apiClient.GET('/api/owner/v1/strategies', {
     params: {
-      query: params,
+      query: queryParams,
     },
   });
   if (!response.ok) {

@@ -5,10 +5,12 @@ import { Pause, Play, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-rea
 interface StrategyMatrixProps {
   strategies: StrategyControlItem[];
   onToggleStrategy?: (strategy: StrategyControlItem) => void;
+  onSelectTicket?: (ticketId: string) => void;
 }
 
 export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
   strategies,
+  onSelectTicket,
 }) => {
 
   return (
@@ -120,9 +122,12 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                     {strategy.active_tickets.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
                         {strategy.active_tickets.map((t) => (
-                          <span
+                          <button
+                            type="button"
                             key={t.ticket_id}
-                            className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-2 py-0.5 text-xs font-mono"
+                            onClick={() => onSelectTicket?.(t.ticket_id)}
+                            className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface-subtle px-2 py-0.5 text-xs font-mono hover:border-brand hover:bg-surface-elevated transition-colors cursor-pointer"
+                            title={`点击查看 ${t.symbol} 交易因果`}
                           >
                             <span
                               className={`font-bold ${
@@ -139,7 +144,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                             >
                               {t.pnl_r}
                             </span>
-                          </span>
+                          </button>
                         ))}
                       </div>
                     ) : (

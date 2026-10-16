@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { SelectionDiagnosticData, UniverseMemberItem } from '../types/controls';
 import { useSelectionPreview } from '../hooks/useControlsData';
+import { cleanSymbol } from '../hooks/useOverviewData';
 import type { GenericSelectionPreview, OrbSelectionPreview } from '../api/controlsApi';
 import { SelectionDrawer } from './SelectionDrawer';
 import { RefreshCw, RotateCcw, ShieldCheck, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react';
@@ -18,12 +19,67 @@ function mapPreviewToDiagnostic(
   preview: GenericSelectionPreview | OrbSelectionPreview | undefined
 ): SelectionDiagnosticData | null {
   if (!preview) return null;
-  const isGeneric = 'cadence_hours' in preview;
+  const isOrb = 'strategy_label' in preview || strategyGroupId === 'SOR-1H-001';
   const runtime = (preview as any).runtime ?? {};
   const control = (preview as any).control ?? {};
 
+  if (isOrb) {
+    const snapshotDisp = runtime.snapshot_disposition ?? {};
+    const snapshot = snapshotDisp.snapshot ?? {};
+    const currentAuth = runtime.current_authority?.authority ?? {};
+    const selectedMembersRaw: string[] = snapshotDisp.selected_members ?? [];
+
+    const candidateCount = snapshot.candidate_count ?? 24;
+    const selectedCount = snapshot.selected_count ?? selectedMembersRaw.length;
+    const readyCount = snapshot.ready_count ?? candidateCount;
+
+    // Selected members list
+    const members: UniverseMemberItem[] = selectedMembersRaw.map((m: string) => ({
+      exchange_instrument_id: cleanSymbol(m),
+      selected: true,
+      first_blocker: null,
+    }));
+
+    const cadenceHours = 24; // SOR-1H ORB 日周期轮动 (24h)
+
+    const outcome = currentAuth.authority_outcome ?? 'ACTIVE_NEW';
+    const epochId = currentAuth.selection_epoch_id ?? null;
+    const authorityStatusZh = `权威有效 · ${outcome}`;
+    const completionAgeMs = snapshot.created_at_ms
+      ? Math.max(0, Date.now() - snapshot.created_at_ms)
+      : 0;
+
+    return {
+      strategy_group_id: strategyGroupId,
+      installed: (preview as any).installed ?? true,
+      cadence_hours: cadenceHours,
+      selection_mode: (control.selection_mode as any) ?? 'dynamic_selection',
+      pending_selection_mode: control.pending_selection_mode ?? null,
+      pending_effective_period_anchor_ms: control.pending_effective_period_anchor_ms ?? null,
+      rollback_baseline_id: control.rollback_baseline_id ?? null,
+      selection_epoch_id: epochId,
+      control_version: control.control_version ?? 1,
+      current_authority_outcome: outcome,
+      authority_status_zh: authorityStatusZh,
+      membership_valid_until_ms: snapshot.expires_at_ms ?? 0,
+      consecutive_missed_periods: 0,
+      latest_ready_count: readyCount,
+      latest_selected_count: selectedCount,
+      materialization_state: runtime.materialization_generation ? 'active' : 'idle',
+      materialization_deadline_ms: null,
+      vacuum_state: (runtime.entry_vacuums?.length ?? 0) > 0 ? 'vacuum_active' : 'clear',
+      vacuum_fenced_at_ms: null,
+      latest_successful_completion_age_ms: completionAgeMs,
+      latest_successful_cutoff_age_ms: completionAgeMs,
+      membership_source_age_ms: completionAgeMs,
+      members,
+    };
+  }
+
+  // Generic Selection (CPM, BRF2, MI, MPG)
+  const isGeneric = 'cadence_hours' in preview;
   const members: UniverseMemberItem[] = (runtime.members ?? []).map((m: any) => ({
-    exchange_instrument_id: m.exchange_instrument_id,
+    exchange_instrument_id: cleanSymbol(m.exchange_instrument_id),
     selected: Boolean(m.selected),
     first_blocker: m.first_blocker ?? null,
   }));
@@ -71,7 +127,10 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
 
   const isDynamic = current ? current.selection_mode === 'dynamic_selection' : true;
   const selectedCount = current?.latest_selected_count ?? 0;
-  const filteredCount = current ? Math.max(0, current.members.length - selectedCount) : 0;
+  const totalPool = current
+    ? Math.max(current.latest_ready_count, current.members.length, 24)
+    : 24;
+  const filteredCount = Math.max(0, totalPool - selectedCount);
 
   return (
     <div className="rounded border border-border bg-surface shadow-xs">
@@ -82,7 +141,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
             动态选币与轮动治理 (Selection)
           </h2>
           <p className="mt-0.5 text-xs text-text-secondary">
-            各策略独立的 4h 动态打分授权与 Static 基线回退；修改均需 Owner TOTP 签名。
+            各策略独立的 4h / 24h 动态打分授权与 Static 基线回退；修改均需 Owner TOTP 签名。
           </p>
         </div>
 
@@ -141,7 +200,11 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
                     isDynamic ? 'bg-status-blue' : 'bg-status-amber'
                   }`}
                 />
-                {isDynamic ? `DYNAMIC (${current.cadence_hours}h)` : 'STATIC 基线'}
+                {isDynamic
+                  ? current.cadence_hours === 24
+                    ? 'DYNAMIC (24h 日周期)'
+                    : `DYNAMIC (${current.cadence_hours}h)`
+                  : 'STATIC 基线'}
               </span>
 
               {/* Authority Status */}

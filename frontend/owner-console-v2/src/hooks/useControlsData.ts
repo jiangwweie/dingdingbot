@@ -6,13 +6,26 @@ import {
   selectionQueryKey,
   type ControlsResponse,
 } from '../api/controlsApi';
+import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
+import { cleanSymbol } from './useOverviewData';
 import type {
   GlobalEntryState,
   StrategyControlItem,
   AccountCapacityData,
   RecentOperationItem,
+  ActiveTicketMini,
 } from '../types/controls';
 
+const STAGE_LABELS: Record<string, string> = {
+  signal: '信号',
+  admission: '准入',
+  entry: '入场',
+  protection: '保护',
+  tp_runner: '止盈',
+  exit: '退出',
+  reconciliation: '对账',
+  review: '复盘',
+};
 
 const STRATEGY_META: Record<string, { name_zh: string; timeframe: string; is_retired?: boolean }> = {
   'CPM-RO-001': { name_zh: '均线回踩做多', timeframe: '1h close' },
@@ -37,13 +50,21 @@ export function useControlsData() {
     queryKey: controlsQueryKey,
     queryFn: fetchControls,
     retry: false,
-    staleTime: 10_000,
+    staleTime: 15_000,
+  });
+
+  const ticketsQuery = useQuery({
+    queryKey: ticketsQueryKey,
+    queryFn: () => fetchTickets({ limit: 50 }),
+    retry: false,
+    staleTime: 15_000,
   });
 
   const raw: ControlsResponse | undefined = query.data;
+  const rawTickets = ticketsQuery.data?.data?.items ?? [];
 
   // 1. Map Global Entry
-  const globalEntry: GlobalEntryState | null = raw
+  const globalEntry: GlobalEntryState | null = raw?.global_entry
     ? {
         configured_state: raw.global_entry.configured_state,
         effective_state: raw.global_entry.effective_state,
@@ -54,15 +75,15 @@ export function useControlsData() {
     : null;
 
   // 2. Map Strategies
-  const strategies: StrategyControlItem[] = raw
+  const strategies: StrategyControlItem[] = raw?.strategies
     ? raw.strategies.map((s) => {
         const meta = STRATEGY_META[s.strategy_group_id] ?? {
           name_zh: s.strategy_group_id,
           timeframe: '1h close',
         };
         const isRetired = meta.is_retired || s.strategy_group_id === 'SOR-001';
-        const isGlobalPaused = raw.global_entry.configured_state === 'paused';
-        const isCapacityFull = raw.account_capacity.remaining_ticket_slots <= 0;
+        const isGlobalPaused = raw?.global_entry?.configured_state === 'paused';
+        const isCapacityFull = (raw?.account_capacity?.remaining_ticket_slots ?? 0) <= 0;
 
         let admissionStatus: 'cleared' | 'blocked' = 'cleared';
         let admissionSummary = '准入畅通 · 观察 Worker 运行正常';
@@ -75,10 +96,53 @@ export function useControlsData() {
           admissionSummary = '受限挂起 · 全局 ENTRY 已由 Owner 暂停';
         } else if (isCapacityFull) {
           admissionStatus = 'blocked';
-          admissionSummary = `准入阻断 · 全局总容量已达上限 (${raw.account_capacity.active_ticket_count}/${raw.account_capacity.max_concurrent_tickets})`;
+          admissionSummary = `准入阻断 · 全局总容量已达上限 (${raw?.account_capacity?.active_ticket_count ?? 3}/${raw?.account_capacity?.max_concurrent_tickets ?? 3})`;
         } else if (s.configured_state === 'paused') {
           admissionStatus = 'blocked';
           admissionSummary = '策略已暂停 · 仅继续存量生命周期保护';
+        }
+
+        // Map real active tickets for this strategy
+        const matchingTickets = rawTickets.filter(
+          (t) => t.strategy_group_id === s.strategy_group_id && t.terminal_at_ms === null
+        );
+
+        let activeTickets: ActiveTicketMini[] = [];
+
+        if (matchingTickets.length > 0) {
+          activeTickets = matchingTickets.map((t) => {
+            const rVal = t.net_r?.value;
+            const rFormatted =
+              rVal !== null && rVal !== undefined
+                ? `${Number(rVal) > 0 ? '+' : ''}${rVal} R`
+                : STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage;
+
+            return {
+              ticket_id: t.ticket_id,
+              symbol: cleanSymbol(t.exchange_instrument_id),
+              side: t.position_side,
+              pnl_r: rFormatted,
+              stage: STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage,
+            };
+          });
+        } else if (raw.account_capacity?.strategy_side_active_counts) {
+          // If tickets not loaded yet or filtered out, check strategy_side_active_counts
+          Object.entries(raw.account_capacity.strategy_side_active_counts).forEach(
+            ([scope, count]) => {
+              if (scope.startsWith(`${s.strategy_group_id}:`) && count > 0) {
+                const side = scope.split(':')[1] as 'long' | 'short';
+                for (let i = 0; i < count; i++) {
+                  activeTickets.push({
+                    ticket_id: `scope-active-${s.strategy_group_id}-${i}`,
+                    symbol: '在管持仓',
+                    side: side ?? 'long',
+                    pnl_r: '执行中',
+                    stage: '生命周期保护',
+                  });
+                }
+              }
+            }
+          );
         }
 
         return {
@@ -96,13 +160,13 @@ export function useControlsData() {
             summary: admissionSummary,
             source: 'server_admission_fact',
           },
-          active_tickets: [],
+          active_tickets: activeTickets,
         };
       })
     : [];
 
   // 3. Map Capacity
-  const capacity: AccountCapacityData | null = raw
+  const capacity: AccountCapacityData | null = raw?.account_capacity
     ? {
         max_concurrent_tickets: raw.account_capacity.max_concurrent_tickets,
         active_ticket_count: raw.account_capacity.active_ticket_count,
@@ -132,7 +196,7 @@ export function useControlsData() {
     : null;
 
   // 4. Map Operations
-  const operations: RecentOperationItem[] = raw
+  const operations: RecentOperationItem[] = raw?.recent_operations
     ? raw.recent_operations.map((op) => ({
         authorization_id: op.authorization_id,
         name: '受控平仓全部仓位',
@@ -145,14 +209,19 @@ export function useControlsData() {
       }))
     : [];
 
+  const refetch = async () => {
+    await Promise.all([query.refetch(), ticketsQuery.refetch()]);
+  };
+
   return {
     isSuccess: query.isSuccess,
     isLoading: query.isLoading,
-    isFetching: query.isFetching,
+    isFetching: query.isFetching || ticketsQuery.isFetching,
     isError: query.isError,
     error: query.error,
     generatedAtMs: raw?.generated_at_ms ?? Date.now(),
-    refetch: query.refetch,
+    refetch,
+    rawTickets,
     globalEntry,
     strategies,
     capacity,

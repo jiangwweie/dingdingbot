@@ -31,6 +31,16 @@ const STAGE_LABELS_ZH: Record<string, string> = {
   review: '事后复盘 (Review)',
 };
 
+function formatPriceOrQty(val: string | number | null | undefined, maxDecimals = 5): string {
+  if (val === null || val === undefined || val === '') return '--';
+  const num = Number(val);
+  if (isNaN(num)) return String(val);
+  return num.toLocaleString('en-US', {
+    maximumFractionDigits: maxDecimals,
+    useGrouping: false,
+  });
+}
+
 export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClose }) => {
   const [activeTab, setActiveTab] = useState<'timeline' | 'commands' | 'events' | 'incidents' | 'evidence'>('timeline');
   const [copied, setCopied] = useState(false);
@@ -124,25 +134,25 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
                 <div className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">入场执行价</div>
                   <div className="font-bold text-text-primary mt-0.5">
-                    {causality.price_plan.actual_entry_price ?? causality.price_plan.entry_reference_price ?? '--'}
+                    {formatPriceOrQty(causality.price_plan.actual_entry_price ?? causality.price_plan.entry_reference_price)}
                   </div>
                 </div>
                 <div className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">初始止损价</div>
                   <div className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">
-                    {causality.price_plan.initial_stop_price}
+                    {formatPriceOrQty(causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
                 <div className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">当前活动止损</div>
                   <div className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {causality.price_plan.active_stop_price ?? causality.price_plan.initial_stop_price}
+                    {formatPriceOrQty(causality.price_plan.active_stop_price ?? causality.price_plan.initial_stop_price)}
                   </div>
                 </div>
                 <div className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">头寸数量</div>
                   <div className="font-bold text-text-primary mt-0.5">
-                    {causality.price_plan.ticket_quantity}
+                    {formatPriceOrQty(causality.price_plan.ticket_quantity)}
                   </div>
                 </div>
               </div>
@@ -397,7 +407,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
           {/* 4. Footer */}
           <div className="border-t border-border bg-surface-subtle p-4 flex items-center justify-between text-xs">
             <span className="text-[11px] text-text-muted">
-              遵循 L1 $\rightarrow$ L2 $\rightarrow$ L3 $\rightarrow$ L4 渐进披露 · 真实不可变因果链
+              遵循 L1 → L2 → L3 → L4 渐进披露 · 真实不可变因果链
             </span>
             <button
               type="button"

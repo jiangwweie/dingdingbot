@@ -9,8 +9,7 @@ export type CausalityEnvelope = components['schemas']['ApiEnvelope_TradeCausalit
 export type TradeCausalityDetail = components['schemas']['TradeCausalityDetail'];
 export type LifecycleStageView = components['schemas']['LifecycleStageView'];
 
-export const ticketsQueryKey = (params?: { from_ms?: number; to_ms?: number; limit?: number }) =>
-  ['owner', 'tickets', params] as const;
+export const ticketsQueryKey = ['owner', 'tickets'] as const;
 
 export const causalityQueryKey = (ticketId: string) =>
   ['owner', 'causality', ticketId] as const;

@@ -1,15 +1,18 @@
 import React, { useState } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useControlsData } from './hooks/useControlsData';
+import { cleanSymbol } from './hooks/useOverviewData';
 import { LoginPage } from './components/auth/LoginPage';
 import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
+import { CausalityDrawer } from './components/overview/CausalityDrawer';
 import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { SelectionSection } from './components/SelectionSection';
 import { DangerZoneCard } from './components/DangerZoneCard';
 import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
+import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 
 export const App: React.FC = () => {
@@ -23,6 +26,7 @@ export const App: React.FC = () => {
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState<NavTabId>('overview');
+  const [selectedTicketEpisode, setSelectedTicketEpisode] = useState<TradeEpisodeSummary | null>(null);
 
   // Controls Data
   const {
@@ -30,6 +34,7 @@ export const App: React.FC = () => {
     strategies,
     capacity,
     operations,
+    rawTickets,
     isLoading: controlsLoading,
     isFetching: controlsFetching,
     isError: controlsError,
@@ -169,6 +174,31 @@ export const App: React.FC = () => {
                   onToggleStrategy={() =>
                     showToast('Phase 1 · 只读模式 (策略启停写操作未开放)')
                   }
+                  onSelectTicket={(ticketId) => {
+                    const matching = rawTickets.find((t) => t.ticket_id === ticketId);
+                    if (matching) {
+                      setSelectedTicketEpisode({
+                        ticket_id: matching.ticket_id,
+                        strategy_id: matching.strategy_group_id,
+                        strategy_name_zh: matching.strategy_group_id,
+                        symbol: cleanSymbol(matching.exchange_instrument_id),
+                        side: matching.position_side,
+                        lifecycle_stage: matching.lifecycle_stage,
+                        lifecycle_stage_zh: matching.lifecycle_stage,
+                        completed_stage_count: matching.completed_stage_count,
+                        total_stage_count: matching.total_stage_count,
+                        ticket_status: matching.ticket_status,
+                        issued_at_ms: matching.issued_at_ms,
+                        issued_at_formatted: new Date(matching.issued_at_ms).toLocaleTimeString(
+                          'zh-CN',
+                          { hour12: false }
+                        ),
+                        attention_items: matching.attention_items ?? [],
+                        net_pnl_formatted: '--',
+                        net_r_formatted: '--',
+                      });
+                    }
+                  }}
                 />
 
                 {/* Level 3: Dynamic Selection Governance */}
@@ -185,7 +215,6 @@ export const App: React.FC = () => {
                   />
                 </div>
 
-
                 {/* Level 5: Audit Log */}
                 <RecentOperations operations={operations} />
               </div>
@@ -193,6 +222,12 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Causality Drawer triggered from Controls Strategy Matrix */}
+      <CausalityDrawer
+        episode={selectedTicketEpisode}
+        onClose={() => setSelectedTicketEpisode(null)}
+      />
 
       {/* Toast Notification */}
       {toastMessage && (
