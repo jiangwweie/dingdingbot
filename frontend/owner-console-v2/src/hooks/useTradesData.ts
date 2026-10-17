@@ -1,6 +1,8 @@
+import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
+import { activeCoverage } from '../mapping/tradeTruth';
 import { tradesPaginationOptions } from '../api/tradesPagination';
 import { useMemo, useCallback, useState } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { type TicketsQueryParams } from '../api/ticketsApi';
 import { mapTradeListItemToEpisode, computeTradesSummaryMetrics } from '../mapping/tradeEpisodeMapping';
 import type { TradeEpisode, TradesSummaryMetrics, TradeListItem } from '../types/trades';
@@ -19,6 +21,7 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
     [params, windowEnd]
   );
 
+  const overview = useQuery({queryKey:overviewQueryKey,queryFn:fetchOverview,staleTime:15000,retry:false});
   const query = useInfiniteQuery(tradesPaginationOptions(queryParams));
 
   const rawItems = useMemo<TradeListItem[]>(() => {
@@ -48,9 +51,10 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
   }, [allTrades, hasNextPage]);
 
   const refetch = useCallback(async () => {
+    await overview.refetch();
     if (params?.from_ms !== undefined || params?.to_ms !== undefined) await query.refetch();
     else setWindowEnd(Date.now());
-  }, [query]);
+  }, [query, overview]);
 
   const fetchNextPage = useCallback(async () => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -60,7 +64,9 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
 
   const firstPage = query.data?.pages[0];
 
+  const coverage = activeCoverage(activeTrades.map(t=>t.ticket_id),overview.data?.data, !overview.isError && overview.data?.freshness === 'fresh');
   return {
+    coverage,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     isFetchingNextPage,

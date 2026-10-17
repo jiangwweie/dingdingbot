@@ -1,3 +1,5 @@
+import Decimal from 'decimal.js';
+const Exact = Decimal.clone({precision:80});
 // Independent verification oracle; does not import the UI's mapping logic.
 export function exactDisplay(actual, expected) {
   const normalize = v => String(v ?? '').trim().replace(/\s+/g, ' ').replace(/(?<=\d),(?=\d{3}(?:\D|$))/g, '');
@@ -34,29 +36,30 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
 
   let winCount = 0;
   let lossCount = 0;
-  let sumPnl = 0;
+  let sumPnl = new Exact(0);
   let pnlEvaluatedCount = 0;
-  let sumR = 0;
+  let sumR = new Exact(0);
   let rEvaluatedCount = 0;
 
   for (const t of completedTickets) {
+    if (['leverage_rejected','entry_rejected','entry_reconciled_absent'].includes(t.ticket_status)) continue;
     const netRVal =
-      t.net_r?.value !== null && t.net_r?.value !== undefined && t.net_r?.unavailable_reason !== 'ticket_active'
-        ? Number(t.net_r.value)
+      t.net_r?.value !== null && t.net_r?.value !== undefined && !t.net_r?.unavailable_reason
+        ? new Exact(t.net_r.value)
         : null;
-    if (netRVal !== null && !isNaN(netRVal)) {
-      if (netRVal > 0) winCount++;
-      else if (netRVal < 0) lossCount++;
-      sumR += netRVal;
+    if (netRVal !== null && netRVal.isFinite()) {
+      if (netRVal.gt(0)) winCount++;
+      else if (netRVal.lt(0)) lossCount++;
+      sumR = sumR.plus(netRVal);
       rEvaluatedCount++;
     }
 
     const netPnlVal =
-      t.net_pnl?.value !== null && t.net_pnl?.value !== undefined && t.net_pnl?.unavailable_reason !== 'ticket_active'
-        ? Number(t.net_pnl.value)
+      t.net_pnl?.value !== null && t.net_pnl?.value !== undefined && !t.net_pnl?.unavailable_reason
+        ? new Exact(t.net_pnl.value)
         : null;
-    if (netPnlVal !== null && !isNaN(netPnlVal)) {
-      sumPnl += netPnlVal;
+    if (netPnlVal !== null && netPnlVal.isFinite()) {
+      sumPnl = sumPnl.plus(netPnlVal);
       pnlEvaluatedCount++;
     }
   }
@@ -75,7 +78,7 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
 
   const winRateDenominatorText =
     completedTickets.length === 0
-      ? '暂无历史平仓'
+      ? '暂无已结束交易'
       : evaluatedTradesCount > 0
       ? excludedFromWinRate > 0
         ? `基准: ${winCount} 胜 / ${lossCount} 负 (排除 ${excludedFromWinRate} 笔平保/未评)`
@@ -88,7 +91,7 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
       ? '暂无历史记录'
       : hasPnlGaps
       ? `已记录合计 · 覆盖 ${pnlEvaluatedCount}/${completedTickets.length} 笔 (存在缺口)`
-      : `全量结清 · 覆盖 ${completedTickets.length} 笔`;
+      : `已加载经济数据齐全 · 覆盖 ${completedTickets.length} 笔`;
 
   const hasRGaps = completedTickets.length > 0 && rEvaluatedCount < completedTickets.length;
   const rCoverageText =
@@ -100,18 +103,12 @@ export function tradesMetricsEvidence(rawTickets, pagination = { hasMore: false 
 
   const formattedPnl =
     pnlEvaluatedCount > 0
-      ? `${sumPnl > 0 ? '+' : ''}${sumPnl.toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} USDT`
+      ? `${sumPnl.gt(0) ? '+' : ''}${sumPnl.toFixed(2)} USDT`
       : '—';
 
   const formattedR =
     rEvaluatedCount > 0
-      ? `${sumR > 0 ? '+' : ''}${sumR.toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} R`
+      ? `${sumR.gt(0) ? '+' : ''}${sumR.toFixed(2)} R`
       : '—';
 
   return {

@@ -69,15 +69,7 @@ function formatMoneyMetric(metric) {
   return `${sign}${formatted} ${metric.unit}`.trim();
 }
 
-function formatPriceOrQty(val, maxDecimals = 5) {
-  if (val === null || val === undefined || val === '') return '--';
-  const num = Number(val);
-  if (isNaN(num)) return String(val);
-  return num.toLocaleString('en-US', {
-    maximumFractionDigits: maxDecimals,
-    useGrouping: false,
-  });
-}
+function formatPriceOrQty(val) { return val == null ? '未取得' : String(val); }
 
 const STAGE_LABELS_ZH = {
   signal: '信号 (Signal)',
@@ -550,7 +542,7 @@ async function runLiveVerification() {
         const initialStopText = await initialStopEl.locator('[data-testid="plan-value"]').textContent();
         const quantityText = await quantityEl.locator('[data-testid="plan-value"]').textContent();
 
-        const expectedEntry = formatPriceOrQty(plan.actual_entry_price ?? plan.entry_reference_price);
+        const expectedEntry = formatPriceOrQty(plan.actual_entry_price);
         const expectedStop = formatPriceOrQty(plan.initial_stop_price);
         const expectedQty = formatPriceOrQty(plan.ticket_quantity);
 
@@ -989,7 +981,7 @@ async function runLiveVerification() {
     );
   } else {
     const emptyNotice = await activeSection.textContent();
-    const emptyFound = emptyNotice?.includes('当前无在管交易');
+    const emptyFound = emptyNotice?.includes('已加载范围暂无在管记录');
     recordAssertion(
       'A6.4',
       'Trades',
@@ -1023,7 +1015,7 @@ async function runLiveVerification() {
     );
   } else {
     const completedText = await completedSection.textContent();
-    const emptyCompletedFound = completedText?.includes('暂无历史平仓记录');
+    const emptyCompletedFound = completedText?.includes('暂无已结束交易记录');
     recordAssertion(
       'A6.5',
       'Trades',
@@ -1040,8 +1032,8 @@ async function runLiveVerification() {
   await page.waitForTimeout(300);
   const activeOnlyCompletedHidden = !(await completedSection.isVisible());
 
-  // Filter button "已平仓"
-  const filterCompletedBtn = tradesPageEl.getByRole('button', { name: new RegExp(`已平仓\\s*\\(${completedTicketsList.length}\\)`) });
+  // Filter button "已结束"
+  const filterCompletedBtn = tradesPageEl.getByRole('button', { name: new RegExp(`已结束\\s*\\(${completedTicketsList.length}\\)`) });
   await filterCompletedBtn.click();
   await page.waitForTimeout(300);
   const completedOnlyActiveHidden = !(await activeSection.isVisible());

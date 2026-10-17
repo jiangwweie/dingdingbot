@@ -1,3 +1,4 @@
+import { MoneyDecimal, protectionFact, terminalFact } from './tradeTruth.ts';
 import type { TradeListItem, TradeEpisode, MoneyMetric, TradesSummaryMetrics } from '../types/trades.ts';
 import { cleanSymbol } from '../utils/symbol.ts';
 import { formatDuration } from '../utils/time.ts';
@@ -39,30 +40,22 @@ export const EXIT_REASON_ZH: Record<string, string> = {
 export function formatMoneyMetric(
   metric: MoneyMetric | null | undefined,
   defaultActiveText: string = '—'
-): { formatted: string; value: number | null; isPositive: boolean | null } {
-  if (!metric || metric.value === null || metric.value === undefined) {
+): { formatted: string; value: string | null; isPositive: boolean | null } {
+  if (!metric || metric.value === null || metric.value === undefined || metric.unavailable_reason) {
     if (metric?.unavailable_reason === 'ticket_active') {
       return { formatted: defaultActiveText, value: null, isPositive: null };
     }
     return { formatted: '—', value: null, isPositive: null };
   }
 
-  const num = Number(metric.value);
-  if (isNaN(num)) {
-    return { formatted: `${metric.value} ${metric.unit}`, value: null, isPositive: null };
+  let num;
+  try { num = new MoneyDecimal(metric.value); } catch { return {formatted: '—', value:null,isPositive:null}; }
+  if (!num.isFinite()) {
+    return { formatted: '—', value: null, isPositive: null };
   }
 
-  const sign = num > 0 ? '+' : '';
-  const formattedNum = num.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
-  return {
-    formatted: `${sign}${formattedNum} ${metric.unit}`.trim(),
-    value: num,
-    isPositive: num > 0 ? true : num < 0 ? false : null,
-  };
+  const sign = num.isPositive() && !num.isZero() ? '+' : '';
+  return {formatted:`${sign}${num.toFixed(2)} ${metric.unit}`.trim(), value:num.toString(),isPositive:num.isZero()?null:num.isPositive()};
 }
 
 export function mapTradeListItemToEpisode(
@@ -103,8 +96,9 @@ export function mapTradeListItemToEpisode(
 
   // Economics
   const activePlaceholder = isActive ? '持仓中 · 未结' : '—';
-  const netPnlResult = formatMoneyMetric(item.net_pnl, activePlaceholder);
-  const netRResult = formatMoneyMetric(item.net_r, activePlaceholder);
+  const eligible = !isActive && terminalFact(item) !== '未成交终止';
+  const netPnlResult = formatMoneyMetric(eligible ? item.net_pnl : null, activePlaceholder);
+  const netRResult = formatMoneyMetric(eligible ? item.net_r : null, activePlaceholder);
   const grossPnlResult = formatMoneyMetric(item.gross_pnl, activePlaceholder);
   const feesResult = formatMoneyMetric(item.fees, activePlaceholder);
   const fundingResult = formatMoneyMetric(item.funding, activePlaceholder);
@@ -114,28 +108,27 @@ export function mapTradeListItemToEpisode(
   let outcomeZh = '进行中';
 
   if (!isActive) {
-    if (netRResult.value !== null) {
-      if (netRResult.value > 0) {
+    if (terminalFact(item) === '已结算' && netRResult.value !== null && netPnlResult.value !== null) {
+      if (new MoneyDecimal(netRResult.value).gt(0)) {
         outcome = 'win';
-        outcomeZh = '盈利 (Win)';
-      } else if (netRResult.value < 0) {
+        outcomeZh = terminalFact(item) + ' · 盈利 (Win)';
+      } else if (new MoneyDecimal(netRResult.value).lt(0)) {
         outcome = 'loss';
-        outcomeZh = '亏损 (Loss)';
+        outcomeZh = terminalFact(item) + ' · 亏损 (Loss)';
       } else {
         outcome = 'breakeven';
-        outcomeZh = '平保 (BE)';
+        outcomeZh = terminalFact(item) + ' · 平保 (BE)';
       }
     } else {
       outcome = 'closed';
-      outcomeZh = '已平仓';
+      outcomeZh = terminalFact(item);
     }
   }
 
   // Protection state
-  const isProtected = item.aggregate_status === 'position_protected';
-  const protectionState = isProtected
-    ? '已受保护 (Protected)'
-    : item.aggregate_status || (isActive ? '保护未就绪' : '平仓终态');
+  const protection = protectionFact(item.aggregate_status);
+  const isProtected = protection.confirmed;
+  const protectionState = protection.label;
 
   // Exit reason
   const rawExitReason = item.exit_reason;
@@ -172,10 +165,10 @@ export function mapTradeListItemToEpisode(
     exit_reason_zh: exitReasonZh,
     protection_state: protectionState,
     is_protected: isProtected,
-    net_pnl_formatted: netPnlResult.formatted,
+    net_pnl_formatted: isActive ? '在管中 · 未结' : netPnlResult.formatted,
     net_pnl_val: netPnlResult.value,
     net_pnl_is_positive: netPnlResult.isPositive,
-    net_r_formatted: netRResult.formatted,
+    net_r_formatted: isActive ? '在管中 · 未结' : netRResult.formatted,
     net_r_val: netRResult.value,
     net_r_is_positive: netRResult.isPositive,
     gross_pnl_formatted: grossPnlResult.formatted,
@@ -198,9 +191,9 @@ export function computeTradesSummaryMetrics(
   let winCount = 0;
   let lossCount = 0;
   let breakevenCount = 0;
-  let sumNetPnl = 0;
+  let sumNetPnl = new MoneyDecimal(0);
   let pnlEvaluatedCount = 0;
-  let sumNetR = 0;
+  let sumNetR = new MoneyDecimal(0);
   let rEvaluatedCount = 0;
 
   completedEpisodes.forEach((t) => {
@@ -209,11 +202,11 @@ export function computeTradesSummaryMetrics(
     else if (t.outcome === 'breakeven') breakevenCount++;
 
     if (t.net_pnl_val !== null && t.net_pnl_val !== undefined) {
-      sumNetPnl += t.net_pnl_val;
+      sumNetPnl = sumNetPnl.plus(t.net_pnl_val);
       pnlEvaluatedCount++;
     }
     if (t.net_r_val !== null && t.net_r_val !== undefined) {
-      sumNetR += t.net_r_val;
+      sumNetR = sumNetR.plus(t.net_r_val);
       rEvaluatedCount++;
     }
   });
@@ -225,7 +218,7 @@ export function computeTradesSummaryMetrics(
 
   const winRateDenominatorText =
     completedCount === 0
-      ? '暂无历史平仓'
+      ? '暂无已结束交易'
       : evaluatedTradesCount > 0
       ? excludedFromWinRateCount > 0
         ? `基准: ${winCount} 胜 / ${lossCount} 负 (排除 ${excludedFromWinRateCount} 笔平保/未评)`
@@ -234,10 +227,7 @@ export function computeTradesSummaryMetrics(
 
   const hasPnlGaps = completedCount > 0 && pnlEvaluatedCount < completedCount;
   const totalNetPnlFormatted = pnlEvaluatedCount > 0
-    ? `${sumNetPnl > 0 ? '+' : ''}${sumNetPnl.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} USDT`
+    ? `${sumNetPnl.gt(0) ? '+' : ''}${sumNetPnl.toFixed(2)} USDT`
     : '—';
 
   const pnlCoverageText =
@@ -245,14 +235,11 @@ export function computeTradesSummaryMetrics(
       ? '暂无历史记录'
       : hasPnlGaps
       ? `已记录合计 · 覆盖 ${pnlEvaluatedCount}/${completedCount} 笔 (存在缺口)`
-      : `全量结清 · 覆盖 ${completedCount} 笔`;
+      : `已加载经济数据齐全 · 覆盖 ${completedCount} 笔`;
 
   const hasRGaps = completedCount > 0 && rEvaluatedCount < completedCount;
   const totalNetRFormatted = rEvaluatedCount > 0
-    ? `${sumNetR > 0 ? '+' : ''}${sumNetR.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      })} R`
+    ? `${sumNetR.gt(0) ? '+' : ''}${sumNetR.toFixed(2)} R`
     : '—';
 
   const rCoverageText =

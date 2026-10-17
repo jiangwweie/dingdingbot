@@ -1,3 +1,4 @@
+import { priceFacts } from '../../mapping/tradeTruth';
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTicketCausality, causalityQueryKey } from '../../api/ticketsApi';
@@ -32,15 +33,6 @@ const STAGE_LABELS_ZH: Record<string, string> = {
   review: '事后复盘 (Review)',
 };
 
-function formatPriceOrQty(val: string | number | null | undefined, maxDecimals = 5): string {
-  if (val === null || val === undefined || val === '') return '--';
-  const num = Number(val);
-  if (isNaN(num)) return String(val);
-  return num.toLocaleString('en-US', {
-    maximumFractionDigits: maxDecimals,
-    useGrouping: false,
-  });
-}
 
 export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClose }) => {
   const [activeTab, setActiveTab] = useState<'timeline' | 'commands' | 'events' | 'incidents' | 'evidence'>('timeline');
@@ -150,27 +142,31 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
             {causality?.price_plan && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
                 <div data-testid="causality-entry-price" className="rounded border border-border bg-surface p-2">
-                  <div className="text-[10px] text-text-muted uppercase">入场执行价</div>
+                  <div className="text-[10px] text-text-muted uppercase">实际入场执行价</div>
                   <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
-                    {formatPriceOrQty(causality.price_plan.actual_entry_price ?? causality.price_plan.entry_reference_price)}
+                    {priceFacts(causality.price_plan).actual}
                   </div>
+                </div>
+                <div className="rounded border border-border bg-surface p-2">
+                  <div className="text-text-muted">计划参考入场价</div>
+                  <div data-testid="causality-reference-price">{priceFacts(causality.price_plan).reference}</div>
                 </div>
                 <div data-testid="causality-initial-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">初始止损价</div>
                   <div data-testid="plan-value" className="font-bold text-rose-600 dark:text-rose-400 mt-0.5">
-                    {formatPriceOrQty(causality.price_plan.initial_stop_price)}
+                    {priceFacts(causality.price_plan).initialStop}
                   </div>
                 </div>
                 <div data-testid="causality-active-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">当前活动止损</div>
                   <div data-testid="plan-value" className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
-                    {formatPriceOrQty(causality.price_plan.active_stop_price ?? causality.price_plan.initial_stop_price)}
+                    {priceFacts(causality.price_plan).activeStop}
                   </div>
                 </div>
                 <div data-testid="causality-quantity" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">头寸数量</div>
                   <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
-                    {formatPriceOrQty(causality.price_plan.ticket_quantity)}
+                    {causality.price_plan.ticket_quantity ?? '未取得'}
                   </div>
                 </div>
               </div>

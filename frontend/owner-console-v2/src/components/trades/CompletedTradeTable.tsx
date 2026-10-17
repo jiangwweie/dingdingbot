@@ -21,7 +21,7 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
     return (
       <div className="rounded-lg border border-border bg-surface p-8 text-center text-xs text-text-muted">
         <Clock className="mx-auto h-8 w-8 text-text-muted/50 mb-2" />
-        <p className="font-semibold text-text-secondary">暂无历史平仓记录</p>
+        <p className="font-semibold text-text-secondary">暂无已结束交易记录</p>
         <p className="mt-1 text-[11px]">当前过滤条件下未查询到已终结的交易事实。</p>
       </div>
     );

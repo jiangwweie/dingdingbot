@@ -27,6 +27,7 @@ export const TradesPage: React.FC = () => {
     freshness,
     allTrades,
     activeTrades,
+    coverage,
     completedTrades,
     metrics,
     refetch,
@@ -120,7 +121,7 @@ export const TradesPage: React.FC = () => {
                   : 'text-text-muted hover:text-text-primary'
               }`}
             >
-              全部 ({metrics.totalCount})
+              已加载 ({metrics.totalCount})
             </button>
             <button
               type="button"
@@ -142,7 +143,7 @@ export const TradesPage: React.FC = () => {
                   : 'text-text-muted hover:text-text-primary'
               }`}
             >
-              已平仓 ({metrics.completedCount})
+              已结束 ({metrics.completedCount})
             </button>
           </div>
 
@@ -159,6 +160,10 @@ export const TradesPage: React.FC = () => {
         </div>
       </div>
 
+      <div role="status" className="rounded border border-border bg-surface p-3 text-xs text-text-secondary" data-testid="active-coverage">
+        在管身份核验：已加载 {activeTrades.length} 笔；Overview 报告 {coverage.count ?? '未知'} 笔。
+        {coverage.complete ? ' 本次只读快照身份一致。' : ` 覆盖尚未确认，已知未覆盖 ${coverage.missing.length} 笔；当前记录仅代表已加载范围。`}
+      </div>
       {/* 2. Top Summary Metrics Deck (L1 Owner Summary) */}
       <div data-testid="trades-metrics-ribbon" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div data-testid="metric-total-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
@@ -177,7 +182,7 @@ export const TradesPage: React.FC = () => {
         <div data-testid="metric-active-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-            <span>当前在管交易</span>
+            <span>已加载在管交易</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-brand">
             {metrics.activeCount}
@@ -190,7 +195,7 @@ export const TradesPage: React.FC = () => {
         <div data-testid="metric-completed-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <CheckCircle2 className="h-3.5 w-3.5 text-text-secondary" />
-            <span>历史平仓 / 胜率</span>
+            <span>已结束交易 / 胜率</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.completedCount}{' '}
@@ -236,7 +241,7 @@ export const TradesPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-                当前在管交易 (Active Trade Episodes)
+                已加载在管交易 (Active Trade Episodes)
               </h2>
               <span className="rounded-full bg-brand/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand">
                 {activeTrades.length} 笔在管
@@ -260,8 +265,8 @@ export const TradesPage: React.FC = () => {
           ) : (
             <div className="rounded-lg border border-border bg-surface p-6 text-center text-xs text-text-muted">
               <CheckCircle2 className="mx-auto h-7 w-7 text-status-green mb-1.5" />
-              <p className="font-semibold text-text-primary">当前无在管交易</p>
-              <p className="mt-0.5 text-[11px] text-text-secondary">所有持仓均已安全平仓并完成账本结清。</p>
+              <p className="font-semibold text-text-primary">已加载范围暂无在管记录</p>
+              <p className="mt-0.5 text-[11px] text-text-secondary">账户在管覆盖以页面上方身份核验为准，不能据此判断全部持仓已结束。</p>
             </div>
           )}
         </section>
@@ -273,14 +278,14 @@ export const TradesPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-                历史平仓记录 (Completed Trade Episodes)
+                已结束交易记录 (Completed Trade Episodes)
               </h2>
               <span className="rounded-full bg-surface-subtle px-2 py-0.5 font-mono text-[11px] font-semibold text-text-secondary border border-border">
-                {completedTrades.length} 笔已结清
+                {completedTrades.length} 笔已结束
               </span>
             </div>
             <span className="text-[11px] text-text-muted">
-              完整经由 Reconciliation 与 Review 审计归档
+              终态不等于已成交或已结算，详见每笔结果
             </span>
           </div>
 

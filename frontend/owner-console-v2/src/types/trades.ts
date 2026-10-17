@@ -38,10 +38,10 @@ export interface TradeEpisode {
   protection_state: string;
   is_protected: boolean;
   net_pnl_formatted: string;
-  net_pnl_val: number | null;
+  net_pnl_val: string | null;
   net_pnl_is_positive: boolean | null;
   net_r_formatted: string;
-  net_r_val: number | null;
+  net_r_val: string | null;
   net_r_is_positive: boolean | null;
   gross_pnl_formatted: string;
   fees_formatted: string;

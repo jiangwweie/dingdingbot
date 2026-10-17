@@ -831,13 +831,13 @@ async function runAllTests() {
     // Case A: Positive money
     const pos = formatMoneyMetric({ value: '124.5', unit: 'USDT' });
     assert.equal(pos.formatted, '+124.50 USDT');
-    assert.equal(pos.value, 124.5);
+    assert.equal(pos.value, '124.5');
     assert.equal(pos.isPositive, true);
 
     // Case B: Negative R
     const neg = formatMoneyMetric({ value: '-1.00', unit: 'R' });
     assert.equal(neg.formatted, '-1.00 R');
-    assert.equal(neg.value, -1);
+    assert.equal(neg.value, '-1');
     assert.equal(neg.isPositive, false);
 
     // Case C: Active ticket - honest placeholder
@@ -888,9 +888,9 @@ async function runAllTests() {
     assert.equal(episode.outcome, 'in_progress');
     assert.equal(episode.outcome_zh, '进行中');
     assert.equal(episode.is_protected, true);
-    assert.equal(episode.protection_state, '已受保护 (Protected)');
-    assert.equal(episode.net_pnl_formatted, '持仓中 · 未结');
-    assert.equal(episode.net_r_formatted, '持仓中 · 未结');
+    assert.equal(episode.protection_state, '后端已确认保护');
+    assert.equal(episode.net_pnl_formatted, '在管中 · 未结');
+    assert.equal(episode.net_r_formatted, '在管中 · 未结');
     assert.equal(episode.duration_formatted, '1小时');
     assert.equal(episode.closed_at_formatted, null);
   });
@@ -902,8 +902,8 @@ async function runAllTests() {
       event_spec_id: 'brf2_short',
       exchange_instrument_id: 'binance-usdm:SOLUSDT:perpetual',
       position_side: 'short',
-      ticket_status: 'ticket_terminal',
-      aggregate_status: 'closed',
+      ticket_status: 'terminal',
+      aggregate_status: 'terminal',
       lifecycle_stage: 'review',
       completed_stage_count: 8,
       total_stage_count: 8,
@@ -923,7 +923,7 @@ async function runAllTests() {
     assert.equal(episode.ticket_id, 'tkt-win-001');
     assert.equal(episode.isActive, false);
     assert.equal(episode.outcome, 'win');
-    assert.equal(episode.outcome_zh, '盈利 (Win)');
+    assert.equal(episode.outcome_zh, '已结算 · 盈利 (Win)');
     assert.equal(episode.net_pnl_formatted, '+250.00 USDT');
     assert.equal(episode.net_r_formatted, '+2.50 R');
     assert.equal(episode.duration_formatted, '2小时15分');
@@ -938,8 +938,8 @@ async function runAllTests() {
       event_spec_id: 'mi_long',
       exchange_instrument_id: 'binance-usdm:DOGEUSDT:perpetual',
       position_side: 'long',
-      ticket_status: 'ticket_terminal',
-      aggregate_status: 'closed',
+      ticket_status: 'terminal',
+      aggregate_status: 'terminal',
       lifecycle_stage: 'review',
       completed_stage_count: 8,
       total_stage_count: 8,
@@ -957,7 +957,7 @@ async function runAllTests() {
 
     const episode = mapTradeListItemToEpisode(rawLoss);
     assert.equal(episode.outcome, 'loss');
-    assert.equal(episode.outcome_zh, '亏损 (Loss)');
+    assert.equal(episode.outcome_zh, '已结算 · 亏损 (Loss)');
     assert.equal(episode.net_pnl_formatted, '-100.00 USDT');
     assert.equal(episode.net_r_formatted, '-1.00 R');
     assert.equal(episode.exit_reason_zh, '外部平仓已确认');
@@ -989,7 +989,7 @@ async function runAllTests() {
     assert.equal(metrics.totalNetPnlFormatted, '+100.00 USDT');
     assert.equal(metrics.pnlEvaluatedCount, 4);
     assert.equal(metrics.hasPnlGaps, false);
-    assert.equal(metrics.pnlCoverageText, '全量结清 · 覆盖 4 笔');
+    assert.equal(metrics.pnlCoverageText, '已加载经济数据齐全 · 覆盖 4 笔');
     // Net R: 1.5 + 1.0 - 1.0 + 0 = +1.50 R
     assert.equal(metrics.totalNetRFormatted, '+1.50 R');
     assert.equal(metrics.rEvaluatedCount, 4);
@@ -1004,7 +1004,7 @@ async function runAllTests() {
     const emptyMetrics = computeTradesSummaryMetrics([]);
     assert.equal(emptyMetrics.totalCount, 0);
     assert.equal(emptyMetrics.winRatePercent, null);
-    assert.equal(emptyMetrics.winRateDenominatorText, '暂无历史平仓');
+    assert.equal(emptyMetrics.winRateDenominatorText, '暂无已结束交易');
     assert.equal(emptyMetrics.totalNetPnlFormatted, '—');
     assert.equal(emptyMetrics.scopeLabel, '暂无数据');
   });
