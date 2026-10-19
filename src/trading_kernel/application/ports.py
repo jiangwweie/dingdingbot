@@ -1337,6 +1337,8 @@ class SignalRepository(Protocol):
         self,
         venue_id: str,
         exchange_instrument_id: str,
+        *,
+        for_update: bool = False,
     ) -> InstrumentRulesSnapshot | None: ...
 
     async def upsert_instrument_rules(

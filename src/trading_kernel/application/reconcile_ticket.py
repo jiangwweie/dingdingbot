@@ -459,11 +459,9 @@ async def reconcile_post_fill_stress(
     certified = await uow.signals.get_instrument_rules(
         domain.venue_id,
         domain.exchange_instrument_id,
+        for_update=True,
     )
-    if (
-        certified is None
-        or certified.valid_until_ms <= request.assessed_at_ms
-    ):
+    if certified is None:
         return PostFillStressReconcileResult(
             status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE
         )
@@ -501,6 +499,25 @@ async def reconcile_post_fill_stress(
     ):
         return PostFillStressReconcileResult(
             status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE
+        )
+    if certified.valid_until_ms <= request.assessed_at_ms:
+        # Entry facts have a short action-time lifetime. Refresh their expired
+        # persisted copy using these matching, fresh readonly facts instead of
+        # waiting for the unrelated background certification rotation.
+        await uow.signals.upsert_instrument_rules(
+            venue_id=domain.venue_id,
+            exchange_instrument_id=rules.exchange_instrument_id,
+            quantity_step=rules.quantity_step,
+            price_tick=rules.price_tick,
+            min_quantity=rules.min_quantity,
+            min_notional=rules.min_notional,
+            exchange_max_leverage=rules.exchange_max_leverage,
+            maintenance_margin_brackets=rules.maintenance_margin_brackets,
+            maintenance_margin_brackets_digest=rules.maintenance_margin_brackets_digest,
+            notional_coefficient=rules.notional_coefficient,
+            notional_coefficient_certified=rules.notional_coefficient_certified,
+            observed_at_ms=rules.observed_at_ms,
+            valid_until_ms=rules.valid_until_ms,
         )
     assert aggregate.average_fill_price is not None
     evidence = evaluate_cross_margin_stress(

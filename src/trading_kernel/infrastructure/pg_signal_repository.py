@@ -1463,14 +1463,16 @@ class PostgresSignalRepository:
         self,
         venue_id: str,
         exchange_instrument_id: str,
+        *,
+        for_update: bool = False,
     ) -> InstrumentRulesSnapshot | None:
-        result = await self._connection.execute(
-            sa.select(instrument_rules_current).where(
-                instrument_rules_current.c.venue_id == venue_id,
-                instrument_rules_current.c.exchange_instrument_id
-                == exchange_instrument_id
-            )
+        query = sa.select(instrument_rules_current).where(
+            instrument_rules_current.c.venue_id == venue_id,
+            instrument_rules_current.c.exchange_instrument_id == exchange_instrument_id,
         )
+        if for_update:
+            query = query.with_for_update()
+        result = await self._connection.execute(query)
         row = result.mappings().one_or_none()
         return (
             None
