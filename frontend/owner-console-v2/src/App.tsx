@@ -6,6 +6,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
 import { TradesPage } from './components/trades/TradesPage';
+import { StrategiesPage } from './components/strategies/StrategiesPage';
 import { CausalityDrawer } from './components/overview/CausalityDrawer';
 import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
@@ -127,6 +128,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'trades' && (
           <TradesPage />
+        )}
+
+        {activeTab === 'strategies' && (
+          <StrategiesPage />
         )}
 
         {activeTab === 'controls' && (

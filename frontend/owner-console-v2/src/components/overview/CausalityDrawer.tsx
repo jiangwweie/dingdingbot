@@ -62,7 +62,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClo
   return (
     <div
       data-testid="causality-drawer"
-      className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
+      className="fixed inset-0 z-[70] overflow-hidden bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
       aria-labelledby="slide-over-title"
       role="dialog"
       aria-modal="true"
