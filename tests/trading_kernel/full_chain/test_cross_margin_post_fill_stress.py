@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Literal
 
 import pytest
+import sqlalchemy as sa
 
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
@@ -11,8 +13,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     dispatch_one_command,
 )
 from src.trading_kernel.application.reconcile_ticket import (
+    PostFillStressReconcileRequest,
     ReconcileTicketRequest,
     ReconcileTicketStatus,
+    reconcile_post_fill_stress,
     reconcile_ticket,
 )
 from src.trading_kernel.application.runtime_facts import (
@@ -654,3 +658,211 @@ async def _run_post_fill_worker(
         account_risk_source=source,
         instrument_rules_source=source,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contradictory", [False, True])
+async def test_expired_cached_rules_use_fresh_matching_post_fill_facts(
+    stress_engine,
+    contradictory: bool,
+) -> None:
+    """Real PG: the 30s Entry cache must not await background certification."""
+    ticket = _ticket()
+    await _reach_post_fill_pending(stress_engine, ticket)
+    async with stress_engine.begin() as connection:
+        await connection.execute(
+            sa.text(
+                "UPDATE brc_instrument_rules_current SET valid_until_ms=2500 "
+                "WHERE exchange_instrument_id=:instrument"
+            ),
+            {"instrument": ticket.identity.netting_domain.exchange_instrument_id},
+        )
+    source = StressFactsSource(
+        ticket,
+        margin_balance=max(Decimal(100), ticket.notional * Decimal(10)),
+        contradictory_rules=contradictory,
+    )
+    result = await _run_post_fill_worker(
+        stress_engine,
+        ticket,
+        source,
+        now_ms=40_000,
+    )
+    async with PostgresKernelUnitOfWork(stress_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        cached = await uow.signals.get_instrument_rules(
+            ticket.identity.netting_domain.venue_id,
+            ticket.identity.netting_domain.exchange_instrument_id,
+        )
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate is not None and cached is not None
+    if contradictory:
+        assert result.detail == "post_fill_stress:facts_contradictory"
+        assert aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+        assert cached.valid_until_ms == 2500
+        assert not any(isinstance(e, PostFillStressAssessed) for e in events)
+    else:
+        assert result.detail == "post_fill_stress:passed"
+        assert aggregate.status is AggregateStatus.TP1_PENDING
+        assert cached.observed_at_ms == 40_000
+        assert cached.valid_until_ms == 41_000
+        assert len([e for e in events if isinstance(e, PostFillStressAssessed)]) == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_cached_rules_concurrent_assessment_is_exactly_once(
+    stress_engine,
+) -> None:
+    ticket = _ticket()
+    await _reach_post_fill_pending(stress_engine, ticket)
+    source = StressFactsSource(ticket, margin_balance=ticket.notional * Decimal(10))
+    domain = ticket.identity.netting_domain
+    account = await source.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=40_000,
+            valid_for_ms=1_000,
+        )
+    )
+    rules = await source.read_instrument_rules(
+        InstrumentRulesRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=40_000,
+            valid_for_ms=1_000,
+        )
+    )
+    request = PostFillStressReconcileRequest(
+        ticket_id=ticket.identity.ticket_id,
+        account_snapshot=account,
+        instrument_rules=rules,
+        assessed_at_ms=40_000,
+    )
+
+    async def assess():
+        async with PostgresKernelUnitOfWork(stress_engine) as uow:
+            return await reconcile_post_fill_stress(uow, request)
+
+    results = await asyncio.gather(assess(), assess())
+    assert sorted(r.status.value for r in results) == ["no_change", "passed"]
+    async with PostgresKernelUnitOfWork(stress_engine) as uow:
+        events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+    assert len([e for e in events if isinstance(e, PostFillStressAssessed)]) == 1
+    assert len([c for c in commands if c.kind is ExchangeCommandKind.TAKE_PROFIT]) == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_cached_rules_do_not_accept_stale_live_rules(
+    stress_engine,
+) -> None:
+    ticket = _ticket()
+    await _reach_post_fill_pending(stress_engine, ticket)
+    domain = ticket.identity.netting_domain
+    source = StressFactsSource(ticket, margin_balance=ticket.notional * Decimal(10))
+    account = await source.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=40_000,
+            valid_for_ms=1_000,
+        )
+    )
+    rules = await source.read_instrument_rules(
+        InstrumentRulesRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=38_000,
+            valid_for_ms=1_000,
+        )
+    )
+    async with PostgresKernelUnitOfWork(stress_engine) as uow:
+        before = await uow.signals.get_instrument_rules(
+            domain.venue_id, domain.exchange_instrument_id
+        )
+        result = await reconcile_post_fill_stress(
+            uow,
+            PostFillStressReconcileRequest(
+                ticket_id=ticket.identity.ticket_id,
+                account_snapshot=account,
+                instrument_rules=rules,
+                assessed_at_ms=40_000,
+            ),
+        )
+        after = await uow.signals.get_instrument_rules(
+            domain.venue_id, domain.exchange_instrument_id
+        )
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+    assert result.status.value == "facts_unavailable"
+    assert before == after
+    assert aggregate is not None
+    assert aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+
+
+@pytest.mark.asyncio
+async def test_concurrent_rule_change_is_not_overwritten_by_post_fill_refresh(
+    stress_engine,
+):
+    ticket = _ticket()
+    await _reach_post_fill_pending(stress_engine, ticket)
+    domain = ticket.identity.netting_domain
+    source = StressFactsSource(ticket, margin_balance=ticket.notional * Decimal(10))
+    account = await source.read_account_risk_snapshot(
+        AccountRiskSnapshotRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=40_000,
+            valid_for_ms=1_000,
+        )
+    )
+    rules = await source.read_instrument_rules(
+        InstrumentRulesRequest(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+            observed_at_ms=40_000,
+            valid_for_ms=1_000,
+        )
+    )
+
+    async def assess():
+        async with PostgresKernelUnitOfWork(stress_engine) as uow:
+            return await reconcile_post_fill_stress(
+                uow,
+                PostFillStressReconcileRequest(
+                    ticket_id=ticket.identity.ticket_id,
+                    account_snapshot=account,
+                    instrument_rules=rules,
+                    assessed_at_ms=40_000,
+                ),
+            )
+
+    async with stress_engine.begin() as concurrent_certification:
+        await concurrent_certification.execute(
+            sa.text(
+                "UPDATE brc_instrument_rules_current "
+                "SET maintenance_margin_brackets_digest=:digest WHERE exchange_instrument_id=:instrument"
+            ),
+            {
+                "digest": "sha256:" + "7" * 64,
+                "instrument": domain.exchange_instrument_id,
+            },
+        )
+        task = asyncio.create_task(assess())
+        await asyncio.sleep(0.05)
+    result = await asyncio.wait_for(task, timeout=5)
+    assert result.status.value == "facts_contradictory"
+    async with PostgresKernelUnitOfWork(stress_engine) as uow:
+        cached = await uow.signals.get_instrument_rules(
+            domain.venue_id, domain.exchange_instrument_id
+        )
+    assert cached is not None
+    assert cached.maintenance_margin_brackets_digest == "sha256:" + "7" * 64
