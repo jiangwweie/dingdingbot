@@ -41,6 +41,9 @@ export function formatStrategyMoneyMetric(
     if (metric?.unavailable_reason === 'no_confirmed_natural_review') {
       return { formatted: '无已确认自然评审', value: null, isPositive: null, isUnavailable: true };
     }
+    if (metric?.unavailable_reason === 'ticket_active') {
+      return { formatted: '持仓中 · 未结', value: null, isPositive: null, isUnavailable: true };
+    }
     return { formatted: defaultUnavailableText, value: null, isPositive: null, isUnavailable: true };
   }
 
@@ -56,7 +59,8 @@ export function formatStrategyMoneyMetric(
   }
 
   const sign = num.isPositive() && !num.isZero() ? '+' : '';
-  const formatted = `${sign}${num.toFixed(2)} ${metric.unit}`.trim();
+  const unitStr = metric.unit ? ` ${metric.unit}` : '';
+  const formatted = `${sign}${num.toFixed(2)}${unitStr}`.trim();
   const isPositive = num.isZero() ? null : num.isPositive();
 
   return {

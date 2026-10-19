@@ -127,15 +127,28 @@ export function useStrategiesData() {
 export function useStrategyTicketsData(strategyVersionId?: string | null) {
   const [scope, setScope] = useState<'natural' | 'all'>('natural');
   const [exitPath, setExitPath] = useState<StrategyTicketExitPath | null>(null);
+  const [windowEnd, setWindowEnd] = useState(() => Date.now());
+
+  const windowStart = useMemo(() => windowEnd - 30 * 86_400_000, [windowEnd]);
+
+  // Defensive guard: controlled_exit is illegal in natural scope
+  const effectiveExitPath = useMemo(() => {
+    if (scope === 'natural' && exitPath === 'controlled_exit') {
+      return null;
+    }
+    return exitPath;
+  }, [scope, exitPath]);
 
   const queryParams = useMemo(
     () => ({
       strategy_version_id: strategyVersionId ?? '',
+      from_ms: windowStart,
+      to_ms: windowEnd,
       scope,
-      exit_path: exitPath,
+      exit_path: effectiveExitPath,
       limit: 50,
     }),
-    [strategyVersionId, scope, exitPath]
+    [strategyVersionId, windowStart, windowEnd, scope, effectiveExitPath]
   );
 
   const query = useInfiniteQuery({
@@ -153,8 +166,35 @@ export function useStrategyTicketsData(strategyVersionId?: string | null) {
   });
 
   const rawItems = useMemo<StrategyTicketListItem[]>(() => {
-    return query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
+    const all = query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
+    const seen = new Set<string>();
+    const deduped: StrategyTicketListItem[] = [];
+    for (const item of all) {
+      const key = item.ticket_id || `${item.exchange_instrument_id}-${item.issued_at_ms}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped;
   }, [query.data]);
+
+  // Natural scope strictly admits natural terminal paths (tp1_reached / tp1_not_reached)
+  const items = useMemo<StrategyTicketListItem[]>(() => {
+    if (scope === 'natural') {
+      return rawItems.filter(
+        (item) => item.evaluation_path === 'tp1_reached' || item.evaluation_path === 'tp1_not_reached'
+      );
+    }
+    return rawItems;
+  }, [rawItems, scope]);
+
+  const excludedNonTerminalCount = useMemo(() => {
+    if (scope === 'natural') {
+      return rawItems.filter((item) => item.evaluation_path === 'not_terminal').length;
+    }
+    return 0;
+  }, [rawItems, scope]);
 
   const fetchNextPage = useCallback(async () => {
     if (query.hasNextPage && !query.isFetchingNextPage) {
@@ -162,8 +202,15 @@ export function useStrategyTicketsData(strategyVersionId?: string | null) {
     }
   }, [query]);
 
+  const refetch = useCallback(async () => {
+    setWindowEnd(Date.now());
+    await query.refetch();
+  }, [query]);
+
   return {
-    items: rawItems,
+    items,
+    rawItems,
+    excludedNonTerminalCount,
     scope,
     setScope,
     exitPath,
@@ -173,22 +220,30 @@ export function useStrategyTicketsData(strategyVersionId?: string | null) {
     isFetchingNextPage: query.isFetchingNextPage,
     hasNextPage: Boolean(query.hasNextPage),
     isFetchNextPageError: query.isFetchNextPageError,
+    isError: query.isError,
     error: query.error,
     fetchNextPage,
-    refetch: query.refetch,
+    refetch,
+    windowStart,
+    windowEnd,
   };
 }
 
 export function useStrategyObservationsData(strategyVersionId?: string | null) {
   const [firstPath, setFirstPath] = useState<StrategyObservationFirstPath | null>(null);
+  const [windowEnd, setWindowEnd] = useState(() => Date.now());
+
+  const windowStart = useMemo(() => windowEnd - 30 * 86_400_000, [windowEnd]);
 
   const queryParams = useMemo(
     () => ({
       strategy_version_id: strategyVersionId ?? '',
+      from_ms: windowStart,
+      to_ms: windowEnd,
       first_path: firstPath,
       limit: 50,
     }),
-    [strategyVersionId, firstPath]
+    [strategyVersionId, windowStart, windowEnd, firstPath]
   );
 
   const query = useInfiniteQuery({
@@ -206,13 +261,28 @@ export function useStrategyObservationsData(strategyVersionId?: string | null) {
   });
 
   const rawItems = useMemo<StrategyObservationListItem[]>(() => {
-    return query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
+    const all = query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
+    const seen = new Set<string>();
+    const deduped: StrategyObservationListItem[] = [];
+    for (const item of all) {
+      const key = item.shadow_outcome_id || `${item.exchange_instrument_id}-${item.occurred_at_ms}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(item);
+      }
+    }
+    return deduped;
   }, [query.data]);
 
   const fetchNextPage = useCallback(async () => {
     if (query.hasNextPage && !query.isFetchingNextPage) {
       await query.fetchNextPage();
     }
+  }, [query]);
+
+  const refetch = useCallback(async () => {
+    setWindowEnd(Date.now());
+    await query.refetch();
   }, [query]);
 
   return {
@@ -224,8 +294,11 @@ export function useStrategyObservationsData(strategyVersionId?: string | null) {
     isFetchingNextPage: query.isFetchingNextPage,
     hasNextPage: Boolean(query.hasNextPage),
     isFetchNextPageError: query.isFetchNextPageError,
+    isError: query.isError,
     error: query.error,
     fetchNextPage,
-    refetch: query.refetch,
+    refetch,
+    windowStart,
+    windowEnd,
   };
 }

@@ -3,6 +3,7 @@ import { useStrategyObservationsData } from '../../hooks/useStrategiesData.ts';
 import type { StrategyObservationFirstPath } from '../../types/strategies.ts';
 import { formatFirstPathLabel, formatObservationMetric } from '../../mapping/strategyMapping.ts';
 import { cleanSymbol } from '../../utils/symbol.ts';
+import { ApiError } from '../../api/errors.ts';
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -11,6 +12,16 @@ import {
   AlertCircle,
   Compass,
 } from 'lucide-react';
+
+const getErrorMessage = (err: unknown): string => {
+  if (err instanceof ApiError) {
+    return `[HTTP ${err.status} ${err.code}] ${err.message}`;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return '网络或服务异常，未能获取观察记录';
+};
 
 interface StrategyObservationsTabProps {
   strategyVersionId: string;
@@ -27,8 +38,10 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
     isFetchingNextPage,
     hasNextPage,
     isFetchNextPageError,
+    isError,
     error,
     fetchNextPage,
+    refetch,
   } = useStrategyObservationsData(strategyVersionId);
 
   return (
@@ -80,6 +93,23 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
         <div className="py-16 text-center">
           <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-2" />
           <p className="text-xs text-text-secondary">正在读取版本 Observation 证据...</p>
+        </div>
+      ) : isError && items.length === 0 ? (
+        /* P1-1: Explicit Error Card when initial load fails */
+        <div className="rounded-lg border border-danger/30 bg-surface p-8 text-center text-xs">
+          <AlertCircle className="mx-auto h-8 w-8 text-danger mb-2" />
+          <p className="font-semibold text-text-primary">Observation 证据读取失败</p>
+          <p className="mt-1 text-[11px] text-text-secondary font-mono">
+            {getErrorMessage(error)}
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-4 inline-flex items-center gap-1.5 rounded bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand/90 transition-colors shadow-xs cursor-pointer"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>重试加载</span>
+          </button>
         </div>
       ) : items.length === 0 ? (
         <div className="rounded-lg border border-border bg-surface p-8 text-center text-xs text-text-muted">
@@ -228,10 +258,22 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
             </div>
           )}
 
+          {/* P1-1: Next Page Fetch Error Bar with Retry */}
           {isFetchNextPageError && (
-            <div className="p-3 bg-danger/10 text-danger text-xs text-center border-t border-danger/20 flex items-center justify-center gap-1.5">
-              <AlertCircle className="h-4 w-4" />
-              <span>加载下一页观察失败: {error instanceof Error ? error.message : '网络或服务异常'}</span>
+            <div className="p-3 bg-danger/10 text-danger text-xs border-t border-danger/20 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-mono">
+                <AlertCircle className="h-4 w-4 shrink-0 font-sans" />
+                <span>加载下一页观察失败: {getErrorMessage(error)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="inline-flex items-center gap-1 rounded border border-danger/30 bg-surface px-2.5 py-1 text-xs font-semibold text-danger hover:bg-danger/10 transition-colors shadow-xs cursor-pointer"
+              >
+                <RefreshCw className={`h-3 w-3 ${isFetchingNextPage ? 'animate-spin' : ''}`} />
+                <span>重试下一页</span>
+              </button>
             </div>
           )}
         </div>

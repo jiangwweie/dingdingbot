@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchTicketCausality, causalityQueryKey } from '../../api/ticketsApi';
 import type { TradeEpisodeSummary } from '../../types/overview';
 import type { TradeEpisode } from '../../types/trades';
+import { useDrawerDismiss } from '../../hooks/useDrawerDismiss';
 import {
   X,
   CheckCircle2,
@@ -35,6 +36,12 @@ const STAGE_LABELS_ZH: Record<string, string> = {
 
 
 export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({ episode, onClose }) => {
+  useDrawerDismiss({
+    isOpen: Boolean(episode),
+    onClose,
+    drawerId: 'causality-drawer',
+  });
+
   const [activeTab, setActiveTab] = useState<'timeline' | 'commands' | 'events' | 'incidents' | 'evidence'>('timeline');
   const [copied, setCopied] = useState(false);
 

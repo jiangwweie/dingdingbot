@@ -3,6 +3,7 @@ import type { EnrichedStrategyVersion, StrategyDetailTabId, StrategyTicketListIt
 import { StrategyTicketsTab } from './StrategyTicketsTab.tsx';
 import { StrategyObservationsTab } from './StrategyObservationsTab.tsx';
 import { useSelectionPreview } from '../../hooks/useControlsData.ts';
+import { useDrawerDismiss } from '../../hooks/useDrawerDismiss.ts';
 import { mapPreviewToDiagnostic } from '../../mapping/selectionMapping.ts';
 import { cleanSymbol } from '../../utils/symbol.ts';
 import {
@@ -27,6 +28,12 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   onClose,
   onSelectTicket,
 }) => {
+  useDrawerDismiss({
+    isOpen: Boolean(strategy),
+    onClose,
+    drawerId: 'strategy-detail-drawer',
+  });
+
   const [activeTab, setActiveTab] = useState<StrategyDetailTabId>('performance');
 
   // Reset tab when strategy changes
@@ -36,7 +43,12 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
 
   // Selection preview query
   const strategyGroupId = strategy?.summary.strategy_group_id ?? '';
-  const { data: rawPreview, isLoading: isSelectionLoading } = useSelectionPreview(strategyGroupId);
+  const {
+    data: rawPreview,
+    isLoading: isSelectionLoading,
+    isError: isSelectionError,
+    error: selectionError,
+  } = useSelectionPreview(strategyGroupId);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -457,6 +469,18 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                     </>
                   );
                 })()}
+              </div>
+            ) : isSelectionError ? (
+              <div className="rounded-lg border border-border bg-surface p-8 text-center text-xs text-text-muted space-y-2">
+                <Compass className="mx-auto h-8 w-8 text-text-muted/50 mb-2" />
+                <p className="font-semibold text-text-secondary">该策略未配置动态选币引擎</p>
+                <p className="text-[11px] text-text-muted">标的池遵循静态配置文件或策略独立指定标的。</p>
+                <div className="mt-3 inline-flex items-center gap-1.5 rounded bg-surface-subtle border border-border px-3 py-1 font-mono text-[10px] text-text-secondary">
+                  <span>服务端响应:</span>
+                  <span className="font-semibold text-text-primary">
+                    {selectionError instanceof Error ? selectionError.message : 'generic_strategy_not_supported'}
+                  </span>
+                </div>
               </div>
             ) : (
               <div className="rounded-lg border border-border bg-surface p-8 text-center text-xs text-text-muted">
