@@ -27,11 +27,25 @@ const getErrorMessage = (err: unknown): string => {
 interface StrategyTicketsTabProps {
   strategyVersionId: string;
   onSelectTicket: (ticket: StrategyTicketListItem) => void;
+  from_ms?: number;
+  to_ms?: number;
+  scope?: 'natural' | 'all';
+  exit_path?: StrategyTicketExitPath | null;
+  onScopeChange?: (scope: 'natural' | 'all') => void;
+  onExitPathChange?: (exitPath: StrategyTicketExitPath | null) => void;
+  onTicketFiltersChange?: (filters: { scope?: 'natural' | 'all'; exit_path?: StrategyTicketExitPath | null }) => void;
 }
 
 export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
   strategyVersionId,
   onSelectTicket,
+  from_ms,
+  to_ms,
+  scope: externalScope,
+  exit_path: externalExitPath,
+  onScopeChange,
+  onExitPathChange,
+  onTicketFiltersChange,
 }) => {
   const {
     items,
@@ -48,21 +62,41 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
     error,
     fetchNextPage,
     refetch,
-  } = useStrategyTicketsData(strategyVersionId);
+  } = useStrategyTicketsData(strategyVersionId, {
+    from_ms,
+    to_ms,
+    scope: externalScope,
+    exit_path: externalExitPath,
+  });
 
   // P1-3: Auto switch scope when selecting controlled_exit, or reset exitPath when selecting natural
   const handleScopeChange = (newScope: 'natural' | 'all') => {
     if (newScope === 'natural' && exitPath === 'controlled_exit') {
       setExitPath(null);
+      if (onTicketFiltersChange) {
+        onTicketFiltersChange({ scope: newScope, exit_path: null });
+        return;
+      }
+      onExitPathChange?.(null);
     }
     setScope(newScope);
+    onScopeChange?.(newScope);
   };
 
   const handleExitPathChange = (path: StrategyTicketExitPath | null) => {
     if (path === 'controlled_exit' && scope === 'natural') {
       setScope('all');
+      setExitPath(path);
+      if (onTicketFiltersChange) {
+        onTicketFiltersChange({ scope: 'all', exit_path: path });
+        return;
+      }
+      onScopeChange?.('all');
+      onExitPathChange?.(path);
+      return;
     }
     setExitPath(path);
+    onExitPathChange?.(path);
   };
 
   return (
@@ -139,7 +173,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
           <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-2" />
           <p className="text-xs text-text-secondary">正在读取版本 Ticket 证据...</p>
         </div>
-      ) : isError && items.length === 0 ? (
+      ) : isError && !isFetchNextPageError && items.length === 0 ? (
         /* P1-1: Explicit Error Card when initial load fails */
         <div className="rounded-lg border border-danger/30 bg-surface p-8 text-center text-xs">
           <AlertCircle className="mx-auto h-8 w-8 text-danger mb-2" />
@@ -202,7 +236,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
             <p className="font-semibold text-text-secondary">当前筛选条件下无 Ticket 记录</p>
             <p className="mt-1 text-[11px]">
               {scope === 'natural' && excludedNonTerminalCount > 0
-                ? `已排除 ${excludedNonTerminalCount} 笔在途未达终态记录，当前查询的 30 天范围内无已达成终态记录。`
+                ? `已排除 ${excludedNonTerminalCount} 笔在途未达终态记录，当前查询范围内无已达成终态记录。`
                 : '请调整退出路径或范围筛选条件。'}
             </p>
           </div>
@@ -315,6 +349,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
                       {/* Issued At */}
                       <td className="px-3 py-2.5 font-mono text-[11px] text-text-muted whitespace-nowrap">
                         {new Date(ticket.issued_at_ms).toLocaleString('zh-CN', {
+                          timeZone: 'Asia/Shanghai',
                           month: '2-digit',
                           day: '2-digit',
                           hour: '2-digit',

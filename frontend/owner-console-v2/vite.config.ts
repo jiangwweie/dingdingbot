@@ -4,6 +4,9 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
   plugins: [react(), basicSsl()],
+  build: {
+    chunkSizeWarningLimit: 1000,
+  },
   server: {
     port: 5174,
     host: '127.0.0.1',

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import {
   fetchStrategies,
@@ -22,12 +22,26 @@ import type {
 } from '../types/strategies.ts';
 import type { StrategyAdmissionHealth } from '../types/controls.ts';
 
-export function useStrategiesData() {
-  const [view, setView] = useState<StrategyViewMode>('current');
+export interface UseStrategiesDataOptions {
+  view?: StrategyViewMode;
+  from_ms?: number;
+  to_ms?: number;
+}
+
+export function useStrategiesData(options?: UseStrategiesDataOptions) {
+  const [internalView, setInternalView] = useState<StrategyViewMode>('current');
+
+  const view = options?.view ?? internalView;
+  const setView = useCallback((nextView: StrategyViewMode) => {
+    setInternalView(nextView);
+  }, []);
+
+  const from_ms = options?.from_ms;
+  const to_ms = options?.to_ms;
 
   const strategiesQuery = useQuery({
-    queryKey: strategiesQueryKey({ view }),
-    queryFn: () => fetchStrategies({ view }),
+    queryKey: strategiesQueryKey({ view, from_ms, to_ms }),
+    queryFn: () => fetchStrategies({ view, from_ms, to_ms }),
     staleTime: 30_000,
     retry: false,
   });
@@ -94,12 +108,14 @@ export function useStrategiesData() {
 
   const enrichedStrategies = useMemo<EnrichedStrategyVersion[]>(() => {
     return rawSummaries.map((summary) => {
-      const runtime = runtimeMap.get(summary.strategy_group_id);
-      return enrichStrategyVersion(summary, runtime?.control, {
+      const runtime = summary.is_current ? runtimeMap.get(summary.strategy_group_id) : undefined;
+      const enriched = enrichStrategyVersion(summary, runtime?.control, {
         firstBlocker: runtime?.firstBlocker,
         activeTicketCount: runtime?.activeTicketCount,
         admissionHealth: runtime?.admissionHealth,
       });
+      if (!summary.is_current) enriched.runtimeStatusLabel = '历史版本 · 不归属当前运行占用';
+      return enriched;
     });
   }, [rawSummaries, runtimeMap]);
 
@@ -109,6 +125,7 @@ export function useStrategiesData() {
 
   return {
     strategies: enrichedStrategies,
+    liveActiveTicketCount: controlsQuery.data?.account_capacity?.active_ticket_count ?? null,
     rawSummaries,
     view,
     setView,
@@ -124,12 +141,51 @@ export function useStrategiesData() {
   };
 }
 
-export function useStrategyTicketsData(strategyVersionId?: string | null) {
-  const [scope, setScope] = useState<'natural' | 'all'>('natural');
-  const [exitPath, setExitPath] = useState<StrategyTicketExitPath | null>(null);
-  const [windowEnd, setWindowEnd] = useState(() => Date.now());
+export interface UseStrategyTicketsOptions {
+  from_ms?: number;
+  to_ms?: number;
+  scope?: 'natural' | 'all';
+  exit_path?: StrategyTicketExitPath | null;
+}
 
-  const windowStart = useMemo(() => windowEnd - 30 * 86_400_000, [windowEnd]);
+export function useStrategyTicketsData(
+  strategyVersionId?: string | null,
+  options?: UseStrategyTicketsOptions
+) {
+  const [internalScope, setInternalScope] = useState<'natural' | 'all'>('natural');
+  const [internalExitPath, setInternalExitPath] = useState<StrategyTicketExitPath | null>(null);
+  const [internalWindowEnd, setInternalWindowEnd] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (options && 'scope' in options) {
+      setInternalScope(options.scope ?? 'natural');
+    }
+  }, [options?.scope]);
+
+  useEffect(() => {
+    if (options && 'exit_path' in options) {
+      setInternalExitPath(options.exit_path ?? null);
+    }
+  }, [options?.exit_path]);
+
+  const scope =
+    options && 'scope' in options
+      ? (options.scope ?? 'natural')
+      : internalScope;
+  const setScope = useCallback((newScope: 'natural' | 'all') => {
+    setInternalScope(newScope);
+  }, []);
+
+  const exitPath =
+    options && 'exit_path' in options
+      ? (options.exit_path ?? null)
+      : internalExitPath;
+  const setExitPath = useCallback((newExitPath: StrategyTicketExitPath | null) => {
+    setInternalExitPath(newExitPath);
+  }, []);
+
+  const windowEnd = options?.to_ms ?? internalWindowEnd;
+  const windowStart = options?.from_ms ?? (windowEnd - 30 * 86_400_000);
 
   // Defensive guard: controlled_exit is illegal in natural scope
   const effectiveExitPath = useMemo(() => {
@@ -203,9 +259,11 @@ export function useStrategyTicketsData(strategyVersionId?: string | null) {
   }, [query]);
 
   const refetch = useCallback(async () => {
-    setWindowEnd(Date.now());
+    if (!options?.to_ms) {
+      setInternalWindowEnd(Date.now());
+    }
     await query.refetch();
-  }, [query]);
+  }, [query, options?.to_ms]);
 
   return {
     items,
@@ -229,11 +287,35 @@ export function useStrategyTicketsData(strategyVersionId?: string | null) {
   };
 }
 
-export function useStrategyObservationsData(strategyVersionId?: string | null) {
-  const [firstPath, setFirstPath] = useState<StrategyObservationFirstPath | null>(null);
-  const [windowEnd, setWindowEnd] = useState(() => Date.now());
+export interface UseStrategyObservationsOptions {
+  from_ms?: number;
+  to_ms?: number;
+  first_path?: StrategyObservationFirstPath | null;
+}
 
-  const windowStart = useMemo(() => windowEnd - 30 * 86_400_000, [windowEnd]);
+export function useStrategyObservationsData(
+  strategyVersionId?: string | null,
+  options?: UseStrategyObservationsOptions
+) {
+  const [internalFirstPath, setInternalFirstPath] = useState<StrategyObservationFirstPath | null>(null);
+  const [internalWindowEnd, setInternalWindowEnd] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (options && 'first_path' in options) {
+      setInternalFirstPath(options.first_path ?? null);
+    }
+  }, [options?.first_path]);
+
+  const firstPath =
+    options && 'first_path' in options
+      ? (options.first_path ?? null)
+      : internalFirstPath;
+  const setFirstPath = useCallback((newFirstPath: StrategyObservationFirstPath | null) => {
+    setInternalFirstPath(newFirstPath);
+  }, []);
+
+  const windowEnd = options?.to_ms ?? internalWindowEnd;
+  const windowStart = options?.from_ms ?? (windowEnd - 30 * 86_400_000);
 
   const queryParams = useMemo(
     () => ({
@@ -281,9 +363,11 @@ export function useStrategyObservationsData(strategyVersionId?: string | null) {
   }, [query]);
 
   const refetch = useCallback(async () => {
-    setWindowEnd(Date.now());
+    if (!options?.to_ms) {
+      setInternalWindowEnd(Date.now());
+    }
     await query.refetch();
-  }, [query]);
+  }, [query, options?.to_ms]);
 
   return {
     items: rawItems,

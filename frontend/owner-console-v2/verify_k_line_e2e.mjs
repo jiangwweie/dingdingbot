@@ -166,6 +166,7 @@ async function runKlineE2E() {
       const isTicket1 = reqTicketId.includes('76be9c73');
       const inst = isTicket1 ? 'binance-usdm:TRXUSDT:perpetual' : 'binance-usdm:ETHUSDT:perpetual';
       const timeOffset = isTicket1 ? 0 : 3600000;
+      const originalTrade = facts.tickets.items.find(t => t.ticket_id === reqTicketId);
       const causalityData = {
         ...facts.causality,
         annotations: [
@@ -180,7 +181,7 @@ async function runKlineE2E() {
           ...facts.causality.trade,
           ticket_id: reqTicketId,
           exchange_instrument_id: inst,
-          terminal_at_ms: (facts.causality.trade.terminal_at_ms || baseTimeMs) + timeOffset,
+          terminal_at_ms: originalTrade?.terminal_at_ms === null ? null : (facts.causality.trade.terminal_at_ms || baseTimeMs) + timeOffset,
           position_side: 'short',
         },
       };
@@ -302,7 +303,7 @@ async function runKlineE2E() {
     await page.waitForTimeout(500);
 
     console.log('Step 2: Opening Causality Drawer for ticket...');
-    const causalityBtn = page.getByRole('button', { name: /因果详情|查看交易因果/ }).first();
+    const causalityBtn = page.locator('[data-testid=active-trade-card][data-ticket-id="ticket:76be9c73106d6a80ac8150a555f8f902"]').getByRole('button', { name: /因果详情|查看交易因果/ });
     await causalityBtn.waitFor({ state: 'visible', timeout: 5000 });
     await causalityBtn.click();
 

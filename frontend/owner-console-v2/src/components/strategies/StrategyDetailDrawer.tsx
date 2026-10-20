@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import type { EnrichedStrategyVersion, StrategyDetailTabId, StrategyTicketListItem } from '../../types/strategies.ts';
+import type {
+  EnrichedStrategyVersion,
+  StrategyDetailTabId,
+  StrategyTicketListItem,
+  StrategyTicketExitPath,
+  StrategyObservationFirstPath,
+} from '../../types/strategies.ts';
 import { StrategyTicketsTab } from './StrategyTicketsTab.tsx';
 import { StrategyObservationsTab } from './StrategyObservationsTab.tsx';
 import { useSelectionPreview } from '../../hooks/useControlsData.ts';
@@ -15,6 +21,7 @@ import {
   Sliders,
   CheckCircle2,
   TrendingUp,
+  RefreshCw,
 } from 'lucide-react';
 
 interface StrategyDetailDrawerProps {
@@ -22,6 +29,18 @@ interface StrategyDetailDrawerProps {
   onClose: () => void;
   onSelectTicket: (ticket: StrategyTicketListItem) => void;
   onSelectTicketId?: (ticketId: string) => void;
+  from_ms?: number;
+  to_ms?: number;
+  activeDrawerTab?: StrategyDetailTabId;
+  onTabChange?: (tab: StrategyDetailTabId) => void;
+  scope?: 'natural' | 'all';
+  exit_path?: StrategyTicketExitPath | null;
+  first_path?: StrategyObservationFirstPath | null;
+  onScopeChange?: (scope: 'natural' | 'all') => void;
+  onExitPathChange?: (exitPath: StrategyTicketExitPath | null) => void;
+  onFirstPathChange?: (firstPath: StrategyObservationFirstPath | null) => void;
+  onTicketFiltersChange?: (filters: { scope?: 'natural' | 'all'; exit_path?: StrategyTicketExitPath | null }) => void;
+  isStrategiesFetching?: boolean;
 }
 
 export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
@@ -29,6 +48,18 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   onClose,
   onSelectTicket,
   onSelectTicketId,
+  from_ms,
+  to_ms,
+  activeDrawerTab,
+  onTabChange,
+  scope,
+  exit_path,
+  first_path,
+  onScopeChange,
+  onExitPathChange,
+  onFirstPathChange,
+  onTicketFiltersChange,
+  isStrategiesFetching,
 }) => {
   useDrawerDismiss({
     isOpen: Boolean(strategy),
@@ -36,12 +67,28 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
     drawerId: 'strategy-detail-drawer',
   });
 
-  const [activeTab, setActiveTab] = useState<StrategyDetailTabId>('performance');
+  const [activeTab, setActiveTab] = useState<StrategyDetailTabId>(
+    activeDrawerTab ?? 'performance'
+  );
 
-  // Reset tab when strategy changes
+  // Sync tab with external prop if provided
   useEffect(() => {
-    setActiveTab('performance');
-  }, [strategy?.summary.strategy_version_id]);
+    if (activeDrawerTab && activeDrawerTab !== activeTab) {
+      setActiveTab(activeDrawerTab);
+    }
+  }, [activeDrawerTab]);
+
+  // Reset tab when strategy changes unless already specified
+  useEffect(() => {
+    if (!activeDrawerTab) {
+      setActiveTab('performance');
+    }
+  }, [strategy?.summary.strategy_version_id, activeDrawerTab]);
+
+  const handleTabClick = (tabId: StrategyDetailTabId) => {
+    setActiveTab(tabId);
+    onTabChange?.(tabId);
+  };
 
   // Selection preview query
   const strategyGroupId = strategy?.summary.strategy_group_id ?? '';
@@ -125,7 +172,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as StrategyDetailTabId)}
+              onClick={() => handleTabClick(tab.id as StrategyDetailTabId)}
               className={`flex items-center gap-1.5 py-3 px-3.5 font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
                 isActive
                   ? 'border-brand text-brand font-semibold'
@@ -138,6 +185,33 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
           );
         })}
       </div>
+
+      {/* 2.5 Time Range Inheritance Ribbon */}
+      {from_ms && to_ms && (
+        <div
+          data-testid="strategy-drawer-time-banner"
+          className="flex items-center justify-between border-b border-border bg-surface-subtle px-6 py-2 text-xs text-text-secondary"
+        >
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded bg-brand/10 px-2 py-0.5 font-mono text-[10px] font-bold text-brand">
+              时间对齐
+            </span>
+            <span className="text-[11px] text-text-muted">继承策略表现时间窗口:</span>
+            <span className="font-mono text-[11px] font-semibold text-text-primary">
+              {new Date(from_ms).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })} ~ {new Date(to_ms).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+            </span>
+            {isStrategiesFetching && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-brand animate-pulse font-medium ml-2">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                正在刷新该时间窗口表现...
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-text-muted">
+            自然退出指标、Tickets 与 Observations 均严格对齐
+          </span>
+        </div>
+      )}
 
       {/* 3. Tab Contents (Scrollable) */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -500,6 +574,13 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
             <StrategyTicketsTab
               strategyVersionId={summary.strategy_version_id}
               onSelectTicket={onSelectTicket}
+              from_ms={from_ms}
+              to_ms={to_ms}
+              scope={scope ?? 'natural'}
+              exit_path={exit_path ?? null}
+              onScopeChange={onScopeChange}
+              onExitPathChange={onExitPathChange}
+              onTicketFiltersChange={onTicketFiltersChange}
             />
           </div>
         )}
@@ -510,6 +591,10 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
             <StrategyObservationsTab
               strategyVersionId={summary.strategy_version_id}
               onSelectTicketId={onSelectTicketId}
+              from_ms={from_ms}
+              to_ms={to_ms}
+              first_path={first_path ?? null}
+              onFirstPathChange={onFirstPathChange}
             />
           </div>
         )}

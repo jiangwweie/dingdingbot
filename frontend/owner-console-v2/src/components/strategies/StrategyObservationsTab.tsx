@@ -29,11 +29,19 @@ const getErrorMessage = (err: unknown): string => {
 interface StrategyObservationsTabProps {
   strategyVersionId: string;
   onSelectTicketId?: (ticketId: string) => void;
+  from_ms?: number;
+  to_ms?: number;
+  first_path?: StrategyObservationFirstPath | null;
+  onFirstPathChange?: (firstPath: StrategyObservationFirstPath | null) => void;
 }
 
 export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = ({
   strategyVersionId,
   onSelectTicketId,
+  from_ms,
+  to_ms,
+  first_path: externalFirstPath,
+  onFirstPathChange,
 }) => {
   const [selectedObservationForChart, setSelectedObservationForChart] =
     useState<StrategyObservationListItem | null>(null);
@@ -50,7 +58,16 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
     error,
     fetchNextPage,
     refetch,
-  } = useStrategyObservationsData(strategyVersionId);
+  } = useStrategyObservationsData(strategyVersionId, {
+    from_ms,
+    to_ms,
+    first_path: externalFirstPath,
+  });
+
+  const handleFirstPathChange = (path: StrategyObservationFirstPath | null) => {
+    setFirstPath(path);
+    onFirstPathChange?.(path);
+  };
 
   return (
     <div className="space-y-4">
@@ -84,7 +101,7 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
           <button
             key={item.label}
             type="button"
-            onClick={() => setFirstPath(item.id as StrategyObservationFirstPath | null)}
+            onClick={() => handleFirstPathChange(item.id as StrategyObservationFirstPath | null)}
             className={`rounded px-2.5 py-1 text-xs transition-colors ${
               firstPath === item.id
                 ? 'bg-brand/10 text-brand font-bold border border-brand/30'
@@ -233,6 +250,7 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
                       {/* Occurred At */}
                       <td className="px-3 py-2.5 text-[11px] text-text-muted whitespace-nowrap font-sans">
                         {new Date(obs.occurred_at_ms).toLocaleString('zh-CN', {
+                          timeZone: 'Asia/Shanghai',
                           month: '2-digit',
                           day: '2-digit',
                           hour: '2-digit',

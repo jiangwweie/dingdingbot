@@ -29,7 +29,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
             <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
               <th scope="col" className="px-4 py-3 font-semibold">策略 / 版本</th>
               <th scope="col" className="px-3 py-3 font-semibold">运行时控制</th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">30天自然净盈亏</th>
+              <th scope="col" className="px-3 py-3 font-semibold text-right">查询范围自然净盈亏</th>
               <th scope="col" className="px-3 py-3 font-semibold text-right">自然净 R</th>
               <th scope="col" className="px-3 py-3 font-semibold text-right">自然胜率</th>
               <th scope="col" className="px-3 py-3 font-semibold">终态构成 (自然 / 受控)</th>
@@ -95,7 +95,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                       {st.activeTicketCount > 0 ? (
                         <span className="text-brand font-semibold">{st.activeTicketCount} 笔在管持仓</span>
                       ) : (
-                        <span>当前在管 0</span>
+                        <span>{st.isCurrent ? '当前在管 0' : '历史版本 · 不归属当前持仓'}</span>
                       )}
                     </div>
                   </td>

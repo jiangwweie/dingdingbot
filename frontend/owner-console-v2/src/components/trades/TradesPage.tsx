@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useTradesData } from '../../hooks/useTradesData';
+import { useTradesFilterState } from '../../hooks/useUrlSearchParams';
+import { TradesFilterBar } from './TradesFilterBar';
 import { ActiveTradeCard } from './ActiveTradeCard';
 import { CompletedTradeTable } from './CompletedTradeTable';
 import { CausalityDrawer } from '../overview/CausalityDrawer';
-import type { TradeEpisode, TradeFilterMode } from '../../types/trades';
+import type { TradeEpisode } from '../../types/trades';
 import {
   RefreshCw,
   AlertCircle,
@@ -15,12 +17,17 @@ import {
 } from 'lucide-react';
 
 export const TradesPage: React.FC = () => {
+  const { filters, setFilters, resetFilters } = useTradesFilterState();
+
   const {
     isLoading,
     isFetching,
     isFetchingNextPage,
     hasNextPage,
     paginationError,
+    refreshError,
+    liveError,
+    isLiveLoading,
     fetchNextPage,
     isError,
     error,
@@ -28,57 +35,22 @@ export const TradesPage: React.FC = () => {
     allTrades,
     activeTrades,
     coverage,
+    liveActiveTicketCount,
     completedTrades,
     metrics,
     refetch,
-  } = useTradesData();
+  } = useTradesData(filters);
 
-  const [filterMode, setFilterMode] = useState<TradeFilterMode>('all');
+  const filterMode = filters.filter_mode;
+  const setFilterMode = (mode: 'all' | 'active' | 'completed') => {
+    setFilters({ filter_mode: mode });
+  };
+
   const [selectedEpisode, setSelectedEpisode] = useState<TradeEpisode | null>(null);
 
   const handleManualRefresh = async () => {
     await refetch();
   };
-
-  if (isLoading) {
-    return (
-      <div id="trades-page" className="py-24 text-center">
-        <div className="inline-block h-7 w-7 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-3" />
-        <h3 className="text-sm font-semibold text-text-primary">
-          正在从生产 API 加载交易账本事实...
-        </h3>
-        <p className="mt-1 text-xs text-text-muted">
-          读取 /api/owner/v1/tickets · 严格杜绝任何 Mock 假数据
-        </p>
-      </div>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div id="trades-page" className="rounded-xl border border-danger/30 bg-surface p-8 text-center max-w-lg mx-auto my-12 shadow-sm">
-        <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-danger/10 text-danger mb-4">
-          <AlertCircle className="h-6 w-6" />
-        </div>
-        <h3 className="text-base font-bold text-text-primary">
-          无法连接 Tickets API
-        </h3>
-        <p className="mt-1.5 text-xs text-text-secondary leading-relaxed">
-          {error instanceof Error ? error.message : '请检查生产网络连接或认证状态。严格拒绝任何静默伪造。'}
-        </p>
-        <div className="mt-5">
-          <button
-            type="button"
-            onClick={handleManualRefresh}
-            className="inline-flex items-center gap-1.5 rounded bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand/90 transition-colors shadow-xs"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            <span>重新加载 (Retry)</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div id="trades-page" className="space-y-5">
@@ -132,7 +104,7 @@ export const TradesPage: React.FC = () => {
                   : 'text-text-muted hover:text-text-primary'
               }`}
             >
-              在管 ({metrics.activeCount})
+              在管 ({liveActiveTicketCount ?? '未知'})
             </button>
             <button
               type="button"
@@ -160,16 +132,39 @@ export const TradesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* 2. Unified Historical Filter Bar */}
+      <TradesFilterBar
+        filters={filters}
+        onChange={setFilters}
+        onReset={resetFilters}
+        disabled={isFetching}
+      />
+
+      {/* 3. Live Active Coverage Ribbon */}
       <div role="status" className="rounded border border-border bg-surface p-3 text-xs text-text-secondary" data-testid="active-coverage">
-        在管身份核验：已加载 {activeTrades.length} 笔；Overview 报告 {coverage.count ?? '未知'} 笔。
-        {coverage.complete ? ' 本次只读快照身份一致。' : ` 覆盖尚未确认，已知未覆盖 ${coverage.missing.length} 笔；当前记录仅代表已加载范围。`}
+        实时在管身份核验：已加载 {activeTrades.length} 笔；Overview 报告 {liveActiveTicketCount ?? '未知'} 笔。
+        历史筛选不影响此区域，实时在管交易不受历史日期、策略、标的、方向或状态条件限制。
+        {coverage.complete ? ' 本次只读快照身份一致。' : ` 覆盖尚未确认，已知未覆盖 ${coverage.missing.length} 笔。`}
+        {liveError && <span role="alert" className="block text-danger">实时身份读取或刷新失败，已加载数据可能为旧快照：{liveError instanceof Error ? liveError.message : '请求失败'}</span>}
+        {isLiveLoading && <span className="block">正在核验实时在管身份...</span>}
       </div>
+      {refreshError && (
+        <div role="alert" data-testid="trades-refresh-error" className="rounded border border-danger/30 p-3 text-xs text-danger">
+          刷新失败，当前显示旧快照：{refreshError instanceof Error ? refreshError.message : '请求失败'}
+          <button type="button" onClick={handleManualRefresh} className="ml-3 underline">重试刷新</button>
+        </div>
+      )}
+      {isLoading && <div role="status" className="p-4 text-xs">正在读取历史筛选范围...</div>}
+      {isError && <div role="alert" className="p-4 text-xs text-danger">
+        无法连接 Tickets API：{error instanceof Error ? error.message : '请求失败'}
+        <button type="button" onClick={handleManualRefresh} className="ml-3 underline">重试</button>
+      </div>}
       {/* 2. Top Summary Metrics Deck (L1 Owner Summary) */}
-      <div data-testid="trades-metrics-ribbon" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      {!isLoading && !isError && <div data-testid="trades-metrics-ribbon" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div data-testid="metric-total-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <Activity className="h-3.5 w-3.5 text-brand" />
-            <span>总交易数</span>
+            <span>筛选范围交易数</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalCount}
@@ -182,7 +177,7 @@ export const TradesPage: React.FC = () => {
         <div data-testid="metric-active-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-            <span>已加载在管交易</span>
+            <span>筛选范围内在管记录</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-brand">
             {metrics.activeCount}
@@ -233,7 +228,7 @@ export const TradesPage: React.FC = () => {
             {metrics.rCoverageText}
           </div>
         </div>
-      </div>
+      </div>}
 
       {/* 3. Section 1: Active Trade Episodes (Only when filter is 'all' or 'active') */}
       {(filterMode === 'all' || filterMode === 'active') && (
@@ -241,15 +236,13 @@ export const TradesPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-                已加载在管交易 (Active Trade Episodes)
+                当前在管交易 (Active Trade Episodes)
               </h2>
               <span className="rounded-full bg-brand/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-brand">
                 {activeTrades.length} 笔在管
               </span>
             </div>
-            <span className="text-[11px] text-text-muted">
-              独立 Netting Domain · 终态前持续监控保护与退出条件
-            </span>
+            <span className="text-[11px] text-text-muted">实时账户身份 · 不受历史筛选影响</span>
           </div>
 
           {activeTrades.length > 0 ? (
@@ -264,16 +257,16 @@ export const TradesPage: React.FC = () => {
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-surface p-6 text-center text-xs text-text-muted">
-              <CheckCircle2 className="mx-auto h-7 w-7 text-status-green mb-1.5" />
-              <p className="font-semibold text-text-primary">已加载范围暂无在管记录</p>
-              <p className="mt-0.5 text-[11px] text-text-secondary">账户在管覆盖以页面上方身份核验为准，不能据此判断全部持仓已结束。</p>
+              <AlertCircle className="mx-auto h-7 w-7 text-amber-500 mb-1.5" />
+              <p className="font-semibold text-text-primary">{isLiveLoading ? '正在读取实时在管交易' : coverage.complete ? '当前无在管交易' : '实时在管覆盖尚未确认'}</p>
+              {!coverage.complete && <p className="mt-1">不能据此判断账户空仓，请查看身份核验及错误提示。</p>}
             </div>
           )}
         </section>
       )}
 
       {/* 4. Section 2: Trade History (Only when filter is 'all' or 'completed') */}
-      {(filterMode === 'all' || filterMode === 'completed') && (
+      {!isLoading && !isError && (filterMode === 'all' || filterMode === 'completed') && (
         <section id="completed-trade-episodes" data-testid="completed-trade-episodes" className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -322,7 +315,7 @@ export const TradesPage: React.FC = () => {
             </div>
           ) : (
             <div data-testid="trades-pagination-status" className="py-2 text-center text-[11px] text-text-muted">
-              已加载当前 30 天范围全部账本记录 (共 {allTrades.length} 笔) · 该范围无更多数据
+              已加载当前筛选范围全部账本记录 (共 {allTrades.length} 笔) · 该范围无更多数据
             </div>
           )}
         </section>

@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStrategiesData } from '../../hooks/useStrategiesData.ts';
+import { useStrategiesFilterState } from '../../hooks/useUrlSearchParams.ts';
+import { TimeRangeFilter } from '../common/TimeRangeFilter.tsx';
 import { StrategyMatrixTable } from './StrategyMatrixTable.tsx';
 import { StrategyDetailDrawer } from './StrategyDetailDrawer.tsx';
 import { CausalityDrawer } from '../overview/CausalityDrawer.tsx';
@@ -14,11 +16,15 @@ import {
   ShieldCheck,
   AlertCircle,
   Clock,
+  RotateCcw,
 } from 'lucide-react';
 
 export const StrategiesPage: React.FC = () => {
+  const { filters, setFilters, resetFilters } = useStrategiesFilterState();
+
   const {
     strategies,
+    liveActiveTicketCount,
     view,
     setView,
     isLoading,
@@ -27,14 +33,42 @@ export const StrategiesPage: React.FC = () => {
     error,
     freshness,
     refetch,
-  } = useStrategiesData();
+  } = useStrategiesData({
+    view: filters.view,
+    from_ms: filters.from_ms,
+    to_ms: filters.to_ms,
+  });
 
-  const [selectedStrategy, setSelectedStrategy] = useState<EnrichedStrategyVersion | null>(null);
   const [selectedTicketForCausality, setSelectedTicketForCausality] = useState<TradeEpisode | null>(null);
   const [selectedTicketIdForCausality, setSelectedTicketIdForCausality] = useState<string | null>(null);
 
-  const activeStrategiesCount = strategies.filter((s) => s.runtimeStatus === 'enabled').length;
-  const totalActiveTickets = strategies.reduce((acc, s) => acc + s.activeTicketCount, 0);
+  // Derive selected strategy strictly from current query results to prevent stale metrics retention
+  const selectedStrategyId = filters.strategy_version_id;
+  const selectedStrategy = useMemo(() => {
+    if (!selectedStrategyId || strategies.length === 0) return null;
+    return (
+      strategies.find(
+        (s) => s.summary.strategy_version_id === selectedStrategyId
+      ) ?? null
+    );
+  }, [selectedStrategyId, strategies]);
+
+  const activeStrategiesCount = strategies.filter((s) => s.isCurrent && s.runtimeStatus === 'enabled').length;
+  const totalActiveTickets = liveActiveTicketCount;
+
+  const handleSelectStrategy = (st: EnrichedStrategyVersion) => {
+    setFilters({ strategy_version_id: st.summary.strategy_version_id });
+  };
+
+  const handleCloseStrategyDrawer = () => {
+    setFilters({
+      strategy_version_id: undefined,
+      drawer_tab: undefined,
+      scope: undefined,
+      exit_path: undefined,
+      first_path: undefined,
+    });
+  };
 
   const handleSelectTicket = (ticket: StrategyTicketListItem) => {
     setSelectedTicketForCausality(mapTradeListItemToEpisode(ticket));
@@ -80,7 +114,10 @@ export const StrategiesPage: React.FC = () => {
           <div className="flex items-center rounded-lg border border-border bg-surface-subtle p-1 text-xs">
             <button
               type="button"
-              onClick={() => setView('current')}
+              onClick={() => {
+                setView('current');
+                setFilters({ view: 'current' });
+              }}
               className={`rounded px-3 py-1 font-mono text-xs font-medium transition-colors ${
                 view === 'current'
                   ? 'bg-surface text-brand font-bold shadow-xs border border-border'
@@ -91,7 +128,10 @@ export const StrategiesPage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => setView('all')}
+              onClick={() => {
+                setView('all');
+                setFilters({ view: 'all' });
+              }}
               className={`rounded px-3 py-1 font-mono text-xs font-medium transition-colors ${
                 view === 'all'
                   ? 'bg-surface text-brand font-bold shadow-xs border border-border'
@@ -112,6 +152,44 @@ export const StrategiesPage: React.FC = () => {
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin text-brand' : ''}`} />
             <span>刷新</span>
           </button>
+        </div>
+      </div>
+
+      {/* 2. Unified Historical Time Range Toolbar */}
+      <div
+        data-testid="strategies-time-range-bar"
+        className="rounded-lg border border-border bg-surface p-4 shadow-xs space-y-2 font-sans text-xs"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <TimeRangeFilter
+            preset={filters.range}
+            from_ms={filters.from_ms}
+            to_ms={filters.to_ms}
+            disabled={isFetching}
+            onChange={({ preset, from_ms, to_ms }) =>
+              setFilters({ range: preset, from_ms, to_ms })
+            }
+          />
+          {filters.range !== '30d' && (
+            <button
+              type="button"
+              disabled={isFetching}
+              onClick={resetFilters}
+              className="inline-flex items-center gap-1 self-start sm:self-center rounded border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-text-muted hover:text-text-primary hover:bg-surface-elevated transition-colors cursor-pointer shrink-0"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>重置时间 (30天)</span>
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted pt-1 border-t border-border/40">
+          <span>
+            表现矩阵指标、Tickets Tab 与 Observations Tab 均严格遵循上述时间窗口。
+          </span>
+          <span className="font-mono text-text-secondary">
+            {new Date(filters.from_ms).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })} ~{' '}
+            {new Date(filters.to_ms).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}
+          </span>
         </div>
       </div>
 
@@ -161,7 +239,10 @@ export const StrategiesPage: React.FC = () => {
                 {errDiag.canReturnToCurrent && (
                   <button
                     type="button"
-                    onClick={() => setView('current')}
+                    onClick={() => {
+                      setView('current');
+                      setFilters({ view: 'current' });
+                    }}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand/90 transition-colors shadow-xs cursor-pointer"
                   >
                     <span>返回当前活跃版本 (current)</span>
@@ -223,10 +304,10 @@ export const StrategiesPage: React.FC = () => {
             <span>当前在管持仓</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-brand">
-            {totalActiveTickets}
+            <span data-testid="strategies-active-count">{totalActiveTickets ?? '未知'}</span>
           </div>
           <div data-testid="metric-subtext" className="text-[10px] text-text-muted mt-0.5">
-            占用全局 Ticket 槽位
+            实时账户真相 · 不受历史时间窗口影响
           </div>
         </div>
 
@@ -263,7 +344,7 @@ export const StrategiesPage: React.FC = () => {
 
         <StrategyMatrixTable
           strategies={strategies}
-          onSelectStrategy={(st) => setSelectedStrategy(st)}
+          onSelectStrategy={handleSelectStrategy}
         />
       </section>
       </>
@@ -273,9 +354,31 @@ export const StrategiesPage: React.FC = () => {
       {selectedStrategy && (
         <StrategyDetailDrawer
           strategy={selectedStrategy}
-          onClose={() => setSelectedStrategy(null)}
+          onClose={handleCloseStrategyDrawer}
           onSelectTicket={handleSelectTicket}
           onSelectTicketId={handleSelectTicketId}
+          from_ms={filters.from_ms}
+          to_ms={filters.to_ms}
+          activeDrawerTab={filters.drawer_tab}
+          onTabChange={(tab) => setFilters({ drawer_tab: tab })}
+          scope={filters.scope}
+          exit_path={filters.exit_path ?? null}
+          first_path={filters.first_path ?? null}
+          onScopeChange={(scope) => setFilters({ scope })}
+          onExitPathChange={(exit_path) =>
+            setFilters({ exit_path: exit_path ?? undefined })
+          }
+          onFirstPathChange={(first_path) =>
+            setFilters({ first_path: first_path ?? undefined })
+          }
+          onTicketFiltersChange={({ scope, exit_path }) => {
+            setFilters((prev) => ({
+              ...prev,
+              ...(scope ? { scope } : {}),
+              exit_path: exit_path ?? undefined,
+            }));
+          }}
+          isStrategiesFetching={isFetching}
         />
       )}
 

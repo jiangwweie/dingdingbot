@@ -1,31 +1,44 @@
-import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
-import { activeCoverage } from '../mapping/tradeTruth';
+import { useActiveTrades } from './useActiveTrades';
 import { tradesPaginationOptions } from '../api/tradesPagination';
-import { useMemo, useCallback, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useMemo, useCallback } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { type TicketsQueryParams } from '../api/ticketsApi';
 import { mapTradeListItemToEpisode, computeTradesSummaryMetrics } from '../mapping/tradeEpisodeMapping';
 import type { TradeEpisode, TradesSummaryMetrics, TradeListItem } from '../types/trades';
+import type { TradesFilterParams } from '../utils/urlParams.ts';
 
 const TRADES_LIMIT = 100;
 
-export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
-  const [windowEnd, setWindowEnd] = useState(Date.now);
-  const queryParams = useMemo<TicketsQueryParams>(
-    () => ({
+export function useTradesData(filters?: Partial<TradesFilterParams>) {
+  const queryParams = useMemo<TicketsQueryParams>(() => {
+    return {
       limit: TRADES_LIMIT,
-      from_ms: windowEnd - 30 * 86_400_000,
-      to_ms: windowEnd,
-      ...params,
-    }),
-    [params, windowEnd]
-  );
+      from_ms: filters?.from_ms,
+      to_ms: filters?.to_ms,
+      strategy_group_id: filters?.strategy_group_id,
+      exchange_instrument_id: filters?.exchange_instrument_id,
+      position_side: filters?.position_side,
+      aggregate_status: filters?.aggregate_status,
+    };
+  }, [
+    filters?.from_ms,
+    filters?.to_ms,
+    filters?.strategy_group_id,
+    filters?.exchange_instrument_id,
+    filters?.position_side,
+    filters?.aggregate_status,
+  ]);
 
-  const overview = useQuery({queryKey:overviewQueryKey,queryFn:fetchOverview,staleTime:15000,retry:false});
+  const live = useActiveTrades();
+
   const query = useInfiniteQuery(tradesPaginationOptions(queryParams));
 
   const rawItems = useMemo<TradeListItem[]>(() => {
-    return query.data?.pages.flatMap((page) => page.data?.items ?? []) ?? [];
+    const unique = new Map<string, TradeListItem>();
+    for (const page of query.data?.pages ?? []) {
+      for (const item of page.data.items) if (!unique.has(item.ticket_id)) unique.set(item.ticket_id, item);
+    }
+    return [...unique.values()];
   }, [query.data]);
 
   const hasNextPage = Boolean(query.hasNextPage);
@@ -35,11 +48,6 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
     const now = Date.now();
     return rawItems.map((item) => mapTradeListItemToEpisode(item, now));
   }, [rawItems]);
-
-  const activeTrades = useMemo(
-    () => allTrades.filter((t) => t.isActive),
-    [allTrades]
-  );
 
   const completedTrades = useMemo(
     () => allTrades.filter((t) => !t.isActive),
@@ -51,10 +59,8 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
   }, [allTrades, hasNextPage]);
 
   const refetch = useCallback(async () => {
-    await overview.refetch();
-    if (params?.from_ms !== undefined || params?.to_ms !== undefined) await query.refetch();
-    else setWindowEnd(Date.now());
-  }, [query, overview]);
+    await Promise.all([live.refetch(), query.refetch()]);
+  }, [query, live]);
 
   const fetchNextPage = useCallback(async () => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -64,22 +70,25 @@ export function useTradesData(params?: Omit<TicketsQueryParams, 'cursor'>) {
 
   const firstPage = query.data?.pages[0];
 
-  const coverage = activeCoverage(activeTrades.map(t=>t.ticket_id),overview.data?.data, !overview.isError && overview.data?.freshness === 'fresh');
   return {
-    coverage,
+    coverage: live.coverage,
+    liveActiveTicketCount: live.liveActiveTicketCount,
+    liveError: live.error,
+    isLiveLoading: live.isLoading,
     isLoading: query.isLoading,
-    isFetching: query.isFetching,
+    isFetching: query.isFetching || live.isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
     isError: query.isError && !query.data,
     paginationError: query.isFetchNextPageError ? query.error : null,
+    refreshError: query.isError && query.data && !query.isFetchNextPageError ? query.error : null,
     error: query.error,
-    freshness: firstPage?.freshness ?? 'unavailable',
+    freshness: query.isError ? 'stale' : firstPage?.freshness ?? 'unavailable',
     generatedAt: firstPage?.generated_at ?? null,
     sourceWatermark: firstPage?.source_watermark ?? null,
     allTrades,
-    activeTrades,
+    activeTrades: live.activeTrades,
     completedTrades,
     metrics,
     refetch,

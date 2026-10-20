@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useControlsData } from './hooks/useControlsData';
 import { cleanSymbol } from './hooks/useOverviewData';
@@ -17,6 +17,16 @@ import { RecentOperations } from './components/RecentOperations';
 import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 
+const getInitialTab = (): NavTabId => {
+  if (typeof window !== 'undefined') {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview') {
+      return tab;
+    }
+  }
+  return 'overview';
+};
+
 export const App: React.FC = () => {
   const {
     isAuthenticated,
@@ -31,8 +41,37 @@ export const App: React.FC = () => {
     acknowledgeUnconfirmedSession,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<NavTabId>('overview');
+  const [activeTab, setActiveTab] = useState<NavTabId>(getInitialTab);
   const [selectedTicketEpisode, setSelectedTicketEpisode] = useState<TradeEpisodeSummary | null>(null);
+
+  // Synchronize activeTab with browser URL search params on popstate
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onPopState = () => {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview') {
+        setActiveTab(tab);
+      } else {
+        setActiveTab('overview');
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const handleSelectTab = (tab: NavTabId) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get('tab') !== tab) {
+        const newSp = new URLSearchParams();
+        newSp.set('tab', tab);
+        window.history.pushState(null, '', `${window.location.pathname}?${newSp.toString()}`);
+      }
+    }
+  };
 
   // Controls Data
   const {
@@ -115,7 +154,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen bg-background text-text-primary">
       <Navbar
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         isRealData={true}
         onLogout={logout}
         isLoggingOut={isLoggingOut}
@@ -123,7 +162,7 @@ export const App: React.FC = () => {
 
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
         {activeTab === 'overview' && (
-          <OverviewPage onNavigateToControls={() => setActiveTab('controls')} />
+          <OverviewPage onNavigateToControls={() => handleSelectTab('controls')} />
         )}
 
         {activeTab === 'trades' && (
