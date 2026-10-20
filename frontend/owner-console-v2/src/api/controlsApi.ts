@@ -5,6 +5,8 @@ import type { components } from './schema';
 export type ControlsResponse = components['schemas']['ControlsResponse'];
 export type GenericSelectionPreview = components['schemas']['GenericSelectionPreviewView'];
 export type OrbSelectionPreview = components['schemas']['OrbSelectionPreviewView'];
+export type StrategyEntryControl = components['schemas']['StrategyEntryControl'];
+export type ControlWriteBody = components['schemas']['ControlWriteBody'];
 
 export const controlsQueryKey = ['owner', 'controls'] as const;
 export const selectionQueryKey = (strategyGroupId: string) => ['owner', 'selection', strategyGroupId] as const;
@@ -28,4 +30,36 @@ export async function fetchSelectionPreview(
   if (!result.response.ok) throw apiErrorFromResponse(result.response, result.error);
   if (!result.data) throw new ApiError(502, 'invalid_response', 'Selection preview is missing');
   return result.data;
+}
+
+export async function pauseStrategy(
+  strategyGroupId: string,
+  body: ControlWriteBody,
+): Promise<StrategyEntryControl> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/strategies/{strategy_group_id}/pause',
+    {
+      params: { path: { strategy_group_id: strategyGroupId } },
+      body,
+    },
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Pause response is missing');
+  return data;
+}
+
+export async function resumeStrategy(
+  strategyGroupId: string,
+  body: ControlWriteBody,
+): Promise<StrategyEntryControl> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/strategies/{strategy_group_id}/resume',
+    {
+      params: { path: { strategy_group_id: strategyGroupId } },
+      body,
+    },
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Resume response is missing');
+  return data;
 }

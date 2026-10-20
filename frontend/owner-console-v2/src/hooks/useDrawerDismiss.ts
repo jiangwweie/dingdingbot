@@ -14,6 +14,16 @@ export function handleDrawerGlobalKeyDown(e: KeyboardEvent): boolean {
   if (e.key !== 'Escape' || e.defaultPrevented) return false;
   if (drawerStack.length === 0) return false;
 
+  // If an overlay modal/alertdialog is open on top of drawers, do not close the underlying drawer!
+  if (typeof document !== 'undefined') {
+    const activeModal = document.querySelector(
+      '[role="alertdialog"], [data-testid="totp-action-modal"], [data-radix-portal] [role="dialog"]'
+    );
+    if (activeModal) {
+      return false;
+    }
+  }
+
   // Prevent default and stop propagation so parent drawers or background handlers do not fire
   e.preventDefault();
   e.stopPropagation();

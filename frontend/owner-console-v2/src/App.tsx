@@ -211,14 +211,14 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Phase 1 Read-Only Status Banner */}
+            {/* Control Posture Status Banner */}
             <div className="mb-4 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.5 border border-brand/20">
-                  Phase 1: Real Read-Only
+                  Phase A: Strategy Entry Controls Active
                 </span>
                 <span className="text-text-secondary">
-                  已连接生产 API · 只读模式 (写操作保持安全禁用，绝无假交互)
+                  单策略暂停/恢复新准入已接通权威写操作 (恢复需 TOTP) · 全局受控平仓、全局 ENTRY 与选币授权保持安全禁用
                 </span>
               </div>
               <span className="font-mono text-[11px] text-text-muted">
@@ -268,9 +268,7 @@ export const App: React.FC = () => {
                 {/* Level 2: Strategy Control Matrix */}
                 <StrategyMatrix
                   strategies={strategies}
-                  onToggleStrategy={() =>
-                    showToast('Phase 1 · 只读模式 (策略启停写操作未开放)')
-                  }
+                  onSuccess={(msg) => showToast(msg)}
                   onSelectTicket={(ticketId) => {
                     const matching = rawTickets.find((t) => t.ticket_id === ticketId);
                     if (matching) {

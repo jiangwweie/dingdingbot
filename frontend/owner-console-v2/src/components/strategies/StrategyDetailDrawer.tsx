@@ -12,6 +12,8 @@ import { useSelectionPreview } from '../../hooks/useControlsData.ts';
 import { useDrawerDismiss } from '../../hooks/useDrawerDismiss.ts';
 import { mapPreviewToDiagnostic } from '../../mapping/selectionMapping.ts';
 import { cleanSymbol } from '../../utils/symbol.ts';
+import { useStrategyControl } from '../../hooks/useStrategyControl.ts';
+import { TotpActionModal } from '../TotpActionModal.tsx';
 import {
   X,
   Layers,
@@ -22,6 +24,8 @@ import {
   CheckCircle2,
   TrendingUp,
   RefreshCw,
+  Pause,
+  Play,
 } from 'lucide-react';
 
 interface StrategyDetailDrawerProps {
@@ -29,6 +33,7 @@ interface StrategyDetailDrawerProps {
   onClose: () => void;
   onSelectTicket: (ticket: StrategyTicketListItem) => void;
   onSelectTicketId?: (ticketId: string) => void;
+  onSuccess?: (message: string) => void;
   from_ms?: number;
   to_ms?: number;
   activeDrawerTab?: StrategyDetailTabId;
@@ -48,6 +53,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   onClose,
   onSelectTicket,
   onSelectTicketId,
+  onSuccess,
   from_ms,
   to_ms,
   activeDrawerTab,
@@ -108,6 +114,35 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   if (!strategy) return null;
 
   const { summary, control } = strategy;
+  const isRetired = summary.strategy_group_id === 'SOR-001';
+  const hasControlFact =
+    control != null &&
+    (control.configured_state === 'enabled' || control.configured_state === 'paused') &&
+    typeof control.control_version === 'number' &&
+    Number.isFinite(control.control_version);
+
+  const configuredState = hasControlFact && control ? control.configured_state : null;
+  const isEnabled = configuredState === 'enabled';
+  const controlVersion = hasControlFact && control ? control.control_version : null;
+
+  const { modalProps, requestToggle, toastMessage, clearToast } = useStrategyControl({
+    onSuccess: (msg) => {
+      onSuccess?.(msg);
+    },
+  });
+
+  const handleToggle = () => {
+    if (!hasControlFact || configuredState == null || controlVersion == null) {
+      return;
+    }
+    requestToggle({
+      strategy_group_id: summary.strategy_group_id,
+      configured_state: configuredState,
+      control_version: controlVersion,
+      name_zh: strategy.displayNameZh,
+      is_retired: isRetired,
+    });
+  };
 
   return (
     <div
@@ -145,14 +180,60 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
             </div>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-text-muted hover:bg-surface-elevated hover:text-text-primary transition-colors cursor-pointer"
-          aria-label="关闭策略详情抽屉"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-2.5">
+          {summary.is_current ? (
+            isRetired ? (
+              <span className="rounded border border-border bg-surface-subtle px-2.5 py-1 text-xs font-mono text-text-muted">
+                已退役 (禁止恢复)
+              </span>
+            ) : !hasControlFact ? (
+              <button
+                type="button"
+                disabled
+                title="缺少真实控制事实 (configured_state / control_version)，禁止执行控制操作"
+                className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-disabled cursor-not-allowed shadow-xs"
+              >
+                控制事实不可用
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggle}
+                className={`inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold shadow-xs transition-colors cursor-pointer ${
+                  isEnabled
+                    ? 'border-border bg-surface text-text-primary hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-500'
+                    : 'border-border bg-surface text-text-primary hover:border-brand/50 hover:bg-brand/10 hover:text-brand'
+                }`}
+                title={isEnabled ? '暂停该策略新准入 (存量持仓继续受保护)' : '恢复该策略新准入 (需 TOTP 验证)'}
+              >
+                {isEnabled ? (
+                  <>
+                    <Pause className="h-3.5 w-3.5 text-amber-500" />
+                    暂停新准入
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-3.5 w-3.5 text-emerald-500" />
+                    恢复新准入
+                  </>
+                )}
+              </button>
+            )
+          ) : (
+            <span className="rounded border border-border bg-surface-subtle px-2 py-0.5 text-xs text-text-muted">
+              历史版本 · 仅供复盘
+            </span>
+          )}
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-text-muted hover:bg-surface-elevated hover:text-text-primary transition-colors cursor-pointer"
+            aria-label="关闭策略详情抽屉"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       {/* 2. Navigation Tabs */}
@@ -375,7 +456,11 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <span className="text-[10px] text-text-muted uppercase">配置启停 (Configured)</span>
                 <div className="mt-1 font-mono text-base font-bold text-text-primary">
-                  {control?.configured_state === 'enabled' ? '已配置启用' : '已配置暂停'}
+                  {control?.configured_state === 'enabled'
+                    ? '已配置启用'
+                    : control?.configured_state === 'paused'
+                    ? '已配置暂停'
+                    : '事实不可用'}
                 </div>
                 <div className="text-[10px] text-text-muted mt-0.5">Owner 主控配置意图</div>
               </div>
@@ -386,10 +471,18 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                   className={`mt-1 font-mono text-base font-bold ${
                     control?.effective_state === 'enabled'
                       ? 'text-emerald-600 dark:text-emerald-400'
-                      : 'text-amber-600 dark:text-amber-400'
+                      : control?.effective_state === 'paused' || control?.effective_state === 'paused_by_global'
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-text-muted'
                   }`}
                 >
-                  {control?.effective_state === 'enabled' ? '运行中 (Enabled)' : '已暂停 (Paused)'}
+                  {control?.effective_state === 'enabled'
+                    ? '运行中 (Enabled)'
+                    : control?.effective_state === 'paused'
+                    ? '已暂停 (Paused)'
+                    : control?.effective_state === 'paused_by_global'
+                    ? '全局暂停生效中'
+                    : '事实不可用'}
                 </div>
                 <div className="text-[10px] text-text-muted mt-0.5">综合全系统门禁实际判定</div>
               </div>
@@ -599,6 +692,19 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="absolute bottom-4 left-6 right-6 z-50 flex items-center justify-between rounded border border-status-green/30 bg-surface-elevated px-4 py-2.5 text-xs font-semibold text-status-green shadow-xl">
+          <span>{toastMessage}</span>
+          <button type="button" onClick={clearToast} className="text-text-muted hover:text-text-primary cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Confirmation & Step-Up Modal */}
+      <TotpActionModal {...modalProps} />
     </div>
   );
 };
