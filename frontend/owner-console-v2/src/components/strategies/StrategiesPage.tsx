@@ -31,12 +31,21 @@ export const StrategiesPage: React.FC = () => {
 
   const [selectedStrategy, setSelectedStrategy] = useState<EnrichedStrategyVersion | null>(null);
   const [selectedTicketForCausality, setSelectedTicketForCausality] = useState<TradeEpisode | null>(null);
+  const [selectedTicketIdForCausality, setSelectedTicketIdForCausality] = useState<string | null>(null);
 
   const activeStrategiesCount = strategies.filter((s) => s.runtimeStatus === 'enabled').length;
   const totalActiveTickets = strategies.reduce((acc, s) => acc + s.activeTicketCount, 0);
 
   const handleSelectTicket = (ticket: StrategyTicketListItem) => {
     setSelectedTicketForCausality(mapTradeListItemToEpisode(ticket));
+    setSelectedTicketIdForCausality(ticket.ticket_id);
+  };
+
+  const handleSelectTicketId = (ticketId: string) => {
+    // P1-2: Strictly prohibit constructing fake TradeEpisode with default side: 'long' or empty symbols.
+    // Instead, pass the raw ticketId and let CausalityDrawer verify authentic server facts.
+    setSelectedTicketForCausality(null);
+    setSelectedTicketIdForCausality(ticketId);
   };
 
   return (
@@ -266,13 +275,17 @@ export const StrategiesPage: React.FC = () => {
           strategy={selectedStrategy}
           onClose={() => setSelectedStrategy(null)}
           onSelectTicket={handleSelectTicket}
+          onSelectTicketId={handleSelectTicketId}
         />
       )}
 
-      {/* 5. Ticket Causality Drawer (L3 & L4) */}
       <CausalityDrawer
         episode={selectedTicketForCausality}
-        onClose={() => setSelectedTicketForCausality(null)}
+        ticketId={selectedTicketIdForCausality}
+        onClose={() => {
+          setSelectedTicketForCausality(null);
+          setSelectedTicketIdForCausality(null);
+        }}
       />
     </div>
   );

@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStrategyObservationsData } from '../../hooks/useStrategiesData.ts';
 import type { StrategyObservationFirstPath } from '../../types/strategies.ts';
 import { formatFirstPathLabel, formatObservationMetric } from '../../mapping/strategyMapping.ts';
 import { cleanSymbol } from '../../utils/symbol.ts';
 import { ApiError } from '../../api/errors.ts';
+import { ObservationChartModal } from './ObservationChartModal.tsx';
+import type { StrategyObservationListItem } from '../../mapping/chartAdapter.ts';
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -11,6 +13,7 @@ import {
   Info,
   AlertCircle,
   Compass,
+  CandlestickChart,
 } from 'lucide-react';
 
 const getErrorMessage = (err: unknown): string => {
@@ -25,11 +28,16 @@ const getErrorMessage = (err: unknown): string => {
 
 interface StrategyObservationsTabProps {
   strategyVersionId: string;
+  onSelectTicketId?: (ticketId: string) => void;
 }
 
 export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = ({
   strategyVersionId,
+  onSelectTicketId,
 }) => {
+  const [selectedObservationForChart, setSelectedObservationForChart] =
+    useState<StrategyObservationListItem | null>(null);
+
   const {
     items,
     firstPath,
@@ -130,6 +138,7 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
                   <th scope="col" className="px-3 py-2.5 font-semibold text-right">价差 (bps)</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">观察状态</th>
                   <th scope="col" className="px-3 py-2.5 font-semibold">发生时间</th>
+                  <th scope="col" className="px-3 py-2.5 font-semibold text-right">K 线复盘</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border font-sans font-mono">
@@ -231,6 +240,20 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
                           hour12: false,
                         })}
                       </td>
+
+                      {/* Action: K-line Review */}
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedObservationForChart(obs)}
+                          className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-[11px] font-medium text-text-secondary hover:text-brand hover:border-brand/40 transition-colors shadow-xs cursor-pointer"
+                          title="查看 15m 影子观察轨迹 K 线"
+                          aria-label={`复盘 ${symbolClean} 影子轨迹`}
+                        >
+                          <CandlestickChart className="h-3 w-3 text-brand" />
+                          <span>影子轨迹</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -278,6 +301,14 @@ export const StrategyObservationsTab: React.FC<StrategyObservationsTabProps> = (
           )}
         </div>
       )}
+
+      {/* Observation Shadow Trajectory K-line Modal */}
+      <ObservationChartModal
+        observation={selectedObservationForChart}
+        isOpen={Boolean(selectedObservationForChart)}
+        onClose={() => setSelectedObservationForChart(null)}
+        onSelectTicketId={onSelectTicketId}
+      />
     </div>
   );
 };

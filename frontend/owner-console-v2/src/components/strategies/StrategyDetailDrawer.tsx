@@ -21,12 +21,14 @@ interface StrategyDetailDrawerProps {
   strategy: EnrichedStrategyVersion | null;
   onClose: () => void;
   onSelectTicket: (ticket: StrategyTicketListItem) => void;
+  onSelectTicketId?: (ticketId: string) => void;
 }
 
 export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   strategy,
   onClose,
   onSelectTicket,
+  onSelectTicketId,
 }) => {
   useDrawerDismiss({
     isOpen: Boolean(strategy),
@@ -505,7 +507,10 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
         {/* TAB 5: OBSERVATIONS */}
         {activeTab === 'observations' && (
           <div className="animate-in fade-in-50 duration-150">
-            <StrategyObservationsTab strategyVersionId={summary.strategy_version_id} />
+            <StrategyObservationsTab
+              strategyVersionId={summary.strategy_version_id}
+              onSelectTicketId={onSelectTicketId}
+            />
           </div>
         )}
       </div>
