@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
     MoneyMetric,
@@ -278,3 +280,18 @@ def test_strategy_version_summary_isolates_observation_paths_and_medians() -> No
     assert observation_page.items[0].annotations[0].kind == "signal"
     assert observation_page.items[0].annotations[1].kind == "take_profit"
     assert observation_page.items[1].annotations[1].kind == "stop"
+
+
+@pytest.mark.parametrize("case", ["no_reason", "live_authority", "known_with_gap"])
+def test_historical_product_gap_cannot_claim_live_authority(case):
+    from pydantic import ValidationError
+    event = _version().product_events[0].model_dump()
+    event.update(product_family=None, runtime_profile_id=None, owner_policy_id=None,
+                 venue_id=None, active_universe_version_id=None, active_exchange_instrument_ids=(),
+                 warming_universe_version_id=None, warming_exchange_instrument_ids=(),
+                 product_compatibility_unavailable_reason="historical_product_compatibility_not_recorded")
+    if case == "no_reason":event["product_compatibility_unavailable_reason"]=None
+    elif case == "live_authority":event["owner_policy_id"]="policy:test"
+    else:event["product_family"]="crypto_perpetual"
+    with pytest.raises(ValidationError):
+        StrategyProductEventFacts.model_validate(event)

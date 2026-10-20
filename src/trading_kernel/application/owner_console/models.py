@@ -944,13 +944,29 @@ class StrategyProductEventFacts(FrozenModel):
     product_family: Literal[
         "crypto_perpetual",
         "tradfi_equity_perpetual",
-    ]
+    ] | None
+    product_compatibility_unavailable_reason: Literal[
+        "historical_product_compatibility_not_recorded",
+    ] | None = None
     runtime_profile_id: str | None
     owner_policy_id: str | None
     active_universe_version_id: str | None
     active_exchange_instrument_ids: tuple[str, ...]
     warming_universe_version_id: str | None
     warming_exchange_instrument_ids: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def _require_explicit_compatibility_gap(self) -> StrategyProductEventFacts:
+        if self.product_family is None:
+            if self.product_compatibility_unavailable_reason is None or any((
+                self.venue_id, self.runtime_profile_id, self.owner_policy_id,
+                self.active_universe_version_id, self.active_exchange_instrument_ids,
+                self.warming_universe_version_id, self.warming_exchange_instrument_ids,
+            )):
+                raise ValueError("missing product compatibility requires an explicit historical gap without live authority")
+        elif self.product_compatibility_unavailable_reason is not None:
+            raise ValueError("known product compatibility forbids a missing-product reason")
+        return self
 
 
 class StrategyVersionFacts(FrozenModel):

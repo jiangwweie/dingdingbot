@@ -692,8 +692,18 @@ class PostgresOwnerReadRepository:
                     event_specs.c.event_id,
                     event_specs.c.position_side,
                     event_specs.c.timeframe,
+                    event_specs.c.status.label("event_status"),
+                    strategy_versions.c.status.label("version_status"),
+                    strategy_groups.c.active_version_id,
+                    sa.exists(sa.select(1).select_from(strategy_universe_versions).where(
+                        strategy_universe_versions.c.event_spec_id == event_specs.c.event_spec_id,
+                        strategy_universe_versions.c.lifecycle_state.in_(("active", "warming")),
+                    )).label("has_current_universe"),
                     event_product_compatibility.c.product_family,
                 )
+                .select_from(event_specs)
+                .join(strategy_versions, strategy_versions.c.strategy_version_id == event_specs.c.strategy_version_id)
+                .join(strategy_groups, strategy_groups.c.strategy_group_id == strategy_versions.c.strategy_group_id)
                 .outerjoin(
                     event_product_compatibility,
                     event_product_compatibility.c.event_spec_id
@@ -711,8 +721,6 @@ class PostgresOwnerReadRepository:
         ).mappings().all()
         if len(event_rows) > 3_200:
             raise ContradictoryFacts("Strategy product Events exceed hard maximum")
-        if any(row["product_family"] is None for row in event_rows):
-            raise ContradictoryFacts("Strategy Event lacks Product Compatibility")
 
         policy_rows = (
             await self._connection.execute(
@@ -813,6 +821,17 @@ class PostgresOwnerReadRepository:
             event_universes = universes.get(event_spec_id, {})
             active = event_universes.get("active")
             warming = event_universes.get("warming")
+            missing_product = row["product_family"] is None
+            if missing_product and (
+                row["event_status"] != "retired"
+                or row["version_status"] != "retired"
+                or row["active_version_id"] == strategy_version_id
+                or event_authority is not None
+                or row["has_current_universe"]
+                or active is not None
+                or warming is not None
+            ):
+                raise ContradictoryFacts("Strategy Event lacks Product Compatibility")
             grouped.setdefault(strategy_version_id, []).append(
                 StrategyProductEventFacts.model_validate(
                     {
@@ -825,7 +844,11 @@ class PostgresOwnerReadRepository:
                             if runtime_profile_id is None
                             else venue_by_profile.get(runtime_profile_id)
                         ),
-                        "product_family": str(row["product_family"]),
+                        "product_family": row["product_family"],
+                        "product_compatibility_unavailable_reason": (
+                            "historical_product_compatibility_not_recorded"
+                            if missing_product else None
+                        ),
                         "runtime_profile_id": runtime_profile_id,
                         "owner_policy_id": (
                             None

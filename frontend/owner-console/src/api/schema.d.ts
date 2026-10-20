@@ -2533,11 +2533,10 @@ export interface components {
              * @enum {string}
              */
             position_side: "long" | "short";
-            /**
-             * Product Family
-             * @enum {string}
-             */
-            product_family: "crypto_perpetual" | "tradfi_equity_perpetual";
+            /** Product Compatibility Unavailable Reason */
+            product_compatibility_unavailable_reason?: "historical_product_compatibility_not_recorded" | null;
+            /** Product Family */
+            product_family: ("crypto_perpetual" | "tradfi_equity_perpetual") | null;
             /** Runtime Profile Id */
             runtime_profile_id: string | null;
             /** Timeframe */
