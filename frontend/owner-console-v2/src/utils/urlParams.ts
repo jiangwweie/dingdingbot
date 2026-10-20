@@ -15,6 +15,15 @@ import type {
   StrategyDetailTabId,
 } from '../types/strategies.ts';
 import type { TradeFilterMode } from '../types/trades.ts';
+import type { ReviewStatusQuery } from '../api/reviewApi.ts';
+
+export interface ReviewFilterParams {
+  range: TimeRangePreset;
+  from_ms: number;
+  to_ms: number;
+  review_status?: ReviewStatusQuery;
+  strategy_group_id?: string;
+}
 
 export interface TradesFilterParams {
   range: TimeRangePreset;
@@ -250,6 +259,81 @@ export function serializeStrategiesSearchParams(params: StrategiesFilterParams):
   }
   if (params.first_path) {
     q.set('first_path', params.first_path);
+  }
+
+  return q.toString();
+}
+
+const VALID_REVIEW_STATUSES = new Set<ReviewStatusQuery>([
+  'in_progress',
+  'waiting_for_review',
+  'complete',
+  'incomplete_evidence',
+]);
+
+/**
+ * Parse and validate Review filter params from URLSearchParams.
+ */
+export function parseReviewSearchParams(
+  searchParams: URLSearchParams,
+  nowMs: number = Date.now()
+): ReviewFilterParams {
+  const rawRange = searchParams.get('range') as TimeRangePreset;
+  const range: TimeRangePreset = VALID_PRESETS.has(rawRange) ? rawRange : '30d';
+
+  const rawFrom = searchParams.get('from_ms');
+  const rawTo = searchParams.get('to_ms');
+  const parsedFrom = rawFrom ? parseInt(rawFrom, 10) : null;
+  const parsedTo = rawTo ? parseInt(rawTo, 10) : null;
+
+  let from_ms: number;
+  let to_ms: number;
+
+  const validation = validateTimeWindow(parsedFrom, parsedTo);
+  if (validation.valid && parsedFrom != null && parsedTo != null) {
+    from_ms = parsedFrom;
+    to_ms = parsedTo;
+  } else {
+    const presetWin = calculatePresetWindow(range, nowMs);
+    from_ms = presetWin.from_ms;
+    to_ms = presetWin.to_ms;
+  }
+
+  const rawStatus = searchParams.get('review_status') as ReviewStatusQuery;
+  const review_status: ReviewStatusQuery | undefined = VALID_REVIEW_STATUSES.has(rawStatus)
+    ? rawStatus
+    : undefined;
+
+  const rawStrat = searchParams.get('strategy_group_id')?.trim();
+  const strategy_group_id = rawStrat && rawStrat.length > 0 ? rawStrat : undefined;
+
+  return {
+    range,
+    from_ms,
+    to_ms,
+    review_status,
+    strategy_group_id,
+  };
+}
+
+/**
+ * Serialize Review filter params into clean URL search string.
+ */
+export function serializeReviewSearchParams(params: ReviewFilterParams): string {
+  const q = new URLSearchParams();
+  q.set('tab', 'review');
+
+  if (params.range !== '30d') {
+    q.set('range', params.range);
+  }
+  q.set('from_ms', String(params.from_ms));
+  q.set('to_ms', String(params.to_ms));
+
+  if (params.review_status) {
+    q.set('review_status', params.review_status);
+  }
+  if (params.strategy_group_id) {
+    q.set('strategy_group_id', params.strategy_group_id);
   }
 
   return q.toString();

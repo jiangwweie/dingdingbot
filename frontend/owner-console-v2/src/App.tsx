@@ -7,6 +7,7 @@ import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
 import { TradesPage } from './components/trades/TradesPage';
 import { StrategiesPage } from './components/strategies/StrategiesPage';
+import { ReviewPage } from './components/review/ReviewPage';
 import { CausalityDrawer } from './components/overview/CausalityDrawer';
 import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
@@ -20,7 +21,7 @@ import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 const getInitialTab = (): NavTabId => {
   if (typeof window !== 'undefined') {
     const tab = new URLSearchParams(window.location.search).get('tab');
-    if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview') {
+    if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview' || tab === 'review') {
       return tab;
     }
   }
@@ -50,7 +51,7 @@ export const App: React.FC = () => {
 
     const onPopState = () => {
       const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview') {
+      if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview' || tab === 'review') {
         setActiveTab(tab);
       } else {
         setActiveTab('overview');
@@ -171,6 +172,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'strategies' && (
           <StrategiesPage />
+        )}
+
+        {activeTab === 'review' && (
+          <ReviewPage />
         )}
 
         {activeTab === 'controls' && (

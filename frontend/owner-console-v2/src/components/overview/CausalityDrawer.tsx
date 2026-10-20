@@ -193,6 +193,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
 
   return (
     <div
+      id="causality-drawer"
       data-testid="causality-drawer"
       className="fixed inset-0 z-[70] overflow-hidden bg-black/60 backdrop-blur-sm transition-opacity animate-in fade-in duration-200"
       aria-labelledby="slide-over-title"

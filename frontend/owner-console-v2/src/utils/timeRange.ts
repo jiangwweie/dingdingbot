@@ -144,3 +144,23 @@ export function formatShanghaiRangeDisplay(from_ms: number, to_ms: number): stri
   const toStr = toShanghaiInputValue(to_ms).replace('T', ' ');
   return `${fromStr} ~ ${toStr} (上海时间)`;
 }
+
+/**
+ * Format a timestamp into Asia/Shanghai display string: "YYYY-MM-DD HH:mm" or "YYYY-MM-DD HH:mm:ss".
+ * Strictly renders Asia/Shanghai (+08:00) regardless of the browser host timezone.
+ */
+export function formatShanghaiDateTime(
+  timestampMs: number | null | undefined,
+  includeSeconds: boolean = false
+): string {
+  if (timestampMs == null || isNaN(timestampMs) || timestampMs <= 0) {
+    return '—';
+  }
+  const base = toShanghaiInputValue(timestampMs).replace('T', ' ');
+  if (!includeSeconds) {
+    return base;
+  }
+  const d = new Date(timestampMs + SHANGHAI_OFFSET_MS);
+  const seconds = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${base}:${seconds}`;
+}

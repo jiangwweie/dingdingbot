@@ -26,7 +26,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'overview', label: '总览态势', en: 'Overview', available: true },
     { id: 'trades', label: '交易因果', en: 'Trades', available: true },
     { id: 'strategies', label: '策略选币', en: 'Strategies', available: true },
-    { id: 'review', label: '复盘评估', en: 'Review', badge: '规划中', available: false },
+    { id: 'review', label: '复盘评估', en: 'Review', available: true },
     { id: 'controls', label: '主控中心', en: 'Controls', available: true },
   ];
 

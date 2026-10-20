@@ -4,8 +4,11 @@ import {
   serializeTradesSearchParams,
   parseStrategiesSearchParams,
   serializeStrategiesSearchParams,
+  parseReviewSearchParams,
+  serializeReviewSearchParams,
   type TradesFilterParams,
   type StrategiesFilterParams,
+  type ReviewFilterParams,
 } from '../utils/urlParams.ts';
 import { calculatePresetWindow } from '../utils/timeRange.ts';
 
@@ -169,6 +172,85 @@ export function useStrategiesFilterState() {
       scope: 'natural',
       exit_path: undefined,
       first_path: undefined,
+    });
+  }, [setFilters]);
+
+  return {
+    filters,
+    setFilters,
+    resetFilters,
+  };
+}
+
+/**
+ * Hook to manage Review filters synchronized with window.location.search and popstate.
+ */
+export function useReviewFilterState() {
+  const [filters, setFiltersInternal] = useState<ReviewFilterParams>(() => {
+    if (typeof window === 'undefined') {
+      const defWin = calculatePresetWindow('30d');
+      return {
+        range: '30d',
+        from_ms: defWin.from_ms,
+        to_ms: defWin.to_ms,
+      };
+    }
+    return parseReviewSearchParams(new URLSearchParams(window.location.search));
+  });
+
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onPopState = () => {
+      const next = parseReviewSearchParams(new URLSearchParams(window.location.search));
+      filtersRef.current = next;
+      setFiltersInternal(next);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const setFilters = useCallback(
+    (
+      updater:
+        | Partial<ReviewFilterParams>
+        | ((prev: ReviewFilterParams) => Partial<ReviewFilterParams>),
+      replace: boolean = false
+    ) => {
+      const prev = filtersRef.current;
+      const patch = typeof updater === 'function' ? updater(prev) : updater;
+      const next: ReviewFilterParams = { ...prev, ...patch };
+      filtersRef.current = next;
+
+      if (typeof window !== 'undefined') {
+        const searchStr = serializeReviewSearchParams(next);
+        const currentSearch = window.location.search.replace(/^\?/, '');
+        if (searchStr !== currentSearch) {
+          const newUrl = `${window.location.pathname}?${searchStr}`;
+          if (replace) {
+            window.history.replaceState(null, '', newUrl);
+          } else {
+            window.history.pushState(null, '', newUrl);
+          }
+        }
+      }
+      setFiltersInternal(next);
+    },
+    []
+  );
+
+  const resetFilters = useCallback(() => {
+    const defWin = calculatePresetWindow('30d');
+    setFilters({
+      range: '30d',
+      from_ms: defWin.from_ms,
+      to_ms: defWin.to_ms,
+      review_status: undefined,
+      strategy_group_id: undefined,
     });
   }, [setFilters]);
 
