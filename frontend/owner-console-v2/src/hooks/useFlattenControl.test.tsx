@@ -655,4 +655,68 @@ describe('useFlattenControl', () => {
     expect(result.current.currentOperation?.state).toBe('completed');
     expect(result.current.toastMessage).toContain('服务端平仓任务已结束 [completed]');
   });
+
+  it('does NOT fabricate preview when restoring legacy inFlightOperation without frozenPreview and locks submit', async () => {
+    // 1. Inject legacy operation lacking frozenPreview
+    sessionStorage.setItem(
+      'brc:owner:in_flight_flatten',
+      JSON.stringify({
+        expected_version: 6,
+        snapshot_digest: mockPreview.snapshot_digest,
+        ticket_ids: ['ticket:legacy-1', 'ticket:legacy-2'],
+        reason: 'owner_flatten_all',
+        idempotency_key: 'owner-request:flatten-all:legacy-no-preview',
+        status: 'submitting',
+        startedAtMs: Date.now(),
+        submittedAuthId: null,
+      })
+    );
+    _reloadInFlightFromStorage();
+
+    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: Date.now(),
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 6,
+        active_ticket_count: 2,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: null,
+      recent_operations: [],
+      events: [],
+    });
+
+    const submitFlattenSpy = vi.spyOn(controlsApi, 'submitFlatten');
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    // 2. Initial state: preview MUST be null (no fabricated facts!)
+    expect(result.current.preview).toBeNull();
+    expect(result.current.isUnknownResult).toBe(true);
+
+    // 3. Perform GET status verification
+    await act(async () => {
+      await result.current.handleVerifyStatus();
+    });
+
+    // 4. Verification succeeds: inFlight transitions to verified_unapplied, but preview MUST stay null!
+    expect(_getInFlightFlatten()?.status).toBe('verified_unapplied');
+    expect(result.current.preview).toBeNull();
+    expect(result.current.errorMessage).toContain('因缺少完整冻结快照（持仓状态未知），提交已闭锁');
+
+    // 5. Attempt confirm submission without authentic preview: MUST reject with error and zero submit POST calls!
+    await act(async () => {
+      await result.current.handleConfirm({
+        totp: '123456',
+        confirmText: '确认平仓全部持仓',
+      });
+    });
+
+    expect(submitFlattenSpy).not.toHaveBeenCalled();
+    expect(result.current.errorMessage).toContain('缺少服务端平仓快照');
+  });
 });

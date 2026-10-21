@@ -246,4 +246,61 @@ describe('ControlledFlattenModal', () => {
     expect(modal?.textContent).toContain('服务端冻结范围 (0 笔持仓受影响):');
     expect(modal?.textContent).toContain('当前已经全平，将执行空仓幂等确认。');
   });
+
+  it('renders unknown ticket states and disables submit with missing snapshot warning when preview is null and inFlightOperation exists', () => {
+    const onVerifyStatus = vi.fn();
+    renderModal({
+      preview: null,
+      isRetryFrozen: true,
+      inFlightOperation: {
+        expected_version: 6,
+        snapshot_digest: 'sha256:' + '2'.repeat(64),
+        ticket_ids: ['ticket:legacy-1', 'ticket:legacy-2'],
+        reason: 'owner_flatten_all',
+        idempotency_key: 'owner-request:flatten-all:legacy-op',
+        status: 'verified_unapplied',
+        startedAtMs: 1800000000000,
+        frozenPreview: null,
+      },
+      onVerifyStatus,
+    });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(modal).not.toBeNull();
+    expect(modal?.textContent).toContain('服务端冻结范围 (历史快照不完整 · 2 笔持仓受影响):');
+    expect(modal?.textContent).toContain('Policy v6 · Snapshot sha256:2222222...');
+    expect(modal?.textContent).toContain('ticket:legacy-1');
+    expect(modal?.textContent).toContain('ticket:legacy-2');
+    expect(modal?.textContent).toContain('状态未知 (需核验)');
+    expect(modal?.textContent).not.toContain('eligible');
+    expect(modal?.textContent).toContain(
+      '因缺少完整冻结快照（持仓状态与阻断条件未知），提交已闭锁。请先执行权威状态核验。'
+    );
+
+    const totpInput = modal?.querySelector('input[placeholder="000000"]') as HTMLInputElement;
+    const confirmInput = modal?.querySelector(
+      'input[placeholder="确认平仓全部持仓"]'
+    ) as HTMLInputElement;
+    const submitBtn = modal?.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    expect(submitBtn?.textContent).toContain('缺少完整快照，禁止提交');
+    expect(submitBtn?.disabled).toBe(true);
+
+    // Even if valid credentials are typed:
+    act(() => {
+      setInputValue(totpInput, '123456');
+      setInputValue(confirmInput, '确认平仓全部持仓');
+    });
+    expect(submitBtn?.disabled).toBe(true);
+
+    // Verify button remains present and interactive
+    const verifyBtn = Array.from(modal?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('核验权威状态 (GET)')
+    );
+    expect(verifyBtn).toBeDefined();
+    act(() => {
+      verifyBtn?.click();
+    });
+    expect(onVerifyStatus).toHaveBeenCalledTimes(1);
+  });
 });

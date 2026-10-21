@@ -31,19 +31,8 @@ export interface InFlightFlattenOperation {
   frozenPreview?: FlattenPreview | null;
 }
 
-export function restorePreviewFromInFlight(op: InFlightFlattenOperation): FlattenPreview {
-  if (op.frozenPreview) return op.frozenPreview;
-  return {
-    venue_id: 'binance-usdm',
-    account_id: 'owner-main',
-    owner_policy_version: op.expected_version,
-    global_entry_enabled: true,
-    ticket_ids: op.ticket_ids ?? [],
-    ticket_states: Object.fromEntries((op.ticket_ids ?? []).map((id) => [id, 'eligible'])),
-    snapshot_digest: op.snapshot_digest,
-    first_blocker: null,
-    runtime_profile_id: 'account-wide',
-  };
+export function restorePreviewFromInFlight(op: InFlightFlattenOperation): FlattenPreview | null {
+  return op.frozenPreview ?? null;
 }
 
 const STORAGE_KEY = 'brc:owner:in_flight_flatten';
@@ -536,10 +525,17 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
         inFlightFlatten.status = 'verified_unapplied';
         inFlightFlatten.lastError = '未能关联到本次平仓的受理凭据。历史同快照记录不能证明本次请求已执行。';
         setInFlightFlatten(inFlightFlatten);
-        setPreview(restorePreviewFromInFlight(inFlightFlatten));
-        setErrorMessage(
-          '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
-        );
+        const restored = restorePreviewFromInFlight(inFlightFlatten);
+        setPreview(restored);
+        if (!restored) {
+          setErrorMessage(
+            '核验结果：服务端未查得本次平仓受理记录。因缺少完整冻结快照（持仓状态未知），提交已闭锁。'
+          );
+        } else {
+          setErrorMessage(
+            '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
+          );
+        }
         return;
       }
 

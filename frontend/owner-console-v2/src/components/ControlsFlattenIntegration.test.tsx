@@ -78,6 +78,7 @@ const TestControlsFlattenContainer: React.FC<{ onSuccess?: (op: any) => void }> 
         isUnknownResult={flatten.isUnknownResult}
         isRetryFrozen={flatten.isRetryFrozen}
         currentOperation={flatten.currentOperation}
+        inFlightOperation={flatten.inFlight}
         onConfirm={flatten.handleConfirm}
         onVerifyStatus={flatten.handleVerifyStatus}
         onRefreshPreview={flatten.requestPreview}

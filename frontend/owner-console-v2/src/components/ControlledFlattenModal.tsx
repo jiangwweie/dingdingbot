@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { AlertOctagon, X, Loader2, ShieldAlert, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
 import type { FlattenPreview, OwnerControlOperation } from '../api/controlsApi';
+import type { InFlightFlattenOperation } from '../hooks/useFlattenControl';
 
 export interface ControlledFlattenModalProps {
   open: boolean;
@@ -13,6 +14,7 @@ export interface ControlledFlattenModalProps {
   isUnknownResult: boolean;
   isRetryFrozen?: boolean;
   currentOperation?: OwnerControlOperation | null;
+  inFlightOperation?: InFlightFlattenOperation | null;
   onConfirm: (payload: { totp: string; confirmText: string }) => Promise<void>;
   onVerifyStatus: () => Promise<void>;
   onRefreshPreview?: () => Promise<void>;
@@ -28,6 +30,7 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
   isUnknownResult,
   isRetryFrozen,
   currentOperation,
+  inFlightOperation,
   onConfirm,
   onVerifyStatus,
   onRefreshPreview,
@@ -345,34 +348,57 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                     <span className="block text-xs font-bold text-text-muted">
                       {preview ? (
                         <>服务端冻结范围 ({preview.ticket_ids.length} 笔持仓受影响):</>
+                      ) : inFlightOperation ? (
+                        <>服务端冻结范围 (历史快照不完整 · {inFlightOperation.ticket_ids.length} 笔持仓受影响):</>
                       ) : (
                         <>服务端冻结范围 (冻结快照待恢复／待核验):</>
                       )}
                     </span>
-                    {preview && (
+                    {preview ? (
                       <span className="font-mono text-[10px] text-text-muted">
                         Policy v{preview.owner_policy_version} · Snapshot {preview.snapshot_digest.slice(0, 14)}...
                       </span>
-                    )}
+                    ) : inFlightOperation ? (
+                      <span className="font-mono text-[10px] text-text-muted">
+                        Policy v{inFlightOperation.expected_version} · Snapshot {inFlightOperation.snapshot_digest.slice(0, 14)}...
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="max-h-36 overflow-y-auto divide-y divide-border rounded border border-border bg-surface-subtle font-mono">
-                    {!preview ? (
-                      <div className="p-3 text-center text-text-secondary font-sans text-xs">
-                        冻结快照待恢复／待核验，请先执行权威状态核验。
-                      </div>
-                    ) : preview.ticket_ids.length > 0 ? (
-                      preview.ticket_ids.map((ticketId) => (
-                        <div key={ticketId} className="flex items-center justify-between p-2.5 text-xs">
-                          <span className="text-text-primary font-medium">{ticketId}</span>
-                          <span className="rounded bg-surface px-2 py-0.5 text-[11px] font-sans text-text-secondary border border-border">
-                            {preview.ticket_states[ticketId] ?? 'unknown'}
-                          </span>
+                    {preview ? (
+                      preview.ticket_ids.length > 0 ? (
+                        preview.ticket_ids.map((ticketId) => (
+                          <div key={ticketId} className="flex items-center justify-between p-2.5 text-xs">
+                            <span className="text-text-primary font-medium">{ticketId}</span>
+                            <span className="rounded bg-surface px-2 py-0.5 text-[11px] font-sans text-text-secondary border border-border">
+                              {preview.ticket_states[ticketId] ?? 'unknown'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-3 text-center text-text-secondary font-sans text-xs">
+                          当前已经全平，将执行空仓幂等确认。
                         </div>
-                      ))
+                      )
+                    ) : inFlightOperation ? (
+                      inFlightOperation.ticket_ids.length > 0 ? (
+                        inFlightOperation.ticket_ids.map((ticketId) => (
+                          <div key={ticketId} className="flex items-center justify-between p-2.5 text-xs">
+                            <span className="text-text-primary font-medium">{ticketId}</span>
+                            <span className="rounded bg-status-amber-bg px-2 py-0.5 text-[11px] font-sans text-status-amber border border-status-amber/30">
+                              状态未知 (需核验)
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-3 text-center text-text-secondary font-sans text-xs">
+                          未记录受影响持仓，状态未知。
+                        </div>
+                      )
                     ) : (
                       <div className="p-3 text-center text-text-secondary font-sans text-xs">
-                        当前已经全平，将执行空仓幂等确认。
+                        冻结快照待恢复／待核验，请先执行权威状态核验。
                       </div>
                     )}
                   </div>
@@ -380,8 +406,16 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
 
                 {/* Warning notice */}
                 <div className="rounded border border-border bg-surface-subtle p-3 text-text-secondary text-xs leading-relaxed">
-                  <strong className="text-text-primary">受控退出约束: </strong>
-                  提交后全局 ENTRY 将保持暂停，由 Lifecycle 调度平仓。页面不能指定平仓数量、方向或订单类型。
+                  {!preview ? (
+                    <span className="text-status-amber font-medium">
+                      因缺少完整冻结快照（持仓状态与阻断条件未知），提交已闭锁。请先执行权威状态核验。
+                    </span>
+                  ) : (
+                    <>
+                      <strong className="text-text-primary">受控退出约束: </strong>
+                      提交后全局 ENTRY 将保持暂停，由 Lifecycle 调度平仓。页面不能指定平仓数量、方向或订单类型。
+                    </>
+                  )}
                 </div>
 
                 {/* Step 1: TOTP input */}
@@ -442,6 +476,8 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         正在提交受控平仓...
                       </>
+                    ) : !preview ? (
+                      '缺少完整快照，禁止提交'
                     ) : (
                       '确认受控平仓全部持仓'
                     )}

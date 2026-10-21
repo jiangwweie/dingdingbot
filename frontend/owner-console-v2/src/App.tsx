@@ -345,6 +345,7 @@ export const App: React.FC = () => {
         isUnknownResult={flattenControl.isUnknownResult}
         isRetryFrozen={flattenControl.isRetryFrozen}
         currentOperation={activeFlattenOperation}
+        inFlightOperation={flattenControl.inFlight}
         onConfirm={flattenControl.handleConfirm}
         onVerifyStatus={flattenControl.handleVerifyStatus}
         onRefreshPreview={flattenControl.requestPreview}
