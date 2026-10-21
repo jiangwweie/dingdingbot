@@ -6,7 +6,7 @@ import {
   ControlledFlattenModal,
   type ControlledFlattenModalProps,
 } from './ControlledFlattenModal';
-import type { FlattenPreview } from '../api/controlsApi';
+import type { FlattenPreview, OwnerControlOperation } from '../api/controlsApi';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -34,6 +34,21 @@ const mockPreview: FlattenPreview = {
   snapshot_digest: 'sha256:' + 'e'.repeat(64),
   first_blocker: null,
   runtime_profile_id: 'account-wide',
+};
+
+const mockActiveOp: OwnerControlOperation = {
+  authorization_id: 'owner-auth:active-op',
+  operation_kind: 'flatten_all',
+  state: 'exits_requested',
+  version: 2,
+  runtime_profile_id: 'account-wide',
+  venue_id: 'binance-usdm',
+  account_id: 'owner-main',
+  target_ticket_ids: ['ticket:btc-long'],
+  snapshot_digest: 'sha256:' + 'e'.repeat(64),
+  first_blocker: null,
+  created_at_ms: 1800000000000,
+  updated_at_ms: 1800000000000,
 };
 
 function renderModal(props: Partial<ControlledFlattenModalProps> = {}) {
@@ -88,6 +103,32 @@ describe('ControlledFlattenModal', () => {
     const submitBtn = modal?.querySelector('button[type="submit"]') as HTMLButtonElement;
     expect(submitBtn).toBeDefined();
     expect(submitBtn?.disabled).toBe(true);
+  });
+
+  it('renders active operation progress view without submit form when operation is running', () => {
+    const onVerifyStatus = vi.fn();
+    renderModal({ currentOperation: mockActiveOp, onVerifyStatus });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(modal?.textContent).toContain('受控平仓正在执行中');
+    expect(modal?.textContent).toContain('exits_requested');
+    expect(modal?.textContent).toContain('owner-auth:active-op');
+
+    // Submit inputs and submit button are completely absent
+    const submitBtn = modal?.querySelector('button[type="submit"]');
+    expect(submitBtn).toBeNull();
+    const totpInput = modal?.querySelector('input[placeholder="000000"]');
+    expect(totpInput).toBeNull();
+
+    // Verify progress button is present and triggers onVerifyStatus
+    const verifyBtn = Array.from(modal?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent?.includes('核验权威进度 (GET)')
+    );
+    expect(verifyBtn).toBeDefined();
+    act(() => {
+      verifyBtn?.click();
+    });
+    expect(onVerifyStatus).toHaveBeenCalledTimes(1);
   });
 
   it('enables submit button only when TOTP has 6 digits and exact confirmation text is entered', () => {

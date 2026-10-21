@@ -15,7 +15,11 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
   isLoading = false,
   currentOperation,
 }) => {
-  const isOperationActive = currentOperation && currentOperation.state !== 'completed';
+  const isOperationActive = Boolean(
+    currentOperation &&
+      currentOperation.state !== 'completed' &&
+      currentOperation.state !== 'blocked'
+  );
 
   return (
     <div className="rounded border border-status-red/50 bg-surface p-4 shadow-xs">
@@ -30,8 +34,8 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-bold text-text-primary">受控平仓全部仓位</h3>
             {isOperationActive && (
-              <span className="rounded bg-status-red-bg px-2 py-0.5 text-[11px] font-mono font-bold text-status-red border border-status-red/30">
-                进行中: {currentOperation.state}
+              <span className="rounded bg-brand/10 px-2 py-0.5 text-[11px] font-mono font-bold text-brand border border-brand/30">
+                进行中: {currentOperation?.state}
               </span>
             )}
           </div>
@@ -48,6 +52,8 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
           className={`flex-none rounded px-3.5 py-2 text-xs font-bold transition-colors ${
             isLoading
               ? 'bg-surface-subtle text-text-disabled cursor-not-allowed border border-border'
+              : isOperationActive
+              ? 'bg-brand/10 text-brand border border-brand/30 hover:bg-brand/20 shadow-xs cursor-pointer'
               : 'bg-status-red text-white hover:bg-red-700 shadow-xs cursor-pointer'
           }`}
         >
@@ -56,6 +62,8 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               读取权威快照...
             </span>
+          ) : isOperationActive ? (
+            `平仓进行中 (${currentOperation?.state}) · 查看进度`
           ) : (
             `受控平仓全部仓位 (${activeTicketCount})`
           )}

@@ -29,16 +29,48 @@ export interface InFlightFlattenOperation {
   submittedAuthId?: string | null;
 }
 
+const STORAGE_KEY = 'brc:owner:in_flight_flatten';
+
+function loadInFlightFromStorage(): InFlightFlattenOperation | null {
+  if (typeof window === 'undefined' || !window.sessionStorage) return null;
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as InFlightFlattenOperation;
+  } catch {
+    return null;
+  }
+}
+
+function saveInFlightToStorage(op: InFlightFlattenOperation | null): void {
+  if (typeof window === 'undefined' || !window.sessionStorage) return;
+  try {
+    if (!op) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+    } else {
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(op));
+    }
+  } catch {
+    // Ignore storage quota or security errors
+  }
+}
+
 // Global in-flight registry for account-wide flatten operations
-let inFlightFlatten: InFlightFlattenOperation | null = null;
+let inFlightFlatten: InFlightFlattenOperation | null = loadInFlightFromStorage();
 const registryListeners = new Set<() => void>();
 
 function notifyListeners() {
   registryListeners.forEach((fn) => fn());
 }
 
+function setInFlightFlatten(op: InFlightFlattenOperation | null): void {
+  inFlightFlatten = op;
+  saveInFlightToStorage(op);
+  notifyListeners();
+}
+
 export function _resetInFlightFlattenRegistry(): void {
-  inFlightFlatten = null;
+  setInFlightFlatten(null);
   registryListeners.clear();
 }
 
@@ -56,6 +88,7 @@ function generateFlattenIdempotencyKey(): string {
 
 export interface UseFlattenControlOptions {
   onSuccess?: (operation: OwnerControlOperation) => void;
+  onError?: (errorMsg: string) => void;
 }
 
 export function useFlattenControl(options?: UseFlattenControlOptions) {
@@ -86,10 +119,19 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
   const isUnknownResult = inFlight?.status === 'unknown_result';
   const isRetryFrozen = inFlight != null && inFlight.status === 'verified_unapplied';
 
+  // Check if an operation is currently active (either locally or on server)
+  const isOperationActive = Boolean(
+    (currentOperation &&
+      currentOperation.state !== 'completed' &&
+      currentOperation.state !== 'blocked') ||
+      (inFlight?.submittedAuthId &&
+        inFlight.status === 'submitting')
+  );
+
   const requestPreview = useCallback(async () => {
     if (submittingRef.current || verifyingRef.current) return;
 
-    // Check if an existing in-flight operation exists
+    // 1. Check local in-flight unverified operation
     if (inFlightFlatten) {
       if (inFlightFlatten.status === 'unknown_result') {
         setIsModalOpen(true);
@@ -98,6 +140,30 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
         );
         return;
       }
+      if (inFlightFlatten.status === 'submitting') {
+        setIsModalOpen(true);
+        setErrorMessage('受控平仓操作正在执行或确认中，请勿重复发起。');
+        return;
+      }
+    }
+
+    // 2. Check if server already has an active non-terminal operation
+    try {
+      const controlsData = await fetchControls();
+      if (
+        controlsData.current_operation &&
+        controlsData.current_operation.state !== 'completed' &&
+        controlsData.current_operation.state !== 'blocked'
+      ) {
+        setCurrentOperation(controlsData.current_operation);
+        setIsModalOpen(true);
+        setErrorMessage(
+          `服务端已有受控平仓操作处于执行中 [${controlsData.current_operation.state}] (授权 ID: ${controlsData.current_operation.authorization_id})，禁止创建新平仓。`
+        );
+        return;
+      }
+    } catch {
+      // If fetching controls failed, continue to preview attempt
     }
 
     setIsLoadingPreview(true);
@@ -108,8 +174,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
 
       // If an existing in-flight operation has a different snapshot digest, discard it
       if (inFlightFlatten && inFlightFlatten.snapshot_digest !== data.snapshot_digest) {
-        inFlightFlatten = null;
-        notifyListeners();
+        setInFlightFlatten(null);
       }
 
       setIsModalOpen(true);
@@ -120,18 +185,19 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
     } catch (err) {
       const formatted = formatControlError(err);
       setToastMessage(formatted);
+      setErrorMessage(formatted);
+      options?.onError?.(formatted);
     } finally {
       setIsLoadingPreview(false);
     }
-  }, []);
+  }, [options]);
 
   const closeModal = useCallback(() => {
     if (submittingRef.current || verifyingRef.current) return;
 
     // If an operation was only initialized and not submitted, discard it
     if (inFlightFlatten && inFlightFlatten.status === 'initialized') {
-      inFlightFlatten = null;
-      notifyListeners();
+      setInFlightFlatten(null);
     }
 
     setIsModalOpen(false);
@@ -144,7 +210,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
 
   const handleConfirm = useCallback(
     async ({ totp, confirmText }: { totp: string; confirmText: string }) => {
-      if (submittingRef.current || verifyingRef.current || isUnknownResult) return;
+      if (submittingRef.current || verifyingRef.current || isUnknownResult || isOperationActive) return;
 
       if (!preview) {
         setErrorMessage('缺少服务端平仓快照，请重新读取权威事实。');
@@ -178,11 +244,11 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
           status: 'submitting',
           startedAtMs: Date.now(),
         };
-        inFlightFlatten = currentOp;
+        setInFlightFlatten(currentOp);
       } else {
         currentOp.status = 'submitting';
+        setInFlightFlatten(currentOp);
       }
-      notifyListeners();
 
       submittingRef.current = true;
       setIsSubmitting(true);
@@ -200,27 +266,37 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
       try {
         const op = await submitFlatten(payload);
 
-        // Success: clear in-flight operation, record completed/pending op
-        inFlightFlatten = null;
-        notifyListeners();
+        // Record authorization id of the submitted operation
+        currentOp.submittedAuthId = op.authorization_id;
 
-        setCurrentOperation(op);
-        setToastMessage(`受控平仓指令已提交 (${op.state})，全局 ENTRY 已挂起。`);
+        if (op.state === 'completed' || op.state === 'blocked') {
+          // Terminal operation: safe to clear in-flight operation
+          setInFlightFlatten(null);
+          setCurrentOperation(op);
+          setToastMessage(`受控平仓指令已完成 (${op.state})。`);
+        } else {
+          // Operation is in-progress (pending, claimed, exits_requested, etc.):
+          // Keep tracking it and prevent duplicate submissions!
+          setInFlightFlatten(currentOp);
+          setCurrentOperation(op);
+          setToastMessage(`受控平仓指令已受理 (${op.state})，全局 ENTRY 已挂起。`);
+        }
         setIsModalOpen(false);
 
-        // Invalidate controls and trades cache to sync UI
+        // Invalidate controls, tickets, overview, and causality query caches
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
-          queryClient.invalidateQueries({ queryKey: ['owner', 'trades'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
         ]);
 
         options?.onSuccess?.(op);
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           // Snapshot conflict or version conflict: invalidates old snapshot
-          inFlightFlatten = null;
+          setInFlightFlatten(null);
           setPreview(null);
-          notifyListeners();
           setErrorMessage('持仓状态快照已发生变动（409 Conflict），请重新读取最新权威事实。');
           return;
         }
@@ -229,17 +305,17 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
           // Step-up verification failure
           if (currentOp) {
             currentOp.status = 'initialized';
-            notifyListeners();
+            setInFlightFlatten(currentOp);
           }
           setErrorMessage('Google Authenticator 验证码无效或已过期，请重新输入。');
           return;
         }
 
-        // Unknown result / timeout / network failure
+        // Unknown result / timeout / network failure: retain in-flight operation with status unknown_result
         if (currentOp) {
           currentOp.status = 'unknown_result';
           currentOp.lastError = err instanceof Error ? err.message : String(err);
-          notifyListeners();
+          setInFlightFlatten(currentOp);
         }
         setErrorMessage(
           '平仓请求未决或网络超时，尚未确认结果。请先核验服务端权威状态，切勿重复提交。'
@@ -249,7 +325,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
         setIsSubmitting(false);
       }
     },
-    [preview, isUnknownResult, queryClient, options]
+    [preview, isUnknownResult, isOperationActive, queryClient, options]
   );
 
   const handleVerifyStatus = useCallback(async () => {
@@ -262,46 +338,79 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
     try {
       const controlsData = await fetchControls();
 
-      // Check current_operation or recent_operations
       const currentOp = controlsData.current_operation;
       const recentOps = controlsData.recent_operations ?? [];
 
-      const matchingOp =
-        (currentOp && currentOp.snapshot_digest === inFlightFlatten.snapshot_digest
-          ? currentOp
-          : null) ??
-        recentOps.find((op) => op.snapshot_digest === inFlightFlatten?.snapshot_digest);
+      // 1. If we have a known submitted authorization_id, find exact operation
+      if (inFlightFlatten.submittedAuthId) {
+        const exactOp =
+          (currentOp?.authorization_id === inFlightFlatten.submittedAuthId ? currentOp : null) ??
+          recentOps.find((op) => op.authorization_id === inFlightFlatten?.submittedAuthId);
 
-      if (matchingOp) {
-        // Authoritative confirmation that operation was executed/accepted!
-        inFlightFlatten = null;
-        notifyListeners();
-        setCurrentOperation(matchingOp);
-        setIsModalOpen(false);
-        setToastMessage(`已核验服务端状态：受控平仓操作处于 [${matchingOp.state}]。`);
+        if (exactOp) {
+          if (exactOp.state === 'completed' || exactOp.state === 'blocked') {
+            setInFlightFlatten(null);
+            setCurrentOperation(exactOp);
+            setIsModalOpen(false);
+            setToastMessage(`已核验服务端状态：受控平仓操作处于 [${exactOp.state}]。`);
+          } else {
+            // Still in progress: update currentOperation, keep tracking
+            setCurrentOperation(exactOp);
+            setToastMessage(`已核验服务端状态：受控平仓操作正在推进中 [${exactOp.state}]。`);
+          }
+
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
+            queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
+            queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
+            queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
+          ]);
+          return;
+        }
+      }
+
+      // 2. If submittedAuthId is NOT known (network cut out before response returned):
+      // NEVER match an operation from recent_operations solely by snapshot_digest!
+      // Content digest of an empty portfolio or static state is NOT proof of this operation.
+      // We can only consider an active current_operation created strictly during our request window.
+      if (
+        currentOp &&
+        currentOp.created_at_ms >= inFlightFlatten.startedAtMs - 3000 &&
+        currentOp.snapshot_digest === inFlightFlatten.snapshot_digest &&
+        currentOp.state !== 'completed'
+      ) {
+        // Active operation created during our window: bind authorization_id and keep tracking!
+        inFlightFlatten.submittedAuthId = currentOp.authorization_id;
+        inFlightFlatten.status = 'submitting';
+        setInFlightFlatten(inFlightFlatten);
+        setCurrentOperation(currentOp);
+        setToastMessage(`已识别到服务端正在执行本次平仓操作 [${currentOp.state}]。`);
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
-          queryClient.invalidateQueries({ queryKey: ['owner', 'trades'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
+          queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
         ]);
         return;
       }
 
-      // Check if policy version advanced or tickets changed
+      // 3. Check if policy version advanced past our expected version
       if (controlsData.global_entry.policy_version > inFlightFlatten.expected_version) {
-        inFlightFlatten = null;
+        setInFlightFlatten(null);
         setPreview(null);
-        notifyListeners();
         setIsModalOpen(false);
         setToastMessage('已核验服务端：全局策略版本已推进，旧平仓快照已失效。');
         await queryClient.invalidateQueries({ queryKey: controlsQueryKey });
         return;
       }
 
-      // If version hasn't changed and no operation recorded: verified unapplied
+      // 4. No matching operation found on server.
+      // CANNOT CLEAR UNKNOWN LOCK: transition to verified_unapplied and retain in-flight idempotency identity!
       inFlightFlatten.status = 'verified_unapplied';
-      notifyListeners();
+      inFlightFlatten.lastError = '未能关联到本次平仓的受理凭据。历史同快照记录不能证明本次请求已执行。';
+      setInFlightFlatten(inFlightFlatten);
       setErrorMessage(
-        '已核验服务端：未检测到本次平仓记录。重试将锁定原快照与幂等键，切勿使用新快照重试。'
+        '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
       );
     } catch (err) {
       const formatted = formatControlError(err);
@@ -323,6 +432,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
     currentOperation,
     isUnknownResult,
     isRetryFrozen,
+    isOperationActive,
     inFlight,
     requestPreview,
     closeModal,

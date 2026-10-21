@@ -102,7 +102,12 @@ export const App: React.FC = () => {
     onSuccess: (op) => {
       showToast(`受控平仓指令已提交 (${op.state})，全局 ENTRY 已挂起。`);
     },
+    onError: (msg) => {
+      showToast(msg);
+    },
   });
+
+  const activeFlattenOperation = currentOperation ?? flattenControl.currentOperation;
 
   // 1. Session Verification View
   if (isCheckingSession) {
@@ -317,7 +322,7 @@ export const App: React.FC = () => {
                     activeTicketCount={globalEntry.active_ticket_count}
                     onTriggerFlatten={flattenControl.requestPreview}
                     isLoading={flattenControl.isLoadingPreview}
-                    currentOperation={currentOperation}
+                    currentOperation={activeFlattenOperation}
                   />
                 </div>
 
@@ -339,6 +344,7 @@ export const App: React.FC = () => {
         errorMessage={flattenControl.errorMessage}
         isUnknownResult={flattenControl.isUnknownResult}
         isRetryFrozen={flattenControl.isRetryFrozen}
+        currentOperation={activeFlattenOperation}
         onConfirm={flattenControl.handleConfirm}
         onVerifyStatus={flattenControl.handleVerifyStatus}
         onRefreshPreview={flattenControl.requestPreview}

@@ -61,6 +61,7 @@ describe('useFlattenControl', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    sessionStorage.clear();
     _resetInFlightFlattenRegistry();
   });
 
@@ -106,6 +107,23 @@ describe('useFlattenControl', () => {
     expect(result.current.isModalOpen).toBe(true);
     expect(result.current.preview).toEqual(mockPreview);
     expect(result.current.errorMessage).toBeNull();
+  });
+
+  it('invokes options.onError when preview request fails with HTTP 500', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockRejectedValue(
+      new ApiError(500, 'internal_error', 'Database timeout')
+    );
+
+    const onError = vi.fn();
+    const { result } = renderTestHook(() => useFlattenControl({ onError }), createWrapper());
+
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+
+    expect(result.current.isModalOpen).toBe(false);
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('Database timeout'));
+    expect(result.current.toastMessage).toContain('Database timeout');
   });
 
   it('sets error and warns when preview has first_blocker', async () => {
@@ -165,12 +183,13 @@ describe('useFlattenControl', () => {
     expect(result.current.errorMessage).toContain('请输入 6 位数字 Google Authenticator 动态口令');
   });
 
-  it('submits flatten successfully and invalidates caches', async () => {
+  it('submits flatten successfully and invalidates tickets, overview, causality, and controls', async () => {
     vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
     const submitSpy = vi.spyOn(controlsApi, 'submitFlatten').mockResolvedValue(mockOperation);
 
     const onSuccess = vi.fn();
     const { result } = renderTestHook(() => useFlattenControl({ onSuccess }), createWrapper());
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
     await act(async () => {
       await result.current.requestPreview();
@@ -192,10 +211,15 @@ describe('useFlattenControl', () => {
       confirmation_text: '确认平仓全部持仓',
     });
 
-    expect(result.current.isModalOpen).toBe(false);
-    expect(result.current.toastMessage).toContain('受控平仓指令已提交');
+    expect(result.current.toastMessage).toContain('受控平仓指令已受理 (pending)');
     expect(result.current.currentOperation).toEqual(mockOperation);
     expect(onSuccess).toHaveBeenCalledWith(mockOperation);
+
+    // Verifies correct cache invalidation
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: controlsApi.controlsQueryKey });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['owner', 'tickets'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['owner', 'overview'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['owner', 'causality'] });
   });
 
   it('handles 409 snapshot conflict by invalidating preview and prompting re-preview', async () => {
@@ -222,11 +246,11 @@ describe('useFlattenControl', () => {
     expect(_getInFlightFlatten()).toBeNull();
   });
 
-  it('locks in unknown result on network timeout, preserving identity across modal reopen', async () => {
+  it('locks in unknown result on network timeout, and retains lockdown after browser refresh', async () => {
     vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
     vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Network Timeout'));
 
-    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+    const { result, unmount } = renderTestHook(() => useFlattenControl(), createWrapper());
 
     await act(async () => {
       await result.current.requestPreview();
@@ -247,33 +271,76 @@ describe('useFlattenControl', () => {
     expect(inFlightOp?.status).toBe('unknown_result');
     const originalKey = inFlightOp?.idempotency_key;
 
-    // Closing modal does NOT discard unknown result in-flight operation
-    act(() => {
-      result.current.closeModal();
-    });
-    expect(result.current.isModalOpen).toBe(false);
-    expect(_getInFlightFlatten()).not.toBeNull();
+    // Simulate page refresh: unmount current hook and verify sessionStorage has persisted operation
+    unmount();
+    expect(sessionStorage.getItem('brc:owner:in_flight_flatten')).not.toBeNull();
 
-    // Re-opening requests preview, detects in-flight and enters unknown_result lock
+    // Re-mount hook (simulating page reload)
+    const { result: reloadedResult } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    expect(reloadedResult.current.isUnknownResult).toBe(true);
+
+    // Opening flatten preview detects the persisted in-flight unknown operation and maintains lock
+    await act(async () => {
+      await reloadedResult.current.requestPreview();
+    });
+
+    expect(reloadedResult.current.isModalOpen).toBe(true);
+    expect(reloadedResult.current.isUnknownResult).toBe(true);
+    expect(reloadedResult.current.errorMessage).toContain('存在未决的受控平仓操作');
+
+    // Attempting submit while in unknown result remains blocked
+    await act(async () => {
+      await reloadedResult.current.handleConfirm({
+        totp: '123456',
+        confirmText: '确认平仓全部持仓',
+      });
+    });
+
+    // Idempotency key did NOT change or regenerate
+    expect(_getInFlightFlatten()?.idempotency_key).toBe(originalKey);
+  });
+
+  it('keeps active operation in progress and prevents creating a duplicate second flatten operation', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
+    vi.spyOn(controlsApi, 'submitFlatten').mockResolvedValue(mockOperation);
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
     await act(async () => {
       await result.current.requestPreview();
     });
-    expect(result.current.isModalOpen).toBe(true);
-    expect(result.current.isUnknownResult).toBe(true);
-    expect(result.current.errorMessage).toContain('存在未决的受控平仓操作');
 
-    // Trying to submit while in unknown result is completely blocked
     await act(async () => {
       await result.current.handleConfirm({
         totp: '123456',
         confirmText: '确认平仓全部持仓',
       });
     });
-    // Idempotency key did NOT change or regenerate
-    expect(_getInFlightFlatten()?.idempotency_key).toBe(originalKey);
+
+    // Operation was submitted and is pending
+    expect(result.current.isOperationActive).toBe(true);
+    expect(result.current.currentOperation?.state).toBe('pending');
+
+    // Attempting another preview while operation is in progress prevents second submission
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+
+    expect(result.current.errorMessage).toContain('受控平仓操作正在执行或确认中');
+
+    // Submit is disabled while isOperationActive is true
+    await act(async () => {
+      await result.current.handleConfirm({
+        totp: '123456',
+        confirmText: '确认平仓全部持仓',
+      });
+    });
+
+    expect(controlsApi.submitFlatten).toHaveBeenCalledTimes(1);
   });
 
-  it('verifies status via handleVerifyStatus when server records matching operation', async () => {
+  it('does NOT clear unknown lockdown when historical completed operation has identical snapshot_digest', async () => {
     vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
     vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Network Timeout'));
 
@@ -291,66 +358,97 @@ describe('useFlattenControl', () => {
 
     expect(result.current.isUnknownResult).toBe(true);
 
-    // Mock fetchControls returning matching current_operation
+    // Mock fetchControls returning a historical completed operation with the same snapshot_digest
+    // but created in the past (before our submit started)
+    const historicalCompletedOp: controlsApi.OwnerControlOperation = {
+      authorization_id: 'owner-auth:fl-old',
+      operation_kind: 'flatten_all',
+      state: 'completed',
+      version: 5,
+      runtime_profile_id: 'account-wide',
+      venue_id: 'binance-usdm',
+      account_id: 'owner-main',
+      target_ticket_ids: [],
+      snapshot_digest: mockPreview.snapshot_digest,
+      first_blocker: null,
+      created_at_ms: 1700000000000, // Historical!
+      updated_at_ms: 1700000000000,
+    };
+
     vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
       generated_at_ms: 1800000000000,
       global_entry: {
         configured_state: 'paused',
         effective_state: 'paused',
-        policy_version: 7,
-        active_ticket_count: 2,
-      },
-      account_capacity: {} as any,
-      runtime_entry_authority: {} as any,
-      dynamic_selection: null,
-      strategies: [],
-      current_operation: {
-        ...mockOperation,
-        state: 'exits_requested',
-      },
-      recent_operations: [],
-      events: [],
-    });
-
-    await act(async () => {
-      await result.current.handleVerifyStatus();
-    });
-
-    expect(_getInFlightFlatten()).toBeNull();
-    expect(result.current.isModalOpen).toBe(false);
-    expect(result.current.toastMessage).toContain('已核验服务端状态：受控平仓操作处于 [exits_requested]');
-  });
-
-  it('marks verified_unapplied when server shows no operation and policy unchanged', async () => {
-    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
-    vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Network Timeout'));
-
-    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
-
-    await act(async () => {
-      await result.current.requestPreview();
-    });
-    await act(async () => {
-      await result.current.handleConfirm({
-        totp: '123456',
-        confirmText: '确认平仓全部持仓',
-      });
-    });
-
-    // Mock fetchControls returning no operation and same policy version
-    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
-      generated_at_ms: 1800000000000,
-      global_entry: {
-        configured_state: 'enabled',
-        effective_state: 'enabled',
         policy_version: 6,
-        active_ticket_count: 2,
+        active_ticket_count: 0,
       },
       account_capacity: {} as any,
       runtime_entry_authority: {} as any,
       dynamic_selection: null,
       strategies: [],
       current_operation: null,
+      recent_operations: [historicalCompletedOp],
+      events: [],
+    });
+
+    await act(async () => {
+      await result.current.handleVerifyStatus();
+    });
+
+    // CANNOT clear unknown lock! Must retain in-flight operation and indicate unapplied
+    expect(_getInFlightFlatten()).not.toBeNull();
+    expect(result.current.isRetryFrozen).toBe(true);
+    expect(result.current.errorMessage).toContain('历史同快照记录无法作为本次凭据，未决闭锁已保持');
+  });
+
+  it('binds to active current_operation created during our window when submittedAuthId was lost', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
+    vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Network Timeout'));
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+    await act(async () => {
+      await result.current.handleConfirm({
+        totp: '123456',
+        confirmText: '确认平仓全部持仓',
+      });
+    });
+
+    expect(result.current.isUnknownResult).toBe(true);
+
+    const now = Date.now();
+    const liveServerOp: controlsApi.OwnerControlOperation = {
+      authorization_id: 'owner-auth:fl-live',
+      operation_kind: 'flatten_all',
+      state: 'exits_requested',
+      version: 2,
+      runtime_profile_id: 'account-wide',
+      venue_id: 'binance-usdm',
+      account_id: 'owner-main',
+      target_ticket_ids: ['ticket:btc-long'],
+      snapshot_digest: mockPreview.snapshot_digest,
+      first_blocker: null,
+      created_at_ms: now,
+      updated_at_ms: now,
+    };
+
+    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: now,
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 6,
+        active_ticket_count: 1,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: liveServerOp,
       recent_operations: [],
       events: [],
     });
@@ -359,8 +457,9 @@ describe('useFlattenControl', () => {
       await result.current.handleVerifyStatus();
     });
 
-    expect(result.current.isUnknownResult).toBe(false);
-    expect(result.current.isRetryFrozen).toBe(true);
-    expect(result.current.errorMessage).toContain('已核验服务端：未检测到本次平仓记录');
+    expect(result.current.currentOperation?.authorization_id).toBe('owner-auth:fl-live');
+    expect(result.current.currentOperation?.state).toBe('exits_requested');
+    expect(result.current.toastMessage).toContain('已识别到服务端正在执行本次平仓操作');
+    expect(_getInFlightFlatten()?.submittedAuthId).toBe('owner-auth:fl-live');
   });
 });
