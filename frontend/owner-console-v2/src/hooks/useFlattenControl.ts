@@ -28,6 +28,22 @@ export interface InFlightFlattenOperation {
   startedAtMs: number;
   lastError?: string | null;
   submittedAuthId?: string | null;
+  frozenPreview?: FlattenPreview | null;
+}
+
+export function restorePreviewFromInFlight(op: InFlightFlattenOperation): FlattenPreview {
+  if (op.frozenPreview) return op.frozenPreview;
+  return {
+    venue_id: 'binance-usdm',
+    account_id: 'owner-main',
+    owner_policy_version: op.expected_version,
+    global_entry_enabled: true,
+    ticket_ids: op.ticket_ids ?? [],
+    ticket_states: Object.fromEntries((op.ticket_ids ?? []).map((id) => [id, 'eligible'])),
+    snapshot_digest: op.snapshot_digest,
+    first_blocker: null,
+    runtime_profile_id: 'account-wide',
+  };
 }
 
 const STORAGE_KEY = 'brc:owner:in_flight_flatten';
@@ -106,7 +122,9 @@ export interface UseFlattenControlOptions {
 export function useFlattenControl(options?: UseFlattenControlOptions) {
   const queryClient = useQueryClient();
 
-  const [preview, setPreview] = useState<FlattenPreview | null>(null);
+  const [preview, setPreview] = useState<FlattenPreview | null>(() => {
+    return inFlightFlatten ? restorePreviewFromInFlight(inFlightFlatten) : null;
+  });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -181,6 +199,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
 
     // 2. Check local in-flight unverified operation
     if (inFlightFlatten) {
+      setPreview(restorePreviewFromInFlight(inFlightFlatten));
       if (!inFlightFlatten.submittedAuthId) {
         // Without an authorization ID, we cannot track progress; user must verify authoritative state
         inFlightFlatten.status = 'unknown_result';
@@ -347,10 +366,14 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
           idempotency_key: generateFlattenIdempotencyKey(),
           status: 'submitting',
           startedAtMs: Date.now(),
+          frozenPreview: preview,
         };
         setInFlightFlatten(currentOp);
       } else {
         currentOp.status = 'submitting';
+        if (!currentOp.frozenPreview && preview) {
+          currentOp.frozenPreview = preview;
+        }
         setInFlightFlatten(currentOp);
       }
 
@@ -485,6 +508,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
           inFlightFlatten.status = 'verified_unapplied';
           inFlightFlatten.lastError = `账户已有活动任务 [${currentOp.state}] (${currentOp.authorization_id})，无法关联为本次请求凭据。`;
           setInFlightFlatten(inFlightFlatten);
+          setPreview(restorePreviewFromInFlight(inFlightFlatten));
           setErrorMessage(
             `核验结果：账户已有活动平仓任务 [${currentOp.state}] (${currentOp.authorization_id})，非本次请求确认凭据。本次未决请求保持闭锁。`
           );
@@ -512,6 +536,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
         inFlightFlatten.status = 'verified_unapplied';
         inFlightFlatten.lastError = '未能关联到本次平仓的受理凭据。历史同快照记录不能证明本次请求已执行。';
         setInFlightFlatten(inFlightFlatten);
+        setPreview(restorePreviewFromInFlight(inFlightFlatten));
         setErrorMessage(
           '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
         );

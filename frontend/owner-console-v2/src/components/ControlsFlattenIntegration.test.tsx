@@ -503,4 +503,157 @@ describe('ControlsFlattenIntegration', () => {
     expect(_getInFlightFlatten()?.status).toBe('verified_unapplied');
     expect(_getInFlightFlatten()?.idempotency_key).toBe(originalKey);
   });
+
+  it('runs complete combined path: refresh -> verify server has no record -> restores preview -> retries with frozen original request', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
+    const submitSpy = vi.spyOn(controlsApi, 'submitFlatten')
+      .mockRejectedValueOnce(new Error('Network disconnected on submit'))
+      .mockResolvedValueOnce(mockOperation);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TestControlsFlattenContainer />
+        </QueryClientProvider>
+      );
+    });
+
+    // 1. Initial preview and submit -> fails with network error
+    const triggerBtn = container.querySelector(
+      '[data-testid="danger-zone-flatten-btn"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      triggerBtn.click();
+    });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    const totpInput = modal?.querySelector('input[placeholder="000000"]') as HTMLInputElement;
+    const confirmInput = modal?.querySelector(
+      'input[placeholder="确认平仓全部持仓"]'
+    ) as HTMLInputElement;
+    const submitBtn = modal?.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    act(() => {
+      setInputValue(totpInput, '111111');
+      setInputValue(confirmInput, '确认平仓全部持仓');
+    });
+
+    await act(async () => {
+      submitBtn.click();
+    });
+
+    expect(modal?.textContent).toContain('平仓结果未知（闭锁保护）');
+    const originalKey = _getInFlightFlatten()?.idempotency_key;
+    expect(originalKey).toBeDefined();
+
+    // 2. Real browser reload simulation:
+    // Unmount root and DOM container, but preserve sessionStorage
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+
+    const newContainer = document.createElement('div');
+    document.body.appendChild(newContainer);
+    const newRoot = createRoot(newContainer);
+
+    act(() => {
+      newRoot.render(
+        <QueryClientProvider client={queryClient}>
+          <TestControlsFlattenContainer />
+        </QueryClientProvider>
+      );
+    });
+
+    // Open modal on fresh page
+    const newTriggerBtn = newContainer.querySelector(
+      '[data-testid="danger-zone-flatten-btn"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      newTriggerBtn.click();
+    });
+
+    const reloadedModal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(reloadedModal?.textContent).toContain('平仓结果未知（闭锁保护）');
+    // Restored preview shows tickets and snapshot
+    expect(reloadedModal?.textContent).toContain('ticket:btc-long');
+    expect(reloadedModal?.textContent).toContain('ticket:ada-short');
+
+    // 3. Click "核验权威状态 (GET)" -> server returns no active task, policy version unchanged (9)
+    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: Date.now(),
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 9,
+        active_ticket_count: 2,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: null,
+      recent_operations: [],
+      events: [],
+    });
+
+    const verifyBtn = Array.from(reloadedModal?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent?.includes('核验权威状态 (GET)')
+    );
+    expect(verifyBtn).toBeDefined();
+
+    await act(async () => {
+      verifyBtn?.click();
+    });
+
+    // 4. Modal is now in verified_unapplied state:
+    // - Shows "重试已锁定原请求"
+    // - Shows "再次核验权威状态 (GET)" button
+    // - Preserves restored preview tickets
+    expect(reloadedModal?.textContent).toContain('重试已锁定原请求');
+    expect(reloadedModal?.textContent).toContain('再次核验权威状态 (GET)');
+    expect(reloadedModal?.textContent).toContain('ticket:btc-long');
+    expect(reloadedModal?.textContent).toContain('ticket:ada-short');
+
+    // 5. User enters TOTP and confirmation text to perform retry
+    const retryTotp = reloadedModal?.querySelector('input[placeholder="000000"]') as HTMLInputElement;
+    const retryConfirm = reloadedModal?.querySelector(
+      'input[placeholder="确认平仓全部持仓"]'
+    ) as HTMLInputElement;
+    const retrySubmitBtn = reloadedModal?.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    expect(retrySubmitBtn.disabled).toBe(true);
+
+    act(() => {
+      setInputValue(retryTotp, '222222');
+      setInputValue(retryConfirm, '确认平仓全部持仓');
+    });
+
+    // Submit button is now enabled!
+    expect(retrySubmitBtn.disabled).toBe(false);
+
+    // 6. Click retry submit
+    await act(async () => {
+      retrySubmitBtn.click();
+    });
+
+    // Verified that submit was called with EXACT original frozen key, version, and digest!
+    expect(submitSpy).toHaveBeenCalledTimes(2);
+    expect(submitSpy).toHaveBeenLastCalledWith({
+      expected_version: 9,
+      reason: 'owner_flatten_all',
+      idempotency_key: originalKey, // EXACT SAME IDEMPOTENCY KEY
+      totp_code: '222222',
+      snapshot_digest: mockPreview.snapshot_digest,
+      confirmation_text: '确认平仓全部持仓',
+    });
+
+    // Modal closes upon successful submit
+    expect(document.body.querySelector('[data-testid="controlled-flatten-modal"]')).toBeNull();
+
+    act(() => {
+      newRoot.unmount();
+    });
+    newContainer.remove();
+  });
 });

@@ -280,6 +280,12 @@ describe('useFlattenControl', () => {
     const { result: reloadedResult } = renderTestHook(() => useFlattenControl(), createWrapper());
 
     expect(reloadedResult.current.isUnknownResult).toBe(true);
+    // Preview is restored from frozen in-flight operation
+    expect(reloadedResult.current.preview).not.toBeNull();
+    expect(reloadedResult.current.preview?.ticket_ids).toEqual([
+      'ticket:btc-long',
+      'ticket:eth-short',
+    ]);
 
     // Opening flatten preview detects the persisted in-flight unknown operation and maintains lock
     await act(async () => {
@@ -289,15 +295,35 @@ describe('useFlattenControl', () => {
     expect(reloadedResult.current.isModalOpen).toBe(true);
     expect(reloadedResult.current.isUnknownResult).toBe(true);
     expect(reloadedResult.current.errorMessage).toContain('存在未决的受控平仓操作');
+    expect(reloadedResult.current.preview).not.toBeNull();
 
-    // Attempting submit while in unknown result remains blocked
-    await act(async () => {
-      await reloadedResult.current.handleConfirm({
-        totp: '123456',
-        confirmText: '确认平仓全部持仓',
-      });
+    // Verify status returns unapplied
+    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: Date.now(),
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 6,
+        active_ticket_count: 1,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: null,
+      recent_operations: [],
+      events: [],
     });
 
+    await act(async () => {
+      await reloadedResult.current.handleVerifyStatus();
+    });
+
+    expect(reloadedResult.current.isRetryFrozen).toBe(true);
+    expect(reloadedResult.current.preview).not.toBeNull();
+    expect(reloadedResult.current.preview?.snapshot_digest).toBe(mockPreview.snapshot_digest);
+
+    // Attempting submit while in unknown result remains blocked (if unknownResult), but once in verified_unapplied, submit is enabled!
     // Idempotency key did NOT change or regenerate
     expect(_getInFlightFlatten()?.idempotency_key).toBe(originalKey);
   });

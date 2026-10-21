@@ -274,11 +274,67 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
 
               {/* Retry Frozen Alert */}
               {isRetryFrozen && (
-                <div className="mt-3.5 rounded border border-brand/40 bg-brand-bg p-3 text-xs text-brand space-y-1">
-                  <strong>重试已锁定原请求</strong>
+                <div className="mt-3.5 rounded border border-brand/40 bg-brand-bg p-3 text-xs text-brand space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <Clock className="h-4 w-4 flex-none" />
+                      <span>重试已锁定原请求</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isVerifying}
+                      onClick={onVerifyStatus}
+                      className="inline-flex items-center gap-1.5 rounded bg-brand px-2.5 py-1 text-[11px] font-bold text-white shadow-xs hover:bg-brand/90 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isVerifying ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          核验中...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3 w-3" />
+                          再次核验权威状态 (GET)
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <p className="text-text-secondary leading-relaxed">
-                    服务端尚未记录上次平仓请求。重试将复用原快照与原幂等键。
+                    服务端尚未记录上次平仓请求。重试将严格复用原快照与原幂等键。若怀疑网络延迟，可点击右上角按钮再次核验。
                   </p>
+                </div>
+              )}
+
+              {/* Missing Snapshot Credential Warning */}
+              {!preview && !isUnknownResult && !isRetryFrozen && (
+                <div className="mt-3.5 rounded border border-status-red bg-status-red-bg p-3 text-xs text-status-red space-y-2">
+                  <div className="flex items-center gap-2 font-bold">
+                    <ShieldAlert className="h-4 w-4 flex-none" />
+                    <span>缺少冻结快照凭据</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    未能在本地恢复冻结快照。禁止直接提交，必须先核验权威状态。
+                  </p>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      disabled={isVerifying}
+                      onClick={onVerifyStatus}
+                      className="inline-flex items-center gap-1.5 rounded bg-status-red px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-red-700 disabled:opacity-50 cursor-pointer"
+                    >
+                      {isVerifying ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          正在核验权威状态...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          核验权威状态 (GET)
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 
