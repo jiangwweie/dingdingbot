@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   useFlattenControl,
   _resetInFlightFlattenRegistry,
+  _reloadInFlightFromStorage,
   _getInFlightFlatten,
 } from './useFlattenControl';
 import * as controlsApi from '../api/controlsApi';
@@ -402,7 +403,7 @@ describe('useFlattenControl', () => {
     expect(result.current.errorMessage).toContain('历史同快照记录无法作为本次凭据，未决闭锁已保持');
   });
 
-  it('binds to active current_operation created during our window when submittedAuthId was lost', async () => {
+  it('displays active server task but does NOT claim it as this request when submittedAuthId was lost', async () => {
     vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
     vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Network Timeout'));
 
@@ -457,9 +458,175 @@ describe('useFlattenControl', () => {
       await result.current.handleVerifyStatus();
     });
 
+    // Displays current active operation from server for awareness
     expect(result.current.currentOperation?.authorization_id).toBe('owner-auth:fl-live');
     expect(result.current.currentOperation?.state).toBe('exits_requested');
-    expect(result.current.toastMessage).toContain('已识别到服务端正在执行本次平仓操作');
-    expect(_getInFlightFlatten()?.submittedAuthId).toBe('owner-auth:fl-live');
+
+    // BUT does NOT adopt submittedAuthId as this request's proof!
+    expect(_getInFlightFlatten()?.submittedAuthId).toBeUndefined();
+    expect(_getInFlightFlatten()?.status).toBe('verified_unapplied');
+    expect(result.current.errorMessage).toContain('账户已有活动平仓任务');
+    expect(result.current.errorMessage).toContain('非本次请求确认凭据。本次未决请求保持闭锁。');
+  });
+
+  it('normalizes submitting state without authId to unknown_result and provides verification path', async () => {
+    // Inject persisted submitting record without submittedAuthId
+    sessionStorage.setItem(
+      'brc:owner:in_flight_flatten',
+      JSON.stringify({
+        expected_version: 6,
+        snapshot_digest: mockPreview.snapshot_digest,
+        ticket_ids: ['ticket:btc-long'],
+        reason: 'owner_flatten_all',
+        idempotency_key: 'owner-request:flatten-all:test-no-auth',
+        status: 'submitting',
+        startedAtMs: Date.now(),
+        submittedAuthId: null,
+      })
+    );
+    _reloadInFlightFromStorage();
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    // Verified upon requestPreview
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+
+    expect(result.current.isModalOpen).toBe(true);
+    expect(result.current.isUnknownResult).toBe(true);
+    expect(result.current.errorMessage).toContain('存在未决的受控平仓操作，提交状态未确认');
+    expect(_getInFlightFlatten()?.status).toBe('unknown_result');
+  });
+
+  it('queries exact operation when recovering submitting state with authId and clears tracking upon completion', async () => {
+    const authId = 'owner-auth:fl-completed-later';
+    sessionStorage.setItem(
+      'brc:owner:in_flight_flatten',
+      JSON.stringify({
+        expected_version: 6,
+        snapshot_digest: mockPreview.snapshot_digest,
+        ticket_ids: ['ticket:btc-long'],
+        reason: 'owner_flatten_all',
+        idempotency_key: 'owner-request:flatten-all:test-with-auth',
+        status: 'submitting',
+        startedAtMs: Date.now(),
+        submittedAuthId: authId,
+      })
+    );
+    _reloadInFlightFromStorage();
+
+    const completedOp: controlsApi.OwnerControlOperation = {
+      authorization_id: authId,
+      operation_kind: 'flatten_all',
+      state: 'completed',
+      version: 2,
+      runtime_profile_id: 'account-wide',
+      venue_id: 'binance-usdm',
+      account_id: 'owner-main',
+      target_ticket_ids: ['ticket:btc-long'],
+      snapshot_digest: mockPreview.snapshot_digest,
+      first_blocker: null,
+      created_at_ms: Date.now() - 5000,
+      updated_at_ms: Date.now(),
+    };
+
+    vi.spyOn(controlsApi, 'fetchControlOperation').mockResolvedValue(completedOp);
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue({
+      ...mockPreview,
+      ticket_ids: [],
+      ticket_states: {},
+    });
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+
+    // Tracking cleared and currentOperation marked completed
+    expect(_getInFlightFlatten()).toBeNull();
+    expect(result.current.currentOperation?.state).toBe('completed');
+    expect(result.current.toastMessage).toContain('受控平仓任务已结束 [completed]');
+  });
+
+  it('allows verifying progress when server has an operation but local has no inFlightFlatten', async () => {
+    const serverOp: controlsApi.OwnerControlOperation = {
+      authorization_id: 'owner-auth:from-server',
+      operation_kind: 'flatten_all',
+      state: 'pending',
+      version: 1,
+      runtime_profile_id: 'account-wide',
+      venue_id: 'binance-usdm',
+      account_id: 'owner-main',
+      target_ticket_ids: ['ticket:btc-long'],
+      snapshot_digest: mockPreview.snapshot_digest,
+      first_blocker: null,
+      created_at_ms: Date.now(),
+      updated_at_ms: Date.now(),
+    };
+
+    // Ensure no local inFlight
+    _resetInFlightFlattenRegistry();
+    sessionStorage.clear();
+
+    const fetchControlsSpy = vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: Date.now(),
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 6,
+        active_ticket_count: 1,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: serverOp,
+      recent_operations: [],
+      events: [],
+    });
+
+    const { result } = renderTestHook(() => useFlattenControl(), createWrapper());
+
+    // 1. Initial requestPreview fetches controls and adopts server current_operation
+    await act(async () => {
+      await result.current.requestPreview();
+    });
+
+    expect(result.current.currentOperation?.authorization_id).toBe('owner-auth:from-server');
+    expect(_getInFlightFlatten()).toBeNull();
+
+    // 2. Click "核验权威进度" without inFlightFlatten
+    fetchControlsSpy.mockResolvedValueOnce({
+      generated_at_ms: Date.now(),
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 7,
+        active_ticket_count: 0,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: null,
+      recent_operations: [
+        {
+          ...serverOp,
+          state: 'completed',
+        },
+      ],
+      events: [],
+    });
+
+    await act(async () => {
+      await result.current.handleVerifyStatus();
+    });
+
+    // Successfully verified!
+    expect(fetchControlsSpy).toHaveBeenCalledTimes(2);
+    expect(result.current.currentOperation?.state).toBe('completed');
+    expect(result.current.toastMessage).toContain('服务端平仓任务已结束 [completed]');
   });
 });

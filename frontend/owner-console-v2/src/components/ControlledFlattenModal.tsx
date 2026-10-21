@@ -287,7 +287,11 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="block text-xs font-bold text-text-muted">
-                      服务端冻结范围 ({preview?.ticket_ids.length ?? 0} 笔持仓受影响):
+                      {preview ? (
+                        <>服务端冻结范围 ({preview.ticket_ids.length} 笔持仓受影响):</>
+                      ) : (
+                        <>服务端冻结范围 (冻结快照待恢复／待核验):</>
+                      )}
                     </span>
                     {preview && (
                       <span className="font-mono text-[10px] text-text-muted">
@@ -297,7 +301,11 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                   </div>
 
                   <div className="max-h-36 overflow-y-auto divide-y divide-border rounded border border-border bg-surface-subtle font-mono">
-                    {preview && preview.ticket_ids.length > 0 ? (
+                    {!preview ? (
+                      <div className="p-3 text-center text-text-secondary font-sans text-xs">
+                        冻结快照待恢复／待核验，请先执行权威状态核验。
+                      </div>
+                    ) : preview.ticket_ids.length > 0 ? (
                       preview.ticket_ids.map((ticketId) => (
                         <div key={ticketId} className="flex items-center justify-between p-2.5 text-xs">
                           <span className="text-text-primary font-medium">{ticketId}</span>

@@ -4,6 +4,7 @@ import {
   fetchFlattenPreview,
   submitFlatten,
   fetchControls,
+  fetchControlOperation,
   controlsQueryKey,
   type FlattenPreview,
   type OwnerControlOperation,
@@ -36,7 +37,13 @@ function loadInFlightFromStorage(): InFlightFlattenOperation | null {
   try {
     const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as InFlightFlattenOperation;
+    const op = JSON.parse(raw) as InFlightFlattenOperation;
+    // If an operation was persisted with status 'submitting' but has no submittedAuthId,
+    // a page refresh or restart means the submit result was never confirmed: normalize to unknown_result
+    if (op && op.status === 'submitting' && !op.submittedAuthId) {
+      op.status = 'unknown_result';
+    }
+    return op;
   } catch {
     return null;
   }
@@ -74,6 +81,11 @@ export function _resetInFlightFlattenRegistry(): void {
   registryListeners.clear();
 }
 
+export function _reloadInFlightFromStorage(): void {
+  inFlightFlatten = loadInFlightFromStorage();
+  notifyListeners();
+}
+
 export function _getInFlightFlatten(): InFlightFlattenOperation | null {
   return inFlightFlatten;
 }
@@ -103,7 +115,12 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
   const verifyingRef = useRef(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [currentOperation, setCurrentOperation] = useState<OwnerControlOperation | null>(null);
+  const [currentOperation, setCurrentOperationState] = useState<OwnerControlOperation | null>(null);
+  const currentOperationRef = useRef<OwnerControlOperation | null>(null);
+  const setCurrentOperation = useCallback((op: OwnerControlOperation | null) => {
+    currentOperationRef.current = op;
+    setCurrentOperationState(op);
+  }, []);
 
   // Synchronize across components if state changes
   const [, setTick] = useState(0);
@@ -113,6 +130,25 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
     return () => {
       registryListeners.delete(handler);
     };
+  }, []);
+
+  // On mount: if an in-flight operation has submittedAuthId, check its status once to update currentOperation
+  useEffect(() => {
+    if (inFlightFlatten?.submittedAuthId) {
+      const authId = inFlightFlatten.submittedAuthId;
+      fetchControlOperation(authId)
+        .then((op) => {
+          if (!op) return;
+          setCurrentOperation(op);
+          if (op.state === 'completed' || op.state === 'blocked') {
+            setInFlightFlatten(null);
+            setToastMessage(`受控平仓任务已结束 [${op.state}]。`);
+          }
+        })
+        .catch(() => {
+          // Ignore mount fetch errors
+        });
+    }
   }, []);
 
   const inFlight = inFlightFlatten;
@@ -131,19 +167,87 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
   const requestPreview = useCallback(async () => {
     if (submittingRef.current || verifyingRef.current) return;
 
-    // 1. Check local in-flight unverified operation
+    // 1. If an active operation is already tracking in memory, open progress view directly
+    const activeOp = currentOperationRef.current ?? currentOperation;
+    if (
+      activeOp &&
+      activeOp.state !== 'completed' &&
+      activeOp.state !== 'blocked'
+    ) {
+      setIsModalOpen(true);
+      setErrorMessage('受控平仓操作正在执行或确认中，请勿重复发起。');
+      return;
+    }
+
+    // 2. Check local in-flight unverified operation
     if (inFlightFlatten) {
-      if (inFlightFlatten.status === 'unknown_result') {
+      if (!inFlightFlatten.submittedAuthId) {
+        // Without an authorization ID, we cannot track progress; user must verify authoritative state
+        inFlightFlatten.status = 'unknown_result';
+        setInFlightFlatten(inFlightFlatten);
         setIsModalOpen(true);
         setErrorMessage(
-          '存在未决的受控平仓操作，执行结果未知。禁止重新发起平仓，必须先核验服务端权威状态。'
+          '存在未决的受控平仓操作，提交状态未确认。禁止重新发起平仓，必须先核验服务端权威状态。'
         );
         return;
       }
-      if (inFlightFlatten.status === 'submitting') {
+
+      // With an authorization ID, query server to update operation status
+      const targetAuthId = inFlightFlatten.submittedAuthId;
+      setIsLoadingPreview(true);
+      try {
+        let exactOp: OwnerControlOperation | null = null;
+        try {
+          exactOp = await fetchControlOperation(targetAuthId);
+        } catch {
+          const controlsData = await fetchControls();
+          exactOp =
+            (controlsData.current_operation?.authorization_id === targetAuthId
+              ? controlsData.current_operation
+              : null) ??
+            (controlsData.recent_operations?.find(
+              (o) => o.authorization_id === targetAuthId
+            ) ?? null);
+        }
+
+        if (exactOp) {
+          setCurrentOperation(exactOp);
+          if (exactOp.state === 'completed' || exactOp.state === 'blocked') {
+            // Terminal state: release tracking!
+            setInFlightFlatten(null);
+            setToastMessage(`受控平仓任务已结束 [${exactOp.state}]。`);
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
+            ]);
+            // Fall through to fetch fresh preview since operation is finished!
+          } else {
+            // Active task: open modal showing progress view
+            setIsModalOpen(true);
+            setToastMessage(`服务端平仓任务正在执行中 [${exactOp.state}]。`);
+            return;
+          }
+        } else {
+          inFlightFlatten.status = 'unknown_result';
+          setInFlightFlatten(inFlightFlatten);
+          setIsModalOpen(true);
+          setErrorMessage(
+            `未能在服务端查询到已授权任务 (${targetAuthId})，请核验权威状态。`
+          );
+          return;
+        }
+      } catch (err) {
+        inFlightFlatten.status = 'unknown_result';
+        setInFlightFlatten(inFlightFlatten);
         setIsModalOpen(true);
-        setErrorMessage('受控平仓操作正在执行或确认中，请勿重复发起。');
+        setErrorMessage(
+          `读取服务端平仓进度失败 (${formatControlError(err)})，请核验权威状态。`
+        );
         return;
+      } finally {
+        setIsLoadingPreview(false);
       }
     }
 
@@ -190,7 +294,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
     } finally {
       setIsLoadingPreview(false);
     }
-  }, [options]);
+  }, [options, currentOperation]);
 
   const closeModal = useCallback(() => {
     if (submittingRef.current || verifyingRef.current) return;
@@ -329,7 +433,8 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
   );
 
   const handleVerifyStatus = useCallback(async () => {
-    if (verifyingRef.current || !inFlightFlatten) return;
+    if (verifyingRef.current) return;
+    if (!inFlightFlatten && !currentOperation) return;
 
     verifyingRef.current = true;
     setIsVerifying(true);
@@ -341,24 +446,48 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
       const currentOp = controlsData.current_operation;
       const recentOps = controlsData.recent_operations ?? [];
 
-      // 1. If we have a known submitted authorization_id, find exact operation
-      if (inFlightFlatten.submittedAuthId) {
-        const exactOp =
-          (currentOp?.authorization_id === inFlightFlatten.submittedAuthId ? currentOp : null) ??
-          recentOps.find((op) => op.authorization_id === inFlightFlatten?.submittedAuthId);
+      // Case 1: Local in-flight operation exists
+      if (inFlightFlatten) {
+        // 1.1 If we have a known submitted authorization_id, find exact operation
+        const localAuthId = inFlightFlatten.submittedAuthId;
+        if (localAuthId) {
+          const exactOp =
+            (currentOp?.authorization_id === localAuthId ? currentOp : null) ??
+            recentOps.find((op) => op.authorization_id === localAuthId);
 
-        if (exactOp) {
-          if (exactOp.state === 'completed' || exactOp.state === 'blocked') {
-            setInFlightFlatten(null);
-            setCurrentOperation(exactOp);
-            setIsModalOpen(false);
-            setToastMessage(`已核验服务端状态：受控平仓操作处于 [${exactOp.state}]。`);
-          } else {
-            // Still in progress: update currentOperation, keep tracking
-            setCurrentOperation(exactOp);
-            setToastMessage(`已核验服务端状态：受控平仓操作正在推进中 [${exactOp.state}]。`);
+          if (exactOp) {
+            if (exactOp.state === 'completed' || exactOp.state === 'blocked') {
+              setInFlightFlatten(null);
+              setCurrentOperation(exactOp);
+              setIsModalOpen(false);
+              setToastMessage(`已核验服务端状态：受控平仓操作处于 [${exactOp.state}]。`);
+            } else {
+              // Still in progress: update currentOperation, keep tracking
+              setCurrentOperation(exactOp);
+              setToastMessage(`已核验服务端状态：受控平仓操作正在推进中 [${exactOp.state}]。`);
+            }
+
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
+              queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
+            ]);
+            return;
           }
+        }
 
+        // 1.2 If submittedAuthId is NOT known:
+        // NEVER adopt or claim currentOp as "本次请求"!
+        // If server has an active operation, display it as "账户已有活动任务", but do NOT bind submittedAuthId!
+        if (currentOp && currentOp.state !== 'completed' && currentOp.state !== 'blocked') {
+          setCurrentOperation(currentOp);
+          inFlightFlatten.status = 'verified_unapplied';
+          inFlightFlatten.lastError = `账户已有活动任务 [${currentOp.state}] (${currentOp.authorization_id})，无法关联为本次请求凭据。`;
+          setInFlightFlatten(inFlightFlatten);
+          setErrorMessage(
+            `核验结果：账户已有活动平仓任务 [${currentOp.state}] (${currentOp.authorization_id})，非本次请求确认凭据。本次未决请求保持闭锁。`
+          );
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
             queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
@@ -367,51 +496,60 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
           ]);
           return;
         }
+
+        // 1.3 Check if policy version advanced past our expected version
+        if (controlsData.global_entry.policy_version > inFlightFlatten.expected_version) {
+          setInFlightFlatten(null);
+          setPreview(null);
+          setIsModalOpen(false);
+          setToastMessage('已核验服务端：全局策略版本已推进，旧平仓快照已失效。');
+          await queryClient.invalidateQueries({ queryKey: controlsQueryKey });
+          return;
+        }
+
+        // 1.4 No matching operation found on server.
+        // CANNOT CLEAR UNKNOWN LOCK: transition to verified_unapplied and retain in-flight idempotency identity!
+        inFlightFlatten.status = 'verified_unapplied';
+        inFlightFlatten.lastError = '未能关联到本次平仓的受理凭据。历史同快照记录不能证明本次请求已执行。';
+        setInFlightFlatten(inFlightFlatten);
+        setErrorMessage(
+          '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
+        );
+        return;
       }
 
-      // 2. If submittedAuthId is NOT known (network cut out before response returned):
-      // NEVER match an operation from recent_operations solely by snapshot_digest!
-      // Content digest of an empty portfolio or static state is NOT proof of this operation.
-      // We can only consider an active current_operation created strictly during our request window.
-      if (
-        currentOp &&
-        currentOp.created_at_ms >= inFlightFlatten.startedAtMs - 3000 &&
-        currentOp.snapshot_digest === inFlightFlatten.snapshot_digest &&
-        currentOp.state !== 'completed'
-      ) {
-        // Active operation created during our window: bind authorization_id and keep tracking!
-        inFlightFlatten.submittedAuthId = currentOp.authorization_id;
-        inFlightFlatten.status = 'submitting';
-        setInFlightFlatten(inFlightFlatten);
-        setCurrentOperation(currentOp);
-        setToastMessage(`已识别到服务端正在执行本次平仓操作 [${currentOp.state}]。`);
+      // Case 2: No local inFlightFlatten, but currentOperation was on display
+      if (currentOperation) {
+        const matchingOp =
+          (currentOp?.authorization_id === currentOperation.authorization_id ? currentOp : null) ??
+          recentOps.find((op) => op.authorization_id === currentOperation.authorization_id);
+
+        if (matchingOp) {
+          setCurrentOperation(matchingOp);
+          if (matchingOp.state === 'completed' || matchingOp.state === 'blocked') {
+            setIsModalOpen(false);
+            setToastMessage(`服务端平仓任务已结束 [${matchingOp.state}]。`);
+          } else {
+            setToastMessage(`已刷新服务端平仓进度 [${matchingOp.state}]。`);
+          }
+        } else if (!currentOp) {
+          // Current operation is no longer active on server
+          setCurrentOperation(null);
+          setIsModalOpen(false);
+          setToastMessage('服务端活动平仓任务已结束。');
+        } else {
+          // A different operation is running on server
+          setCurrentOperation(currentOp);
+          setToastMessage(`已刷新服务端平仓进度 [${currentOp.state}]。`);
+        }
+
         await Promise.all([
           queryClient.invalidateQueries({ queryKey: controlsQueryKey }),
           queryClient.invalidateQueries({ queryKey: ['owner', 'tickets'] }),
           queryClient.invalidateQueries({ queryKey: ['owner', 'overview'] }),
           queryClient.invalidateQueries({ queryKey: ['owner', 'causality'] }),
         ]);
-        return;
       }
-
-      // 3. Check if policy version advanced past our expected version
-      if (controlsData.global_entry.policy_version > inFlightFlatten.expected_version) {
-        setInFlightFlatten(null);
-        setPreview(null);
-        setIsModalOpen(false);
-        setToastMessage('已核验服务端：全局策略版本已推进，旧平仓快照已失效。');
-        await queryClient.invalidateQueries({ queryKey: controlsQueryKey });
-        return;
-      }
-
-      // 4. No matching operation found on server.
-      // CANNOT CLEAR UNKNOWN LOCK: transition to verified_unapplied and retain in-flight idempotency identity!
-      inFlightFlatten.status = 'verified_unapplied';
-      inFlightFlatten.lastError = '未能关联到本次平仓的受理凭据。历史同快照记录不能证明本次请求已执行。';
-      setInFlightFlatten(inFlightFlatten);
-      setErrorMessage(
-        '核验结果：服务端未查得本次平仓受理记录。历史同快照记录无法作为本次凭据，未决闭锁已保持。重试将锁定原快照与原幂等键。'
-      );
     } catch (err) {
       const formatted = formatControlError(err);
       setErrorMessage(`核验失败 (${formatted})，请保持闭锁并稍后重试核验。`);
@@ -419,7 +557,7 @@ export function useFlattenControl(options?: UseFlattenControlOptions) {
       verifyingRef.current = false;
       setIsVerifying(false);
     }
-  }, [queryClient]);
+  }, [queryClient, currentOperation]);
 
   return {
     preview,

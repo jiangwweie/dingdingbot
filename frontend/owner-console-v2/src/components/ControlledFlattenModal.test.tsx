@@ -222,4 +222,28 @@ describe('ControlledFlattenModal', () => {
 
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('displays "冻结快照待恢复／待核验" when preview is null instead of claiming empty positions', () => {
+    renderModal({ preview: null, isUnknownResult: true });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(modal).not.toBeNull();
+    expect(modal?.textContent).toContain('服务端冻结范围 (冻结快照待恢复／待核验):');
+    expect(modal?.textContent).toContain('冻结快照待恢复／待核验，请先执行权威状态核验。');
+    expect(modal?.textContent).not.toContain('当前已经全平');
+  });
+
+  it('displays "当前已经全平" when preview is valid and has 0 tickets', () => {
+    renderModal({
+      preview: {
+        ...mockPreview,
+        ticket_ids: [],
+        ticket_states: {},
+      },
+    });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(modal?.textContent).toContain('服务端冻结范围 (0 笔持仓受影响):');
+    expect(modal?.textContent).toContain('当前已经全平，将执行空仓幂等确认。');
+  });
 });
