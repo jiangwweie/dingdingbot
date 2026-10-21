@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useControlsData } from './hooks/useControlsData';
 import { cleanSymbol } from './hooks/useOverviewData';
@@ -6,15 +6,31 @@ import { LoginPage } from './components/auth/LoginPage';
 import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
 import { TradesPage } from './components/trades/TradesPage';
+import { StrategiesPage } from './components/strategies/StrategiesPage';
+import { ReviewPage } from './components/review/ReviewPage';
 import { CausalityDrawer } from './components/overview/CausalityDrawer';
 import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { SelectionSection } from './components/SelectionSection';
 import { DangerZoneCard } from './components/DangerZoneCard';
+import { ControlledFlattenModal } from './components/ControlledFlattenModal';
 import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
+import { useFlattenControl } from './hooks/useFlattenControl';
+import { useGlobalEntryControl } from './hooks/useGlobalEntryControl';
+import { TotpActionModal } from './components/TotpActionModal';
 import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
+
+const getInitialTab = (): NavTabId => {
+  if (typeof window !== 'undefined') {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview' || tab === 'review') {
+      return tab;
+    }
+  }
+  return 'overview';
+};
 
 export const App: React.FC = () => {
   const {
@@ -30,8 +46,37 @@ export const App: React.FC = () => {
     acknowledgeUnconfirmedSession,
   } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<NavTabId>('overview');
+  const [activeTab, setActiveTab] = useState<NavTabId>(getInitialTab);
   const [selectedTicketEpisode, setSelectedTicketEpisode] = useState<TradeEpisodeSummary | null>(null);
+
+  // Synchronize activeTab with browser URL search params on popstate
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const onPopState = () => {
+      const tab = new URLSearchParams(window.location.search).get('tab');
+      if (tab === 'trades' || tab === 'strategies' || tab === 'controls' || tab === 'overview' || tab === 'review') {
+        setActiveTab(tab);
+      } else {
+        setActiveTab('overview');
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const handleSelectTab = (tab: NavTabId) => {
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      if (sp.get('tab') !== tab) {
+        const newSp = new URLSearchParams();
+        newSp.set('tab', tab);
+        window.history.pushState(null, '', `${window.location.pathname}?${newSp.toString()}`);
+      }
+    }
+  };
 
   // Controls Data
   const {
@@ -39,6 +84,7 @@ export const App: React.FC = () => {
     strategies,
     capacity,
     operations,
+    currentOperation,
     rawTickets,
     isLoading: controlsLoading,
     isFetching: controlsFetching,
@@ -48,12 +94,27 @@ export const App: React.FC = () => {
     refetch: refetchControls,
   } = useControlsData();
 
-  // Toast indicator
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  const flattenControl = useFlattenControl({
+    onSuccess: (op) => {
+      showToast(`受控平仓指令已提交 (${op.state})，全局 ENTRY 已挂起。`);
+    },
+    onError: (msg) => {
+      showToast(msg);
+    },
+  });
+
+  const activeFlattenOperation = currentOperation ?? flattenControl.currentOperation;
+
+  const globalControl = useGlobalEntryControl({
+    onSuccess: (msg) => showToast(msg),
+    activeFlattenOperation,
+  });
 
   // 1. Session Verification View
   if (isCheckingSession) {
@@ -114,7 +175,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen bg-background text-text-primary">
       <Navbar
         activeTab={activeTab}
-        onSelectTab={setActiveTab}
+        onSelectTab={handleSelectTab}
         isRealData={true}
         onLogout={logout}
         isLoggingOut={isLoggingOut}
@@ -122,11 +183,19 @@ export const App: React.FC = () => {
 
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
         {activeTab === 'overview' && (
-          <OverviewPage onNavigateToControls={() => setActiveTab('controls')} />
+          <OverviewPage onNavigateToControls={() => handleSelectTab('controls')} />
         )}
 
         {activeTab === 'trades' && (
           <TradesPage />
+        )}
+
+        {activeTab === 'strategies' && (
+          <StrategiesPage />
+        )}
+
+        {activeTab === 'review' && (
+          <ReviewPage />
         )}
 
         {activeTab === 'controls' && (
@@ -162,14 +231,14 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Phase 1 Read-Only Status Banner */}
+            {/* Control Posture Status Banner */}
             <div className="mb-4 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.5 border border-brand/20">
-                  Phase 1: Real Read-Only
+                  Phase C + D: Global ENTRY & Selection Governance Active
                 </span>
                 <span className="text-text-secondary">
-                  已连接生产 API · 只读模式 (写操作保持安全禁用，绝无假交互)
+                  策略启停、受控平仓、动态选币授权及全局 ENTRY 控制已接通权威写操作 (防重锁 + TOTP 强认证) · 单 Ticket 平仓保持安全禁用
                 </span>
               </div>
               <span className="font-mono text-[11px] text-text-muted">
@@ -211,17 +280,25 @@ export const App: React.FC = () => {
                   globalEntry={globalEntry}
                   pausedStrategyCount={pausedCount}
                   totalActiveStrategies={strategies.length}
-                  onToggleGlobalEntry={() =>
-                    showToast('Phase 1 · 只读模式 (全局开仓写操作未开放)')
+                  onRequestAction={globalControl.requestAction}
+                  isActionDisabled={Boolean(
+                    activeFlattenOperation &&
+                    activeFlattenOperation.state !== 'completed' &&
+                    activeFlattenOperation.state !== 'blocked'
+                  )}
+                  disabledReason={
+                    activeFlattenOperation &&
+                    activeFlattenOperation.state !== 'completed' &&
+                    activeFlattenOperation.state !== 'blocked'
+                      ? '受控平仓正在执行中，禁止操作全局新开仓准入'
+                      : undefined
                   }
                 />
 
                 {/* Level 2: Strategy Control Matrix */}
                 <StrategyMatrix
                   strategies={strategies}
-                  onToggleStrategy={() =>
-                    showToast('Phase 1 · 只读模式 (策略启停写操作未开放)')
-                  }
+                  onSuccess={(msg) => showToast(msg)}
                   onSelectTicket={(ticketId) => {
                     const matching = rawTickets.find((t) => t.ticket_id === ticketId);
                     if (matching) {
@@ -250,7 +327,7 @@ export const App: React.FC = () => {
                 />
 
                 {/* Level 3: Dynamic Selection Governance */}
-                <SelectionSection />
+                <SelectionSection onSuccess={(msg) => showToast(msg)} />
 
                 {/* Level 4: Capacity & High Risk Guardrail */}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -260,6 +337,9 @@ export const App: React.FC = () => {
                   />
                   <DangerZoneCard
                     activeTicketCount={globalEntry.active_ticket_count}
+                    onTriggerFlatten={flattenControl.requestPreview}
+                    isLoading={flattenControl.isLoadingPreview}
+                    currentOperation={activeFlattenOperation}
                   />
                 </div>
 
@@ -270,6 +350,26 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Controlled Flatten Modal */}
+      <ControlledFlattenModal
+        open={flattenControl.isModalOpen}
+        onClose={flattenControl.closeModal}
+        preview={flattenControl.preview}
+        isSubmitting={flattenControl.isSubmitting}
+        isVerifying={flattenControl.isVerifying}
+        errorMessage={flattenControl.errorMessage}
+        isUnknownResult={flattenControl.isUnknownResult}
+        isRetryFrozen={flattenControl.isRetryFrozen}
+        currentOperation={activeFlattenOperation}
+        inFlightOperation={flattenControl.inFlight}
+        onConfirm={flattenControl.handleConfirm}
+        onVerifyStatus={flattenControl.handleVerifyStatus}
+        onRefreshPreview={flattenControl.requestPreview}
+      />
+
+      {/* Global Entry Control Modal */}
+      <TotpActionModal {...globalControl.modalProps} />
 
       {/* Causality Drawer triggered from Controls Strategy Matrix */}
       <CausalityDrawer

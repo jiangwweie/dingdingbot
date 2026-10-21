@@ -2,20 +2,26 @@ import React from 'react';
 import type { GlobalEntryState } from '../types/controls';
 import { Pause, Play } from 'lucide-react';
 
-interface TopStatusBarProps {
+export interface TopStatusBarProps {
   globalEntry: GlobalEntryState;
   pausedStrategyCount: number;
   totalActiveStrategies: number;
-  onToggleGlobalEntry?: () => void;
+  onRequestAction?: (action: 'pause' | 'resume', version: number) => void;
+  isActionDisabled?: boolean;
+  disabledReason?: string;
 }
 
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   globalEntry,
   pausedStrategyCount,
   totalActiveStrategies,
+  onRequestAction,
+  isActionDisabled = false,
+  disabledReason,
 }) => {
-
   const isGlobalEnabled = globalEntry.configured_state === 'enabled';
+  const targetAction = isGlobalEnabled ? 'pause' : 'resume';
+  const isDisabled = isActionDisabled || !onRequestAction;
 
   return (
     <section className="mb-4 rounded border border-border bg-surface p-4 shadow-xs">
@@ -75,23 +81,27 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
 
           <button
             type="button"
-            disabled
-            title="Phase 1 · 只读模式 (写操作未开放)"
-            className="inline-flex items-center gap-2 rounded border border-border bg-surface-subtle px-3.5 py-1.5 text-xs font-semibold text-text-muted opacity-60 cursor-not-allowed shadow-none"
+            disabled={isDisabled}
+            title={disabledReason ?? (isGlobalEnabled ? '暂停全局策略新开仓准入' : '恢复全局新开仓通道')}
+            onClick={() => onRequestAction?.(targetAction, globalEntry.policy_version)}
+            className={`inline-flex items-center gap-2 rounded border px-3.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
+              isGlobalEnabled
+                ? 'border-status-amber/50 bg-status-amber-bg text-status-amber hover:bg-status-amber/20'
+                : 'border-status-green/50 bg-status-green-bg text-status-green hover:bg-status-green/20'
+            }`}
           >
             {isGlobalEnabled ? (
               <>
-                <Pause className="h-3.5 w-3.5 text-text-muted" />
-                暂停全局 (Phase 1 只读)
+                <Pause className="h-3.5 w-3.5 text-status-amber" />
+                暂停全局新准入
               </>
             ) : (
               <>
-                <Play className="h-3.5 w-3.5 text-text-muted" />
-                恢复全局 (Phase 1 只读)
+                <Play className="h-3.5 w-3.5 text-status-green" />
+                恢复全局新准入
               </>
             )}
           </button>
-
         </div>
       </div>
     </section>

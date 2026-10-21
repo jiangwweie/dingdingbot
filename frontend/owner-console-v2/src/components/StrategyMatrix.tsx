@@ -1,17 +1,46 @@
 import React from 'react';
 import type { StrategyControlItem } from '../types/controls';
 import { Pause, Play, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
+import { useStrategyControl } from '../hooks/useStrategyControl';
+import { TotpActionModal } from './TotpActionModal';
 
 interface StrategyMatrixProps {
   strategies: StrategyControlItem[];
   onToggleStrategy?: (strategy: StrategyControlItem) => void;
   onSelectTicket?: (ticketId: string) => void;
+  onSuccess?: (message: string) => void;
 }
 
 export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
   strategies,
+  onToggleStrategy,
   onSelectTicket,
+  onSuccess,
 }) => {
+  const { modalProps, requestToggle } = useStrategyControl({
+    onSuccess: (msg) => {
+      onSuccess?.(msg);
+    },
+  });
+
+  const handleToggle = (strategy: StrategyControlItem) => {
+    const hasControlFact =
+      (strategy.configured_state === 'enabled' || strategy.configured_state === 'paused') &&
+      typeof strategy.control_version === 'number' &&
+      Number.isFinite(strategy.control_version);
+    if (!hasControlFact) return;
+
+    if (onToggleStrategy) {
+      onToggleStrategy(strategy);
+    }
+    requestToggle({
+      strategy_group_id: strategy.strategy_group_id,
+      configured_state: strategy.configured_state,
+      control_version: strategy.control_version,
+      name_zh: strategy.name_zh,
+      is_retired: strategy.is_retired || strategy.strategy_group_id === 'SOR-001',
+    });
+  };
 
   return (
     <div className="rounded border border-border bg-surface shadow-xs">
@@ -21,7 +50,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
             策略独立控制矩阵
           </h2>
           <p className="mt-0.5 text-xs text-text-secondary">
-            区分配置启用状态、实时准入诊断与实际在管持仓；策略暂停不影响已有持仓退出。
+            区分配置启用状态、实时准入诊断与实际在管持仓；暂停新准入不影响存量持仓保护与退出。
           </p>
         </div>
         <span className="font-mono text-xs text-text-muted">5 个在役策略 · 1 个退役归档</span>
@@ -32,7 +61,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
           <thead>
             <tr className="border-b border-border bg-surface-subtle text-xs font-semibold text-text-muted">
               <th className="py-2.5 pl-5 pr-4 w-[28%]">策略组 (StrategyGroup)</th>
-              <th className="px-4 py-2.5 w-[14%]">配置状态</th>
+              <th className="px-4 py-2.5 w-[14%]">配置与有效状态</th>
               <th className="px-4 py-2.5 w-[32%]">实际准入诊断 (来自事实)</th>
               <th className="px-4 py-2.5 w-[14%]">在管持仓占用</th>
               <th className="py-2.5 pl-4 pr-5 text-right w-[12%]">控制操作</th>
@@ -41,7 +70,12 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
           <tbody className="divide-y divide-border">
             {strategies.map((strategy) => {
               const isEnabled = strategy.configured_state === 'enabled';
-              const isRetired = strategy.is_retired;
+              const isRetired = strategy.is_retired || strategy.strategy_group_id === 'SOR-001';
+              const isPausedByGlobal = strategy.effective_state === 'paused_by_global';
+              const hasControlFact =
+                (strategy.configured_state === 'enabled' || strategy.configured_state === 'paused') &&
+                typeof strategy.control_version === 'number' &&
+                Number.isFinite(strategy.control_version);
 
               return (
                 <tr
@@ -67,39 +101,59 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                         {strategy.strategy_version_id && (
                           <>
                             <span className="text-text-muted opacity-40">·</span>
-                            <span className="font-mono text-[11px] text-text-muted" title="真实策略版本号 (strategy_version_id)">
+                            <span
+                              className="font-mono text-[11px] text-text-muted"
+                              title="真实策略版本号 (strategy_version_id)"
+                            >
                               {strategy.strategy_version_id}
                             </span>
                           </>
                         )}
                         <span className="text-text-muted opacity-40">·</span>
-                        <span className="font-mono text-[11px] text-text-muted" title="控制记录版本与原因">
+                        <span
+                          className="font-mono text-[11px] text-text-muted"
+                          title="控制记录版本与原因"
+                        >
                           控制: v{strategy.control_version} ({strategy.reason_label})
                         </span>
                       </div>
                     </div>
                   </td>
 
-                  {/* Configured State */}
+                  {/* Configured State & Effective State */}
                   <td className="px-4 py-2.5">
                     {isRetired ? (
                       <span className="inline-flex items-center rounded border border-border bg-surface-subtle px-2 py-0.5 font-mono text-xs text-text-muted">
                         已退役 (RETIRED)
                       </span>
-                    ) : isEnabled ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-green">
-                        <span className="h-2 w-2 rounded-full bg-status-green" />
-                        已启用
-                      </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted">
-                        <span className="h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500" />
-                        已暂停
-                      </span>
+                      <div className="flex flex-col gap-1">
+                        <div>
+                          {isEnabled ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-status-green">
+                              <span className="h-2 w-2 rounded-full bg-status-green" />
+                              配置: 已启用
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-text-muted">
+                              <span className="h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500" />
+                              配置: 已暂停
+                            </span>
+                          )}
+                        </div>
+                        {isPausedByGlobal && (
+                          <span
+                            className="inline-flex items-center rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                            title="全局 ENTRY 暂停生效中：新入场通道被动阻断，但策略自身配置仍为已启用"
+                          >
+                            全局暂停生效中
+                          </span>
+                        )}
+                      </div>
                     )}
                   </td>
 
-                  {/* Actual Admission Health (Expanded horizontal space for Chinese readability) */}
+                  {/* Actual Admission Health */}
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       {strategy.admission_health.status === 'cleared' && (
@@ -126,7 +180,7 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                     </div>
                   </td>
 
-                  {/* Active Positions in Flight (Never fabricate fake ticket buttons) */}
+                  {/* Active Positions in Flight */}
                   <td className="px-4 py-2.5">
                     {strategy.active_tickets.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5">
@@ -175,32 +229,41 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
                       <button
                         type="button"
                         disabled
+                        title="SOR-001 已永久退役，禁止恢复新准入"
                         className="rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs text-text-disabled cursor-not-allowed"
                       >
-                        禁止恢复
+                        已退役 (禁止恢复)
+                      </button>
+                    ) : !hasControlFact ? (
+                      <button
+                        type="button"
+                        disabled
+                        title="缺少真实控制事实 (configured_state / control_version)，禁止操作"
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-disabled cursor-not-allowed shadow-xs"
+                      >
+                        控制事实不可用
                       </button>
                     ) : isEnabled ? (
                       <button
                         type="button"
-                        disabled
-                        title="Phase 1 · 只读模式 (写操作未开放)"
-                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed"
+                        onClick={() => handleToggle(strategy)}
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-amber-500/50 hover:bg-amber-500/10 hover:text-amber-500 transition-colors cursor-pointer shadow-xs"
+                        title="暂停该策略新准入 (存量持仓继续受保护)"
                       >
-                        <Pause className="h-3.5 w-3.5 text-text-muted" />
-                        暂停 (只读)
+                        <Pause className="h-3.5 w-3.5 text-amber-500" />
+                        暂停新准入
                       </button>
                     ) : (
                       <button
                         type="button"
-                        disabled
-                        title="Phase 1 · 只读模式 (写操作未开放)"
-                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface-subtle px-3 py-1.5 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed"
+                        onClick={() => handleToggle(strategy)}
+                        className="inline-flex items-center gap-1.5 rounded border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-primary hover:border-brand/50 hover:bg-brand/10 hover:text-brand transition-colors cursor-pointer shadow-xs"
+                        title="恢复该策略新准入 (需 TOTP 验证)"
                       >
-                        <Play className="h-3.5 w-3.5 text-text-muted" />
-                        恢复 (只读)
+                        <Play className="h-3.5 w-3.5 text-emerald-500" />
+                        恢复新准入
                       </button>
                     )}
-
                   </td>
                 </tr>
               );
@@ -208,7 +271,9 @@ export const StrategyMatrix: React.FC<StrategyMatrixProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Confirmation & TOTP Step-Up Modal */}
+      <TotpActionModal {...modalProps} />
     </div>
   );
 };
-

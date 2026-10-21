@@ -201,8 +201,8 @@ export function useControlsData() {
     ? raw.recent_operations.map((op) => ({
         authorization_id: op.authorization_id,
         name: '受控平仓全部仓位',
-        ticket_count: 0,
-        updated_at_ms: op.created_at_ms,
+        ticket_count: op.target_ticket_ids?.length ?? 0,
+        updated_at_ms: op.updated_at_ms ?? op.created_at_ms,
         created_at_ms: op.created_at_ms,
         state: op.state,
         result_label: op.state === 'completed' ? (op.first_blocker ? '曾需关注，现已完成' : '已完成') : op.state,
@@ -227,6 +227,7 @@ export function useControlsData() {
     strategies,
     capacity,
     operations,
+    currentOperation: raw?.current_operation ?? null,
   };
 }
 

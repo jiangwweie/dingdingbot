@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSelectionPreview } from '../hooks/useControlsData';
+import { useSelectionControl } from '../hooks/useSelectionControl';
+import { SelectionActionModal } from './SelectionActionModal';
 import { SelectionDrawer } from './SelectionDrawer';
 import { formatAgeFromTimestamp } from '../utils/time';
 import { RefreshCw, RotateCcw, ShieldCheck, ExternalLink, ShieldAlert, Loader2 } from 'lucide-react';
@@ -8,16 +10,27 @@ import { mapPreviewToDiagnostic } from '../mapping/selectionMapping';
 export { mapPreviewToDiagnostic };
 
 interface SelectionSectionProps {
-  onTriggerFallback?: (groupId: string) => void;
-  onTriggerReauthorize?: (groupId: string) => void;
-  onRefreshData?: (groupId: string) => void;
+  onSuccess?: (message: string) => void;
 }
 
 export const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-001'] as const;
 
-export const SelectionSection: React.FC<SelectionSectionProps> = () => {
+export const SelectionSection: React.FC<SelectionSectionProps> = ({ onSuccess }) => {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>('CPM-RO-001');
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const { modalProps, openSelectionModal, toastMessage, clearToast } = useSelectionControl({
+    onSuccess: (msg) => {
+      onSuccess?.(msg);
+    },
+  });
+
+  useEffect(() => {
+    if (toastMessage) {
+      onSuccess?.(toastMessage);
+      clearToast();
+    }
+  }, [toastMessage, onSuccess, clearToast]);
 
   const { data: rawPreview, isLoading, isError, refetch } = useSelectionPreview(activeTab);
   const [now, setNow] = useState(Date.now());
@@ -141,6 +154,14 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
                   : 'STATIC 基线'}
               </span>
 
+              {/* Pending mode indicator */}
+              {current.pending_selection_mode && (
+                <span className="inline-flex items-center gap-1.5 rounded border border-status-blue/30 bg-status-blue-bg px-2 py-0.5 text-[11px] font-semibold text-status-blue">
+                  <span className="h-1.5 w-1.5 rounded-full bg-status-blue animate-pulse" />
+                  等待 {current.pending_selection_mode === 'dynamic_selection' ? 'Dynamic' : 'Static'} 周期生效
+                </span>
+              )}
+
               {/* Authority Status */}
               <div className="flex items-center gap-1 text-xs">
                 <ShieldCheck className="h-4 w-4 text-status-green flex-none" />
@@ -173,22 +194,43 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
               {isDynamic ? (
                 <button
                   type="button"
-                  disabled
-                  title="Phase 1 · 只读模式 (选币模式切换写操作未开放)"
-                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed shadow-none"
+                  disabled={
+                    Boolean(current.pending_selection_mode) ||
+                    !current.rollback_baseline_id ||
+                    !current.selection_epoch_id
+                  }
+                  title={
+                    !current.rollback_baseline_id || !current.selection_epoch_id
+                      ? '缺少服务端认证的静态回退基线或 Epoch'
+                      : current.pending_selection_mode
+                      ? `已有未生效变更 (${current.pending_selection_mode})`
+                      : '回退至认证静态基线'
+                  }
+                  onClick={() => openSelectionModal(activeTab, 'static')}
+                  className="inline-flex items-center gap-1 rounded border border-status-amber/40 bg-status-amber-bg px-2.5 py-1 text-xs font-semibold text-status-amber hover:bg-status-amber/20 transition-colors cursor-pointer shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <RotateCcw className="h-3.5 w-3.5 text-text-muted" />
-                  回退 Static (只读)
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  回退 Static
                 </button>
               ) : (
                 <button
                   type="button"
-                  disabled
-                  title="Phase 1 · 只读模式 (选币模式切换写操作未开放)"
-                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-xs font-medium text-text-muted opacity-60 cursor-not-allowed shadow-none"
+                  disabled={
+                    Boolean(current.pending_selection_mode) ||
+                    !current.installed
+                  }
+                  title={
+                    !current.installed
+                      ? '选币 Spec 未安装或未认证'
+                      : current.pending_selection_mode
+                      ? `已有未生效变更 (${current.pending_selection_mode})`
+                      : '激活动态选币轮动'
+                  }
+                  onClick={() => openSelectionModal(activeTab, 'dynamic')}
+                  className="inline-flex items-center gap-1 rounded border border-status-blue/40 bg-status-blue-bg px-2.5 py-1 text-xs font-semibold text-status-blue hover:bg-status-blue/20 transition-colors cursor-pointer shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <ShieldAlert className="h-3.5 w-3.5 text-text-muted" />
-                  授权 Dynamic (只读)
+                  <ShieldAlert className="h-3.5 w-3.5" />
+                  授权 Dynamic
                 </button>
               )}
 
@@ -214,6 +256,9 @@ export const SelectionSection: React.FC<SelectionSectionProps> = () => {
           </div>
         )}
       </div>
+
+      {/* Selection Control Action Modal */}
+      <SelectionActionModal {...modalProps} />
 
       {/* Drawer */}
       {current && (
