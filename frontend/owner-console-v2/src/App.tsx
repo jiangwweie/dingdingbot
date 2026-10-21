@@ -17,6 +17,8 @@ import { ControlledFlattenModal } from './components/ControlledFlattenModal';
 import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
 import { useFlattenControl } from './hooks/useFlattenControl';
+import { useGlobalEntryControl } from './hooks/useGlobalEntryControl';
+import { TotpActionModal } from './components/TotpActionModal';
 import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 
@@ -108,6 +110,11 @@ export const App: React.FC = () => {
   });
 
   const activeFlattenOperation = currentOperation ?? flattenControl.currentOperation;
+
+  const globalControl = useGlobalEntryControl({
+    onSuccess: (msg) => showToast(msg),
+    activeFlattenOperation,
+  });
 
   // 1. Session Verification View
   if (isCheckingSession) {
@@ -228,10 +235,10 @@ export const App: React.FC = () => {
             <div className="mb-4 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.5 border border-brand/20">
-                  Phase B: Guarded Strategy & Global Flatten Controls Active
+                  Phase C + D: Global ENTRY & Selection Governance Active
                 </span>
                 <span className="text-text-secondary">
-                  单策略启停与全局受控平仓已接通权威写操作 (强制 TOTP + 文本确认) · 单 Ticket 平仓与选币授权保持安全禁用
+                  策略启停、受控平仓、动态选币授权及全局 ENTRY 控制已接通权威写操作 (防重锁 + TOTP 强认证) · 单 Ticket 平仓保持安全禁用
                 </span>
               </div>
               <span className="font-mono text-[11px] text-text-muted">
@@ -273,8 +280,18 @@ export const App: React.FC = () => {
                   globalEntry={globalEntry}
                   pausedStrategyCount={pausedCount}
                   totalActiveStrategies={strategies.length}
-                  onToggleGlobalEntry={() =>
-                    showToast('Phase 1 · 只读模式 (全局开仓写操作未开放)')
+                  onRequestAction={globalControl.requestAction}
+                  isActionDisabled={Boolean(
+                    activeFlattenOperation &&
+                    activeFlattenOperation.state !== 'completed' &&
+                    activeFlattenOperation.state !== 'blocked'
+                  )}
+                  disabledReason={
+                    activeFlattenOperation &&
+                    activeFlattenOperation.state !== 'completed' &&
+                    activeFlattenOperation.state !== 'blocked'
+                      ? '受控平仓正在执行中，禁止操作全局新开仓准入'
+                      : undefined
                   }
                 />
 
@@ -310,7 +327,7 @@ export const App: React.FC = () => {
                 />
 
                 {/* Level 3: Dynamic Selection Governance */}
-                <SelectionSection />
+                <SelectionSection onSuccess={(msg) => showToast(msg)} />
 
                 {/* Level 4: Capacity & High Risk Guardrail */}
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -350,6 +367,9 @@ export const App: React.FC = () => {
         onVerifyStatus={flattenControl.handleVerifyStatus}
         onRefreshPreview={flattenControl.requestPreview}
       />
+
+      {/* Global Entry Control Modal */}
+      <TotpActionModal {...globalControl.modalProps} />
 
       {/* Causality Drawer triggered from Controls Strategy Matrix */}
       <CausalityDrawer

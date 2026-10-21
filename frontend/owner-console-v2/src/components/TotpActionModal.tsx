@@ -207,12 +207,16 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
                 </button>
               </AlertDialog.Cancel>
 
-              {isUnknownResult && onVerifyStatus ? (
+              {onVerifyStatus && (
                 <button
                   type="button"
                   disabled={isVerifying}
                   onClick={onVerifyStatus}
-                  className="inline-flex items-center gap-1.5 rounded px-4 py-1.5 text-xs font-bold bg-brand text-slate-950 hover:bg-brand-hover shadow-xs transition-colors cursor-pointer disabled:opacity-60"
+                  className={`inline-flex items-center gap-1.5 rounded px-4 py-1.5 text-xs font-bold transition-colors cursor-pointer disabled:opacity-60 ${
+                    isUnknownResult
+                      ? 'bg-brand text-slate-950 hover:bg-brand-hover shadow-xs'
+                      : 'border border-border-strong bg-surface-subtle text-text-primary hover:bg-surface-elevated'
+                  }`}
                 >
                   {isVerifying ? (
                     <>
@@ -226,7 +230,9 @@ export const TotpActionModal: React.FC<TotpActionModalProps> = ({
                     </>
                   )}
                 </button>
-              ) : (
+              )}
+
+              {!isUnknownResult && (
                 <button
                   type="submit"
                   disabled={!canSubmit}

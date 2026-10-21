@@ -11,6 +11,11 @@ export type FlattenPreview = components['schemas']['FlattenPreview'];
 export type FlattenBody = components['schemas']['FlattenBody'];
 export type OwnerControlOperation = components['schemas']['OwnerControlOperation'];
 export type EmptyControlBody = components['schemas']['EmptyControlBody'];
+export type GlobalMutationResponse = components['schemas']['GlobalMutationResponse'];
+export type SelectionControl = components['schemas']['SelectionControl'];
+export type DynamicSelectionActivationBody = components['schemas']['DynamicSelectionActivationBody'];
+export type GenericSelectionActivationBody = components['schemas']['GenericSelectionActivationBody'];
+export type GenericStaticSelectionActivationBody = components['schemas']['GenericStaticSelectionActivationBody'];
 
 export const controlsQueryKey = ['owner', 'controls'] as const;
 export const selectionQueryKey = (strategyGroupId: string) => ['owner', 'selection', strategyGroupId] as const;
@@ -108,4 +113,56 @@ export async function fetchControlOperation(
     return null;
   }
   return data as OwnerControlOperation;
+}
+
+export async function pauseGlobalEntry(body: ControlWriteBody): Promise<GlobalMutationResponse> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/entry/pause',
+    { body }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Pause global entry response is missing');
+  return data;
+}
+
+export async function resumeGlobalEntry(body: ControlWriteBody): Promise<GlobalMutationResponse> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/entry/resume',
+    { body }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Resume global entry response is missing');
+  return data;
+}
+
+export async function activateDynamicSelection(
+  strategyGroupId: string,
+  body: DynamicSelectionActivationBody | GenericSelectionActivationBody,
+): Promise<SelectionControl> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate',
+    {
+      params: { path: { strategy_group_id: strategyGroupId } },
+      body,
+    }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Activate dynamic selection response is missing');
+  return data;
+}
+
+export async function activateStaticSelection(
+  strategyGroupId: string,
+  body: GenericStaticSelectionActivationBody,
+): Promise<SelectionControl> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate',
+    {
+      params: { path: { strategy_group_id: strategyGroupId } },
+      body,
+    }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Activate static selection response is missing');
+  return data;
 }

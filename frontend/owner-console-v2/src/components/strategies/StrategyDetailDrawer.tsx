@@ -13,7 +13,9 @@ import { useDrawerDismiss } from '../../hooks/useDrawerDismiss.ts';
 import { mapPreviewToDiagnostic } from '../../mapping/selectionMapping.ts';
 import { cleanSymbol } from '../../utils/symbol.ts';
 import { useStrategyControl } from '../../hooks/useStrategyControl.ts';
+import { useSelectionControl } from '../../hooks/useSelectionControl.ts';
 import { TotpActionModal } from '../TotpActionModal.tsx';
+import { SelectionActionModal } from '../SelectionActionModal.tsx';
 import {
   X,
   Layers,
@@ -26,6 +28,7 @@ import {
   RefreshCw,
   Pause,
   Play,
+  RotateCcw,
 } from 'lucide-react';
 
 interface StrategyDetailDrawerProps {
@@ -130,6 +133,24 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
       onSuccess?.(msg);
     },
   });
+
+  const {
+    modalProps: selectionModalProps,
+    openSelectionModal,
+    toastMessage: selectionToast,
+    clearToast: clearSelectionToast,
+  } = useSelectionControl({
+    onSuccess: (msg) => {
+      onSuccess?.(msg);
+    },
+  });
+
+  useEffect(() => {
+    if (selectionToast) {
+      onSuccess?.(selectionToast);
+      clearSelectionToast();
+    }
+  }, [selectionToast, onSuccess, clearSelectionToast]);
 
   const handleToggle = () => {
     if (!hasControlFact || configuredState == null || controlVersion == null) {
@@ -593,6 +614,68 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                         </div>
                       </div>
 
+                      {/* Selection Action Strip */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-subtle p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-semibold text-text-primary">选币授权控制:</span>
+                          {selectionDiagnostic.pending_selection_mode ? (
+                            <span className="inline-flex items-center gap-1 rounded bg-status-blue-bg px-2 py-0.5 text-[11px] font-semibold text-status-blue border border-status-blue/30">
+                              <span className="h-1.5 w-1.5 rounded-full bg-status-blue animate-pulse" />
+                              等待 {selectionDiagnostic.pending_selection_mode === 'dynamic_selection' ? 'Dynamic' : 'Static'} 周期生效
+                            </span>
+                          ) : (
+                            <span className="text-text-secondary">
+                              当前模式稳定运行中 · 权限变更由 Worker 在周期边界物化
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {selectionDiagnostic.selection_mode === 'dynamic_selection' ? (
+                            <button
+                              type="button"
+                              disabled={
+                                Boolean(selectionDiagnostic.pending_selection_mode) ||
+                                !selectionDiagnostic.rollback_baseline_id ||
+                                !selectionDiagnostic.selection_epoch_id
+                              }
+                              title={
+                                !selectionDiagnostic.rollback_baseline_id || !selectionDiagnostic.selection_epoch_id
+                                  ? '缺少服务端认证的静态回退基线或 Epoch'
+                                  : selectionDiagnostic.pending_selection_mode
+                                  ? `已有未生效变更 (${selectionDiagnostic.pending_selection_mode})`
+                                  : '回退至认证静态基线'
+                              }
+                              onClick={() => openSelectionModal(strategyGroupId, 'static')}
+                              className="inline-flex items-center gap-1 rounded border border-status-amber/40 bg-status-amber-bg px-2.5 py-1 text-xs font-semibold text-status-amber hover:bg-status-amber/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              回退 Static 基线
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={
+                                Boolean(selectionDiagnostic.pending_selection_mode) ||
+                                !selectionDiagnostic.installed
+                              }
+                              title={
+                                !selectionDiagnostic.installed
+                                  ? '选币 Spec 未安装或未认证'
+                                  : selectionDiagnostic.pending_selection_mode
+                                  ? `已有未生效变更 (${selectionDiagnostic.pending_selection_mode})`
+                                  : '授权激活动态选币模式'
+                              }
+                              onClick={() => openSelectionModal(strategyGroupId, 'dynamic')}
+                              className="inline-flex items-center gap-1 rounded border border-status-blue/40 bg-status-blue-bg px-2.5 py-1 text-xs font-semibold text-status-blue hover:bg-status-blue/20 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Compass className="h-3.5 w-3.5" />
+                              启用 Dynamic 模式
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                       {/* Selected Members Section */}
                       <div className="rounded-lg border border-border bg-surface p-4 shadow-xs space-y-3">
                         <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary flex items-center justify-between">
@@ -705,6 +788,9 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
 
       {/* Confirmation & Step-Up Modal */}
       <TotpActionModal {...modalProps} />
+
+      {/* Selection Control Action Modal */}
+      <SelectionActionModal {...selectionModalProps} />
     </div>
   );
 };

@@ -5,6 +5,10 @@ import {
   fetchFlattenPreview,
   submitFlatten,
   fetchControlOperation,
+  pauseGlobalEntry,
+  resumeGlobalEntry,
+  activateDynamicSelection,
+  activateStaticSelection,
 } from './controlsApi';
 import { apiClient } from './client';
 import { ApiError } from './errors';
@@ -292,6 +296,151 @@ describe('controlsApi strategy controls', () => {
 
       const op = await fetchControlOperation('nonexistent-auth');
       expect(op).toBeNull();
+    });
+  });
+
+  describe('global entry controls', () => {
+    it('pauseGlobalEntry sends POST to /controls/entry/pause without requiring TOTP', async () => {
+      const mockResult = {
+        data: {
+          configured_state: 'paused',
+          effective_state: 'paused',
+          version: 7,
+          updated_at_ms: 1800000000000,
+        },
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue(mockResult as any);
+
+      const payload = {
+        expected_version: 6,
+        reason: 'Owner 手动暂停全局新开仓',
+        idempotency_key: 'owner-request:global-entry-pause:123',
+        totp_code: null,
+      };
+
+      const res = await pauseGlobalEntry(payload);
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/entry/pause',
+        { body: payload }
+      );
+      expect(res.configured_state).toBe('paused');
+      expect(res.version).toBe(7);
+    });
+
+    it('resumeGlobalEntry sends POST to /controls/entry/resume with TOTP code', async () => {
+      const mockResult = {
+        data: {
+          configured_state: 'enabled',
+          effective_state: 'enabled',
+          version: 8,
+          updated_at_ms: 1800000005000,
+        },
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue(mockResult as any);
+
+      const payload = {
+        expected_version: 7,
+        reason: 'Owner 手动恢复全局新开仓',
+        idempotency_key: 'owner-request:global-entry-resume:456',
+        totp_code: '123456',
+      };
+
+      const res = await resumeGlobalEntry(payload);
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/entry/resume',
+        { body: payload }
+      );
+      expect(res.configured_state).toBe('enabled');
+      expect(res.version).toBe(8);
+    });
+  });
+
+  describe('selection controls', () => {
+    it('activateDynamicSelection sends POST with generic payload', async () => {
+      const mockResult = {
+        data: {
+          strategy_group_id: 'CPM-RO-001',
+          selection_spec_id: 'generic-spec-1',
+          selection_mode: 'static_baseline',
+          pending_selection_mode: 'dynamic_selection',
+          pending_effective_period_anchor_ms: 1800003600000,
+          control_version: 2,
+          rollback_baseline_id: 'baseline-1',
+          updated_at_ms: 1800000000000,
+        },
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue(mockResult as any);
+
+      const payload = {
+        expected_version: 1,
+        reason: 'Owner 激活动态选币',
+        idempotency_key: 'owner-request:selection-dynamic:cpm:1',
+        totp_code: '654321',
+        effective_period_anchor_ms: 1800003600000,
+      };
+
+      const res = await activateDynamicSelection('CPM-RO-001', payload);
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate',
+        {
+          params: { path: { strategy_group_id: 'CPM-RO-001' } },
+          body: payload,
+        }
+      );
+      expect(res.pending_selection_mode).toBe('dynamic_selection');
+    });
+
+    it('activateStaticSelection sends POST with rollback baseline and epoch', async () => {
+      const mockResult = {
+        data: {
+          strategy_group_id: 'CPM-RO-001',
+          selection_spec_id: 'generic-spec-1',
+          selection_mode: 'dynamic_selection',
+          pending_selection_mode: 'static_baseline',
+          pending_effective_period_anchor_ms: 1800003600000,
+          control_version: 3,
+          rollback_baseline_id: 'baseline-certified-v1',
+          selection_epoch_id: 'epoch-20261021',
+          updated_at_ms: 1800000000000,
+        },
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue(mockResult as any);
+
+      const payload = {
+        expected_version: 2,
+        reason: 'Owner 回退静态基线',
+        idempotency_key: 'owner-request:selection-static:cpm:2',
+        totp_code: '654321',
+        effective_period_anchor_ms: 1800003600000,
+        rollback_baseline_id: 'baseline-certified-v1',
+        selection_epoch_id: 'epoch-20261021',
+      };
+
+      const res = await activateStaticSelection('CPM-RO-001', payload);
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/strategies/{strategy_group_id}/selection/static/activate',
+        {
+          params: { path: { strategy_group_id: 'CPM-RO-001' } },
+          body: payload,
+        }
+      );
+      expect(res.pending_selection_mode).toBe('static_baseline');
     });
   });
 });
