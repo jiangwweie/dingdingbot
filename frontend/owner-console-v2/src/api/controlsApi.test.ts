@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { pauseStrategy, resumeStrategy } from './controlsApi';
+import {
+  pauseStrategy,
+  resumeStrategy,
+  fetchFlattenPreview,
+  submitFlatten,
+  fetchControlOperation,
+} from './controlsApi';
 import { apiClient } from './client';
 import { ApiError } from './errors';
 
@@ -133,6 +139,159 @@ describe('controlsApi strategy controls', () => {
           totp_code: '123456',
         })
       ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('fetchFlattenPreview', () => {
+    it('requests flatten preview with empty body and returns FlattenPreview', async () => {
+      const mockPreview = {
+        venue_id: 'binance-usdm',
+        account_id: 'owner-main',
+        owner_policy_version: 5,
+        global_entry_enabled: true,
+        ticket_ids: ['ticket:btc-long', 'ticket:eth-short'],
+        ticket_states: {
+          'ticket:btc-long': 'eligible',
+          'ticket:eth-short': 'eligible',
+        },
+        snapshot_digest: 'sha256:' + 'a'.repeat(64),
+        first_blocker: null,
+        runtime_profile_id: 'account-wide',
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue({
+        data: mockPreview,
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      } as any);
+
+      const preview = await fetchFlattenPreview();
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/exposure/flatten-all/preview',
+        { body: {} }
+      );
+      expect(preview.owner_policy_version).toBe(5);
+      expect(preview.ticket_ids).toHaveLength(2);
+      expect(preview.snapshot_digest).toBe('sha256:' + 'a'.repeat(64));
+    });
+
+    it('throws ApiError when server returns 502/503/422', async () => {
+      vi.spyOn(apiClient, 'POST').mockResolvedValue({
+        data: undefined,
+        error: { error: { code: 'control_unavailable', message: 'Service unavailable' } },
+        response: { ok: false, status: 503 } as Response,
+      } as any);
+
+      await expect(fetchFlattenPreview()).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('submitFlatten', () => {
+    it('submits flatten request with valid parameters and returns OwnerControlOperation', async () => {
+      const mockOperation = {
+        authorization_id: 'owner-auth:123',
+        operation_kind: 'flatten_all',
+        state: 'pending',
+        version: 2,
+        runtime_profile_id: 'account-wide',
+        venue_id: 'binance-usdm',
+        account_id: 'owner-main',
+        target_ticket_ids: ['ticket:btc-long'],
+        snapshot_digest: 'sha256:' + 'b'.repeat(64),
+        first_blocker: null,
+        created_at_ms: 1800000000000,
+        updated_at_ms: 1800000000000,
+      };
+
+      const postSpy = vi.spyOn(apiClient, 'POST').mockResolvedValue({
+        data: mockOperation,
+        error: undefined,
+        response: { ok: true, status: 201 } as Response,
+      } as any);
+
+      const payload = {
+        expected_version: 5,
+        reason: 'owner_flatten_all',
+        idempotency_key: 'owner-req:flatten:1',
+        totp_code: '654321',
+        snapshot_digest: 'sha256:' + 'b'.repeat(64),
+        confirmation_text: '确认平仓全部持仓' as const,
+      };
+
+      const op = await submitFlatten(payload);
+
+      expect(postSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/controls/exposure/flatten-all',
+        { body: payload }
+      );
+      expect(op.authorization_id).toBe('owner-auth:123');
+      expect(op.operation_kind).toBe('flatten_all');
+      expect(op.state).toBe('pending');
+    });
+
+    it('throws ApiError on snapshot conflict (409)', async () => {
+      vi.spyOn(apiClient, 'POST').mockResolvedValue({
+        data: undefined,
+        error: { error: { code: 'control_conflict', message: 'flatten_snapshot_conflict' } },
+        response: { ok: false, status: 409 } as Response,
+      } as any);
+
+      await expect(
+        submitFlatten({
+          expected_version: 5,
+          reason: 'owner_flatten_all',
+          idempotency_key: 'owner-req:flatten:2',
+          totp_code: '654321',
+          snapshot_digest: 'sha256:' + 'c'.repeat(64),
+          confirmation_text: '确认平仓全部持仓',
+        })
+      ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('fetchControlOperation', () => {
+    it('fetches control operation by authorization_id', async () => {
+      const mockOperation = {
+        authorization_id: 'owner-auth:999',
+        operation_kind: 'flatten_all',
+        state: 'completed',
+        version: 5,
+        runtime_profile_id: 'account-wide',
+        venue_id: 'binance-usdm',
+        account_id: 'owner-main',
+        target_ticket_ids: ['ticket:btc-long'],
+        snapshot_digest: 'sha256:' + 'd'.repeat(64),
+        first_blocker: null,
+        created_at_ms: 1800000000000,
+        updated_at_ms: 1800000010000,
+      };
+
+      const getSpy = vi.spyOn(apiClient, 'GET').mockResolvedValue({
+        data: mockOperation,
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      } as any);
+
+      const op = await fetchControlOperation('owner-auth:999');
+
+      expect(getSpy).toHaveBeenCalledWith(
+        '/api/owner/v1/control-operations/{authorization_id}',
+        { params: { path: { authorization_id: 'owner-auth:999' } } }
+      );
+      expect(op).not.toBeNull();
+      expect(op?.state).toBe('completed');
+    });
+
+    it('returns null if server responds with not_found status', async () => {
+      vi.spyOn(apiClient, 'GET').mockResolvedValue({
+        data: { status: 'not_found' },
+        error: undefined,
+        response: { ok: true, status: 200 } as Response,
+      } as any);
+
+      const op = await fetchControlOperation('nonexistent-auth');
+      expect(op).toBeNull();
     });
   });
 });

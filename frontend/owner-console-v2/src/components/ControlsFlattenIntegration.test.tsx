@@ -1,0 +1,259 @@
+// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { DangerZoneCard } from './DangerZoneCard';
+import { ControlledFlattenModal } from './ControlledFlattenModal';
+import { useFlattenControl, _resetInFlightFlattenRegistry } from '../hooks/useFlattenControl';
+import * as controlsApi from '../api/controlsApi';
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  if (setter) {
+    setter.call(input, value);
+  } else {
+    input.value = value;
+  }
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+const mockPreview: controlsApi.FlattenPreview = {
+  venue_id: 'binance-usdm',
+  account_id: 'owner-main',
+  owner_policy_version: 9,
+  global_entry_enabled: true,
+  ticket_ids: ['ticket:btc-long', 'ticket:ada-short'],
+  ticket_states: {
+    'ticket:btc-long': 'eligible',
+    'ticket:ada-short': 'eligible',
+  },
+  snapshot_digest: 'sha256:' + 'f'.repeat(64),
+  first_blocker: null,
+  runtime_profile_id: 'account-wide',
+};
+
+const mockOperation: controlsApi.OwnerControlOperation = {
+  authorization_id: 'owner-auth:fl-integ',
+  operation_kind: 'flatten_all',
+  state: 'pending',
+  version: 1,
+  runtime_profile_id: 'account-wide',
+  venue_id: 'binance-usdm',
+  account_id: 'owner-main',
+  target_ticket_ids: ['ticket:btc-long', 'ticket:ada-short'],
+  snapshot_digest: 'sha256:' + 'f'.repeat(64),
+  first_blocker: null,
+  created_at_ms: 1800000000000,
+  updated_at_ms: 1800000000000,
+};
+
+const TestControlsFlattenContainer: React.FC<{ onSuccess?: (op: any) => void }> = ({
+  onSuccess,
+}) => {
+  const flatten = useFlattenControl({ onSuccess });
+
+  return (
+    <div>
+      <DangerZoneCard
+        activeTicketCount={2}
+        onTriggerFlatten={flatten.requestPreview}
+        isLoading={flatten.isLoadingPreview}
+        currentOperation={flatten.currentOperation}
+      />
+      <ControlledFlattenModal
+        open={flatten.isModalOpen}
+        onClose={flatten.closeModal}
+        preview={flatten.preview}
+        isSubmitting={flatten.isSubmitting}
+        isVerifying={flatten.isVerifying}
+        errorMessage={flatten.errorMessage}
+        isUnknownResult={flatten.isUnknownResult}
+        isRetryFrozen={flatten.isRetryFrozen}
+        onConfirm={flatten.handleConfirm}
+        onVerifyStatus={flatten.handleVerifyStatus}
+        onRefreshPreview={flatten.requestPreview}
+      />
+    </div>
+  );
+};
+
+describe('ControlsFlattenIntegration', () => {
+  let queryClient: QueryClient;
+  let container: HTMLDivElement;
+  let root: ReturnType<typeof createRoot>;
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    _resetInFlightFlattenRegistry();
+    document.body.innerHTML = '';
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  it('runs complete preview to submit flow end-to-end', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
+    const submitSpy = vi.spyOn(controlsApi, 'submitFlatten').mockResolvedValue(mockOperation);
+    const onSuccess = vi.fn();
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TestControlsFlattenContainer onSuccess={onSuccess} />
+        </QueryClientProvider>
+      );
+    });
+
+    // 1. Click button in DangerZoneCard
+    const triggerBtn = container.querySelector(
+      '[data-testid="danger-zone-flatten-btn"]'
+    ) as HTMLButtonElement;
+    expect(triggerBtn).toBeDefined();
+
+    await act(async () => {
+      triggerBtn.click();
+    });
+
+    // 2. Modal should now be open with preview details
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(modal).not.toBeNull();
+    expect(modal?.textContent).toContain('ticket:btc-long');
+    expect(modal?.textContent).toContain('ticket:ada-short');
+
+    // 3. Enter TOTP and confirmation text
+    const totpInput = modal?.querySelector('input[placeholder="000000"]') as HTMLInputElement;
+    const confirmInput = modal?.querySelector(
+      'input[placeholder="确认平仓全部持仓"]'
+    ) as HTMLInputElement;
+    const submitBtn = modal?.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    expect(submitBtn.disabled).toBe(true);
+
+    act(() => {
+      setInputValue(totpInput, '888999');
+      setInputValue(confirmInput, '确认平仓全部持仓');
+    });
+
+    expect(submitBtn.disabled).toBe(false);
+
+    // 4. Submit flatten
+    await act(async () => {
+      submitBtn.click();
+    });
+
+    expect(submitSpy).toHaveBeenCalledWith({
+      expected_version: 9,
+      reason: 'owner_flatten_all',
+      idempotency_key: expect.stringContaining('owner-request:flatten-all:'),
+      totp_code: '888999',
+      snapshot_digest: 'sha256:' + 'f'.repeat(64),
+      confirmation_text: '确认平仓全部持仓',
+    });
+
+    expect(onSuccess).toHaveBeenCalledWith(mockOperation);
+
+    // Modal should now be closed
+    const closedModal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(closedModal).toBeNull();
+  });
+
+  it('locks down on network timeout, maintains lock after cancel, and resolves via verification', async () => {
+    vi.spyOn(controlsApi, 'fetchFlattenPreview').mockResolvedValue(mockPreview);
+    vi.spyOn(controlsApi, 'submitFlatten').mockRejectedValue(new Error('Gateway Timeout 504'));
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <TestControlsFlattenContainer />
+        </QueryClientProvider>
+      );
+    });
+
+    // Trigger preview
+    const triggerBtn = container.querySelector(
+      '[data-testid="danger-zone-flatten-btn"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      triggerBtn.click();
+    });
+
+    const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    const totpInput = modal?.querySelector('input[placeholder="000000"]') as HTMLInputElement;
+    const confirmInput = modal?.querySelector(
+      'input[placeholder="确认平仓全部持仓"]'
+    ) as HTMLInputElement;
+    const submitBtn = modal?.querySelector('button[type="submit"]') as HTMLButtonElement;
+
+    act(() => {
+      setInputValue(totpInput, '111222');
+      setInputValue(confirmInput, '确认平仓全部持仓');
+    });
+
+    // Submit -> triggers timeout
+    await act(async () => {
+      submitBtn.click();
+    });
+
+    // Modal is in unknown result mode
+    expect(modal?.textContent).toContain('平仓结果未知（闭锁保护）');
+    expect(submitBtn.disabled).toBe(true);
+
+    // Cancel modal
+    const cancelBtn = Array.from(modal?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent === '取消'
+    );
+    act(() => {
+      cancelBtn?.click();
+    });
+
+    // Re-open from DangerZoneCard
+    await act(async () => {
+      triggerBtn.click();
+    });
+
+    // Modal opens directly in unknown result lockdown mode
+    const reopenedModal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(reopenedModal?.textContent).toContain('平仓结果未知（闭锁保护）');
+    const verifyBtn = Array.from(reopenedModal?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent?.includes('核验权威状态 (GET)')
+    );
+    expect(verifyBtn).toBeDefined();
+
+    // Mock authoritative check returning the completed operation
+    vi.spyOn(controlsApi, 'fetchControls').mockResolvedValue({
+      generated_at_ms: 1800000000000,
+      global_entry: {
+        configured_state: 'paused',
+        effective_state: 'paused',
+        policy_version: 10,
+        active_ticket_count: 0,
+      },
+      account_capacity: {} as any,
+      runtime_entry_authority: {} as any,
+      dynamic_selection: null,
+      strategies: [],
+      current_operation: {
+        ...mockOperation,
+        state: 'completed',
+      },
+      recent_operations: [],
+      events: [],
+    });
+
+    // Click verify
+    await act(async () => {
+      verifyBtn?.click();
+    });
+
+    // Modal closes upon successful verification
+    const finalModal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
+    expect(finalModal).toBeNull();
+  });
+});

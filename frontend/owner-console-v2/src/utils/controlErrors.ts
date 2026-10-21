@@ -7,6 +7,9 @@ export function formatControlError(error: unknown): string {
   if (error instanceof ApiError) {
     // 1. Conflict (409)
     if (error.status === 409 || error.code === 'control_conflict') {
+      if (error.message.includes('flatten_snapshot_conflict')) {
+        return '持仓状态快照冲突（服务端持仓在确认期间已发生变化）。请重新读取最新快照。';
+      }
       if (error.message.includes('version_conflict') || error.message.includes('strategy_control_version_conflict')) {
         return '策略控制版本冲突（服务端版本已发生变化）。已自动重新读取最新状态，请核对后再试。';
       }

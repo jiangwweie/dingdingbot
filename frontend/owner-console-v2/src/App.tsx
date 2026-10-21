@@ -13,8 +13,10 @@ import { TopStatusBar } from './components/TopStatusBar';
 import { StrategyMatrix } from './components/StrategyMatrix';
 import { SelectionSection } from './components/SelectionSection';
 import { DangerZoneCard } from './components/DangerZoneCard';
+import { ControlledFlattenModal } from './components/ControlledFlattenModal';
 import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
+import { useFlattenControl } from './hooks/useFlattenControl';
 import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 
@@ -80,6 +82,7 @@ export const App: React.FC = () => {
     strategies,
     capacity,
     operations,
+    currentOperation,
     rawTickets,
     isLoading: controlsLoading,
     isFetching: controlsFetching,
@@ -89,12 +92,17 @@ export const App: React.FC = () => {
     refetch: refetchControls,
   } = useControlsData();
 
-  // Toast indicator
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  const flattenControl = useFlattenControl({
+    onSuccess: (op) => {
+      showToast(`受控平仓指令已提交 (${op.state})，全局 ENTRY 已挂起。`);
+    },
+  });
 
   // 1. Session Verification View
   if (isCheckingSession) {
@@ -215,10 +223,10 @@ export const App: React.FC = () => {
             <div className="mb-4 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.5 border border-brand/20">
-                  Phase A: Strategy Entry Controls Active
+                  Phase B: Guarded Strategy & Global Flatten Controls Active
                 </span>
                 <span className="text-text-secondary">
-                  单策略暂停/恢复新准入已接通权威写操作 (恢复需 TOTP) · 全局受控平仓、全局 ENTRY 与选币授权保持安全禁用
+                  单策略启停与全局受控平仓已接通权威写操作 (强制 TOTP + 文本确认) · 单 Ticket 平仓与选币授权保持安全禁用
                 </span>
               </div>
               <span className="font-mono text-[11px] text-text-muted">
@@ -307,6 +315,9 @@ export const App: React.FC = () => {
                   />
                   <DangerZoneCard
                     activeTicketCount={globalEntry.active_ticket_count}
+                    onTriggerFlatten={flattenControl.requestPreview}
+                    isLoading={flattenControl.isLoadingPreview}
+                    currentOperation={currentOperation}
                   />
                 </div>
 
@@ -317,6 +328,21 @@ export const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Controlled Flatten Modal */}
+      <ControlledFlattenModal
+        open={flattenControl.isModalOpen}
+        onClose={flattenControl.closeModal}
+        preview={flattenControl.preview}
+        isSubmitting={flattenControl.isSubmitting}
+        isVerifying={flattenControl.isVerifying}
+        errorMessage={flattenControl.errorMessage}
+        isUnknownResult={flattenControl.isUnknownResult}
+        isRetryFrozen={flattenControl.isRetryFrozen}
+        onConfirm={flattenControl.handleConfirm}
+        onVerifyStatus={flattenControl.handleVerifyStatus}
+        onRefreshPreview={flattenControl.requestPreview}
+      />
 
       {/* Causality Drawer triggered from Controls Strategy Matrix */}
       <CausalityDrawer

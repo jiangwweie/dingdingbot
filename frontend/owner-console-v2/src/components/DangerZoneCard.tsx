@@ -1,14 +1,21 @@
 import React from 'react';
-import { AlertOctagon } from 'lucide-react';
+import { AlertOctagon, Loader2 } from 'lucide-react';
+import type { OwnerControlOperation } from '../api/controlsApi';
 
-interface DangerZoneCardProps {
-  onTriggerFlatten?: () => void;
+export interface DangerZoneCardProps {
   activeTicketCount: number;
+  onTriggerFlatten?: () => void;
+  isLoading?: boolean;
+  currentOperation?: OwnerControlOperation | null;
 }
 
 export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
   activeTicketCount,
+  onTriggerFlatten,
+  isLoading = false,
+  currentOperation,
 }) => {
+  const isOperationActive = currentOperation && currentOperation.state !== 'completed';
 
   return (
     <div className="rounded border border-status-red/50 bg-surface p-4 shadow-xs">
@@ -20,7 +27,14 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
               危险操作 · 紧急熔断
             </span>
           </div>
-          <h3 className="text-sm font-bold text-text-primary">受控平仓全部仓位</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-text-primary">受控平仓全部仓位</h3>
+            {isOperationActive && (
+              <span className="rounded bg-status-red-bg px-2 py-0.5 text-[11px] font-mono font-bold text-status-red border border-status-red/30">
+                进行中: {currentOperation.state}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-text-secondary leading-relaxed max-w-sm">
             安全挂起全局 ENTRY，由 Lifecycle 调度逐笔有序平仓当前全部在管持仓。
           </p>
@@ -28,15 +42,25 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
 
         <button
           type="button"
-          disabled
-          title="Phase 1 · 只读模式 (受控平仓写操作未开放)"
-          className="flex-none rounded border border-border bg-surface-subtle px-3.5 py-2 text-xs font-bold text-text-muted opacity-60 cursor-not-allowed shadow-none"
+          data-testid="danger-zone-flatten-btn"
+          disabled={isLoading}
+          onClick={onTriggerFlatten}
+          className={`flex-none rounded px-3.5 py-2 text-xs font-bold transition-colors ${
+            isLoading
+              ? 'bg-surface-subtle text-text-disabled cursor-not-allowed border border-border'
+              : 'bg-status-red text-white hover:bg-red-700 shadow-xs cursor-pointer'
+          }`}
         >
-          受控平仓全部仓位 ({activeTicketCount}) · 只读
+          {isLoading ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              读取权威快照...
+            </span>
+          ) : (
+            `受控平仓全部仓位 (${activeTicketCount})`
+          )}
         </button>
-
       </div>
     </div>
   );
 };
-

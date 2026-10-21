@@ -7,9 +7,14 @@ export type GenericSelectionPreview = components['schemas']['GenericSelectionPre
 export type OrbSelectionPreview = components['schemas']['OrbSelectionPreviewView'];
 export type StrategyEntryControl = components['schemas']['StrategyEntryControl'];
 export type ControlWriteBody = components['schemas']['ControlWriteBody'];
+export type FlattenPreview = components['schemas']['FlattenPreview'];
+export type FlattenBody = components['schemas']['FlattenBody'];
+export type OwnerControlOperation = components['schemas']['OwnerControlOperation'];
+export type EmptyControlBody = components['schemas']['EmptyControlBody'];
 
 export const controlsQueryKey = ['owner', 'controls'] as const;
 export const selectionQueryKey = (strategyGroupId: string) => ['owner', 'selection', strategyGroupId] as const;
+export const flattenOperationQueryKey = (authId: string) => ['owner', 'control-operation', authId] as const;
 
 export async function fetchControls(): Promise<ControlsResponse> {
   const { data, error, response } = await apiClient.GET('/api/owner/v1/controls');
@@ -62,4 +67,45 @@ export async function resumeStrategy(
   if (!response.ok) throw apiErrorFromResponse(response, error);
   if (!data) throw new ApiError(502, 'invalid_response', 'Resume response is missing');
   return data;
+}
+
+export async function fetchFlattenPreview(body?: EmptyControlBody): Promise<FlattenPreview> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/exposure/flatten-all/preview',
+    {
+      body: body ?? {},
+    }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Flatten preview is missing');
+  return data;
+}
+
+export async function submitFlatten(body: FlattenBody): Promise<OwnerControlOperation> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/owner/v1/controls/exposure/flatten-all',
+    {
+      body,
+    }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Flatten response is missing');
+  return data;
+}
+
+export async function fetchControlOperation(
+  authorizationId: string
+): Promise<OwnerControlOperation | null> {
+  const { data, error, response } = await apiClient.GET(
+    '/api/owner/v1/control-operations/{authorization_id}',
+    {
+      params: { path: { authorization_id: authorizationId } },
+    }
+  );
+  if (!response.ok) throw apiErrorFromResponse(response, error);
+  if (!data) throw new ApiError(502, 'invalid_response', 'Control operation is missing');
+  if ('status' in data && data.status === 'not_found') {
+    return null;
+  }
+  return data as OwnerControlOperation;
 }
