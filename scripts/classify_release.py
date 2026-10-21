@@ -137,7 +137,7 @@ def _is_authority_path(path: str) -> bool:
 
 
 def is_owner_static_path(path: str) -> bool:
-    return path.startswith("frontend/owner-console/")
+    return path.startswith(("frontend/owner-console/", "frontend/owner-console-v2/"))
 
 
 def is_owner_api_path(path: str) -> bool:

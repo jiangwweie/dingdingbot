@@ -8,6 +8,7 @@ def test_release_classification_uses_the_heaviest_changed_boundary() -> None:
         (("docs/current/MAIN_CONTROL_ROADMAP.md",), ReleaseLevel.R0),
         (("scripts/trading_kernel/deploy_tokyo_release.py",), ReleaseLevel.R0),
         (("frontend/owner-console/src/app/App.tsx",), ReleaseLevel.R1),
+        (("frontend/owner-console-v2/src/App.tsx",), ReleaseLevel.R1),
         (
             ("src/trading_kernel/interfaces/owner_console_http/app.py",),
             ReleaseLevel.R2,

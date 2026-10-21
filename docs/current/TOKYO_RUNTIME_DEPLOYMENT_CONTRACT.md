@@ -110,6 +110,13 @@ currently recorded production procedure remains authoritative.
 
 ## R1 Static Frontend Release
 
+The active frontend source is `frontend/owner-console-v2`, served under
+`/trading/`. R1 classification and exact-commit certification include V2;
+installation and build select V2 only. `frontend/owner-console` is retired from
+the default release path and retained as source history. Prior static releases
+remain available for an explicit symlink rollback; they are not rebuilt as a
+second active frontend.
+
 `scripts/owner_console/deploy_release.py --kind static` builds the exact target
 Commit in a disposable local directory and installs only:
 

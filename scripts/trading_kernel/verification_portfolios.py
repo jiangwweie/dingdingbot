@@ -36,8 +36,8 @@ FAST_KERNEL_COMMANDS: Final[CommandSet] = (
 )
 
 R1_STATIC_COMMANDS: Final[CommandSet] = (
-    ("pnpm", "--dir", "frontend/owner-console", "run", "typecheck"),
-    ("pnpm", "--dir", "frontend/owner-console", "run", "build"),
+    ("pnpm", "--dir", "frontend/owner-console-v2", "exec", "tsc", "-b"),
+    ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
 )
 
 R2_OWNER_API_COMMANDS: Final[CommandSet] = (

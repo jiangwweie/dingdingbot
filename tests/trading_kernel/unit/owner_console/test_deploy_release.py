@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +15,36 @@ from scripts.owner_console.deploy_release import (
 )
 
 TARGET_COMMIT = "a" * 40
+
+
+def test_static_builder_installs_and_builds_only_v2(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[tuple[str, ...]] = []
+
+    monkeypatch.setattr(
+        release_module.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=BytesIO(), stderr=BytesIO(), wait=lambda: 0
+        ),
+    )
+
+    def run(command: tuple[str, ...], **kwargs: object) -> SimpleNamespace:
+        commands.append(command)
+        if command[0] == "pnpm" and command[-1] == "build":
+            dist = Path(str(kwargs["cwd"])) / command[2] / "dist"
+            dist.mkdir(parents=True)
+            (dist / "index.html").write_text("V2", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(release_module.subprocess, "run", run)
+    with release_module._build_static_dist(TARGET_COMMIT) as dist:
+        assert dist.parts[-3:] == ("frontend", "owner-console-v2", "dist")
+        assert (dist / "index.html").read_text(encoding="utf-8") == "V2"
+
+    assert commands[1:] == [
+        ("pnpm", "--dir", "frontend/owner-console-v2", "install", "--frozen-lockfile"),
+        ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
+    ]
 
 
 @pytest.mark.parametrize(

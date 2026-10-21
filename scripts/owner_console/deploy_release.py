@@ -596,7 +596,7 @@ def _build_static_dist(commit: str) -> Iterator[Path]:
             (
                 "pnpm",
                 "--dir",
-                "frontend/owner-console",
+                "frontend/owner-console-v2",
                 "install",
                 "--frozen-lockfile",
             ),
@@ -604,11 +604,11 @@ def _build_static_dist(commit: str) -> Iterator[Path]:
             check=True,
         )
         subprocess.run(
-            ("pnpm", "--dir", "frontend/owner-console", "build"),
+            ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
             cwd=build_root,
             check=True,
         )
-        dist = build_root / "frontend/owner-console/dist"
+        dist = build_root / "frontend/owner-console-v2/dist"
         if not (dist / "index.html").is_file():
             raise RuntimeError("Owner Console frontend build did not produce index.html")
         yield dist

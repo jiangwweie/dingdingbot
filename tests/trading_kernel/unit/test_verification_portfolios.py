@@ -63,3 +63,10 @@ def test_selection_golden_tracks_selection_sources_not_exit_runtime_files() -> N
         "src/trading_kernel/domain/strategy_registry.py",
         "src/trading_kernel/domain/exit_policy.py",
     )
+
+
+def test_r1_static_portfolio_targets_owner_console_v2() -> None:
+    assert R1_STATIC_COMMANDS == (
+        ("pnpm", "--dir", "frontend/owner-console-v2", "exec", "tsc", "-b"),
+        ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
+    )
