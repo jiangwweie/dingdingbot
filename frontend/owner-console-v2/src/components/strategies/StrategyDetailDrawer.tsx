@@ -42,6 +42,7 @@ interface StrategyDetailDrawerProps {
   activeDrawerTab?: StrategyDetailTabId;
   onTabChange?: (tab: StrategyDetailTabId) => void;
   scope?: 'natural' | 'all';
+  exit_scope?:import('../../api/performanceApi').ExitScope;
   exit_path?: StrategyTicketExitPath | null;
   first_path?: StrategyObservationFirstPath | null;
   onScopeChange?: (scope: 'natural' | 'all') => void;
@@ -61,7 +62,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
   to_ms,
   activeDrawerTab,
   onTabChange,
-  scope,
+  scope,exit_scope,
   exit_path,
   first_path,
   onScopeChange,
@@ -325,7 +326,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
               {/* Card 1: Natural Net PnL */}
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <div className="flex items-center justify-between text-[11px] text-text-muted">
-                  <span>自然已结净收益</span>
+                  <span>所选范围已核实净收益</span>
                   <TrendingUp className="h-3.5 w-3.5 text-brand" />
                 </div>
                 <div
@@ -347,7 +348,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
               {/* Card 2: Natural Net R */}
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <div className="flex items-center justify-between text-[11px] text-text-muted">
-                  <span>自然净风险回报</span>
+                  <span>累计单笔净 R</span>
                   <Activity className="h-3.5 w-3.5 text-brand" />
                 </div>
                 <div
@@ -752,7 +753,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
               onSelectTicket={onSelectTicket}
               from_ms={from_ms}
               to_ms={to_ms}
-              scope={scope ?? 'natural'}
+              scope={scope ?? 'all'} exit_scope={exit_scope}
               exit_path={exit_path ?? null}
               onScopeChange={onScopeChange}
               onExitPathChange={onExitPathChange}

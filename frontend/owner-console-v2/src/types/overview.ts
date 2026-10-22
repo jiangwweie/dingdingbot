@@ -23,6 +23,7 @@ export interface SystemPulseData {
 }
 
 export interface TodayPerformanceMetrics {
+  income_coverage?: string;
   net_pnl_formatted?: string;
   net_pnl_usd?: number;
   net_pnl_is_positive?: boolean | null;

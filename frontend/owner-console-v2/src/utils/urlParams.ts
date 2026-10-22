@@ -1,3 +1,4 @@
+import type { ExitScope } from '../api/performanceApi';
 /**
  * Pure URL Search Params parsing, validation, and serialization for Owner Console V2.
  * Adheres strictly to Trades and Strategies contracts.
@@ -18,14 +19,22 @@ import type { TradeFilterMode } from '../types/trades.ts';
 import type { ReviewStatusQuery } from '../api/reviewApi.ts';
 
 export interface ReviewFilterParams {
+  view?: 'current' | 'all';
+  exit_scope?: ExitScope;
+  strategy_version_id?: string;
   range: TimeRangePreset;
   from_ms: number;
   to_ms: number;
+  exchange_instrument_id?: string;
+  position_side?: 'long'|'short';
   review_status?: ReviewStatusQuery;
   strategy_group_id?: string;
 }
 
 export interface TradesFilterParams {
+  view?: 'current' | 'all';
+  exit_scope?: ExitScope;
+  strategy_version_id?: string;
   range: TimeRangePreset;
   from_ms: number;
   to_ms: number;
@@ -37,7 +46,10 @@ export interface TradesFilterParams {
 }
 
 export interface StrategiesFilterParams {
+  exchange_instrument_id?:string;position_side?:'long'|'short';
   view: StrategyViewMode;
+  exit_scope?: ExitScope;
+  strategy_group_id?: string;
   range: TimeRangePreset;
   from_ms: number;
   to_ms: number;
@@ -119,7 +131,10 @@ export function parseTradesSearchParams(
     range,
     from_ms,
     to_ms,
+    exit_scope: parseExitScope(searchParams.get('exit_scope')),
+    view: searchParams.get('view') === 'current' ? 'current' : 'all',
     strategy_group_id,
+    strategy_version_id: searchParams.get('strategy_version_id')?.trim() || undefined,
     exchange_instrument_id,
     position_side,
     aggregate_status,
@@ -132,6 +147,8 @@ export function parseTradesSearchParams(
  */
 export function serializeTradesSearchParams(params: TradesFilterParams): string {
   const q = new URLSearchParams();
+  if (params.exit_scope && params.exit_scope !== 'all') q.set('exit_scope', params.exit_scope);
+  if (params.view === 'current') q.set('view', 'current');
   q.set('tab', 'trades');
 
   if (params.range !== '30d') {
@@ -140,9 +157,8 @@ export function serializeTradesSearchParams(params: TradesFilterParams): string 
   q.set('from_ms', String(params.from_ms));
   q.set('to_ms', String(params.to_ms));
 
-  if (params.strategy_group_id) {
-    q.set('strategy_group_id', params.strategy_group_id);
-  }
+  if (params.strategy_group_id) q.set('strategy_group_id', params.strategy_group_id);
+  if (params.strategy_version_id) q.set('strategy_version_id', params.strategy_version_id);
   if (params.exchange_instrument_id) {
     q.set('exchange_instrument_id', params.exchange_instrument_id);
   }
@@ -167,7 +183,7 @@ export function parseStrategiesSearchParams(
   nowMs: number = Date.now()
 ): StrategiesFilterParams {
   const rawView = searchParams.get('view');
-  const view: StrategyViewMode = rawView === 'all' ? 'all' : 'current';
+  const view: StrategyViewMode = rawView === 'current' ? 'current' : 'all';
 
   const rawRange = searchParams.get('range') as TimeRangePreset;
   const range: TimeRangePreset = VALID_PRESETS.has(rawRange) ? rawRange : '30d';
@@ -199,7 +215,7 @@ export function parseStrategiesSearchParams(
     : undefined;
 
   const rawScope = searchParams.get('scope');
-  const scope: 'natural' | 'all' = rawScope === 'all' ? 'all' : 'natural';
+  const scope: 'natural' | 'all' = rawScope === 'natural' ? 'natural' : 'all';
 
   const rawExitPath = searchParams.get('exit_path') as StrategyTicketExitPath;
   let exit_path: StrategyTicketExitPath | undefined = VALID_EXIT_PATHS.has(rawExitPath)
@@ -218,6 +234,10 @@ export function parseStrategiesSearchParams(
 
   return {
     view,
+    exchange_instrument_id:searchParams.get('exchange_instrument_id')?.trim()||undefined,
+    position_side:VALID_SIDES.has(searchParams.get('position_side')??'')?searchParams.get('position_side') as 'long'|'short':undefined,
+    exit_scope: parseExitScope(searchParams.get('exit_scope')),
+    strategy_group_id: searchParams.get('strategy_group_id')?.trim() || undefined,
     range,
     from_ms,
     to_ms,
@@ -234,11 +254,14 @@ export function parseStrategiesSearchParams(
  */
 export function serializeStrategiesSearchParams(params: StrategiesFilterParams): string {
   const q = new URLSearchParams();
+  if (params.exit_scope && params.exit_scope !== 'all') q.set('exit_scope', params.exit_scope);
+  if (params.view === 'current') q.set('view', 'current');
   q.set('tab', 'strategies');
+  if(params.exchange_instrument_id)q.set('exchange_instrument_id',params.exchange_instrument_id);
+  if(params.position_side)q.set('position_side',params.position_side);
+  if(params.strategy_group_id)q.set('strategy_group_id',params.strategy_group_id);
 
-  if (params.view === 'all') {
-    q.set('view', 'all');
-  }
+
   if (params.range !== '30d') {
     q.set('range', params.range);
   }
@@ -251,9 +274,7 @@ export function serializeStrategiesSearchParams(params: StrategiesFilterParams):
   if (params.drawer_tab) {
     q.set('drawer_tab', params.drawer_tab);
   }
-  if (params.scope === 'all') {
-    q.set('scope', 'all');
-  }
+  if (params.scope === 'natural') q.set('scope', 'natural');
   if (params.exit_path) {
     q.set('exit_path', params.exit_path);
   }
@@ -308,10 +329,13 @@ export function parseReviewSearchParams(
   const strategy_group_id = rawStrat && rawStrat.length > 0 ? rawStrat : undefined;
 
   return {
-    range,
-    from_ms,
-    to_ms,
+    range,from_ms,to_ms,
+    exit_scope: parseExitScope(searchParams.get('exit_scope')),
+    view: searchParams.get('view') === 'current' ? 'current' : 'all',
+    strategy_version_id: searchParams.get('strategy_version_id')?.trim() || undefined,
     review_status,
+    exchange_instrument_id:searchParams.get('exchange_instrument_id')?.trim()||undefined,
+    position_side:VALID_SIDES.has(searchParams.get('position_side')??'')?searchParams.get('position_side') as 'long'|'short':undefined,
     strategy_group_id,
   };
 }
@@ -321,6 +345,8 @@ export function parseReviewSearchParams(
  */
 export function serializeReviewSearchParams(params: ReviewFilterParams): string {
   const q = new URLSearchParams();
+  if (params.exit_scope && params.exit_scope !== 'all') q.set('exit_scope', params.exit_scope);
+  if (params.view === 'current') q.set('view', 'current');
   q.set('tab', 'review');
 
   if (params.range !== '30d') {
@@ -329,12 +355,30 @@ export function serializeReviewSearchParams(params: ReviewFilterParams): string 
   q.set('from_ms', String(params.from_ms));
   q.set('to_ms', String(params.to_ms));
 
+  if(params.exchange_instrument_id)q.set('exchange_instrument_id',params.exchange_instrument_id);
+  if(params.position_side)q.set('position_side',params.position_side);
   if (params.review_status) {
     q.set('review_status', params.review_status);
   }
-  if (params.strategy_group_id) {
-    q.set('strategy_group_id', params.strategy_group_id);
-  }
+  if (params.strategy_group_id) q.set('strategy_group_id', params.strategy_group_id);
+  if (params.strategy_version_id) q.set('strategy_version_id', params.strategy_version_id);
 
   return q.toString();
+}
+
+export function parseExitScope(raw: string | null): ExitScope {
+  return raw === 'strategy' || raw === 'owner' || raw === 'safety' || raw === 'unknown' ? raw : 'all';
+}
+
+export function incomeNavigationSearch(search: string, tab: string, nowMs = Date.now()): string {
+  const old = new URLSearchParams(search);
+  const parsed = parseReviewSearchParams(old, nowMs);
+  const next = new URLSearchParams();
+  next.set('tab', tab);
+  next.set('range', parsed.range);
+  next.set('from_ms', String(parsed.from_ms)); next.set('to_ms', String(parsed.to_ms));
+  for (const key of ['view', 'exit_scope', 'strategy_group_id', 'strategy_version_id', 'exchange_instrument_id', 'position_side']) {
+    const value = old.get(key); if (value) next.set(key, value);
+  }
+  return next.toString();
 }

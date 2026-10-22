@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Literal, cast
 
 import sqlalchemy as sa
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import (
 from src.trading_kernel.application.owner_console.causality import (
     ContradictoryFacts,
 )
+from src.trading_kernel.application.owner_console.exit_attribution import classify_exit
 from src.trading_kernel.application.owner_console.models import (
     EffectiveEntryScopeFacts,
     EntryScopeFacts,
@@ -34,6 +35,8 @@ from src.trading_kernel.application.owner_console.models import (
     OverviewEvidenceGap,
     OverviewFacts,
     PageCursor,
+    PerformanceQuery,
+    PerformanceSummary,
     ProgrammaticReviewFacts,
     ReviewCenterFacts,
     ReviewCenterItemFacts,
@@ -65,6 +68,9 @@ from src.trading_kernel.application.owner_console.models import (
     TradeListQuery,
     TradePageFacts,
     decode_cursor,
+)
+from src.trading_kernel.application.owner_console.performance import (
+    build_performance_summary,
 )
 from src.trading_kernel.application.owner_console.programmatic_review import (
     ProgrammaticReviewContradiction,
@@ -121,7 +127,7 @@ _CAUSALITY_EVENT_LIMIT = 512
 _CAUSALITY_COMMAND_LIMIT = 128
 _CAUSALITY_INCIDENT_LIMIT = 64
 _REVIEW_CENTER_INCIDENT_LIMIT = 64
-_REVIEW_CENTER_FILTER_CANDIDATE_LIMIT = 512
+_REVIEW_CENTER_FILTER_CANDIDATE_LIMIT = 5_000
 _STRATEGY_SUMMARY_VERSION_LIMIT = 100
 _STRATEGY_SUMMARY_TICKET_LIMIT = 5_000
 _STRATEGY_SUMMARY_OBSERVATION_LIMIT = 5_000
@@ -963,18 +969,16 @@ class PostgresOwnerReadRepository:
             .mappings()
             .one()
         )
-        review_row = (
-            (
-                await self._connection.execute(
-                    _today_reviews_query(
-                        day_start_ms=day_start_ms,
-                        venue_id=venue_id,
-                        account_id=account_id,
-                    )
-                )
-            )
-            .mappings()
-            .one()
+        income_query = PerformanceQuery(
+            from_ms=day_start_ms,
+            to_ms=max(day_start_ms + 1, now_ms),
+            account_id=account_id,
+            venue_id=venue_id,
+        )
+        performance = (
+            build_performance_summary((), income_query)
+            if account_id is None or venue_id is None
+            else await self.read_performance_summary(income_query)
         )
 
         contradictory_reasons: list[str] = []
@@ -1083,8 +1087,36 @@ class PostgresOwnerReadRepository:
         ):
             intervention_monitor = None
 
-        today_net_pnl, today_net_r, review_gap, review_evidence = (
-            _review_aggregate_metrics(review_row)
+        today_net_pnl = performance.verified_totals.net_pnl
+        today_net_r = performance.verified_totals.net_r
+        review_gap = (
+            "incomplete_review_economics"
+            if performance.confirmed_count < performance.sample_count
+            else None
+        )
+        missing_ids = performance.metric_coverage["net_pnl"].missing_ticket_ids
+        review_evidence = (
+            ()
+            if not missing_ids
+            else tuple(
+                EvidenceRef(
+                    kind="review", identity=str(row[0]), occurred_at_ms=int(row[1])
+                )
+                for row in (
+                    await self._connection.execute(
+                        sa.select(
+                            trade_reviews.c.review_id, trade_reviews.c.created_at_ms
+                        )
+                        .join(
+                            trade_aggregates,
+                            trade_aggregates.c.review_id == trade_reviews.c.review_id,
+                        )
+                        .where(trade_aggregates.c.ticket_id.in_(missing_ids))
+                        .order_by(trade_reviews.c.review_id)
+                        .limit(1)
+                    )
+                ).all()
+            )
         )
         if review_gap is not None:
             review_gap_evidence = (
@@ -1220,6 +1252,7 @@ class PostgresOwnerReadRepository:
                 freshness_identity if contradictory_reasons else None
             ),
             evidence_gaps=tuple(evidence_gaps),
+            performance=performance,
             today_net_pnl=today_net_pnl,
             today_net_r=today_net_r,
             today_signal_count=int(count_row["signal_count"]),
@@ -1327,15 +1360,34 @@ class PostgresOwnerReadRepository:
         rows = (
             (
                 await self._connection.execute(
-                    _trade_list_query(query=query, cursor=cursor)
+                    _trade_list_query(
+                        query=query.model_copy(update={"limit": 5000})
+                        if query.exit_scope != "all"
+                        else query,
+                        cursor=cursor,
+                    )
                 )
             )
             .mappings()
             .all()
         )
+        if len(rows) > 5000:
+            raise TradeFactsContradiction(
+                "Trade scope exceeds 5000 candidates; narrow the window"
+            )
+        items = tuple(_trade_item_facts_from_row(row) for row in rows)
+        if query.exit_scope != "all":
+            items = tuple(
+                item
+                for item in items
+                if item.aggregate_status == "terminal"
+                and classify_exit(build_trade_item(item).exit_reason)
+                == query.exit_scope
+            )
         return TradePageFacts(
-            items=tuple(_trade_item_facts_from_row(row) for row in rows),
+            items=items[: query.limit + 1],
             requested_limit=query.limit,
+            time_basis=query.time_basis,
         )
 
     async def read_trade_causality_facts(
@@ -1506,10 +1558,15 @@ class PostgresOwnerReadRepository:
             observations_by_version[strategy_version_id].append(
                 _strategy_observation_facts_from_row(row)
             )
+        performance = await self.read_performance_summary(
+            PerformanceQuery.model_validate(query.model_dump())
+        )
         return StrategyPageFacts(
+            performance=performance,
             from_ms=query.from_ms,
             to_ms=query.to_ms,
             view=query.view,
+            exit_scope=query.exit_scope,
             versions=tuple(
                 StrategyVersionFacts(
                     strategy_group_id=str(row["strategy_group_id"]),
@@ -1554,9 +1611,31 @@ class PostgresOwnerReadRepository:
             .mappings()
             .all()
         )
+        if len(rows) > _STRATEGY_SUMMARY_TICKET_LIMIT:
+            raise TradeFactsContradiction(
+                "Strategy Ticket filter exceeds 5000 candidates"
+            )
+        items = []
+        for row in rows:
+            facts = _trade_item_facts_from_row(row)
+            trade = build_trade_item(facts)
+            kind = classify_exit(trade.exit_reason)
+            if query.exit_scope != "all" and kind != query.exit_scope:
+                continue
+            if query.scope == "natural" and (
+                trade.aggregate_status != "terminal" or kind != "strategy"
+            ):
+                continue
+            if query.exit_path == "controlled_exit" and kind != "owner":
+                continue
+            if query.exit_path in {"tp1_reached", "tp1_not_reached"} and (
+                kind != "strategy"
+                or facts.tp1_reached != (query.exit_path == "tp1_reached")
+            ):
+                continue
+            items.append(facts)
         return StrategyTicketPageFacts(
-            items=tuple(_trade_item_facts_from_row(row) for row in rows),
-            requested_limit=query.limit,
+            items=tuple(items[: query.limit + 1]), requested_limit=query.limit
         )
 
     async def read_strategy_observation_page_facts(
@@ -1580,9 +1659,71 @@ class PostgresOwnerReadRepository:
             requested_limit=query.limit,
         )
 
+    async def read_performance_summary(
+        self, query: PerformanceQuery
+    ) -> PerformanceSummary:
+        """Read the bounded entire terminal population in one readonly snapshot."""
+        # Same joins and exact Review classification as the detail endpoint.
+        facts = await self.read_review_center_facts(
+            ReviewListQuery.model_validate(
+                {
+                    **query.model_dump(
+                        exclude={"snapshot", "cursor", "account_id", "venue_id"}
+                    ),
+                    "exit_scope": "all",
+                }
+            ),
+            full_window=True,
+            account_id=query.account_id,
+            venue_id=query.venue_id,
+        )
+        from src.trading_kernel.application.owner_console.models import (
+            PerformanceSample,
+        )
+
+        samples = []
+        for item in facts.items:
+            review = build_programmatic_review(item.review)
+            if item.strategy_version_id is None:
+                raise TradeFactsContradiction(
+                    "Income sample lacks exact StrategyVersion identity"
+                )
+            samples.append(
+                PerformanceSample(
+                    ticket_id=review.ticket_id,
+                    strategy_group_id=item.strategy_group_id,
+                    strategy_version_id=item.strategy_version_id,
+                    exchange_instrument_id=item.exchange_instrument_id,
+                    position_side=item.position_side,
+                    terminal_at_ms=item.terminal_at_ms,
+                    review_id=item.review.current_review_id,
+                    review_revision=item.review_revision,
+                    exit_reason=review.exit_reason,
+                    economics=review.economic_summary,
+                    review_status=review.review_status,
+                    execution_classification=review.execution_classification,
+                    attention_count=len(review.attention_items),
+                )
+            )
+        # Bind exact current Review identities and values, not only latest time.
+        result = build_performance_summary(samples, query)
+        if query.snapshot is not None and query.snapshot != result.snapshot_id:
+            from src.trading_kernel.application.owner_console.performance import (
+                PerformanceSnapshotChanged,
+            )
+
+            raise PerformanceSnapshotChanged(
+                "Income population changed; refresh the complete query"
+            )
+        return result
+
     async def read_review_center_facts(
         self,
         query: ReviewListQuery,
+        *,
+        full_window: bool = False,
+        account_id: str | None = None,
+        venue_id: str | None = None,
     ) -> ReviewCenterFacts:
         """Read one terminal-only limit+1 Review Center page."""
 
@@ -1590,19 +1731,31 @@ class PostgresOwnerReadRepository:
         ticket_rows = (
             (
                 await self._connection.execute(
-                    _review_center_ticket_query(query=query, cursor=cursor)
+                    _review_center_ticket_query(
+                        query=query,
+                        cursor=cursor,
+                        full_window=full_window,
+                        account_id=account_id,
+                        venue_id=venue_id,
+                    )
                 )
             )
             .mappings()
             .all()
         )
+        if full_window and len(ticket_rows) > _STRATEGY_SUMMARY_TICKET_LIMIT:
+            raise ProgrammaticReviewContradiction(
+                "Income window exceeds maximum 5000 Tickets; narrow the query"
+            )
         filter_overflow = (
-            query.review_status is not None
+            not full_window
+            and (query.review_status is not None or query.exit_scope != "all")
             and len(ticket_rows) > _REVIEW_CENTER_FILTER_CANDIDATE_LIMIT
         )
         candidate_rows = (
             ticket_rows[:_REVIEW_CENTER_FILTER_CANDIDATE_LIMIT]
-            if query.review_status is not None
+            if (query.review_status is not None or query.exit_scope != "all")
+            and not full_window
             else ticket_rows
         )
         page_ticket_ids = tuple(
@@ -1610,6 +1763,8 @@ class PostgresOwnerReadRepository:
             for row in (
                 candidate_rows
                 if query.review_status is not None
+                or query.exit_scope != "all"
+                or full_window
                 else candidate_rows[: query.limit]
             )
         )
@@ -1632,8 +1787,16 @@ class PostgresOwnerReadRepository:
             )
             for row in candidate_rows
         )
+        if query.exit_scope != "all":
+            candidate_items = tuple(
+                item
+                for item in candidate_items
+                if classify_exit(item.review.exit_reason) == query.exit_scope
+            )
         if query.review_status is None:
-            items = candidate_items
+            items = (
+                candidate_items if full_window else candidate_items[: query.limit + 1]
+            )
         else:
             items = tuple(
                 item
@@ -1642,11 +1805,15 @@ class PostgresOwnerReadRepository:
                     build_programmatic_review(item.review),
                     query.review_status,
                 )
-            )[: query.limit + 1]
+            )[: _STRATEGY_SUMMARY_TICKET_LIMIT if full_window else query.limit + 1]
             if len(items) < query.limit + 1 and filter_overflow:
                 raise ProgrammaticReviewContradiction(
                     "Review Center status filter exceeded candidate bound"
                 )
+        if not full_window and filter_overflow and len(items) < query.limit + 1:
+            raise ProgrammaticReviewContradiction(
+                "Review filter exceeded candidate bound"
+            )
         return ReviewCenterFacts(
             from_ms=query.from_ms,
             to_ms=query.to_ms,
@@ -2050,14 +2217,54 @@ def _signal_list_query(
     )
 
 
+def _profit_conditions(query: Any) -> list[sa.ColumnElement[bool]]:
+    conditions = []
+    for name in (
+        "strategy_group_id",
+        "strategy_version_id",
+        "exchange_instrument_id",
+        "position_side",
+        "venue_id",
+        "account_id",
+    ):
+        value = getattr(query, name, None)
+        if value is not None:
+            conditions.append(trade_tickets.c[name] == value)
+    if getattr(query, "aggregate_status", None) is not None:
+        conditions.append(trade_aggregates.c.status == query.aggregate_status)
+    if getattr(query, "view", "all") == "current":
+        conditions.append(
+            sa.exists(
+                sa.select(sa.literal(1)).where(
+                    strategy_groups.c.strategy_group_id
+                    == trade_tickets.c.strategy_group_id,
+                    strategy_groups.c.active_version_id
+                    == trade_tickets.c.strategy_version_id,
+                )
+            )
+        )
+    return conditions
+
+
+def _trade_time_expression(query: TradeListQuery) -> sa.ColumnElement[Any]:
+    # Income is terminal-based; unfilled terminal and active facts retain their own creation window.
+    if query.time_basis == "created":
+        return trade_tickets.c.created_at_ms
+    return sa.func.coalesce(
+        trade_tickets.c.terminal_at_ms, trade_tickets.c.created_at_ms
+    )
+
+
 def _trade_list_query(
     *,
     query: TradeListQuery,
     cursor: PageCursor | None,
 ) -> sa.Select[Any]:
+    time = _trade_time_expression(query)
     conditions: list[sa.ColumnElement[bool]] = [
-        trade_tickets.c.created_at_ms >= query.from_ms,
-        trade_tickets.c.created_at_ms < query.to_ms,
+        time >= query.from_ms,
+        time < query.to_ms,
+        *_profit_conditions(query),
     ]
     if query.strategy_group_id is not None:
         conditions.append(trade_tickets.c.strategy_group_id == query.strategy_group_id)
@@ -2071,19 +2278,11 @@ def _trade_list_query(
         conditions.append(trade_aggregates.c.status == query.aggregate_status)
     if cursor is not None:
         conditions.append(
-            sa.tuple_(
-                trade_tickets.c.created_at_ms,
-                trade_tickets.c.ticket_id,
-            )
-            < sa.tuple_(
-                sa.literal(cursor.sort_ms),
-                sa.literal(cursor.identity),
-            )
+            sa.tuple_(time, trade_tickets.c.ticket_id)
+            < sa.tuple_(sa.literal(cursor.sort_ms), sa.literal(cursor.identity))
         )
-
     return _ticket_facts_select(
-        conditions=conditions,
-        limit=query.limit + 1,
+        conditions=conditions, limit=query.limit + 1, sort_time=time
     )
 
 
@@ -2091,6 +2290,14 @@ def _strategy_versions_query(query: StrategySummaryQuery) -> sa.Select[Any]:
     """Select authoritative StrategyVersions, including zero-ticket versions."""
 
     conditions: list[sa.ColumnElement[bool]] = []
+    if query.strategy_group_id is not None:
+        conditions.append(
+            strategy_groups.c.strategy_group_id == query.strategy_group_id
+        )
+    if query.strategy_version_id is not None:
+        conditions.append(
+            strategy_versions.c.strategy_version_id == query.strategy_version_id
+        )
     if query.view == "current":
         conditions.append(
             strategy_groups.c.active_version_id
@@ -2134,9 +2341,10 @@ def _strategy_summary_ticket_query(
 ) -> sa.Select[Any]:
     return _ticket_facts_select(
         conditions=(
-            trade_tickets.c.created_at_ms >= query.from_ms,
-            trade_tickets.c.created_at_ms < query.to_ms,
+            trade_tickets.c.terminal_at_ms >= query.from_ms,
+            trade_tickets.c.terminal_at_ms < query.to_ms,
             trade_tickets.c.strategy_version_id.in_(strategy_version_ids),
+            *_profit_conditions(query),
         ),
         limit=_STRATEGY_SUMMARY_TICKET_LIMIT + 1,
     )
@@ -2228,34 +2436,31 @@ def _strategy_ticket_query(
     query: StrategyTicketQuery,
     cursor: PageCursor | None,
 ) -> sa.Select[Any]:
+    time = sa.func.coalesce(
+        trade_tickets.c.terminal_at_ms, trade_tickets.c.created_at_ms
+    )
     conditions: list[sa.ColumnElement[bool]] = [
-        trade_tickets.c.created_at_ms >= query.from_ms,
-        trade_tickets.c.created_at_ms < query.to_ms,
+        time >= query.from_ms,
+        time < query.to_ms,
         trade_tickets.c.strategy_version_id == query.strategy_version_id,
     ]
-    controlled_exit = _controlled_exit_exists()
-    tp1_reached = _take_profit_filled_exists()
-    natural_terminal = _natural_terminal_ticket_condition()
-    if query.scope == "natural":
-        conditions.append(~controlled_exit)
-    if query.exit_path == "controlled_exit":
-        conditions.append(controlled_exit)
-    elif query.exit_path == "tp1_reached":
-        conditions.extend((natural_terminal, ~controlled_exit, tp1_reached))
-    elif query.exit_path == "tp1_not_reached":
-        conditions.extend((natural_terminal, ~controlled_exit, ~tp1_reached))
     if cursor is not None:
         conditions.append(
             sa.tuple_(
-                trade_tickets.c.created_at_ms,
+                time,
                 trade_tickets.c.ticket_id,
             )
-            < sa.tuple_(
-                sa.literal(cursor.sort_ms),
-                sa.literal(cursor.identity),
-            )
+            < sa.tuple_(sa.literal(cursor.sort_ms), sa.literal(cursor.identity))
         )
-    return _ticket_facts_select(conditions=conditions, limit=query.limit + 1)
+    return _ticket_facts_select(
+        conditions=conditions,
+        limit=_STRATEGY_SUMMARY_TICKET_LIMIT + 1
+        if query.scope == "natural"
+        or query.exit_path is not None
+        or query.exit_scope != "all"
+        else query.limit + 1,
+        sort_time=time,
+    )
 
 
 def _frozen_exit_profile_column() -> sa.ColumnElement[Any]:
@@ -2313,6 +2518,7 @@ def _ticket_facts_select(
     *,
     conditions: Sequence[sa.ColumnElement[bool]],
     limit: int,
+    sort_time: sa.ColumnElement[Any] | None = None,
 ) -> sa.Select[Any]:
     """Select one shared bounded Ticket row shape for every Owner read list."""
 
@@ -2429,7 +2635,7 @@ def _ticket_facts_select(
         .select_from(source)
         .where(*conditions)
         .order_by(
-            trade_tickets.c.created_at_ms.desc(),
+            (trade_tickets.c.created_at_ms if sort_time is None else sort_time).desc(),
             trade_tickets.c.ticket_id.desc(),
         )
         .limit(limit)
@@ -2471,6 +2677,9 @@ def _review_center_ticket_query(
     *,
     query: ReviewListQuery,
     cursor: PageCursor | None,
+    full_window: bool = False,
+    account_id: str | None = None,
+    venue_id: str | None = None,
 ) -> sa.Select[Any]:
     terminal_at_ms = trade_tickets.c.terminal_at_ms
     conditions: list[sa.ColumnElement[bool]] = [
@@ -2479,7 +2688,12 @@ def _review_center_ticket_query(
         terminal_at_ms.is_not(None),
         terminal_at_ms >= query.from_ms,
         terminal_at_ms < query.to_ms,
+        *_profit_conditions(query),
     ]
+    if account_id is not None:
+        conditions.append(trade_tickets.c.account_id == account_id)
+    if venue_id is not None:
+        conditions.append(trade_tickets.c.venue_id == venue_id)
     if query.strategy_group_id is not None:
         conditions.append(trade_tickets.c.strategy_group_id == query.strategy_group_id)
     if cursor is not None:
@@ -2566,6 +2780,7 @@ def _review_center_ticket_query(
         sa.select(
             trade_tickets.c.ticket_id,
             trade_tickets.c.strategy_group_id,
+            trade_tickets.c.strategy_version_id,
             trade_tickets.c.event_spec_id,
             trade_tickets.c.exchange_instrument_id,
             trade_tickets.c.position_side,
@@ -2612,8 +2827,10 @@ def _review_center_ticket_query(
             trade_tickets.c.ticket_id.desc(),
         )
         .limit(
-            query.limit + 1
-            if query.review_status is None
+            _STRATEGY_SUMMARY_TICKET_LIMIT + 1
+            if full_window
+            else query.limit + 1
+            if query.review_status is None and query.exit_scope == "all"
             else _REVIEW_CENTER_FILTER_CANDIDATE_LIMIT + 1
         )
     )
@@ -2808,7 +3025,8 @@ def _strategy_ticket_facts_from_row(row: RowMapping) -> StrategyTicketFacts:
         net_pnl=trade.net_pnl,
         net_r=trade.net_r,
         exit_reason=trade.exit_reason,
-        tp1_reached=bool(row.get("tp1_event_id")),
+        tp1_reached=bool(row.get("tp1_event_id")) or bool(row.get("tp1_reached")),
+        trade=trade,
         evidence=trade.evidence,
     )
 
@@ -3071,8 +3289,14 @@ def _review_center_item_facts(
         incident_evidence.append(incident_ref)
         evidence.append(incident_ref)
 
-    if exact_event_refs["exit_trigger_evidence"] is None and trade.exit_attribution is not None and trade.exit_attribution.source == "review_fills":
-        exact_event_refs["exit_trigger_evidence"] = next(ref for ref in trade.exit_attribution.evidence if ref.kind == "command")
+    if (
+        exact_event_refs["exit_trigger_evidence"] is None
+        and trade.exit_attribution is not None
+        and trade.exit_attribution.source == "review_fills"
+    ):
+        exact_event_refs["exit_trigger_evidence"] = next(
+            ref for ref in trade.exit_attribution.evidence if ref.kind == "command"
+        )
         evidence.extend(trade.exit_attribution.evidence)
 
     current_review_evidence = (
@@ -3129,8 +3353,14 @@ def _review_center_item_facts(
         exit_reason=trade.exit_reason,
         exit_attribution=trade.exit_attribution,
         funding_unavailable_reason=(
-            cast(str, (trade_facts.review_metrics or {}).get("funding_unavailable_reason"))
-            if isinstance((trade_facts.review_metrics or {}).get("funding_unavailable_reason"), str)
+            cast(
+                str,
+                (trade_facts.review_metrics or {}).get("funding_unavailable_reason"),
+            )
+            if isinstance(
+                (trade_facts.review_metrics or {}).get("funding_unavailable_reason"),
+                str,
+            )
             else None
         ),
         runner_net_contribution=unavailable_runner,
@@ -3154,6 +3384,8 @@ def _review_center_item_facts(
             "Review Center terminal Ticket lacks terminal timestamp"
         )
     return ReviewCenterItemFacts(
+        strategy_version_id=str(row["strategy_version_id"]),
+        review_revision=trade.review_revision,
         strategy_group_id=trade.strategy_group_id,
         exchange_instrument_id=trade.exchange_instrument_id,
         position_side=trade.position_side,
@@ -4064,170 +4296,6 @@ def _today_counts_query(
     )
 
 
-def _today_reviews_query(
-    *, day_start_ms: int, venue_id: str | None, account_id: str | None
-) -> sa.Select[Any]:
-    scope = _exact_scope(
-        venue_column=trade_tickets.c.venue_id,
-        account_column=trade_tickets.c.account_id,
-        venue_id=venue_id,
-        account_id=account_id,
-    )
-    economics_completeness = trade_reviews.c.metrics[
-        "economics_completeness"
-    ].as_string()
-    net_pnl_quote = trade_reviews.c.metrics["net_pnl_quote"].as_string()
-    planned_r_multiple = trade_reviews.c.metrics["planned_r_multiple"].as_string()
-    numeric_text = r"^-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$"
-    valid_economics = sa.func.coalesce(
-        sa.and_(
-            economics_completeness == "complete",
-            net_pnl_quote.op("~")(numeric_text),
-            planned_r_multiple.op("~")(numeric_text),
-        ),
-        sa.false(),
-    )
-    review_facts = (
-        sa.select(
-            trade_reviews.c.review_id,
-            trade_reviews.c.created_at_ms,
-            net_pnl_quote.label("net_pnl_quote"),
-            planned_r_multiple.label("planned_r_multiple"),
-            valid_economics.label("valid_economics"),
-        )
-        .select_from(
-            trade_aggregates.join(
-                trade_reviews,
-                trade_aggregates.c.review_id == trade_reviews.c.review_id,
-            ).join(
-                trade_tickets,
-                trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
-            )
-        )
-        .where(scope, trade_reviews.c.created_at_ms >= day_start_ms)
-        .cte("current_review_facts")
-    )
-    latest_review_id = (
-        sa.select(review_facts.c.review_id)
-        .order_by(
-            review_facts.c.created_at_ms.desc(),
-            review_facts.c.review_id,
-        )
-        .limit(1)
-        .scalar_subquery()
-    )
-    latest_review_at_ms = (
-        sa.select(review_facts.c.created_at_ms)
-        .order_by(
-            review_facts.c.created_at_ms.desc(),
-            review_facts.c.review_id,
-        )
-        .limit(1)
-        .scalar_subquery()
-    )
-    invalid_review_id = (
-        sa.select(review_facts.c.review_id)
-        .where(review_facts.c.valid_economics.is_(False))
-        .order_by(
-            review_facts.c.created_at_ms.desc(),
-            review_facts.c.review_id,
-        )
-        .limit(1)
-        .scalar_subquery()
-    )
-    invalid_review_at_ms = (
-        sa.select(review_facts.c.created_at_ms)
-        .where(review_facts.c.valid_economics.is_(False))
-        .order_by(
-            review_facts.c.created_at_ms.desc(),
-            review_facts.c.review_id,
-        )
-        .limit(1)
-        .scalar_subquery()
-    )
-    net_pnl_sum = sa.func.coalesce(
-        sa.func.sum(
-            sa.case(
-                (
-                    review_facts.c.valid_economics.is_(True),
-                    sa.cast(review_facts.c.net_pnl_quote, sa.Numeric()),
-                ),
-                else_=sa.literal(0),
-            )
-        ),
-        0,
-    )
-    net_r_sum = sa.func.coalesce(
-        sa.func.sum(
-            sa.case(
-                (
-                    review_facts.c.valid_economics.is_(True),
-                    sa.cast(review_facts.c.planned_r_multiple, sa.Numeric()),
-                ),
-                else_=sa.literal(0),
-            )
-        ),
-        0,
-    )
-    return sa.select(
-        sa.func.count().label("review_count"),
-        sa.func.count()
-        .filter(review_facts.c.valid_economics.is_(False))
-        .label("incomplete_review_count"),
-        net_pnl_sum.label("net_pnl_sum"),
-        net_r_sum.label("net_r_sum"),
-        latest_review_id.label("latest_review_id"),
-        latest_review_at_ms.label("latest_review_at_ms"),
-        invalid_review_id.label("invalid_review_id"),
-        invalid_review_at_ms.label("invalid_review_at_ms"),
-    ).select_from(review_facts)
-
-
-def _review_aggregate_metrics(
-    row: sa.RowMapping,
-) -> tuple[MoneyMetric, MoneyMetric, str | None, tuple[EvidenceRef, ...]]:
-    invalid_count = int(row["incomplete_review_count"])
-    evidence_id = row["invalid_review_id"] if invalid_count else row["latest_review_id"]
-    evidence_at_ms = (
-        row["invalid_review_at_ms"] if invalid_count else row["latest_review_at_ms"]
-    )
-    evidence = (
-        ()
-        if evidence_id is None or evidence_at_ms is None
-        else (
-            EvidenceRef(
-                kind="review",
-                identity=str(evidence_id),
-                occurred_at_ms=int(evidence_at_ms),
-            ),
-        )
-    )
-    if invalid_count:
-        reason = "incomplete_review_economics"
-        return (
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
-            reason,
-            evidence,
-        )
-    net_pnl = row["net_pnl_sum"]
-    net_r = row["net_r_sum"]
-    if not isinstance(net_pnl, Decimal) or not isinstance(net_r, Decimal):
-        reason = "incomplete_review_economics"
-        return (
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
-            reason,
-            evidence,
-        )
-    return (
-        MoneyMetric(value=net_pnl, unit="USDT"),
-        MoneyMetric(value=net_r, unit="R"),
-        None,
-        evidence,
-    )
-
-
 def _exact_scope(
     *,
     venue_column: sa.ColumnElement[Any],
@@ -4270,59 +4338,6 @@ def _incident_scope(
             ticket.c.venue_id == venue_id,
             ticket.c.account_id == account_id,
         ),
-    )
-
-
-def _review_metrics(
-    rows: Sequence[sa.RowMapping],
-) -> tuple[MoneyMetric, MoneyMetric, str | None, tuple[EvidenceRef, ...]]:
-    if not rows:
-        return (
-            MoneyMetric(value=Decimal(0), unit="USDT"),
-            MoneyMetric(value=Decimal(0), unit="R"),
-            None,
-            (),
-        )
-    net_pnl = Decimal(0)
-    net_r = Decimal(0)
-    evidence: list[EvidenceRef] = []
-    try:
-        for row in rows:
-            evidence.append(
-                EvidenceRef(
-                    kind="review",
-                    identity=str(row["review_id"]),
-                    occurred_at_ms=int(row["created_at_ms"]),
-                )
-            )
-            if (
-                row["economics_completeness"] != "complete"
-                or not isinstance(row["net_pnl_quote"], str)
-                or not isinstance(row["planned_r_multiple"], str)
-            ):
-                raise InvalidOperation
-            net_pnl += Decimal(row["net_pnl_quote"])
-            net_r += Decimal(row["planned_r_multiple"])
-    except (InvalidOperation, ValueError, TypeError):
-        return (
-            MoneyMetric(
-                value=None,
-                unit="USDT",
-                unavailable_reason="incomplete_review_economics",
-            ),
-            MoneyMetric(
-                value=None,
-                unit="R",
-                unavailable_reason="incomplete_review_economics",
-            ),
-            "incomplete_review_economics",
-            tuple(evidence),
-        )
-    return (
-        MoneyMetric(value=net_pnl, unit="USDT"),
-        MoneyMetric(value=net_r, unit="R"),
-        None,
-        tuple(evidence),
     )
 
 

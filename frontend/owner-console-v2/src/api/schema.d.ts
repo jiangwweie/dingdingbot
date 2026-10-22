@@ -532,6 +532,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Performance */
+        get: operations["performance_api_owner_v1_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/review": {
         parameters: {
             query?: never;
@@ -819,6 +836,17 @@ export interface components {
         /** ApiEnvelope[OwnerOverview] */
         ApiEnvelope_OwnerOverview_: {
             data: components["schemas"]["OwnerOverview"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
+        /** ApiEnvelope[PerformanceSummary] */
+        ApiEnvelope_PerformanceSummary_: {
+            data: components["schemas"]["PerformanceSummary"];
             freshness: components["schemas"]["Freshness"];
             /** Generated At */
             generated_at: string;
@@ -1973,6 +2001,7 @@ export interface components {
             execution_incident_count: number | null;
             /** Observed At Ms */
             observed_at_ms: number;
+            performance?: components["schemas"]["PerformanceSummary"] | null;
             /** Rejected Signal Count */
             rejected_signal_count: number;
             /** Ticket Capacity */
@@ -1981,6 +2010,88 @@ export interface components {
             today_net_r: components["schemas"]["MoneyMetric"];
             /** Today Signal Count */
             today_signal_count: number;
+        };
+        /** PerformanceMetrics */
+        PerformanceMetrics: {
+            /** Breakeven Count */
+            breakeven_count: number;
+            /** Confirmed Count */
+            confirmed_count: number;
+            /** Loss Count */
+            loss_count: number;
+            /** Metric Coverage */
+            metric_coverage: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
+            /** Sample Count */
+            sample_count: number;
+            /** Unreviewed Count */
+            unreviewed_count: number;
+            verified_totals: components["schemas"]["ReviewEconomicSummary"];
+            /** Win Count */
+            win_count: number;
+        };
+        /** PerformanceSummary */
+        PerformanceSummary: {
+            /** Attention Count */
+            attention_count: number;
+            /** Breakdown */
+            breakdown: {
+                [key: string]: components["schemas"]["PerformanceMetrics"];
+            };
+            /** Breakeven Count */
+            breakeven_count: number;
+            /** By Strategy Group */
+            by_strategy_group?: {
+                [key: string]: components["schemas"]["PerformanceMetrics"];
+            };
+            /** Complete Review Count */
+            complete_review_count: number;
+            /** Confirmed Count */
+            confirmed_count: number;
+            /**
+             * Exit Scope
+             * @enum {string}
+             */
+            exit_scope: "all" | "strategy" | "owner" | "safety" | "unknown";
+            /** From Ms */
+            from_ms: number;
+            /** Incomplete Review Count */
+            incomplete_review_count: number;
+            /** Loss Count */
+            loss_count: number;
+            /** Metric Coverage */
+            metric_coverage: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
+            /** Sample Count */
+            sample_count: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Summary Scope
+             * @default full_window
+             * @constant
+             */
+            summary_scope: "full_window";
+            /**
+             * Time Basis
+             * @default terminal
+             * @constant
+             */
+            time_basis: "terminal";
+            /** To Ms */
+            to_ms: number;
+            /** Unreviewed Count */
+            unreviewed_count: number;
+            verified_totals: components["schemas"]["ReviewEconomicSummary"];
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "current" | "all";
+            /** Win Count */
+            win_count: number;
         };
         /**
          * PreTp1GuardKind
@@ -2729,6 +2840,7 @@ export interface components {
             from_ms: number;
             /** Items */
             items: components["schemas"]["StrategyVersionSummary"][];
+            performance?: components["schemas"]["PerformanceSummary"] | null;
             /** To Ms */
             to_ms: number;
             /**
@@ -2751,7 +2863,7 @@ export interface components {
              * Evaluation Path
              * @enum {string}
              */
-            evaluation_path: "tp1_reached" | "tp1_not_reached" | "controlled_exit" | "not_terminal";
+            evaluation_path: "tp1_reached" | "tp1_not_reached" | "controlled_exit" | "safety_exit" | "unknown_exit" | "not_terminal";
             /** Event Spec Id */
             event_spec_id: string;
             /** Evidence */
@@ -2830,6 +2942,11 @@ export interface components {
             completed_observation_count: number;
             /** Confirmed Natural Review Count */
             confirmed_natural_review_count: number;
+            /**
+             * Confirmed Review Count
+             * @default 0
+             */
+            confirmed_review_count: number;
             /** Controlled Exit Count */
             controlled_exit_count: number;
             /** Evidence */
@@ -2846,6 +2963,10 @@ export interface components {
             median_mfe_r: string | null;
             /** Median Spread Bps */
             median_spread_bps: string | null;
+            /** Metric Coverage */
+            metric_coverage?: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
             /** Natural Terminal Count */
             natural_terminal_count: number;
             net_pnl: components["schemas"]["MoneyMetric"];
@@ -2861,6 +2982,16 @@ export interface components {
              * @default []
              */
             product_events: components["schemas"]["StrategyProductEventFacts"][];
+            /**
+             * Safety Exit Count
+             * @default 0
+             */
+            safety_exit_count: number;
+            /**
+             * Selected Terminal Count
+             * @default 0
+             */
+            selected_terminal_count: number;
             /** Session Exit Count */
             session_exit_count: number;
             /** Strategy Group Display Name */
@@ -2883,6 +3014,11 @@ export interface components {
             tp1_reached_count: number;
             /** Unavailable Observation Count */
             unavailable_observation_count: number;
+            /**
+             * Unknown Exit Count
+             * @default 0
+             */
+            unknown_exit_count: number;
             /** Version */
             version: number;
             /** Win Count */
@@ -4040,6 +4176,47 @@ export interface operations {
             };
         };
     };
+    performance_api_owner_v1_performance_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                from_ms?: number | null;
+                to_ms?: number | null;
+                strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                review_status?: ("in_progress" | "waiting_for_settlement" | "waiting_for_review" | "complete" | "incomplete_evidence") | null;
+                aggregate_status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_PerformanceSummary_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     review_center_api_owner_v1_review_get: {
         parameters: {
             query?: {
@@ -4049,6 +4226,13 @@ export interface operations {
                 cursor?: string | null;
                 review_status?: ("in_progress" | "waiting_for_settlement" | "waiting_for_review" | "complete" | "incomplete_evidence") | null;
                 strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                snapshot?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
+                aggregate_status?: string | null;
             };
             header?: never;
             path?: never;
@@ -4151,6 +4335,11 @@ export interface operations {
                 from_ms?: number | null;
                 to_ms?: number | null;
                 view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
             };
             header?: never;
             path?: never;
@@ -4222,6 +4411,8 @@ export interface operations {
                 to_ms?: number | null;
                 limit?: number;
                 cursor?: string | null;
+                snapshot?: string | null;
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
                 scope?: "natural" | "all";
                 exit_path?: ("tp1_reached" | "tp1_not_reached" | "controlled_exit") | null;
             };
@@ -4262,6 +4453,11 @@ export interface operations {
                 cursor?: string | null;
                 aggregate_status?: string | null;
                 strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                snapshot?: string | null;
+                time_basis?: "terminal" | "created";
                 exchange_instrument_id?: string | null;
                 position_side?: ("long" | "short") | null;
             };

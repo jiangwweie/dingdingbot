@@ -1,3 +1,5 @@
+import { ApiError } from '../api/errors';
+import { usePerformance } from './usePerformance';
 import { useMemo, useCallback } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { reviewPaginationOptions } from '../api/reviewPagination.ts';
@@ -11,19 +13,24 @@ export function useReviewData(filters?: Partial<ReviewFilterParams>) {
   const queryParams = useMemo<ReviewQueryParams>(() => {
     return {
       limit: REVIEW_PAGE_LIMIT,
+      exchange_instrument_id:filters?.exchange_instrument_id,position_side:filters?.position_side,
+      view: filters?.view,exit_scope: filters?.exit_scope,strategy_version_id: filters?.strategy_version_id,
       from_ms: filters?.from_ms,
       to_ms: filters?.to_ms,
       review_status: filters?.review_status,
       strategy_group_id: filters?.strategy_group_id,
     };
   }, [
+    filters?.exchange_instrument_id,filters?.position_side,
+    filters?.view,filters?.exit_scope,filters?.strategy_version_id,
     filters?.from_ms,
     filters?.to_ms,
     filters?.review_status,
     filters?.strategy_group_id,
   ]);
 
-  const query = useInfiniteQuery(reviewPaginationOptions(queryParams));
+  const performance=usePerformance(queryParams);
+  const query = useInfiniteQuery({...reviewPaginationOptions({...queryParams,snapshot:performance.data?.data.snapshot_id}),enabled:!!performance.data&&!performance.isError});
 
   const items = useMemo<ReviewCenterItem[]>(() => {
     const unique = new Map<string, ReviewCenterItem>();
@@ -37,7 +44,8 @@ export function useReviewData(filters?: Partial<ReviewFilterParams>) {
     return [...unique.values()];
   }, [query.data]);
 
-  const hasNextPage = Boolean(query.hasNextPage);
+  const snapshotChanged=query.error instanceof ApiError && query.error.code==='statistics_snapshot_changed';
+  const hasNextPage = Boolean(query.hasNextPage)&&!snapshotChanged;
   const isFetchingNextPage = query.isFetchingNextPage;
 
   const firstPage = query.data?.pages[0];
@@ -55,8 +63,9 @@ export function useReviewData(filters?: Partial<ReviewFilterParams>) {
   }, [items]);
 
   const refetch = useCallback(async () => {
-    await query.refetch();
-  }, [query]);
+    const next=await performance.refetch();
+    if(next.data?.data.snapshot_id===performance.data?.data.snapshot_id) await query.refetch();
+  }, [query,performance]);
 
   const fetchNextPage = useCallback(async () => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -65,15 +74,17 @@ export function useReviewData(filters?: Partial<ReviewFilterParams>) {
   }, [hasNextPage, isFetchingNextPage, query]);
 
   return {
-    isLoading: query.isLoading,
+    performance:performance.data?.data ?? null,
+    performanceError:performance.error ?? (snapshotChanged ? query.error : null),
+    isLoading: !performance.isError && (query.isLoading || performance.isPending),
     isFetching: query.isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    isError: query.isError && !query.data,
+    isError: (query.isError && !query.data)||performance.isError,
     paginationError: query.isFetchNextPageError ? query.error : null,
     refreshError: query.isError && query.data && !query.isFetchNextPageError ? query.error : null,
-    error: query.error,
+    error: query.error??performance.error,
     freshness: query.isError ? 'stale' : firstPage?.freshness ?? 'unavailable',
     generatedAt: firstPage?.generated_at ?? null,
     sourceWatermark: firstPage?.source_watermark ?? null,

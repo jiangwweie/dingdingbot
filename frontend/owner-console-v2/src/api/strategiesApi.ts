@@ -16,12 +16,16 @@ export type StrategyObservationListPage = components['schemas']['StrategyObserva
 export type StrategyObservationListItem = components['schemas']['StrategyObservationListItem'];
 
 export interface StrategiesQueryParams {
+  exchange_instrument_id?:string;position_side?:'long'|'short';
+  strategy_group_id?:string;strategy_version_id?:string;
   from_ms?: number;
   to_ms?: number;
   view?: 'current' | 'all';
+  exit_scope?: import('./performanceApi').ExitScope;
 }
 
 export interface StrategyTicketsQueryParams {
+  snapshot?:string;exit_scope?:import('./performanceApi').ExitScope;
   strategy_version_id: string;
   from_ms?: number;
   to_ms?: number;
@@ -85,7 +89,7 @@ export async function fetchStrategyTickets(
           to_ms: query.to_ms,
           limit: query.limit ?? 50,
           cursor: query.cursor ?? undefined,
-          scope: query.scope ?? 'natural',
+          scope: query.scope ?? 'all',snapshot:query.snapshot,exit_scope:query.exit_scope,
           exit_path: query.exit_path ?? undefined,
         },
       },

@@ -185,6 +185,13 @@ class _RepositorySpy:
         self.entry_scope_policy_ids: list[str] = []
         self.overview_facts_override: OverviewFacts | None = None
 
+    async def read_performance_summary(self, query):
+        from src.trading_kernel.application.owner_console.performance import (
+            build_performance_summary,
+        )
+
+        return build_performance_summary((), query)
+
     async def read_overview_facts(
         self,
         day_start_ms: int,
@@ -522,6 +529,7 @@ async def test_candles_do_not_open_database_transaction(
         "/api/owner/v1/signals",
         "/api/owner/v1/tickets",
         "/api/owner/v1/review",
+        "/api/owner/v1/performance",
         "/api/owner/v1/strategies/strategy-version:1/tickets",
         "/api/owner/v1/strategies/strategy-version:1/observations",
     ),
@@ -547,6 +555,7 @@ async def test_list_limit_above_hard_cap_returns_422(
         "/api/owner/v1/tickets",
         "/api/owner/v1/tickets/ticket:1/causality",
         "/api/owner/v1/review",
+        "/api/owner/v1/performance",
         "/api/owner/v1/strategies",
         "/api/owner/v1/strategies/strategy-version:1/tickets",
         "/api/owner/v1/strategies/strategy-version:1/observations",
@@ -718,6 +727,7 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/tickets",
         "/api/owner/v1/tickets/{ticket_id}/causality",
         "/api/owner/v1/review",
+        "/api/owner/v1/performance",
         "/api/owner/v1/strategies",
         "/api/owner/v1/strategies/{strategy_version_id}/observations",
         "/api/owner/v1/strategies/{strategy_version_id}/tickets",
@@ -1133,3 +1143,35 @@ async def test_hourly_static_owner_http_uses_independent_baseline_intent(owner_c
         'effective_period_anchor_ms':control.pending_effective_period_anchor_ms})
     assert response.status_code==200,response.text
     mutation.assert_awaited_once()
+
+
+async def test_statistics_revision_conflict_is_visible_and_readonly(
+    owner_console_client, repository_spy, monkeypatch
+):
+    from src.trading_kernel.application.owner_console.performance import (
+        PerformanceSnapshotChanged,
+    )
+
+    async def changed(_query):
+        raise PerformanceSnapshotChanged("changed")
+
+    monkeypatch.setattr(repository_spy, "read_performance_summary", changed)
+    response = await owner_console_client.get(
+        "/api/owner/v1/review", params={"snapshot": "profit:older"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "statistics_snapshot_changed"
+
+
+async def test_performance_endpoint_is_get_only_and_carries_complete_window(
+    owner_console_client,
+):
+    response = await owner_console_client.get("/api/owner/v1/performance")
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["summary_scope"] == "full_window"
+    assert data["time_basis"] == "terminal"
+    assert set(data["breakdown"]) == {"strategy", "owner", "safety", "unknown"}
+    assert (
+        await owner_console_client.post("/api/owner/v1/performance", json={})
+    ).status_code == 405

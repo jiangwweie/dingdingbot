@@ -31,6 +31,7 @@ interface StrategyTicketsTabProps {
   from_ms?: number;
   to_ms?: number;
   scope?: 'natural' | 'all';
+  exit_scope?:import('../../api/performanceApi').ExitScope;
   exit_path?: StrategyTicketExitPath | null;
   onScopeChange?: (scope: 'natural' | 'all') => void;
   onExitPathChange?: (exitPath: StrategyTicketExitPath | null) => void;
@@ -42,14 +43,14 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
   onSelectTicket,
   from_ms,
   to_ms,
-  scope: externalScope,
+  scope: externalScope,exit_scope,
   exit_path: externalExitPath,
   onScopeChange,
   onExitPathChange,
   onTicketFiltersChange,
 }) => {
   const {
-    items,
+    items,snapshotChanged,
     excludedNonTerminalCount,
     scope,
     setScope,
@@ -65,7 +66,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
     refetch,
   } = useStrategyTicketsData(strategyVersionId, {
     from_ms,
-    to_ms,
+    to_ms,exit_scope,
     scope: externalScope,
     exit_path: externalExitPath,
   });
@@ -138,14 +139,14 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
               { id: null, label: '全部' },
               { id: 'tp1_reached', label: '达到 TP1' },
               { id: 'tp1_not_reached', label: '未达 TP1' },
-              { id: 'controlled_exit', label: '受控退出' },
+              { id: 'controlled_exit', label: 'Owner 平仓' },
             ] as const
           ).map((item) => (
             <button
               key={item.label}
               type="button"
               onClick={() => handleExitPathChange(item.id as StrategyTicketExitPath | null)}
-              title={scope === 'natural' && item.id === 'controlled_exit' ? '选择受控退出将自动切换至全部版本 (All)' : undefined}
+              title={scope === 'natural' && item.id === 'controlled_exit' ? '选择Owner 平仓将自动切换至全部退出范围 (All)' : undefined}
               className={`rounded px-2.5 py-1 text-xs transition-colors ${
                 exitPath === item.id
                   ? 'bg-brand/10 text-brand font-bold border border-brand/30'
@@ -205,7 +206,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
             <div className="mt-4 flex items-center justify-center gap-2">
               <button
                 type="button"
-                onClick={() => fetchNextPage()}
+                onClick={() => snapshotChanged ? refetch() : fetchNextPage()}
                 disabled={isFetchingNextPage}
                 className="inline-flex items-center gap-1.5 rounded bg-brand px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-brand/90 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
               >
@@ -221,7 +222,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => fetchNextPage()}
+                  onClick={() => snapshotChanged ? refetch() : fetchNextPage()}
                   disabled={isFetchingNextPage}
                   className="rounded border border-danger/30 bg-surface px-2 py-0.5 text-[11px] font-semibold text-danger hover:bg-danger/10 transition-colors cursor-pointer"
                 >
@@ -307,7 +308,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
                             : ticket.evaluation_path === 'tp1_not_reached'
                             ? '未达 TP1'
                             : ticket.evaluation_path === 'controlled_exit'
-                            ? '受控退出'
+                            ? 'Owner 平仓'
                             : '未达终态 (在途)'}
                         </span>
                       </td>
@@ -388,7 +389,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
               </span>
               <button
                 type="button"
-                onClick={() => fetchNextPage()}
+                onClick={() => snapshotChanged ? refetch() : fetchNextPage()}
                 disabled={isFetchingNextPage}
                 className="inline-flex items-center gap-1.5 rounded border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:bg-surface-elevated transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
               >
@@ -398,7 +399,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
             </div>
           ) : (
             <div className="border-t border-border py-2 text-center text-[11px] text-text-muted bg-surface-subtle">
-              已加载全部 Ticket 记录 (共 {items.length} 笔已达成终态
+              {snapshotChanged ? '统计事实已更新，以下仅为旧明细；请刷新整组数据。' : '已加载全部 Ticket 记录'} (共 {items.length} 笔已达成终态
               {scope === 'natural' && excludedNonTerminalCount > 0
                 ? `，已排除 ${excludedNonTerminalCount} 笔在途记录`
                 : ''}
@@ -415,7 +416,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => fetchNextPage()}
+                onClick={() => snapshotChanged ? refetch() : fetchNextPage()}
                 disabled={isFetchingNextPage}
                 className="inline-flex items-center gap-1 rounded border border-danger/30 bg-surface px-2.5 py-1 text-xs font-semibold text-danger hover:bg-danger/10 transition-colors shadow-xs cursor-pointer"
               >

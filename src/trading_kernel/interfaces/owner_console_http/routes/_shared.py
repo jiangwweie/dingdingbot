@@ -104,3 +104,23 @@ def utc_day_start_ms(timestamp_ms: int) -> int:
         instant.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         * 1_000
     )
+
+
+async def checked_income_page(
+    repository: PostgresOwnerReadRepository,
+    query: BaseModel,
+    operation: Callable[[], Awaitable[FactsT]],
+) -> FactsT:
+    from src.trading_kernel.application.owner_console.models import PerformanceQuery
+
+    if getattr(query, "snapshot", None) is not None:
+        values = query.model_dump(exclude={"time_basis", "scope", "exit_path"})
+        await repository.read_performance_summary(
+            PerformanceQuery.model_validate(values)
+        )
+    return await operation()
+
+
+def shanghai_day_start_ms(timestamp_ms: int) -> int:
+    offset = 8 * 60 * 60 * 1000
+    return ((timestamp_ms + offset) // 86_400_000) * 86_400_000 - offset

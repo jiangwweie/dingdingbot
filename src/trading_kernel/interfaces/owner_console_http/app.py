@@ -20,6 +20,9 @@ from src.trading_kernel.application.install_strategy_universe import (
     UniverseControlConflict,
 )
 from src.trading_kernel.application.owner_console.causality import ContradictoryFacts
+from src.trading_kernel.application.owner_console.performance import (
+    PerformanceSnapshotChanged,
+)
 from src.trading_kernel.application.owner_console.programmatic_review import (
     ProgrammaticReviewContradiction,
 )
@@ -97,6 +100,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.market import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.overview import (
     router as overview_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.performance import (
+    router as performance_router,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.review import (
     router as review_router,
@@ -191,6 +197,17 @@ def create_owner_console_app(
             )
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.exception_handler(PerformanceSnapshotChanged)
+    async def income_snapshot_changed(
+        _request: Request, _error: PerformanceSnapshotChanged
+    ) -> JSONResponse:
+        return error_response(
+            status_code=409,
+            code="statistics_snapshot_changed",
+            message="统计事实已更新，请刷新整个查询后继续翻页",
+        )
+
     app.include_router(auth_router)
     app.include_router(google_router)
     app.include_router(controls_router)
@@ -200,6 +217,7 @@ def create_owner_console_app(
     app.include_router(tickets_router)
     app.include_router(strategies_router)
     app.include_router(review_router)
+    app.include_router(performance_router)
     app.include_router(market_router)
     app.include_router(instruments_router)
     _register_error_handlers(app)

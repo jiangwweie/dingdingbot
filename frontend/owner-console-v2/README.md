@@ -61,13 +61,28 @@ not make the execution chain incomplete; a missing exit cause does not erase
 confirmed PnL. Review completeness still requires both dimensions. Raw reasons,
 authorization IDs and evidence remain available in details.
 
-Review responses describe one returned page (`summary_scope=page`). The UI
-combines deduplicated loaded Tickets (`summary_scope=loaded_records`); it never
-claims a full-window total before all pages are loaded. Each metric has its own
-coverage and missing Ticket IDs. Strict totals remain unavailable when incomplete;
-`verified_totals` separately carries clearly labelled partial sums. Unknown
-funding is never zero. No historical Review, economic fact or trade policy is
-rewritten by these read models.
+All income surfaces use terminal timestamps in Asia/Shanghai. The full-window
+`GET /api/owner/v1/performance` summary is independent of detail page size/cursor,
+includes Owner flatten by default, and retains all/current version and explicit
+exit-scope filters. Strategy, Owner, safety and unknown exit classes are mutually
+exclusive; unknown is never treated as a strategy-natural exit.
+
+Each metric independently reports covered/missing Tickets and exact 80-digit
+verified sums. Unknown funding never becomes zero. The API bounds each window
+to 90 days and 5000 Tickets, failing explicitly instead of silently truncating.
+A content fingerprint binds the population, current Review revision, economics,
+classification and effective filters. Detail GETs validate this fingerprint in
+their readonly transaction; changed facts return 409 statistics_snapshot_changed.
+The UI stops paging and requires a whole-query refresh, not a blind old-cursor
+retry. Strategy matrix and its full summary share one read transaction. Overview
+headlines and group contributions use the same income snapshot; delayed Review
+revisions revise the original terminal period rather than today's income.
+
+Cross-page navigation and copied links retain exact timestamps and supported
+identity/scope filters. Profit statistics exclude unfilled terminal attempts and
+unrealized positions; current managed exposure is independently resolved from
+Overview and exact causality reads. Cumulative single-Ticket Net R is not account
+return. No historical Review, policy, schema or exchange state is rewritten.
 
 If a row's net PnL is unavailable because funding evidence is incomplete but gross PnL
 is known, its PnL cell displays the gross amount with `（资费不完整）` and an

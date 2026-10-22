@@ -14,6 +14,10 @@ import type {
 import type { TimeRangePreset } from '../utils/timeRange.ts';
 
 export interface ReviewFilterParams {
+  view?: 'all' | 'current';
+  exit_scope?: import('../api/performanceApi').ExitScope;
+  strategy_version_id?: string;
+  exchange_instrument_id?: string;position_side?: 'long'|'short';
   range: TimeRangePreset;
   from_ms: number;
   to_ms: number;

@@ -157,7 +157,22 @@ class SignalListQuery(BoundedWindowQuery):
     position_side: Literal["long", "short"] | None = None
 
 
-class TradeListQuery(BoundedWindowQuery):
+ExitScope = Literal["all", "strategy", "owner", "safety", "unknown"]
+
+
+class ProfitWindowQuery(BoundedWindowQuery):
+    aggregate_status: str | None = None
+    strategy_group_id: str | None = None
+    strategy_version_id: str | None = None
+    exchange_instrument_id: str | None = None
+    position_side: Literal["long", "short"] | None = None
+    view: Literal["current", "all"] = "all"
+    exit_scope: ExitScope = "all"
+    snapshot: str | None = Field(default=None, max_length=80)
+
+
+class TradeListQuery(ProfitWindowQuery):
+    time_basis: Literal["terminal", "created"] = "terminal"
     aggregate_status: str | None = None
     strategy_group_id: str | None = Field(
         default=None,
@@ -172,7 +187,7 @@ class TradeListQuery(BoundedWindowQuery):
     position_side: Literal["long", "short"] | None = None
 
 
-class ReviewListQuery(BoundedWindowQuery):
+class ReviewListQuery(ProfitWindowQuery):
     review_status: (
         Literal[
             "in_progress",
@@ -186,17 +201,25 @@ class ReviewListQuery(BoundedWindowQuery):
     strategy_group_id: str | None = None
 
 
-class StrategySummaryQuery(BoundedWindowQuery):
+class PerformanceQuery(ReviewListQuery):
+    account_id: str | None = None
+    venue_id: str | None = None
+    """One complete bounded terminal-income population, independent of paging."""
+
+
+class StrategySummaryQuery(ProfitWindowQuery):
     """Bounded version-isolated strategy evaluation query."""
 
-    view: Literal["current", "all"] = "current"
+    view: Literal["current", "all"] = "all"
 
 
 class StrategyTicketQuery(BoundedWindowQuery):
+    snapshot: str | None = Field(default=None, max_length=80)
+    exit_scope: ExitScope = "all"
     """Bounded Ticket query opened from one StrategyVersion evidence path."""
 
     strategy_version_id: str = Field(min_length=1, max_length=160)
-    scope: Literal["natural", "all"] = "natural"
+    scope: Literal["natural", "all"] = "all"
     exit_path: (
         Literal[
             "tp1_reached",
@@ -481,6 +504,7 @@ class OwnerConclusion(FrozenModel):
 
 
 class OwnerOverview(FrozenModel):
+    performance: PerformanceSummary | None = None
     observed_at_ms: int
     conclusion: OwnerConclusion
     account_snapshot: AdmissionAccountSnapshot
@@ -875,6 +899,48 @@ class ReviewCenterSummary(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class PerformanceSample(FrozenModel):
+    ticket_id: str
+    strategy_group_id: str
+    strategy_version_id: str
+    exchange_instrument_id: str | None
+    position_side: Literal["long", "short"] | None
+    terminal_at_ms: int
+    review_id: str | None
+    review_revision: int | None
+    exit_reason: str | None
+    economics: ReviewEconomicSummary
+    review_status: str | None = None
+    execution_classification: str | None = None
+    attention_count: int = 0
+
+
+class PerformanceMetrics(FrozenModel):
+    sample_count: int
+    confirmed_count: int
+    unreviewed_count: int
+    win_count: int
+    loss_count: int
+    breakeven_count: int
+    verified_totals: ReviewEconomicSummary
+    metric_coverage: dict[str, MetricCoverage]
+
+
+class PerformanceSummary(PerformanceMetrics):
+    from_ms: int
+    to_ms: int
+    time_basis: Literal["terminal"] = "terminal"
+    summary_scope: Literal["full_window"] = "full_window"
+    snapshot_id: str
+    view: Literal["current", "all"]
+    exit_scope: ExitScope
+    complete_review_count: int
+    incomplete_review_count: int
+    attention_count: int
+    breakdown: dict[str, PerformanceMetrics]
+    by_strategy_group: dict[str, PerformanceMetrics] = Field(default_factory=dict)
+
+
 class StrategyTicketFacts(FrozenModel):
     """One exact Ticket outcome used only for a StrategyVersion summary."""
 
@@ -898,6 +964,7 @@ class StrategyTicketFacts(FrozenModel):
     net_r: MoneyMetric
     exit_reason: str | None
     tp1_reached: bool
+    trade: TradeListItem | None = None
     evidence: tuple[EvidenceRef, ...]
 
 
@@ -1029,9 +1096,11 @@ class StrategyVersionFacts(FrozenModel):
 
 
 class StrategyPageFacts(FrozenModel):
+    performance: PerformanceSummary | None = None
     from_ms: int
     to_ms: int
     view: Literal["current", "all"]
+    exit_scope: ExitScope = "all"
     versions: tuple[StrategyVersionFacts, ...] = Field(max_length=100)
 
 
@@ -1043,6 +1112,11 @@ class StrategyVersionSummary(FrozenModel):
     strategy_version_status: str
     is_current: bool
     ticket_count: int = Field(ge=0)
+    selected_terminal_count: int = 0
+    confirmed_review_count: int = 0
+    safety_exit_count: int = 0
+    unknown_exit_count: int = 0
+    metric_coverage: dict[str, MetricCoverage] = Field(default_factory=dict)
     natural_terminal_count: int = Field(ge=0)
     confirmed_natural_review_count: int = Field(ge=0)
     pending_natural_review_count: int = Field(ge=0)
@@ -1077,6 +1151,7 @@ class StrategyVersionSummary(FrozenModel):
 
 
 class StrategySummaryPage(FrozenModel):
+    performance: PerformanceSummary | None = None
     from_ms: int
     to_ms: int
     view: Literal["current", "all"]
@@ -1089,6 +1164,8 @@ class StrategyTicketListItem(TradeListItem):
         "tp1_reached",
         "tp1_not_reached",
         "controlled_exit",
+        "safety_exit",
+        "unknown_exit",
         "not_terminal",
     ]
 
@@ -1113,6 +1190,7 @@ class StrategyObservationListPage(FrozenModel):
 
 
 class OverviewFacts(FrozenModel):
+    performance: PerformanceSummary | None = None
     observed_at_ms: int
     runtime_freshness: Freshness
     freshness_evidence_identity: str
@@ -1269,6 +1347,7 @@ class TradeItemFacts(FrozenModel):
 
 
 class TradePageFacts(FrozenModel):
+    time_basis: Literal["terminal", "created"] = "terminal"
     items: tuple[TradeItemFacts, ...] = Field(max_length=101)
     requested_limit: int = Field(ge=1, le=100)
 
@@ -1427,6 +1506,8 @@ class ProgrammaticReviewFacts(FrozenModel):
 
 
 class ReviewCenterItemFacts(FrozenModel):
+    strategy_version_id: str | None = None
+    review_revision: int | None = None
     strategy_group_id: str
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
@@ -1437,6 +1518,6 @@ class ReviewCenterItemFacts(FrozenModel):
 class ReviewCenterFacts(FrozenModel):
     from_ms: int
     to_ms: int
-    items: tuple[ReviewCenterItemFacts, ...] = Field(max_length=101)
+    items: tuple[ReviewCenterItemFacts, ...] = Field(max_length=5_000)
     requested_limit: int = Field(ge=1, le=100)
     requested_strategy_group_id: str | None

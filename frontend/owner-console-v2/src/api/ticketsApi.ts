@@ -10,6 +10,11 @@ export type TradeCausalityDetail = components['schemas']['TradeCausalityDetail']
 export type LifecycleStageView = components['schemas']['LifecycleStageView'];
 
 export interface TicketsQueryParams {
+  view?: 'all' | 'current';
+  exit_scope?: import('./performanceApi').ExitScope;
+  strategy_version_id?: string;
+  snapshot?: string;
+  time_basis?: 'terminal' | 'created';
   from_ms?: number;
   to_ms?: number;
   limit?: number;

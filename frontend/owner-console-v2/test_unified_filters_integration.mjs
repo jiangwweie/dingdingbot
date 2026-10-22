@@ -386,10 +386,10 @@ it('Strategies params serialize and parse with drawer context and sub-filters', 
 
   const serialized = serializeStrategiesSearchParams(original);
   assert.match(serialized, /tab=strategies/);
-  assert.match(serialized, /view=all/);
+  assert.strictEqual(new URLSearchParams(serialized).has('view'), false, 'all versions is the default; roundtrip below must retain it');
   assert.match(serialized, /strategy_version_id=strat_ver_999/);
   assert.match(serialized, /drawer_tab=tickets/);
-  assert.match(serialized, /scope=all/);
+  assert.strictEqual(new URLSearchParams(serialized).has('scope'), false, 'all exit paths is the default; roundtrip below must retain it');
   assert.match(serialized, /exit_path=controlled_exit/);
 
   const parsed = parseStrategiesSearchParams(new URLSearchParams(serialized));

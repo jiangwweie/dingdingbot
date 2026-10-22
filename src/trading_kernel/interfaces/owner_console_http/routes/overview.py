@@ -21,7 +21,7 @@ from src.trading_kernel.interfaces.owner_console_http.routes._shared import (
     evidence_watermark,
     latest_ms,
     read_page_facts,
-    utc_day_start_ms,
+    shanghai_day_start_ms,
 )
 
 router = APIRouter(prefix="/api/owner/v1", tags=["owner-read"])
@@ -35,7 +35,7 @@ async def overview(request: Request) -> ApiEnvelope[OwnerOverview]:
     facts = await read_page_facts(
         request,
         lambda repository: repository.read_overview_facts(
-            utc_day_start_ms(now_ms),
+            shanghai_day_start_ms(now_ms),
             now_ms,
         ),
     )

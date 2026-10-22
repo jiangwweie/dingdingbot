@@ -12,10 +12,10 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-      {/* 1. 今日净收益 (Net PnL) */}
+      {/* 1. 今日已核实净收益 */}
       <div data-testid="net-pnl-card" className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="flex items-center justify-between text-xs text-text-secondary">
-          <span className="font-medium">今日净收益 (Net PnL)</span>
+          <span className="font-medium">今日已核实净收益</span>
           <TrendingUp className="h-4 w-4 text-emerald-500" />
         </div>
         <div className="mt-2 flex items-baseline gap-2">
@@ -30,6 +30,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
           >
             {metrics.net_pnl_formatted}
           </span>
+          <span className="text-[10px] text-text-muted">{metrics.income_coverage}</span>
         </div>
         <p className="mt-1 text-[11px] text-text-muted">
           {pnlIsUnavailable
@@ -41,7 +42,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
       {/* 2. 今日净 R (Net R) */}
       <div data-testid="net-r-card" className="rounded-lg border border-border bg-surface p-4 shadow-sm">
         <div className="flex items-center justify-between text-xs text-text-secondary">
-          <span className="font-medium">今日累计收益 (Net R)</span>
+          <span className="font-medium">今日累计单笔净 R</span>
           <Target className="h-4 w-4 text-brand" />
         </div>
         <div className="mt-2 flex items-baseline gap-2">
@@ -58,7 +59,7 @@ export const TodayMetricsDeck: React.FC<TodayMetricsDeckProps> = ({ metrics }) =
           </span>
         </div>
         <p className="mt-1 text-[11px] text-text-muted">
-          以单笔初始风险单位 (R) 度量不对称右尾回报
+          上海今日终态交易 · 单笔净 R 合计，不代表账户收益率
         </p>
       </div>
 

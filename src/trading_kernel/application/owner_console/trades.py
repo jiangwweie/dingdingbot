@@ -172,7 +172,9 @@ def build_trade_page(facts: TradePageFacts) -> TradeListPage:
         boundary = page_facts[-1]
         next_cursor = encode_cursor(
             PageCursor(
-                sort_ms=boundary.issued_at_ms,
+                sort_ms=(boundary.terminal_at_ms or boundary.issued_at_ms)
+                if facts.time_basis == "terminal"
+                else boundary.issued_at_ms,
                 identity=boundary.ticket_id,
             )
         )

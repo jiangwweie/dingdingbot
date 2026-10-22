@@ -1,3 +1,4 @@
+import { IncomeSummary, IncomeScopeBar } from '../common/IncomeSummary';
 import React, { useState } from 'react';
 import { useTradesData } from '../../hooks/useTradesData';
 import { useTradesFilterState } from '../../hooks/useUrlSearchParams';
@@ -37,7 +38,7 @@ export const TradesPage: React.FC = () => {
     coverage,
     liveActiveTicketCount,
     completedTrades,
-    metrics,
+    metrics,performance,performanceError,
     refetch,
   } = useTradesData(filters);
 
@@ -159,12 +160,14 @@ export const TradesPage: React.FC = () => {
         无法连接 Tickets API：{error instanceof Error ? error.message : '请求失败'}
         <button type="button" onClick={handleManualRefresh} className="ml-3 underline">重试</button>
       </div>}
+      <IncomeScopeBar view={filters.view} scope={filters.exit_scope} onChange={setFilters} />
+      <IncomeSummary summary={performance} error={performanceError} onRefresh={handleManualRefresh} onSelectTicket={(id)=>setSelectedEpisode(allTrades.find(t=>t.ticket_id===id)??null)} />
       {/* 2. Top Summary Metrics Deck (L1 Owner Summary) */}
       {!isLoading && !isError && <div data-testid="trades-metrics-ribbon" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <div data-testid="metric-total-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <Activity className="h-3.5 w-3.5 text-brand" />
-            <span>筛选范围交易数</span>
+            <span>已加载明细数</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalCount}
@@ -190,7 +193,7 @@ export const TradesPage: React.FC = () => {
         <div data-testid="metric-completed-trades" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <CheckCircle2 className="h-3.5 w-3.5 text-text-secondary" />
-            <span>已结束交易 / 胜率</span>
+            <span>全窗口已结束持仓 / 净胜率</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.completedCount}{' '}
@@ -219,7 +222,7 @@ export const TradesPage: React.FC = () => {
         <div data-testid="metric-total-r" className="rounded-lg border border-border bg-surface p-3.5 shadow-xs">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-text-muted">
             <Layers className="h-3.5 w-3.5 text-brand" />
-            <span>{metrics.hasRGaps ? '已记录风险回报' : '累计风险回报'}</span>
+            <span>{metrics.hasRGaps ? '已记录风险回报' : '累计单笔净 R'}</span>
           </div>
           <div data-testid="metric-value" className="mt-1 font-mono text-lg font-bold text-text-primary">
             {metrics.totalNetRFormatted}

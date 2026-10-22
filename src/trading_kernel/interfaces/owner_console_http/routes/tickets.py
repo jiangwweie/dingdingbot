@@ -23,6 +23,7 @@ from src.trading_kernel.interfaces.owner_console_http.errors import (
     OwnerResourceNotFound,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes._shared import (
+    checked_income_page,
     envelope,
     evidence_watermark,
     read_page_facts,
@@ -43,6 +44,11 @@ async def tickets(
     cursor: Annotated[str | None, Query(max_length=2_048)] = None,
     aggregate_status: str | None = None,
     strategy_group_id: str | None = None,
+    strategy_version_id: str | None = None,
+    view: Literal["current", "all"] = "all",
+    exit_scope: Literal["all", "strategy", "owner", "safety", "unknown"] = "all",
+    snapshot: Annotated[str | None, Query(max_length=80)] = None,
+    time_basis: Literal["terminal", "created"] = "terminal",
     exchange_instrument_id: str | None = None,
     position_side: Literal["long", "short"] | None = None,
 ) -> ApiEnvelope[TradeListPage]:
@@ -56,13 +62,20 @@ async def tickets(
         limit=limit,
         cursor=cursor,
         aggregate_status=aggregate_status,
+        time_basis=time_basis,
         strategy_group_id=strategy_group_id,
+        strategy_version_id=strategy_version_id,
+        view=view,
+        exit_scope=exit_scope,
+        snapshot=snapshot,
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
     )
     facts = await read_page_facts(
         request,
-        lambda repository: repository.read_trade_page_facts(query),
+        lambda repository: checked_income_page(
+            repository, query, lambda: repository.read_trade_page_facts(query)
+        ),
     )
     data = build_trade_page(facts)
     return envelope(

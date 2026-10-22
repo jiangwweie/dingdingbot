@@ -1,3 +1,5 @@
+import { ApiError } from '../api/errors';
+import { usePerformance } from './usePerformance';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import {
@@ -23,13 +25,16 @@ import type {
 import type { StrategyAdmissionHealth } from '../types/controls.ts';
 
 export interface UseStrategiesDataOptions {
+  exchange_instrument_id?:string;position_side?:'long'|'short';
+  strategy_group_id?:string;strategy_version_id?:string;
   view?: StrategyViewMode;
+  exit_scope?: import('../api/performanceApi').ExitScope;
   from_ms?: number;
   to_ms?: number;
 }
 
 export function useStrategiesData(options?: UseStrategiesDataOptions) {
-  const [internalView, setInternalView] = useState<StrategyViewMode>('current');
+  const [internalView, setInternalView] = useState<StrategyViewMode>('all');
 
   const view = options?.view ?? internalView;
   const setView = useCallback((nextView: StrategyViewMode) => {
@@ -40,8 +45,8 @@ export function useStrategiesData(options?: UseStrategiesDataOptions) {
   const to_ms = options?.to_ms;
 
   const strategiesQuery = useQuery({
-    queryKey: strategiesQueryKey({ view, from_ms, to_ms }),
-    queryFn: () => fetchStrategies({ view, from_ms, to_ms }),
+    queryKey: strategiesQueryKey({ view, from_ms, to_ms,exit_scope:options?.exit_scope,strategy_group_id:options?.strategy_group_id,strategy_version_id:options?.strategy_version_id,exchange_instrument_id:options?.exchange_instrument_id,position_side:options?.position_side }),
+    queryFn: () => fetchStrategies({ view, from_ms, to_ms,exit_scope:options?.exit_scope,strategy_group_id:options?.strategy_group_id,strategy_version_id:options?.strategy_version_id,exchange_instrument_id:options?.exchange_instrument_id,position_side:options?.position_side }),
     staleTime: 30_000,
     retry: false,
   });
@@ -124,6 +129,7 @@ export function useStrategiesData(options?: UseStrategiesDataOptions) {
   }, [strategiesQuery, controlsQuery]);
 
   return {
+    performance:strategiesQuery.data?.data.performance ?? null,
     strategies: enrichedStrategies,
     liveActiveTicketCount: controlsQuery.data?.account_capacity?.active_ticket_count ?? null,
     rawSummaries,
@@ -142,6 +148,7 @@ export function useStrategiesData(options?: UseStrategiesDataOptions) {
 }
 
 export interface UseStrategyTicketsOptions {
+  exit_scope?:import('../api/performanceApi').ExitScope;
   from_ms?: number;
   to_ms?: number;
   scope?: 'natural' | 'all';
@@ -152,13 +159,13 @@ export function useStrategyTicketsData(
   strategyVersionId?: string | null,
   options?: UseStrategyTicketsOptions
 ) {
-  const [internalScope, setInternalScope] = useState<'natural' | 'all'>('natural');
+  const [internalScope, setInternalScope] = useState<'natural' | 'all'>('all');
   const [internalExitPath, setInternalExitPath] = useState<StrategyTicketExitPath | null>(null);
   const [internalWindowEnd, setInternalWindowEnd] = useState(() => Date.now());
 
   useEffect(() => {
     if (options && 'scope' in options) {
-      setInternalScope(options.scope ?? 'natural');
+      setInternalScope(options.scope ?? 'all');
     }
   }, [options?.scope]);
 
@@ -170,7 +177,7 @@ export function useStrategyTicketsData(
 
   const scope =
     options && 'scope' in options
-      ? (options.scope ?? 'natural')
+      ? (options.scope ?? 'all')
       : internalScope;
   const setScope = useCallback((newScope: 'natural' | 'all') => {
     setInternalScope(newScope);
@@ -207,16 +214,17 @@ export function useStrategyTicketsData(
     [strategyVersionId, windowStart, windowEnd, scope, effectiveExitPath]
   );
 
+  const income=usePerformance({from_ms:windowStart,to_ms:windowEnd,strategy_version_id:strategyVersionId??undefined,exit_scope:options?.exit_scope});
   const query = useInfiniteQuery({
-    queryKey: strategyTicketsInfiniteQueryKey(queryParams),
+    queryKey: strategyTicketsInfiniteQueryKey({...queryParams,snapshot:income.data?.data.snapshot_id,exit_scope:options?.exit_scope}),
     queryFn: ({ pageParam }) =>
       fetchStrategyTickets({
-        ...queryParams,
+        ...queryParams,snapshot:income.data?.data.snapshot_id,exit_scope:options?.exit_scope,
         cursor: pageParam ?? undefined,
       }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.data?.next_cursor ?? null,
-    enabled: Boolean(strategyVersionId),
+    enabled: Boolean(strategyVersionId)&&!!income.data&&!income.isError,
     staleTime: 15_000,
     retry: false,
   });
@@ -252,20 +260,23 @@ export function useStrategyTicketsData(
     return 0;
   }, [rawItems, scope]);
 
+  const snapshotChanged=query.error instanceof ApiError && query.error.code==='statistics_snapshot_changed';
   const fetchNextPage = useCallback(async () => {
-    if (query.hasNextPage && !query.isFetchingNextPage) {
+    if (query.hasNextPage && !query.isFetchingNextPage && !snapshotChanged) {
       await query.fetchNextPage();
     }
-  }, [query]);
+  }, [query,snapshotChanged]);
 
   const refetch = useCallback(async () => {
     if (!options?.to_ms) {
       setInternalWindowEnd(Date.now());
     }
-    await query.refetch();
-  }, [query, options?.to_ms]);
+    const next=await income.refetch();
+    if(next.data?.data.snapshot_id===income.data?.data.snapshot_id) await query.refetch();
+  }, [query, options?.to_ms,income]);
 
   return {
+    snapshotChanged,
     items,
     rawItems,
     excludedNonTerminalCount,
@@ -273,13 +284,13 @@ export function useStrategyTicketsData(
     setScope,
     exitPath,
     setExitPath,
-    isLoading: query.isLoading,
+    isLoading: !income.isError&&(query.isLoading||income.isPending),
     isFetching: query.isFetching,
     isFetchingNextPage: query.isFetchingNextPage,
-    hasNextPage: Boolean(query.hasNextPage),
+    hasNextPage: Boolean(query.hasNextPage)&&!snapshotChanged,
     isFetchNextPageError: query.isFetchNextPageError,
-    isError: query.isError,
-    error: query.error,
+    isError: query.isError||income.isError,
+    error: query.error??income.error,
     fetchNextPage,
     refetch,
     windowStart,

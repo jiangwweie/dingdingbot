@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from decimal import Decimal
-from typing import Literal
+from decimal import Decimal, localcontext
+from typing import Literal, cast
 
 from src.trading_kernel.application.owner_console.exit_attribution import (
-    is_controlled_exit,
+    classify_exit,
 )
 from src.trading_kernel.application.owner_console.models import (
     ChartAnnotation,
     EvidenceRef,
     MoneyMetric,
     PageCursor,
+    PerformanceSample,
+    ReviewEconomicSummary,
     StrategyObservationFacts,
     StrategyObservationListItem,
     StrategyObservationListPage,
@@ -29,6 +31,7 @@ from src.trading_kernel.application.owner_console.models import (
     TradeItemFacts,
     encode_cursor,
 )
+from src.trading_kernel.application.owner_console.performance import aggregate_metrics
 from src.trading_kernel.application.owner_console.trades import build_trade_item
 
 
@@ -39,8 +42,12 @@ class StrategyFactsContradiction(RuntimeError):
 def build_strategy_page(facts: StrategyPageFacts) -> StrategySummaryPage:
     """Summarize each StrategyVersion without mixing version or exit scope."""
 
-    items = tuple(_build_version_summary(version) for version in facts.versions)
+    items = tuple(
+        _build_version_summary(version, exit_scope=facts.exit_scope)
+        for version in facts.versions
+    )
     return StrategySummaryPage(
+        performance=facts.performance,
         from_ms=facts.from_ms,
         to_ms=facts.to_ms,
         view=facts.view,
@@ -49,16 +56,6 @@ def build_strategy_page(facts: StrategyPageFacts) -> StrategySummaryPage:
             evidence for version in items for evidence in version.evidence
         ),
     )
-
-
-def strategy_ticket_path(
-    ticket: StrategyTicketFacts,
-) -> Literal["tp1_reached", "tp1_not_reached", "controlled_exit", "not_terminal"]:
-    """Classify a Ticket using its frozen exit reason and TP1 event fact."""
-
-    if not _is_natural_terminal(ticket):
-        return "controlled_exit" if _is_controlled_exit(ticket) else "not_terminal"
-    return "tp1_reached" if ticket.tp1_reached else "tp1_not_reached"
 
 
 def build_strategy_ticket_page(
@@ -74,7 +71,10 @@ def build_strategy_ticket_page(
     if len(facts.items) > facts.requested_limit and page_facts:
         boundary = page_facts[-1]
         next_cursor = encode_cursor(
-            PageCursor(sort_ms=boundary.issued_at_ms, identity=boundary.ticket_id)
+            PageCursor(
+                sort_ms=boundary.terminal_at_ms or boundary.issued_at_ms,
+                identity=boundary.ticket_id,
+            )
         )
     return StrategyTicketListPage(items=items, next_cursor=next_cursor)
 
@@ -102,7 +102,9 @@ def build_strategy_observation_page(
     return StrategyObservationListPage(items=items, next_cursor=next_cursor)
 
 
-def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummary:
+def _build_version_summary(
+    facts: StrategyVersionFacts, *, exit_scope: str = "all"
+) -> StrategyVersionSummary:
     natural = tuple(ticket for ticket in facts.tickets if _is_natural_terminal(ticket))
     confirmed = tuple(
         ticket for ticket in natural if _has_complete_natural_review(ticket)
@@ -110,14 +112,48 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
     for ticket in confirmed:
         _require_complete_economics(ticket)
 
-    net_pnl = _summary_metric(
-        (ticket.net_pnl.value for ticket in confirmed),
-        unit="USDT",
+    terminal = tuple(
+        t
+        for t in facts.tickets
+        if t.ticket_status == "terminal"
+        and t.aggregate_status == "terminal"
+        and t.terminal_at_ms is not None
     )
-    net_r = _summary_metric(
-        (ticket.net_r.value for ticket in confirmed),
-        unit="R",
+    selected = tuple(
+        t
+        for t in terminal
+        if exit_scope == "all" or classify_exit(t.exit_reason) == exit_scope
     )
+    unknown = MoneyMetric(
+        value=None, unit="USDT", unavailable_reason="no_confirmed_metric"
+    )
+    samples = tuple(
+        PerformanceSample(
+            ticket_id=t.ticket_id,
+            strategy_group_id=facts.strategy_group_id,
+            strategy_version_id=facts.strategy_version_id,
+            exchange_instrument_id=t.trade.exchange_instrument_id if t.trade else None,
+            position_side=t.trade.position_side if t.trade else None,
+            terminal_at_ms=cast(int, t.terminal_at_ms),
+            review_id=t.review_id,
+            review_revision=None,
+            exit_reason=t.exit_reason,
+            economics=ReviewEconomicSummary(
+                gross_pnl=t.trade.gross_pnl if t.trade else unknown,
+                fees=t.trade.fees if t.trade else unknown,
+                funding=t.trade.funding if t.trade else unknown,
+                net_pnl=t.net_pnl,
+                net_r=t.net_r,
+            ),
+        )
+        for t in selected
+    )
+    income = aggregate_metrics(samples)
+    net_pnl = income.verified_totals.net_pnl
+    net_r = income.verified_totals.net_r
+    if not selected or income.confirmed_count == 0:
+        net_pnl = _summary_metric((), unit="USDT")
+        net_r = _summary_metric((), unit="R")
     evidence = _deduplicate_evidence(
         evidence
         for source in (
@@ -138,6 +174,15 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
         strategy_version_status=facts.strategy_version_status,
         is_current=facts.is_current,
         ticket_count=len(facts.tickets),
+        selected_terminal_count=len(selected),
+        confirmed_review_count=income.confirmed_count,
+        safety_exit_count=sum(
+            classify_exit(t.exit_reason) == "safety" for t in terminal
+        ),
+        unknown_exit_count=sum(
+            classify_exit(t.exit_reason) == "unknown" for t in terminal
+        ),
+        metric_coverage=income.metric_coverage,
         natural_terminal_count=len(natural),
         confirmed_natural_review_count=len(confirmed),
         pending_natural_review_count=len(natural) - len(confirmed),
@@ -148,12 +193,12 @@ def _build_version_summary(facts: StrategyVersionFacts) -> StrategyVersionSummar
         tp1_not_reached_count=sum(1 for ticket in natural if not ticket.tp1_reached),
         win_count=sum(
             1
-            for ticket in confirmed
+            for ticket in selected
             if ticket.net_pnl.value is not None and ticket.net_pnl.value > 0
         ),
         loss_count=sum(
             1
-            for ticket in confirmed
+            for ticket in selected
             if ticket.net_pnl.value is not None and ticket.net_pnl.value < 0
         ),
         net_pnl=net_pnl,
@@ -268,7 +313,7 @@ def _strategy_observation_item(
 
 
 def _is_controlled_exit(ticket: StrategyTicketFacts) -> bool:
-    return is_controlled_exit(ticket.exit_reason)
+    return classify_exit(ticket.exit_reason) == "owner"
 
 
 def _is_natural_terminal(ticket: StrategyTicketFacts) -> bool:
@@ -276,7 +321,7 @@ def _is_natural_terminal(ticket: StrategyTicketFacts) -> bool:
         ticket.ticket_status == "terminal"
         and ticket.aggregate_status == "terminal"
         and ticket.terminal_at_ms is not None
-        and not _is_controlled_exit(ticket)
+        and classify_exit(ticket.exit_reason) == "strategy"
     )
 
 
@@ -308,6 +353,8 @@ def _strategy_ticket_list_item(facts: TradeItemFacts) -> StrategyTicketListItem:
         "tp1_reached",
         "tp1_not_reached",
         "controlled_exit",
+        "safety_exit",
+        "unknown_exit",
         "not_terminal",
     ]
     if not (
@@ -316,8 +363,12 @@ def _strategy_ticket_list_item(facts: TradeItemFacts) -> StrategyTicketListItem:
         and facts.terminal_at_ms is not None
     ):
         path = "not_terminal"
-    elif is_controlled_exit(trade.exit_reason):
+    elif classify_exit(trade.exit_reason) == "owner":
         path = "controlled_exit"
+    elif classify_exit(trade.exit_reason) == "safety":
+        path = "safety_exit"
+    elif classify_exit(trade.exit_reason) == "unknown":
+        path = "unknown_exit"
     else:
         path = "tp1_reached" if facts.tp1_reached else "tp1_not_reached"
     return StrategyTicketListItem(
@@ -338,10 +389,10 @@ def _summary_metric(
             unit=unit,  # type: ignore[arg-type]
             unavailable_reason="no_confirmed_natural_review",
         )
-    return MoneyMetric(
-        value=sum(exact_values, Decimal(0)),
-        unit=unit,  # type: ignore[arg-type]
-    )
+    with localcontext() as context:
+        context.prec = 80
+        value = sum(exact_values, Decimal(0))
+    return MoneyMetric(value=value, unit=unit)  # type: ignore[arg-type]
 
 
 def _deduplicate_evidence(

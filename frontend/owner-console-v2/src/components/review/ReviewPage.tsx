@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useReviewData } from '../../hooks/useReviewData.ts';
 import { useReviewFilterState } from '../../hooks/useUrlSearchParams.ts';
 import { ReviewFilterBar } from './ReviewFilterBar.tsx';
-import { ReviewMetricsDeck } from './ReviewMetricsDeck.tsx';
+import { IncomeSummary, IncomeScopeBar } from '../common/IncomeSummary';
 import { ReviewTable } from './ReviewTable.tsx';
 import { ReviewBreakdownSections } from './ReviewBreakdownSections.tsx';
 import { CausalityDrawer } from '../overview/CausalityDrawer.tsx';
@@ -30,7 +30,7 @@ export const ReviewPage: React.FC = () => {
     generatedAt,
     items,
     summary,
-    totalAttentionCount,
+    performance,performanceError,
     refetch,
   } = useReviewData(filters);
 
@@ -90,6 +90,8 @@ export const ReviewPage: React.FC = () => {
         </div>
       </div>
 
+      <IncomeScopeBar view={filters.view} scope={filters.exit_scope} onChange={setFilters} />
+      {performanceError && <IncomeSummary summary={null} error={performanceError} onRefresh={handleManualRefresh} />}
       {/* 2. Refresh Error Banner */}
       {refreshError && (
         <div
@@ -159,12 +161,7 @@ export const ReviewPage: React.FC = () => {
       {!isLoading && !isError && (
         <>
           {/* Summary Deck */}
-          <ReviewMetricsDeck
-            summary={summary}
-            totalAttentionCount={totalAttentionCount}
-            onSelectTicket={setSelectedTicketId}
-            isLoading={false}
-          />
+          <IncomeSummary summary={performance} error={performanceError} onRefresh={handleManualRefresh} onSelectTicket={setSelectedTicketId} />
 
           {/* Records Table */}
           <ReviewTable
@@ -213,6 +210,7 @@ export const ReviewPage: React.FC = () => {
             </div>
           )}
 
+          <p className="text-[11px] text-text-muted">以下证据分布仅对应已加载的 {items.length} 笔明细；顶部收益覆盖完整窗口。</p>
           {/* Breakdown Sections */}
           <ReviewBreakdownSections
             summary={summary}

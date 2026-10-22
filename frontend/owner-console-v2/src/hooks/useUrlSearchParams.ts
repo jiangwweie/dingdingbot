@@ -29,6 +29,13 @@ export function useTradesFilterState() {
     return parseTradesSearchParams(new URLSearchParams(window.location.search));
   });
 
+  useEffect(() => {
+    const current=new URLSearchParams(window.location.search);
+    if (!current.has('from_ms') || !current.has('to_ms')) {
+      current.set('from_ms', String(filters.from_ms)); current.set('to_ms', String(filters.to_ms));
+      window.history.replaceState(null, '', `${window.location.pathname}?${current}`);
+    }
+  }, []);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
@@ -104,16 +111,23 @@ export function useStrategiesFilterState() {
     if (typeof window === 'undefined') {
       const defWin = calculatePresetWindow('30d');
       return {
-        view: 'current',
+        view: 'all',
         range: '30d',
         from_ms: defWin.from_ms,
         to_ms: defWin.to_ms,
-        scope: 'natural',
+        scope: 'all',
       };
     }
     return parseStrategiesSearchParams(new URLSearchParams(window.location.search));
   });
 
+  useEffect(() => {
+    const current=new URLSearchParams(window.location.search);
+    if (!current.has('from_ms') || !current.has('to_ms')) {
+      current.set('from_ms', String(filters.from_ms)); current.set('to_ms', String(filters.to_ms));
+      window.history.replaceState(null, '', `${window.location.pathname}?${current}`);
+    }
+  }, []);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
@@ -163,13 +177,13 @@ export function useStrategiesFilterState() {
   const resetFilters = useCallback(() => {
     const defWin = calculatePresetWindow('30d');
     setFilters({
-      view: 'current',
+      view: 'all',
       range: '30d',
       from_ms: defWin.from_ms,
       to_ms: defWin.to_ms,
       strategy_version_id: undefined,
       drawer_tab: undefined,
-      scope: 'natural',
+      scope: 'all',
       exit_path: undefined,
       first_path: undefined,
     });
@@ -198,6 +212,13 @@ export function useReviewFilterState() {
     return parseReviewSearchParams(new URLSearchParams(window.location.search));
   });
 
+  useEffect(() => {
+    const current=new URLSearchParams(window.location.search);
+    if (!current.has('from_ms') || !current.has('to_ms')) {
+      current.set('from_ms', String(filters.from_ms)); current.set('to_ms', String(filters.to_ms));
+      window.history.replaceState(null, '', `${window.location.pathname}?${current}`);
+    }
+  }, []);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 

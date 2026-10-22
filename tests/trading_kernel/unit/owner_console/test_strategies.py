@@ -160,6 +160,7 @@ def test_strategy_version_summary_keeps_natural_and_controlled_outcomes_separate
             from_ms=1_799_000_000_000,
             to_ms=1_801_000_000_000,
             view="all",
+            exit_scope="strategy",
             versions=(
                 _version(
                     _ticket(
@@ -202,6 +203,7 @@ def test_strategy_version_summary_keeps_natural_and_controlled_outcomes_separate
     assert item.confirmed_natural_review_count == 2
     assert item.pending_natural_review_count == 1
     assert item.controlled_exit_count == 1
+    assert item.safety_exit_count == 0
     assert item.tp1_reached_count == 1
     assert item.tp1_not_reached_count == 2
     assert item.win_count == 1
@@ -219,6 +221,7 @@ def test_strategy_version_with_no_confirmed_natural_review_never_emits_zero_retu
             from_ms=1_799_000_000_000,
             to_ms=1_801_000_000_000,
             view="current",
+            exit_scope="strategy",
             versions=(
                 _version(
                     _ticket(
@@ -261,6 +264,7 @@ def test_strategy_version_summary_isolates_observation_paths_and_medians() -> No
             from_ms=1_799_000_000_000,
             to_ms=1_801_000_000_000,
             view="current",
+            exit_scope="strategy",
             versions=(_version(observations=observations),),
         )
     )

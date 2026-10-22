@@ -18,6 +18,7 @@ from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     get_clock_ms,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes._shared import (
+    checked_income_page,
     envelope,
     evidence_watermark,
     read_page_facts,
@@ -45,6 +46,13 @@ async def review_center(
     ]
     | None = None,
     strategy_group_id: str | None = None,
+    strategy_version_id: str | None = None,
+    view: Literal["current", "all"] = "all",
+    exit_scope: Literal["all", "strategy", "owner", "safety", "unknown"] = "all",
+    snapshot: Annotated[str | None, Query(max_length=80)] = None,
+    exchange_instrument_id: str | None = None,
+    position_side: Literal["long", "short"] | None = None,
+    aggregate_status: str | None = None,
 ) -> ApiEnvelope[ReviewCenterSummary]:
     """Return one deterministic bounded terminal Review Center snapshot."""
 
@@ -56,11 +64,20 @@ async def review_center(
         limit=limit,
         cursor=cursor,
         review_status=review_status,
+        exchange_instrument_id=exchange_instrument_id,
+        position_side=position_side,
+        aggregate_status=aggregate_status,
         strategy_group_id=strategy_group_id,
+        strategy_version_id=strategy_version_id,
+        view=view,
+        exit_scope=exit_scope,
+        snapshot=snapshot,
     )
     facts = await read_page_facts(
         request,
-        lambda repository: repository.read_review_center_facts(query),
+        lambda repository: checked_income_page(
+            repository, query, lambda: repository.read_review_center_facts(query)
+        ),
     )
     data = build_review_center(facts)
     return envelope(

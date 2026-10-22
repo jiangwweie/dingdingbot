@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from src.trading_kernel.application.owner_console.models import (
@@ -72,6 +72,26 @@ def exit_reason_group(code: str | None) -> str:
     if code.startswith("deployment_drain:"):
         return "deployment_drain"
     return code
+
+
+def classify_exit(
+    code: str | None,
+) -> Literal["strategy", "owner", "safety", "unknown"]:
+    """Classify explicit facts only; a non-Owner exit is not automatically natural."""
+    if not code:
+        return "unknown"
+    if code.startswith("owner_flatten_all:"):
+        return "owner"
+    if code.startswith(("deployment_drain:", "ticket_incident:")) or code in {
+        "recover_exit_rejection",
+        "initial_stop_rejected",
+        "initial_stop_absent",
+        "Controlled Exit",
+    }:
+        return "safety"
+    if code in strategy_exit_codes():
+        return "strategy"
+    return "unknown"
 
 
 def is_controlled_exit(code: str | None) -> bool:
@@ -185,4 +205,28 @@ def review_fill_exit_attribution(facts: TradeItemFacts) -> ExitAttribution | Non
         label=canonical_exit_attribution(code).label,
         source="review_fills",
         evidence=tuple(refs),
+    )
+
+
+def strategy_exit_codes() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                "initial_stop_triggered",
+                "take_profit_triggered",
+                "failed_breakout_reclaimed",
+                "failed_breakdown_reclaimed",
+                "sor_session_expired",
+                "exposure_session_expired",
+                "pre_tp1_time_stop_hit",
+                "absolute_time_stop_hit",
+                "time_stop_hit",
+                "strategy_exit",
+                "runner_stop",
+                "runner_exit",
+                "protection_stop_triggered",
+                "Initial Stop",
+                "TP1 + Runner Exit",
+            }
+        )
     )

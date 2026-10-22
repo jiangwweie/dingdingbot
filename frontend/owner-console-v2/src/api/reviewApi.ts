@@ -22,6 +22,12 @@ export type ReviewStatusQuery =
   | 'incomplete_evidence';
 
 export interface ReviewQueryParams {
+  view?: 'all' | 'current';
+  exit_scope?: import('./performanceApi').ExitScope;
+  strategy_version_id?: string;
+  exchange_instrument_id?: string;
+  position_side?: 'long'|'short';
+  snapshot?: string;
   from_ms?: number;
   to_ms?: number;
   limit?: number;
@@ -41,6 +47,8 @@ export async function fetchReviewCenter(params?: ReviewQueryParams): Promise<Rev
   const { data, error, response } = await apiClient.GET('/api/owner/v1/review', {
     params: {
       query: {
+        exchange_instrument_id:queryParams.exchange_instrument_id,position_side:queryParams.position_side,
+        view: queryParams.view, exit_scope: queryParams.exit_scope, strategy_version_id: queryParams.strategy_version_id, snapshot: queryParams.snapshot,
         from_ms: queryParams.from_ms,
         to_ms: queryParams.to_ms,
         limit: queryParams.limit,

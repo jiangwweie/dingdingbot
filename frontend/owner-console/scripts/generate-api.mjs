@@ -36,6 +36,7 @@ const approvedPaths = [
   "/api/owner/v1/market/candles",
   "/api/owner/v1/overview",
   "/api/owner/v1/review",
+  "/api/owner/v1/performance",
   "/api/owner/v1/signals",
   "/api/owner/v1/signals/{signal_event_id}",
   "/api/owner/v1/strategies",

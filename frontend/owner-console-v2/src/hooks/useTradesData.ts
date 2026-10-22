@@ -1,3 +1,6 @@
+import { ApiError } from '../api/errors';
+import { usePerformance } from './usePerformance';
+import { formatReviewMoneyMetric } from '../mapping/reviewMapping';
 import { useActiveTrades } from './useActiveTrades';
 import { tradesPaginationOptions } from '../api/tradesPagination';
 import { useMemo, useCallback } from 'react';
@@ -12,7 +15,8 @@ const TRADES_LIMIT = 100;
 export function useTradesData(filters?: Partial<TradesFilterParams>) {
   const queryParams = useMemo<TicketsQueryParams>(() => {
     return {
-      limit: TRADES_LIMIT,
+      limit: TRADES_LIMIT, time_basis: 'terminal',
+      view: filters?.view,exit_scope: filters?.exit_scope,strategy_version_id: filters?.strategy_version_id,
       from_ms: filters?.from_ms,
       to_ms: filters?.to_ms,
       strategy_group_id: filters?.strategy_group_id,
@@ -21,6 +25,7 @@ export function useTradesData(filters?: Partial<TradesFilterParams>) {
       aggregate_status: filters?.aggregate_status,
     };
   }, [
+    filters?.view,filters?.exit_scope,filters?.strategy_version_id,
     filters?.from_ms,
     filters?.to_ms,
     filters?.strategy_group_id,
@@ -31,7 +36,9 @@ export function useTradesData(filters?: Partial<TradesFilterParams>) {
 
   const live = useActiveTrades();
 
-  const query = useInfiniteQuery(tradesPaginationOptions(queryParams));
+  const {limit: _limit,time_basis: _basis,...incomeParams}=queryParams;
+  const performance=usePerformance(incomeParams);
+  const query=useInfiniteQuery({...tradesPaginationOptions({...queryParams,snapshot:performance.data?.data.snapshot_id}),enabled:!!performance.data&&!performance.isError});
 
   const rawItems = useMemo<TradeListItem[]>(() => {
     const unique = new Map<string, TradeListItem>();
@@ -41,7 +48,8 @@ export function useTradesData(filters?: Partial<TradesFilterParams>) {
     return [...unique.values()];
   }, [query.data]);
 
-  const hasNextPage = Boolean(query.hasNextPage);
+  const snapshotChanged=query.error instanceof ApiError && query.error.code==='statistics_snapshot_changed';
+  const hasNextPage = Boolean(query.hasNextPage)&&!snapshotChanged;
   const isFetchingNextPage = query.isFetchingNextPage;
 
   const allTrades = useMemo<TradeEpisode[]>(() => {
@@ -55,12 +63,25 @@ export function useTradesData(filters?: Partial<TradesFilterParams>) {
   );
 
   const metrics = useMemo<TradesSummaryMetrics>(() => {
-    return computeTradesSummaryMetrics(allTrades, { hasMore: hasNextPage });
-  }, [allTrades, hasNextPage]);
+    const loaded=computeTradesSummaryMetrics(allTrades, { hasMore: hasNextPage });
+    const full=performance.data?.data;
+    if(!full) return {...loaded,totalNetPnlFormatted:'统计不可用',totalNetRFormatted:'统计不可用'};
+    const pnl=formatReviewMoneyMetric(full.verified_totals.net_pnl,{sign:true});
+    const r=formatReviewMoneyMetric(full.verified_totals.net_r,{sign:true,fractionDigits:4});
+    const coverage=full.metric_coverage!;
+    return {...loaded,completedCount:full.sample_count,winCount:full.win_count,lossCount:full.loss_count,winRatePercent:full.win_count+full.loss_count?Math.round(full.win_count*100/(full.win_count+full.loss_count)):null,
+      totalNetPnlFormatted:pnl.formatted,totalNetRFormatted:r.formatted,
+      hasPnlGaps:coverage.net_pnl.available_count<full.sample_count,hasRGaps:coverage.net_r.available_count<full.sample_count,
+      pnlCoverageText:`全窗口 · 已核实 ${coverage.net_pnl.available_count}/${full.sample_count} 笔`,rCoverageText:`累计单笔净 R · 已核实 ${coverage.net_r.available_count}/${full.sample_count} 笔`,
+      winRateDenominatorText:`全窗口已核实：${full.win_count} 胜 / ${full.loss_count} 负；${full.breakeven_count} 笔持平`,
+    };
+  }, [allTrades, hasNextPage,performance.data]);
 
   const refetch = useCallback(async () => {
-    await Promise.all([live.refetch(), query.refetch()]);
-  }, [query, live]);
+    const next=await performance.refetch();
+    await live.refetch();
+    if(next.data?.data.snapshot_id===performance.data?.data.snapshot_id) await query.refetch();
+  }, [query, live,performance]);
 
   const fetchNextPage = useCallback(async () => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -71,19 +92,21 @@ export function useTradesData(filters?: Partial<TradesFilterParams>) {
   const firstPage = query.data?.pages[0];
 
   return {
+    performance:performance.data?.data ?? null,
+    performanceError:performance.error ?? (snapshotChanged ? query.error : null),
     coverage: live.coverage,
     liveActiveTicketCount: live.liveActiveTicketCount,
     liveError: live.error,
     isLiveLoading: live.isLoading,
-    isLoading: query.isLoading,
+    isLoading: !performance.isError && (query.isLoading || performance.isPending),
     isFetching: query.isFetching || live.isFetching,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    isError: query.isError && !query.data,
+    isError: (query.isError && !query.data)||performance.isError,
     paginationError: query.isFetchNextPageError ? query.error : null,
     refreshError: query.isError && query.data && !query.isFetchNextPageError ? query.error : null,
-    error: query.error,
+    error: query.error??performance.error,
     freshness: query.isError ? 'stale' : firstPage?.freshness ?? 'unavailable',
     generatedAt: firstPage?.generated_at ?? null,
     sourceWatermark: firstPage?.source_watermark ?? null,

@@ -1,3 +1,4 @@
+import { IncomeSummary, IncomeScopeBar } from '../common/IncomeSummary';
 import React, { useState, useMemo } from 'react';
 import { useStrategiesData } from '../../hooks/useStrategiesData.ts';
 import { useStrategiesFilterState } from '../../hooks/useUrlSearchParams.ts';
@@ -23,7 +24,7 @@ export const StrategiesPage: React.FC = () => {
   const { filters, setFilters, resetFilters } = useStrategiesFilterState();
 
   const {
-    strategies,
+    strategies,performance,
     liveActiveTicketCount,
     view,
     setView,
@@ -34,10 +35,11 @@ export const StrategiesPage: React.FC = () => {
     freshness,
     refetch,
   } = useStrategiesData({
-    view: filters.view,
+    view: filters.view,exit_scope:filters.exit_scope,strategy_group_id:filters.strategy_group_id,strategy_version_id:filters.strategy_version_id,exchange_instrument_id:filters.exchange_instrument_id,position_side:filters.position_side,
     from_ms: filters.from_ms,
     to_ms: filters.to_ms,
   });
+
 
   const [selectedTicketForCausality, setSelectedTicketForCausality] = useState<TradeEpisode | null>(null);
   const [selectedTicketIdForCausality, setSelectedTicketIdForCausality] = useState<string | null>(null);
@@ -144,7 +146,7 @@ export const StrategiesPage: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => refetch()}
+            onClick={() => {refetch();}}
             disabled={isFetching}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-surface-elevated hover:text-text-primary transition-colors shadow-xs"
             title="手动刷新策略评估事实"
@@ -184,7 +186,7 @@ export const StrategiesPage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-text-muted pt-1 border-t border-border/40">
           <span>
-            表现矩阵指标、Tickets Tab 与 Observations Tab 均严格遵循上述时间窗口。
+            交易收益按终态时间；Observation 按信号发生时间。当前持仓独立于历史窗口。
           </span>
           <span className="font-mono text-text-secondary">
             {new Date(filters.from_ms).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })} ~{' '}
@@ -193,6 +195,9 @@ export const StrategiesPage: React.FC = () => {
         </div>
       </div>
 
+      {filters.strategy_version_id && <p className="text-xs text-text-muted">已限定单一策略版本；关闭详情后恢复版本列表。</p>}
+      <IncomeScopeBar view={filters.view} scope={filters.exit_scope} onChange={setFilters} />
+      <IncomeSummary summary={performance} error={isError?error:null} onRefresh={()=>{refetch();}} onSelectTicket={handleSelectTicketId} />
       {/* 2. Main Content Area */}
       {isLoading ? (
         <div className="py-24 text-center">
@@ -361,7 +366,7 @@ export const StrategiesPage: React.FC = () => {
           to_ms={filters.to_ms}
           activeDrawerTab={filters.drawer_tab}
           onTabChange={(tab) => setFilters({ drawer_tab: tab })}
-          scope={filters.scope}
+          scope={filters.scope} exit_scope={filters.exit_scope}
           exit_path={filters.exit_path ?? null}
           first_path={filters.first_path ?? null}
           onScopeChange={(scope) => setFilters({ scope })}

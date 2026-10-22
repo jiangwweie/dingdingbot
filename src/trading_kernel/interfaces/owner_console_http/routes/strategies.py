@@ -24,6 +24,7 @@ from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     get_clock_ms,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes._shared import (
+    checked_income_page,
     envelope,
     evidence_watermark,
     read_page_facts,
@@ -40,7 +41,12 @@ async def strategy_versions(
     request: Request,
     from_ms: int | None = None,
     to_ms: int | None = None,
-    view: Literal["current", "all"] = "current",
+    view: Literal["current", "all"] = "all",
+    exit_scope: Literal["all", "strategy", "owner", "safety", "unknown"] = "all",
+    strategy_group_id: str | None = None,
+    strategy_version_id: str | None = None,
+    exchange_instrument_id: str | None = None,
+    position_side: Literal["long", "short"] | None = None,
 ) -> ApiEnvelope[StrategySummaryPage]:
     """Return bounded evaluation summaries keyed by immutable StrategyVersion."""
 
@@ -50,6 +56,11 @@ async def strategy_versions(
         from_ms=now_ms - 30 * _DAY_MS if from_ms is None else from_ms,
         to_ms=now_ms if to_ms is None else to_ms,
         view=view,
+        exit_scope=exit_scope,
+        strategy_group_id=strategy_group_id,
+        strategy_version_id=strategy_version_id,
+        exchange_instrument_id=exchange_instrument_id,
+        position_side=position_side,
     )
     data = build_strategy_page(
         await read_page_facts(
@@ -75,7 +86,9 @@ async def strategy_version_tickets(
     to_ms: int | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query(max_length=2_048)] = None,
-    scope: Literal["natural", "all"] = "natural",
+    snapshot: Annotated[str | None, Query(max_length=80)] = None,
+    exit_scope: Literal["all", "strategy", "owner", "safety", "unknown"] = "all",
+    scope: Literal["natural", "all"] = "all",
     exit_path: Literal[
         "tp1_reached",
         "tp1_not_reached",
@@ -92,6 +105,8 @@ async def strategy_version_tickets(
         to_ms=now_ms if to_ms is None else to_ms,
         limit=limit,
         cursor=cursor,
+        snapshot=snapshot,
+        exit_scope=exit_scope,
         strategy_version_id=strategy_version_id,
         scope=scope,
         exit_path=exit_path,
@@ -99,7 +114,11 @@ async def strategy_version_tickets(
     data = build_strategy_ticket_page(
         await read_page_facts(
             request,
-            lambda repository: repository.read_strategy_ticket_page_facts(query),
+            lambda repository: checked_income_page(
+                repository,
+                query,
+                lambda: repository.read_strategy_ticket_page_facts(query),
+            ),
         )
     )
     return envelope(

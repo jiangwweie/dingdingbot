@@ -51,6 +51,7 @@ def build_owner_overview(facts: OverviewFacts, now_ms: int) -> OwnerOverview:
         ticket_capacity=capacity,
         active_ticket_count=facts.active_ticket_count,
         active_ticket_ids=facts.active_ticket_ids,
+        performance=facts.performance,
         today_net_pnl=facts.today_net_pnl,
         today_net_r=facts.today_net_r,
         today_signal_count=facts.today_signal_count,

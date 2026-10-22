@@ -87,7 +87,7 @@ test('serializeTradesSearchParams: roundtrips correctly', () => {
   const serialized = serializeTradesSearchParams(params);
   const reParsed = parseTradesSearchParams(new URLSearchParams(serialized));
 
-  assert.deepEqual(reParsed, params);
+  assert.deepEqual(reParsed, {view:'all',exit_scope:'all',strategy_version_id:undefined,...params});
 });
 
 // Group 2: Strategies URL Params
@@ -98,11 +98,11 @@ test('parseStrategiesSearchParams: default empty query initializes current view 
   const q = new URLSearchParams('');
   const parsed = parseStrategiesSearchParams(q, nowMs);
 
-  assert.equal(parsed.view, 'current');
+  assert.equal(parsed.view, 'all');
   assert.equal(parsed.range, '30d');
   assert.equal(parsed.from_ms, nowMs - 30 * DAY_MS);
   assert.equal(parsed.to_ms, nowMs);
-  assert.equal(parsed.scope, 'natural');
+  assert.equal(parsed.scope, 'all');
   assert.equal(parsed.strategy_version_id, undefined);
   assert.equal(parsed.drawer_tab, undefined);
   assert.equal(parsed.exit_path, undefined);
@@ -148,7 +148,7 @@ test('serializeStrategiesSearchParams: roundtrips correctly', () => {
   const serialized = serializeStrategiesSearchParams(params);
   const reParsed = parseStrategiesSearchParams(new URLSearchParams(serialized));
 
-  assert.deepEqual(reParsed, params);
+  assert.deepEqual(reParsed, {exit_scope:'all',strategy_group_id:undefined,exchange_instrument_id:undefined,position_side:undefined,...params});
 });
 
 console.log('\n================================================================');

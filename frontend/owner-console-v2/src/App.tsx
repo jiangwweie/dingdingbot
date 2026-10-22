@@ -1,3 +1,4 @@
+import { incomeNavigationSearch } from './utils/urlParams';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useControlsData } from './hooks/useControlsData';
@@ -72,9 +73,8 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
       if (sp.get('tab') !== tab) {
-        const newSp = new URLSearchParams();
-        newSp.set('tab', tab);
-        window.history.pushState(null, '', `${window.location.pathname}?${newSp.toString()}`);
+        const search = incomeNavigationSearch(window.location.search, tab);
+        window.history.pushState(null, '', `${window.location.pathname}?${search}`);
       }
     }
   };

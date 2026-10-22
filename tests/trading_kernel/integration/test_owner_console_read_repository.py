@@ -54,7 +54,6 @@ from src.trading_kernel.domain.identities import (
 from src.trading_kernel.domain.ticket import TicketStatus, TradeTicket
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     PostgresOwnerReadRepository,
-    _review_metrics,
     create_owner_read_engine,
     owner_read_transaction,
 )
@@ -78,25 +77,7 @@ from tests.trading_kernel.integration.owner_console_support import (
 
 __all__ = ["owner_read_dsn"]
 
-_REVIEW_FILTER_HARD_CAP = 512
-
-
-def test_overview_review_metrics_never_accept_decoded_json_floats() -> None:
-    net_pnl, net_r, gap, _evidence = _review_metrics(  # type: ignore[arg-type]
-        [
-            {
-                "review_id": "review:float",
-                "created_at_ms": 1_800_000_000_000,
-                "economics_completeness": "complete",
-                "net_pnl_quote": 0.1,
-                "planned_r_multiple": 0.2,
-            }
-        ]
-    )
-
-    assert net_pnl.value is None
-    assert net_r.value is None
-    assert gap == "incomplete_review_economics"
+_REVIEW_FILTER_HARD_CAP = 5_000
 
 
 @pytest.mark.parametrize(
@@ -886,6 +867,7 @@ async def test_trade_list_cursor_is_stable_for_active_and_terminal_mix(
             first = build_trade_page(
                 await repository.read_trade_page_facts(
                     TradeListQuery(
+                        time_basis="created",
                         from_ms=1_799_999_000_000,
                         to_ms=1_800_001_000_000,
                         limit=2,
@@ -896,6 +878,7 @@ async def test_trade_list_cursor_is_stable_for_active_and_terminal_mix(
             second = build_trade_page(
                 await repository.read_trade_page_facts(
                     TradeListQuery(
+                        time_basis="created",
                         from_ms=1_799_999_000_000,
                         to_ms=1_800_001_000_000,
                         limit=2,
@@ -918,13 +901,15 @@ async def test_trade_list_cursor_is_stable_for_active_and_terminal_mix(
         assert "brc_trade_tickets" in list_selects[0]
         assert "brc_trade_aggregates" in list_selects[0]
         assert "brc_trade_reviews" in list_selects[0]
-        assert "brc_trade_reviews.review_id = brc_trade_aggregates.review_id" in (
-            list_selects[0]
+        assert (
+            "brc_trade_reviews.review_id = brc_trade_aggregates.review_id"
+            in (list_selects[0])
         )
         assert "brc_runtime_incidents" in list_selects[0]
         assert "brc_trade_events" in list_selects[0]
-        assert "brc_runtime_incidents.ticket_id = brc_trade_tickets.ticket_id" in (
-            list_selects[0]
+        assert (
+            "brc_runtime_incidents.ticket_id = brc_trade_tickets.ticket_id"
+            in (list_selects[0])
         )
         assert "brc_runtime_incidents.status =" in list_selects[0]
         assert list_selects[0].count("limit") >= 4
@@ -949,6 +934,7 @@ async def test_trade_list_applies_window_and_all_exact_filters(
             filtered = build_trade_page(
                 await repository.read_trade_page_facts(
                     TradeListQuery(
+                        time_basis="created",
                         from_ms=1_800_000_000_000,
                         to_ms=1_800_000_000_001,
                         strategy_group_id="strategy-group:alpha",
@@ -961,6 +947,7 @@ async def test_trade_list_applies_window_and_all_exact_filters(
             terminal = build_trade_page(
                 await repository.read_trade_page_facts(
                     TradeListQuery(
+                        time_basis="created",
                         from_ms=1_799_999_000_000,
                         to_ms=1_800_001_000_000,
                         aggregate_status="terminal",
@@ -970,6 +957,7 @@ async def test_trade_list_applies_window_and_all_exact_filters(
             upper_exclusive = build_trade_page(
                 await repository.read_trade_page_facts(
                     TradeListQuery(
+                        time_basis="created",
                         from_ms=1_799_999_000_000,
                         to_ms=1_800_000_000_000,
                     )
@@ -1481,9 +1469,12 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
             )
 
             assert connection.get_transaction() is transaction
-            assert await connection.scalar(
-                sa.text("SELECT count(*) FROM brc_owner_policy_current")
-            ) == 1
+            assert (
+                await connection.scalar(
+                    sa.text("SELECT count(*) FROM brc_owner_policy_current")
+                )
+                == 1
+            )
         overview_selects = [
             statement
             for statement in statements
@@ -1506,11 +1497,12 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         assert "brc_signal_events" in overview_selects[5]
         assert "brc_admission_decisions" in overview_selects[5]
         assert "brc_trade_reviews" in overview_selects[6]
-        assert "brc_trade_aggregates.review_id = brc_trade_reviews.review_id" in (
-            overview_selects[6]
+        assert (
+            "brc_trade_reviews.review_id = brc_trade_aggregates.review_id"
+            in (overview_selects[6])
         )
-        assert "created_at_ms >=" in overview_selects[6]
-        assert "sum(" in overview_selects[6]
+        assert "brc_trade_tickets.terminal_at_ms >=" in overview_selects[6]
+        assert "limit" in overview_selects[6]
         assert "count(*) over" not in " ".join(overview_selects)
         assert "count() over" not in " ".join(overview_selects)
 
@@ -1527,8 +1519,9 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         assert facts.today_signal_count == 0
         assert facts.admitted_signal_count == 0
         assert facts.rejected_signal_count == 0
-        assert facts.today_net_pnl.value == Decimal(0)
-        assert facts.today_net_r.value == Decimal(0)
+        assert facts.today_net_pnl.value is None
+        assert facts.performance.sample_count == 0
+        assert facts.today_net_r.value is None
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", capture_statement)
         await engine.dispose()
@@ -1823,17 +1816,11 @@ async def test_overview_missing_review_economics_key_is_unavailable(
                 now_ms=now_ms,
             )
 
-        assert facts.today_net_pnl.value is None
-        assert facts.today_net_pnl.unavailable_reason == (
-            "incomplete_review_economics"
-        )
-        assert facts.today_net_r.value is None
-        assert facts.today_net_r.unavailable_reason == (
-            "incomplete_review_economics"
-        )
-        assert facts.evidence_gaps[0].reason == (
-            "incomplete_review_economics"
-        )
+        assert facts.today_net_pnl.value == Decimal("1.25")
+        assert facts.today_net_r.value == Decimal("0.5")
+        assert facts.performance.metric_coverage["net_pnl"].available_count == 1
+        assert facts.performance.sample_count == 2
+        assert facts.evidence_gaps[0].reason == ("incomplete_review_economics")
         assert facts.evidence_gaps[0].evidence.identity == malformed_review_id
         assert facts.evidence_gaps[0].evidence.occurred_at_ms == (
             day_start_ms + 1_002
@@ -2322,11 +2309,17 @@ async def _seed_current_reviews(
                         WHEN series = $3::integer AND $4::text IS NOT NULL
                         THEN jsonb_build_object(
                             'economics_completeness', 'complete',
+                            'gross_realized_pnl_quote', '1.5',
+                            'trading_fees_quote', '0.2',
+                            'funding_quote', '-0.05',
                             'net_pnl_quote', '1.25',
                             'planned_r_multiple', '0.5'
                         ) - $4::text
                         ELSE jsonb_build_object(
                             'economics_completeness', 'complete',
+                            'gross_realized_pnl_quote', '1.5',
+                            'trading_fees_quote', '0.2',
+                            'funding_quote', '-0.05',
                             'net_pnl_quote', '1.25',
                             'planned_r_multiple', '0.5'
                         )

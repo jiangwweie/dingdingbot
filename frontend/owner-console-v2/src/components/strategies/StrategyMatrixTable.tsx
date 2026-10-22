@@ -1,3 +1,4 @@
+import { incomeNavigationSearch } from '../../utils/urlParams';
 import React from 'react';
 import type { EnrichedStrategyVersion } from '../../types/strategies.ts';
 import { ChevronRight, Layers } from 'lucide-react';
@@ -29,10 +30,10 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
             <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
               <th scope="col" className="px-4 py-3 font-semibold">策略 / 版本</th>
               <th scope="col" className="px-3 py-3 font-semibold">运行时控制</th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">查询范围自然净盈亏</th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">自然净 R</th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">自然胜率</th>
-              <th scope="col" className="px-3 py-3 font-semibold">终态构成 (自然 / 受控)</th>
+              <th scope="col" className="px-3 py-3 font-semibold text-right">所选范围净盈亏</th>
+              <th scope="col" className="px-3 py-3 font-semibold text-right">累计单笔净 R</th>
+              <th scope="col" className="px-3 py-3 font-semibold text-right">所选范围净胜率</th>
+              <th scope="col" className="px-3 py-3 font-semibold">终态构成（策略 / Owner）</th>
               <th scope="col" className="px-3 py-3 font-semibold">复盘审计 (Review)</th>
               <th scope="col" className="px-3 py-3 font-semibold">TP1 达成</th>
               <th scope="col" className="px-4 py-3 font-semibold text-right">操作</th>
@@ -113,6 +114,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                     >
                       {st.netPnlFormatted}
                     </span>
+                    <div className="text-[10px] font-normal text-text-muted">核算覆盖 {st.summary.metric_coverage?.net_pnl?.available_count??st.confirmedReviews}/{st.summary.metric_coverage?.net_pnl?.total_count??st.naturalTerminals} 笔</div>
                     {!st.hasConfirmedReview && (
                       <div className="text-[10px] text-text-muted font-sans font-normal mt-0.5">
                         待结清评审
@@ -152,17 +154,18 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                   {/* 6. Terminal Composition (Natural vs Controlled) */}
                   <td className="px-3 py-3 font-mono whitespace-nowrap">
                     <div className="text-text-primary font-semibold">
-                      {st.naturalTerminals} <span className="font-sans text-[11px] text-text-muted font-normal">自然</span>
+                      {st.naturalTerminals} <span className="font-sans text-[11px] text-text-muted font-normal">策略退出</span>
                     </div>
                     <div className="text-[10px] text-text-muted mt-0.5">
                       {st.controlledExits > 0 ? (
                         <span className="text-amber-600 dark:text-amber-400 font-medium">
-                          {st.controlledExits} 受控退出
+                          {st.controlledExits} Owner 平仓
                         </span>
                       ) : (
-                        '0 受控退出'
+                        '0 Owner 平仓'
                       )}
                     </div>
+                    <div className="text-[10px] text-text-muted">安全退出 {st.summary.safety_exit_count??0} · 原因未知 {st.summary.unknown_exit_count??0}</div>
                   </td>
 
                   {/* 7. Review Audit */}
@@ -171,7 +174,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                       {st.confirmedReviews} 已确认
                     </div>
                     <div className="text-[10px] text-text-muted mt-0.5">
-                      {st.pendingReviews} 待确认
+                      {st.pendingReviews} 核算缺项
                     </div>
                   </td>
 
@@ -194,6 +197,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                       <span>详情</span>
                       <ChevronRight className="h-3 w-3" />
                     </button>
+                    <a className="ml-2 text-[11px] text-brand underline" onClick={(event)=>event.stopPropagation()} href={(()=>{const q=new URLSearchParams(incomeNavigationSearch(window.location.search,'review'));q.set('strategy_version_id',st.summary.strategy_version_id);q.set('strategy_group_id',st.summary.strategy_group_id);return `?${q}`;})()}>复盘对账</a>
                   </td>
                 </tr>
               );

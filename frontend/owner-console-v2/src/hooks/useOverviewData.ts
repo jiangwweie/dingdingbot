@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
 import { fetchControls, controlsQueryKey } from '../api/controlsApi';
 import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
-import { fetchStrategies, strategiesQueryKey } from '../api/strategiesApi';
-import { getUtcDayStartMs } from '../utils/time';
+import { formatReviewMoneyMetric } from '../mapping/reviewMapping';
+import { getBeijingDayStartMs } from '../utils/timeRange';
 import { computeUnloadedActiveCount } from '../mapping/ticketMapping';
 import type {
   SystemPulseData,
@@ -35,31 +35,14 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function formatMetric(metric?: { value: string | null; unit: string; unavailable_reason?: string | null } | null): string {
-  if (!metric || metric.value === null || metric.value === undefined) {
-    return '--';
-  }
-  if (metric.value === '0') {
-    return `0 ${metric.unit}`;
-  }
-  const num = Number(metric.value);
-  if (isNaN(num)) {
-    return `${metric.value} ${metric.unit}`;
-  }
-  const sign = num > 0 ? '+' : '';
-  const formattedNum = num.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  const unitSuffix = metric.unit ? ` ${metric.unit}` : '';
-  return `${sign}${formattedNum}${unitSuffix}`;
+  if (!metric || metric.value==null) return '--';
+  return formatReviewMoneyMetric(metric as import('../types/trades').MoneyMetric,{sign:true}).formatted;
 }
 
 import { cleanSymbol } from '../utils/symbol';
 export { cleanSymbol };
 
 export function useOverviewData() {
-  // Stable UTC day start timestamp (00:00:00.000 UTC) matching backend utc_day_start_ms
-  const [todayStartMs, setTodayStartMs] = useState(() => getUtcDayStartMs());
 
   const overviewQuery = useQuery({
     queryKey: overviewQueryKey,
@@ -83,22 +66,6 @@ export function useOverviewData() {
     retry: false,
   });
 
-  // Query strategies strictly bounded to Today (from_ms: todayStartMs)
-  const strategiesParams = useMemo(
-    () => ({
-      from_ms: todayStartMs,
-      view: 'current' as const,
-    }),
-    [todayStartMs]
-  );
-
-  const strategiesQuery = useQuery({
-    queryKey: strategiesQueryKey(strategiesParams),
-    queryFn: () => fetchStrategies(strategiesParams),
-    staleTime: 15_000,
-    retry: false,
-  });
-
   const isLoading = overviewQuery.isLoading || controlsQuery.isLoading;
   const isError = overviewQuery.isError || controlsQuery.isError;
   const error = overviewQuery.error || controlsQuery.error;
@@ -106,7 +73,7 @@ export function useOverviewData() {
   const rawOverview = overviewQuery.data?.data;
   const rawControls = controlsQuery.data;
   const rawTickets = ticketsQuery.data?.data?.items ?? [];
-  const rawStrategies = strategiesQuery.data?.data?.items ?? [];
+  const todayStartMs=rawOverview?.performance?.from_ms ?? getBeijingDayStartMs();
 
   // Active tickets mapping (terminal_at_ms === null means actively in flight)
   const authoritativeActiveCount = rawOverview?.active_ticket_count ?? null;
@@ -229,6 +196,7 @@ export function useOverviewData() {
   const netRVal = rawOverview?.today_net_r?.value;
 
   const todayMetrics: TodayPerformanceMetrics = {
+    income_coverage: rawOverview?.performance ? `上海今日终态交易 · 已核实 ${rawOverview.performance.confirmed_count}/${rawOverview.performance.sample_count} 笔${rawOverview.performance.confirmed_count<rawOverview.performance.sample_count ? ' · 部分合计' : ''}` : undefined,
     net_pnl_formatted: formatMetric(rawOverview?.today_net_pnl),
     net_pnl_is_positive:
       netPnlVal !== null && netPnlVal !== undefined ? Number(netPnlVal) >= 0 : null,
@@ -276,86 +244,12 @@ export function useOverviewData() {
         };
       });
 
-  // 4. Strategy Contributions - Strictly Scoped to Today (from_ms: todayStartMs)
-  const strategyItems: StrategyPerformanceItem[] = (() => {
-    if (strategiesQuery.isError) {
-      // If strategies query failed, do NOT fabricate 0 wins or 0 USDT
-      return (rawControls?.strategies ?? []).map((s) => {
-        const meta = STRATEGY_META[s.strategy_group_id] ?? {
-          name_zh: s.strategy_group_id,
-          timeframe: '1h close',
-        };
-        const isPaused = s.configured_state === 'paused';
-        return {
-          strategy_id: s.strategy_group_id,
-          strategy_version_id: null,
-          name_zh: meta.name_zh,
-          timeframe: meta.timeframe,
-          status: isPaused ? 'paused' : 'running',
-          status_label: isPaused ? '已暂停' : '运行中',
-          ticket_count: undefined,
-          win_count: 0,
-          loss_count: 0,
-          net_pnl_formatted: '读取失败',
-          net_r_formatted: '读取失败',
-          active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
-          is_metrics_available: false,
-        };
-      });
-    }
-
-    if (rawStrategies.length > 0) {
-      return rawStrategies.map((s) => {
-        const meta = STRATEGY_META[s.strategy_group_id] ?? {
-          name_zh: s.strategy_group_display_name ?? s.strategy_group_id,
-          timeframe: '1h close',
-        };
-        const ctrl = rawControls?.strategies?.find(
-          (c) => c.strategy_group_id === s.strategy_group_id
-        );
-        const isPaused = ctrl?.configured_state === 'paused';
-
-        return {
-          strategy_id: s.strategy_group_id,
-          strategy_version_id: s.strategy_version_id,
-          name_zh: meta.name_zh,
-          timeframe: meta.timeframe,
-          status: isPaused ? 'paused' : 'running',
-          status_label: isPaused ? '已暂停' : '运行中',
-          ticket_count: s.ticket_count,
-          win_count: s.win_count,
-          loss_count: s.loss_count,
-          net_pnl_formatted: formatMetric(s.net_pnl),
-          net_r_formatted: formatMetric(s.net_r),
-          active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
-          is_metrics_available: true,
-        };
-      });
-    }
-
-    return (rawControls?.strategies ?? []).map((s) => {
-      const meta = STRATEGY_META[s.strategy_group_id] ?? {
-        name_zh: s.strategy_group_id,
-        timeframe: '1h close',
-      };
-      const isPaused = s.configured_state === 'paused';
-      return {
-        strategy_id: s.strategy_group_id,
-        strategy_version_id: null,
-        name_zh: meta.name_zh,
-        timeframe: meta.timeframe,
-        status: isPaused ? 'paused' : 'running',
-        status_label: isPaused ? '已暂停' : '运行中',
-        ticket_count: 0,
-        win_count: 0,
-        loss_count: 0,
-        net_pnl_formatted: '--',
-        net_r_formatted: '--',
-        active_tickets_count: activeCountByStrategy.get(s.strategy_group_id) ?? 0,
-        is_metrics_available: false,
-      };
-    });
-  })();
+  // Per-group contributions and headline are from the same full-window snapshot.
+  const strategyItems: StrategyPerformanceItem[] = Object.entries(rawOverview?.performance?.by_strategy_group ?? {}).map(([group,stats])=>{
+    const meta=STRATEGY_META[group] ?? {name_zh:group,timeframe:'全部版本'};
+    const paused=rawControls?.strategies?.find(c=>c.strategy_group_id===group)?.configured_state==='paused';
+    return {strategy_id:group,strategy_version_id:null,name_zh:meta.name_zh,timeframe:'全部版本 · 上海今日终态',status:paused?'paused':'running',status_label:paused?'已暂停':'运行中',ticket_count:stats.sample_count,win_count:stats.win_count,loss_count:stats.loss_count,net_pnl_formatted:formatMetric(stats.verified_totals.net_pnl),net_r_formatted:formatMetric(stats.verified_totals.net_r),active_tickets_count:activeCountByStrategy.get(group)??0,is_metrics_available:stats.confirmed_count>0};
+  });
 
   // 5. Attention Items
   const isTrulyHealthy =
@@ -435,13 +329,11 @@ export function useOverviewData() {
   }
 
   const refetch = async () => {
-    // Refresh the day start boundary in case UTC day rolled over
-    setTodayStartMs(getUtcDayStartMs());
     await Promise.all([
       overviewQuery.refetch(),
       controlsQuery.refetch(),
       ticketsQuery.refetch(),
-      strategiesQuery.refetch(),
+
     ]);
   };
 
@@ -456,15 +348,11 @@ export function useOverviewData() {
         : '无法读取 Ticket 列表'
       : null,
     unloadedActiveCount,
-    strategiesLoading: strategiesQuery.isLoading,
-    strategiesError: strategiesQuery.isError
-      ? strategiesQuery.error instanceof Error
-        ? strategiesQuery.error.message
-        : '无法读取策略表现数据'
-      : null,
+    strategiesLoading: overviewQuery.isLoading,
+    strategiesError: overviewQuery.isError ? '收益统计读取失败' : null,
     todayStartMs,
     refetchTickets: () => ticketsQuery.refetch(),
-    refetchStrategies: () => strategiesQuery.refetch(),
+    refetchStrategies: () => overviewQuery.refetch(),
     pulse,
     todayMetrics,
     episodes,
