@@ -26,6 +26,31 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
+### Latest unified income statistics release
+
+This Owner surface snapshot supersedes the explanation-release snapshot below;
+Kernel production identity and trading authority are unchanged.
+
+| Area | Directly verified state |
+| --- | --- |
+| Release | Owner API and static V2 both `a7cfd0393b227002325ee5fe79116ef547cc2975`; immutable tag `tokyo-runtime-2026.10.22.3`; deployed2026-10-22 approximately18:52 Asia/Shanghai through official R2 API then R1 static release paths. Remote `dev` contains the exact implementation |
+| Owner-approved income contract | Default includes all ended exposure Tickets and all versions, including Owner flatten. Income belongs to terminal time in Asia/Shanghai, not issue/Review-generation time. Strategy/Owner/safety/unknown causes are explicit disjoint partitions; unknown is never treated as natural strategy exit. Version and exit filters remain explicit; copied links and cross-page navigation retain fixed windows and supported identities |
+| Full-window statistics | `/api/owner/v1/performance` is authenticated GET-only. Full-window counts, per-metric known/missing coverage, verified sums, exit partitions and per-group contributions are independent of detail cursor/page size. Queries retain90-day/5000-Ticket bounds and read timeout; overflow fails explicitly. Money aggregation uses80-digit Decimal. Gross fallback never enters net aggregates, Net R or net win/loss |
+| Consistency | The fingerprint binds effective filters, complete Ticket population, exact current Review/revision, economics and execution classification. Ticket/Review/detail GETs validate it within the readonly transaction; drift returns409 `statistics_snapshot_changed`, blocks further paging and requires full refresh. Strategy matrix and its headline share a transaction. Overview daily headline/group contributions share one terminal-day income snapshot |
+| Local verification | Owner unit/interface slice338 PASS; existing Owner PostgreSQL integration55 PASS; new income PostgreSQL integration5 PASS; V2 tests115 PASS; V1 regression57 PASS. Time-range12, URL8, unified-filter19, Review29, Strategies49, chart23 and Trades pagination/truth scripts PASS. Affected Mypy32 files, Ruff/diff/typecheck/build PASS. Exact R2/R1 certification manifests PASS on release SHA |
+| Browser evidence | Isolated readonly production-sample browser fixture verified first50→all72 Review details keep headline +16.98 USDT with60/72 net coverage. Switching to Strategies preserved exact2026-09-22 14:20:48→2026-10-22 14:20:48 window and identical headline. Automated component tests cover snapshot409 lockdown and full-window-failure disclosure |
+| Deployed readonly acceptance | At that exact sample window:72 terminal Tickets/60 known net; full net16.9799390541890812999999999503 USDT and cumulative single-Ticket net R3.62443446596345438148693781065. Matrix sum and four partitions equal full net;67 strategy exits/55 known net4.9733238625830181999999999503 plus5 Owner exits/5 known net12.0066151916060631. Review detail pages50+22 cover the population; Trades contains the same ended exposure identities. Fingerprint stayed stable after limit/cursor changes; every exit-scope query matched its detail list |
+| Public postflight | Index/JS/CSS HTTPS200 with exact local/public SHA-256 equality. API Unix-Socket healthz `ok`, active/NRestarts0. Google login provider remains enabled/binding disabled; public browser displays Google login. Unauthenticated performance GET returns401. No authenticated production-browser business-page acceptance claimed after session invalidation; release-code/read-role data acceptance above passed |
+| Safety proof | Four Kernel Worker PIDs2067875/2085006/2067874/2067876 and NRestarts0 unchanged. Owner Policy/Strategy/Selection Control digests match before/after; Schema0012 unchanged. Only Owner API restarted. No flatness request, ENTRY pause/resume, Worker restart, schema migration, economic/history rewrite, production control write or exchange request in acceptance probes |
+| Explicit remaining boundary | Truly unavailable funding and unproved historical exit facts remain unknown. This release does not complete live economic attribution or production control-write acceptance; those boundaries remain separate |
+
+Evidence: `.local/unified-profit-statistics-20261022/` holds exact certification,
+classification/deploy logs, before/after service/control proofs, bounded readonly
+source samples, deployed income verification and public asset hashes.
+`output/playwright/unified-profit-statistics-20261022/` holds browser artifacts.
+Generated evidence is display-only and is never runtime authority.
+
+
 ### Latest Owner API / V2 explanation release
 
 The Owner surface snapshot below supersedes the older Owner API/static entries
