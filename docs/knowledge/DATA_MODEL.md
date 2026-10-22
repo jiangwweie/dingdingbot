@@ -2,6 +2,10 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。本页解释 tracked schema，不是生产数据导出；当前生产 schema 和运行快照见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 全表数量与目录入口
+
+**代码模型包含 85 张业务表、1035 个字段**；迁移版本表与独立切换运维表另计。每张表的职责、内容、主键、完整字段及维护入口见 [数据库全表职责与内容目录](DATABASE_TABLE_CATALOG.md)。生产即时盘点与差异统一记录在 roadmap，本页继续负责关系、状态和事务解释。
+
 ## 模型权威与存储约定
 
 **表定义来自 `pg_models.py`，实际安装和演进来自单一 Alembic 前向链。**当前源码的 `CURRENT_SCHEMA_REVISION` 是 `0012_generic_signal_path_v1`；这是代码身份，不能直接推断服务器安装情况。（来源：[pg_models](../../src/trading_kernel/infrastructure/pg_models.py)、[runtime_identity](../../src/trading_kernel/infrastructure/runtime_identity.py)、[Alembic env](../../migrations/trading_kernel/env.py)）

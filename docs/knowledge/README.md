@@ -9,7 +9,7 @@
 1. **代码已验证**：已读取相应实现，结论指向代码入口；代码链接使用仓库相对路径和 Python 定义行号。
 2. **现行契约规定**：规范要求，指向 `docs/current` 的责任文档；不据此声称行为已在生产发生。
 3. **待核实**：当前缺少直接证明，列入[来源差异清单](SOURCE_AUTHORITY.md)，不补写为既成事实。
-4. **测试证据**：区分测试覆盖什么、本轮实际运行什么及未运行什么，记录在[维护与验收](MAINTENANCE.md)。本轮没有访问生产 PostgreSQL、systemd 或交易所。
+4. **测试证据**：区分测试覆盖什么、实际运行什么及未运行什么，记录在[维护与验收](MAINTENANCE.md)。首轮知识库交付没有访问生产；后续全表目录增补只读核对了生产数据库目录，具体证据边界见该记录。
 
 ## 从哪里开始读
 
@@ -31,6 +31,7 @@
 | Owner 控制 | [OWNER_CONTROLS](OWNER_CONTROLS.md) | 从界面操作追踪到鉴权、数据库和 Worker | Policy、命令持久化 |
 | 风险与退出 | [RISK_AND_EXIT](RISK_AND_EXIT.md) | 理解定量、保护、退出及故障处理 | Claim、Aggregate、Reducer |
 | 数据库状态 | [DATA_MODEL](DATA_MODEL.md) | 按对象身份、状态和事务追踪事实 | 主链路与三个专题 |
+| 全表目录 | [DATABASE_TABLE_CATALOG](DATABASE_TABLE_CATALOG.md) | 逐表查看职责、主要内容、主键、完整字段和维护路径 | 数据库状态模型 |
 | 部署与恢复 | [DEPLOYMENT_AND_RECOVERY](DEPLOYMENT_AND_RECOVERY.md) | 区分软件发布、权限恢复和自然交易验收 | 运行身份、持久化恢复 |
 | 持续维护 | [MAINTENANCE](MAINTENANCE.md) | 判断资料何时需要更新及如何重新验收 | 上述索引与专题 |
 
@@ -64,6 +65,7 @@ flowchart TD
 | 暂停后为什么还有动作 | [Owner 控制](OWNER_CONTROLS.md) | 新 ENTRY 权限与已暴露 Ticket 的安全工作 |
 | 请求超时后会不会重复下单 | [风险与退出](RISK_AND_EXIT.md) | Command 状态、精确订单身份、未知结果恢复 |
 | 平仓后为什么还没结束 | [数据模型](DATA_MODEL.md) | 余单 → Reconciliation → Settlement → Review |
+| 一共有多少表、每张表存什么 | [全表职责与内容目录](DATABASE_TABLE_CATALOG.md) | 业务表、迁移版本表、运维表分别统计；逐表字段与维护用途 |
 | 重启后从哪里继续 | [部署与恢复](DEPLOYMENT_AND_RECOVERY.md) | 运行身份、持久化命令、租约和 due 状态 |
 
 ## 完成的含义

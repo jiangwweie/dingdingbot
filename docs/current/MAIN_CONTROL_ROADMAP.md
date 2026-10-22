@@ -26,6 +26,28 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
+### Readonly database table inventory for the knowledge catalog
+
+Verified at **2026-10-22 20:32:22 Asia/Shanghai** against database
+`brc_trading_kernel`, with a follow-up primary-key catalog check. Both probes
+used `BEGIN READ ONLY`, a five-second local statement timeout, catalog SELECTs
+and COMMIT. `transaction_read_only=on`; no business rows were read or counted.
+
+| Scope | Direct catalog evidence |
+| --- | --- |
+| Non-system persistent tables | **88** ordinary/partitioned tables across the two non-system schemas; system schemas, views, indexes, sequences and temporary tables excluded |
+| `public` business tables | **85** `brc_*` tables; exact table names, column-name sets and primary keys match tracked Kernel metadata, with no missing or extra business table/column. Physical column ordinal order differs from metadata declaration order in 16 tables; no layout-order equality claimed |
+| Migration version table | **1**, `public.alembic_version`; observed revision `0012_generic_signal_path_v1` |
+| Independent operations tables | **2**, `brc_cutover_ops.cutover_runs` and `brc_cutover_ops.cutover_phases`; not members of Kernel metadata |
+| Bounded source discrepancy | `cutover_runs.exchange_instrument_ids_json` exists in the production catalog but is not declared by the current `PostgresCutoverJournal` CREATE TABLE statement. Its writer/provenance was not proved in this inventory; no runtime use or authority inferred |
+| Safety and limits | SSH/Docker/psql catalog reads only; no schema/control/business mutation, service restart, exchange request, full-history scan or live row-count scan. This is not a fresh runtime, policy, position or trading-activation certification |
+
+Display-only catalog evidence is under
+`.local/project-knowledge/table-catalog/production-catalog.json`. Stable table
+responsibilities and field names are explained in the
+[knowledge catalog](../knowledge/DATABASE_TABLE_CATALOG.md); volatile production
+inventory remains owned by this section.
+
 ### Latest unified income statistics release
 
 This Owner surface snapshot supersedes the explanation-release snapshot below;
