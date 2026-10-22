@@ -7,6 +7,7 @@ def test_release_classification_uses_the_heaviest_changed_boundary() -> None:
     cases = (
         (("docs/current/MAIN_CONTROL_ROADMAP.md",), ReleaseLevel.R0),
         (("scripts/trading_kernel/deploy_tokyo_release.py",), ReleaseLevel.R0),
+        (("scripts/owner_console/prepare_google_credential.py",), ReleaseLevel.R0),
         (("frontend/owner-console/src/app/App.tsx",), ReleaseLevel.R1),
         (("frontend/owner-console-v2/src/App.tsx",), ReleaseLevel.R1),
         (

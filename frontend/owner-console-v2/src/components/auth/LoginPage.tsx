@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTheme } from '../../context/ThemeContext';
 import { Shield, Sun, Moon, Lock, User, KeyRound, AlertCircle } from 'lucide-react';
 import type { LoginRequest } from '../../api/authApi';
+import { GoogleLogin } from './GoogleAuth';
 
 interface LoginPageProps {
   onLogin: (credentials: LoginRequest) => Promise<void>;
@@ -85,7 +86,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, isLoading, error 
           <div className="mb-5 pb-3 border-b border-border">
             <h2 className="text-sm font-semibold text-text-primary">Owner 身份验证</h2>
             <p className="text-[11px] text-text-muted mt-0.5">
-              需要输入生产账号凭据与 6 位 TOTP 动态验证码
+              使用已绑定 Google 账号，或原账号与 6 位 TOTP 登录
             </p>
           </div>
 
@@ -96,6 +97,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, isLoading, error 
             </div>
           )}
 
+          <GoogleLogin />
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-text-secondary mb-1.5" htmlFor="username">

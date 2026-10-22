@@ -4,6 +4,74 @@
  */
 
 export interface paths {
+    "/api/owner/v1/auth/google/bind/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Google Bind Start */
+        post: operations["google_bind_start_api_owner_v1_auth_google_bind_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/auth/google/binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Google Binding */
+        get: operations["google_binding_api_owner_v1_auth_google_binding_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/auth/google/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Google Callback */
+        get: operations["google_callback_api_owner_v1_auth_google_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/auth/google/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Google Start */
+        get: operations["google_start_api_owner_v1_auth_google_start_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/auth/login": {
         parameters: {
             query?: never;
@@ -38,6 +106,23 @@ export interface paths {
          * @description Clear the matching in-memory Session and expire its cookie.
          */
         post: operations["logout_api_owner_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/auth/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Providers */
+        get: operations["providers_api_owner_v1_auth_providers_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -830,6 +915,13 @@ export interface components {
             /** Source Watermark */
             source_watermark: string | null;
         };
+        /** AuthProviders */
+        AuthProviders: {
+            /** Google Binding */
+            google_binding: boolean;
+            /** Google Login */
+            google_login: boolean;
+        };
         /** AuthorityGapAudit */
         AuthorityGapAudit: {
             /** Audit Result Digest */
@@ -1456,6 +1548,23 @@ export interface components {
             updated_at_ms: number;
             /** Version */
             version: number;
+        };
+        /** GoogleBindBody */
+        GoogleBindBody: {
+            /** Totp Code */
+            totp_code: string;
+        };
+        /** GoogleBindStart */
+        GoogleBindStart: {
+            /** Authorization Url */
+            authorization_url: string;
+        };
+        /** GoogleBindingCandidate */
+        GoogleBindingCandidate: {
+            /** Email */
+            email: string;
+            /** Subject */
+            subject: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2533,11 +2642,10 @@ export interface components {
              * @enum {string}
              */
             position_side: "long" | "short";
-            /**
-             * Product Family
-             * @enum {string}
-             */
-            product_family: "crypto_perpetual" | "tradfi_equity_perpetual";
+            /** Product Compatibility Unavailable Reason */
+            product_compatibility_unavailable_reason?: "historical_product_compatibility_not_recorded" | null;
+            /** Product Family */
+            product_family: ("crypto_perpetual" | "tradfi_equity_perpetual") | null;
             /** Runtime Profile Id */
             runtime_profile_id: string | null;
             /** Timeframe */
@@ -2988,6 +3096,112 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    google_bind_start_api_owner_v1_auth_google_bind_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleBindBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleBindStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_binding_api_owner_v1_auth_google_binding_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleBindingCandidate"];
+                };
+            };
+        };
+    };
+    google_callback_api_owner_v1_auth_google_callback_get: {
+        parameters: {
+            query?: {
+                state?: string;
+                code?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_start_api_owner_v1_auth_google_start_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     login_api_owner_v1_auth_login_post: {
         parameters: {
             query?: never;
@@ -3034,6 +3248,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    providers_api_owner_v1_auth_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthProviders"];
+                };
             };
         };
     };

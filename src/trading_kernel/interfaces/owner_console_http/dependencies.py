@@ -17,6 +17,9 @@ from src.trading_kernel.interfaces.owner_console_http.auth import (
     OwnerAuthSettings,
 )
 from src.trading_kernel.interfaces.owner_console_http.errors import UnauthorizedError
+from src.trading_kernel.interfaces.owner_console_http.google_oidc import (
+    GoogleOidcSettings,
+)
 
 
 class OwnerControlUnavailable(RuntimeError):
@@ -38,6 +41,7 @@ class OwnerConsoleSettings(FrozenModel):
     public_host: str = "jiaoyingpan.cloud"
     owner_policy_id: str = "policy-main"
     runtime_profile_id: str = "tiny-live-v1"
+    google_oidc: GoogleOidcSettings | None = None
 
 
 def current_time_ms() -> int:

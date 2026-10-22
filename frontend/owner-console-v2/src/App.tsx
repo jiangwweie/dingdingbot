@@ -19,6 +19,7 @@ import { RecentOperations } from './components/RecentOperations';
 import { useFlattenControl } from './hooks/useFlattenControl';
 import { useGlobalEntryControl } from './hooks/useGlobalEntryControl';
 import { TotpActionModal } from './components/TotpActionModal';
+import { GoogleOwnerBinding } from './components/auth/GoogleAuth';
 import type { TradeEpisodeSummary } from './types/overview';
 import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
 
@@ -181,6 +182,7 @@ export const App: React.FC = () => {
         isLoggingOut={isLoggingOut}
       />
 
+      <GoogleOwnerBinding />
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
         {activeTab === 'overview' && (
           <OverviewPage onNavigateToControls={() => handleSelectTab('controls')} />

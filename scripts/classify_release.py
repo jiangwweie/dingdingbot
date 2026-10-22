@@ -61,6 +61,7 @@ _LOCAL_RELEASE_TOOLS = frozenset(
         "scripts/owner_console/certify_release_candidate.py",
         "scripts/owner_console/certify_static_release_candidate.py",
         "scripts/owner_console/deploy_release.py",
+        "scripts/owner_console/prepare_google_credential.py",
         "scripts/release_control.py",
         "scripts/trading_kernel/certify_release_candidate.py",
         "scripts/trading_kernel/deploy_tokyo_release.py",

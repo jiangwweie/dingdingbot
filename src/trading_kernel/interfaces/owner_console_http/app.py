@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import ccxt.async_support as ccxt_async
+import httpx
 import sqlalchemy as sa
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -73,6 +74,9 @@ from src.trading_kernel.interfaces.owner_console_http.errors import (
     error_response,
     unauthorized_response,
 )
+from src.trading_kernel.interfaces.owner_console_http.google_oidc import (
+    GoogleOidcService,
+)
 from src.trading_kernel.interfaces.owner_console_http.routes.auth import (
     router as auth_router,
 )
@@ -81,6 +85,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.controls import (
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.entry_scope import (
     router as entry_scope_router,
+)
+from src.trading_kernel.interfaces.owner_console_http.routes.google_auth import (
+    router as google_router,
 )
 from src.trading_kernel.interfaces.owner_console_http.routes.instruments import (
     router as instruments_router,
@@ -106,6 +113,10 @@ from src.trading_kernel.interfaces.owner_console_http.routes.tickets import (
 
 _API_PREFIX = "/api/owner/v1"
 _LOGIN_PATH = f"{_API_PREFIX}/auth/login"
+_PUBLIC_AUTH_PATHS = frozenset({
+    _LOGIN_PATH, f"{_API_PREFIX}/auth/providers",
+    f"{_API_PREFIX}/auth/google/start", f"{_API_PREFIX}/auth/google/callback",
+})
 
 
 def create_owner_console_app(
@@ -123,6 +134,7 @@ def create_owner_console_app(
         read_engine: AsyncEngine | None = None
         write_engine: AsyncEngine | None = None
         public_market_data: OwnerMarketData | None = None
+        google_client: httpx.AsyncClient | None = None
         primary_error: BaseException | None = None
         try:
             read_engine = (
@@ -152,12 +164,25 @@ def create_owner_console_app(
             app.state.owner_clock_ms = (
                 clock_ms if clock_ms is not None else current_time_ms
             )
+            app.state.owner_google_oidc = None
+            if settings.google_oidc is not None:
+                google_client = httpx.AsyncClient(
+                    timeout=5.0, trust_env=False, follow_redirects=False,
+                    limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+                )
+                app.state.owner_google_oidc = GoogleOidcService(
+                    settings.google_oidc, app.state.owner_auth_service,
+                    public_origin=settings.public_origin, clock_ms=app.state.owner_clock_ms,
+                    client=google_client,
+                )
             await _verify_startup_read_transaction(read_engine)
             yield
         except BaseException as error:
             primary_error = error
             raise
         finally:
+            if google_client is not None:
+                await google_client.aclose()
             await _cleanup_lifespan_resources(
                 engine=read_engine,
                 control_engine=write_engine,
@@ -167,6 +192,7 @@ def create_owner_console_app(
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(auth_router)
+    app.include_router(google_router)
     app.include_router(controls_router)
     app.include_router(overview_router)
     app.include_router(entry_scope_router)
@@ -182,7 +208,7 @@ def create_owner_console_app(
     async def require_owner_session(request: Request, call_next: Any) -> Response:
         if (
             request.url.path.startswith(f"{_API_PREFIX}/")
-            and request.url.path != _LOGIN_PATH
+            and request.url.path not in _PUBLIC_AUTH_PATHS
         ):
             try:
                 await require_authenticated(request)

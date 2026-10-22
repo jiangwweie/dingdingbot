@@ -14,6 +14,11 @@ from src.trading_kernel.interfaces.owner_console_http.dependencies import (
 router = APIRouter(prefix="/api/owner/v1/auth", tags=["authentication"])
 
 
+def set_session_cookie(response: Response, name: str, value: str) -> None:
+    response.set_cookie(key=name, value=value, httponly=True, secure=True,
+                        samesite="strict", path="/api/owner/v1")
+
+
 class _LoginRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -35,14 +40,7 @@ async def login(request: Request, body: _LoginRequest) -> Response:
         now_ms=request.app.state.owner_clock_ms(),
     )
     response = Response(status_code=204)
-    response.set_cookie(
-        key=settings.cookie_name,
-        value=session.cookie,
-        httponly=True,
-        secure=True,
-        samesite="strict",
-        path="/api/owner/v1",
-    )
+    set_session_cookie(response, settings.cookie_name, session.cookie)
     return response
 
 

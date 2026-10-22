@@ -57,6 +57,17 @@ def test_owner_console_nginx_include_is_same_origin_and_manual_cache_safe() -> N
     assert "/opt/brc/current/frontend/owner-console/dist" not in source
 
 
+def test_google_callback_does_not_log_codes_and_keeps_secrets_out_of_base_unit() -> None:
+    source = _read("deploy/owner-console/nginx/owner-console.locations.conf")
+    callback = source.split("location = /api/owner/v1/auth/google/callback {", 1)[1].split("}", 1)[0]
+    assert "access_log off;" in callback
+    assert "error_log /dev/null crit;" in callback
+    assert 'Referrer-Policy "no-referrer"' in callback
+    dropin = _read("deploy/owner-console/systemd/google-oidc.conf.example")
+    assert "LoadCredential=google_oidc:" in dropin
+    assert "client_secret=" not in dropin
+
+
 def test_owner_console_postgresql_role_is_read_only_and_select_only() -> None:
     source = _read(
         "deploy/owner-console/postgresql/owner-console-read-role.sql"

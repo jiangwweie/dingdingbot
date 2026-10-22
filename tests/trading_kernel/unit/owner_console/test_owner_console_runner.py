@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,28 @@ def test_runner_reads_only_exact_systemd_credentials(tmp_path: Path) -> None:
     assert settings.auth.username == "owner"
     assert settings.account_id == "subaccount-test"
     assert settings.market_timeout_seconds == 5.0
+
+
+def test_runner_loads_optional_google_credential_and_hides_invalid_secret(tmp_path: Path) -> None:
+    _write_credentials(tmp_path)
+    google = tmp_path / "google_oidc"
+    google.write_text(json.dumps({"client_id":"test.apps.googleusercontent.com", "client_secret":"NEVER-PRINT-SECRET", "owner_email":"owner@example.com"}))
+    google.chmod(0o600)
+    settings = runner.load_settings({"CREDENTIALS_DIRECTORY": str(tmp_path)})
+    assert settings.google_oidc is not None
+    assert settings.google_oidc.owner_subject is None
+    assert "NEVER-PRINT-SECRET" not in repr(settings)
+    google.write_text('{"client_secret":"NEVER-PRINT-SECRET"}')
+    with pytest.raises(ValueError) as error:
+        runner.load_settings({"CREDENTIALS_DIRECTORY": str(tmp_path)})
+    assert "NEVER-PRINT-SECRET" not in str(error.value)
+
+
+def test_google_callback_access_logs_drop_authorization_query_values() -> None:
+    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %s",
+        ("127.0.0.1", "GET", "/api/owner/v1/auth/google/callback?code=SECRET&state=SECRET", "1.1", 303), None)
+    assert runner.GoogleOAuthLogFilter().filter(record)
+    assert "SECRET" not in record.getMessage()
 
 
 @pytest.mark.parametrize(

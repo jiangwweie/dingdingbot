@@ -239,6 +239,14 @@ class OwnerAuthService:
             )
             return True
 
+    async def issue_google_session(self, *, now_ms: int) -> LoginSession:
+        """Called only after the Google OIDC boundary verifies the pinned Owner."""
+        _require_nonnegative_time(now_ms)
+        async with self._lock:
+            session_id = secrets.token_urlsafe(32)
+            self._session = SessionRecord(session_id, now_ms, now_ms)
+            return LoginSession(cookie=self._serializer.dumps(session_id))
+
     async def logout(self, cookie: str | None) -> None:
         """Invalidate the matching Session; repeated or bad cookies are no-ops."""
 

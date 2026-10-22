@@ -1,0 +1,4 @@
+# Install as /etc/systemd/system/brc-owner-console-api.service.d/google-oidc.conf
+# only after the root-only google_oidc credential has been supplied by Owner.
+[Service]
+LoadCredential=google_oidc:/etc/brc/owner-console-credentials/google_oidc

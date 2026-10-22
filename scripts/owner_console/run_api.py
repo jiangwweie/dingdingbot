@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import logging
 import math
 import os
 import stat
@@ -23,6 +25,9 @@ from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSetti
 from src.trading_kernel.interfaces.owner_console_http.dependencies import (
     OwnerConsoleSettings,
 )
+from src.trading_kernel.interfaces.owner_console_http.google_oidc import (
+    GoogleOidcSettings,
+)
 
 _CREDENTIAL_NAMES = frozenset(
     {
@@ -41,6 +46,17 @@ _DEFAULT_UNIX_SOCKET = "/run/brc-owner-console/api.sock"
 _MAX_CREDENTIAL_BYTES = 16_384
 
 
+class GoogleOAuthLogFilter(logging.Filter):
+    """Never write Google authorization code/state query strings to access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple) and len(record.args) == 5:
+            client, method, path, version, status = record.args
+            if isinstance(path, str) and path.startswith("/api/owner/v1/auth/google/callback"):
+                record.args = (client, method, path.split("?", 1)[0], version, status)
+        return True
+
+
 def load_settings(environ: Mapping[str, str]) -> OwnerConsoleSettings:
     """Load only the declared systemd credentials and bounded timeout setting."""
 
@@ -49,11 +65,18 @@ def load_settings(environ: Mapping[str, str]) -> OwnerConsoleSettings:
         raise ValueError("CREDENTIALS_DIRECTORY is required")
 
     credentials = _read_credentials(Path(credentials_directory))
+    google_oidc = None
+    if "google_oidc" in credentials:
+        try:
+            google_oidc = GoogleOidcSettings.model_validate_json(credentials["google_oidc"])
+        except ValueError:
+            raise ValueError("Google OIDC credential is invalid") from None
     return OwnerConsoleSettings(
         database_dsn=credentials["database_dsn"],
         control_database_dsn=credentials["control_database_dsn"],
         account_id=credentials["account_id"],
         market_timeout_seconds=_market_timeout_seconds(environ),
+        google_oidc=google_oidc,
         auth=OwnerAuthSettings(
             username=credentials["owner_username"],
             password_hash=credentials["owner_password_hash"],
@@ -66,12 +89,16 @@ def load_settings(environ: Mapping[str, str]) -> OwnerConsoleSettings:
 def run(settings: OwnerConsoleSettings, *, uds: str = _DEFAULT_UNIX_SOCKET) -> None:
     """Run exactly one proxy-header-disabled Uvicorn worker on the Unix Socket."""
 
+    log_config = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+    log_config["filters"] = {"oauth_redaction": {"()": GoogleOAuthLogFilter}}
+    log_config["handlers"]["access"]["filters"] = ["oauth_redaction"]
     uvicorn.run(
         create_owner_console_app(settings),
         uds=uds,
         workers=1,
         proxy_headers=False,
         access_log=True,
+        log_config=log_config,
     )
 
 
@@ -94,11 +121,11 @@ def _read_credentials(directory: Path) -> dict[str, str]:
             credential_names = frozenset(os.listdir(directory_fd))
         except OSError as error:
             raise ValueError("credential directory cannot be enumerated") from error
-        if credential_names != _CREDENTIAL_NAMES:
+        if credential_names not in (_CREDENTIAL_NAMES, _CREDENTIAL_NAMES | {"google_oidc"}):
             raise ValueError("credential directory names do not match the declared set")
         return {
             name: _read_credential(directory_fd, name)
-            for name in _CREDENTIAL_NAMES
+            for name in credential_names
         }
     finally:
         os.close(directory_fd)
