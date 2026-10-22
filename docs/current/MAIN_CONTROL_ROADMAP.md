@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-10-21
+last_verified: 2026-10-22
 ---
 
 # Main Control Roadmap
@@ -25,6 +25,28 @@ One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
 ## Current Verified State
+
+### Latest Owner API / V2 explanation release
+
+The Owner surface snapshot below supersedes the older Owner API/static entries
+in the Kernel release snapshot that follows. It does not change Kernel identity.
+
+| Area | Directly verified state |
+| --- | --- |
+| Snapshot | 2026-10-22 approximately13:32 Asia/Shanghai; Owner explicitly authorized development, testing and deployment of explanation/readonly-query fixes, then the labelled gross-PnL display |
+| Owner API | `c98faeb8cf3585ddc80c76fa127f37cfb0b977ba`, immutable tag `tokyo-runtime-2026.10.22.1`; official R2 exact-commit certification and API deployment PASS; Unix socket healthz `ok`, service active/NRestarts0. Google provider remains enabled, binding disabled; unauthenticated Review returns401 |
+| Static V2 | `7211164f1feb96e0f0314db87c29398889bef5ba`, immutable tag `tokyo-runtime-2026.10.22.2`; official R1 exact-commit certification/deployment PASS. Public index, JS and CSS200 with local/public SHA-256 equality. Remote `dev` contains both changes |
+| Explanation boundary | Trades, Strategy Tickets, Review and causality share exact exit attribution from the original ExitRequested or current Review exit fills and same-Ticket commands. Frozen time-stop details use exact Ticket Profile ID/hash. Execution gaps and economic gaps are independent; missing exit attribution no longer denies known economics. No core trading or persistent economic-calculation change |
+| Summary / gross display | API page scope and UI deduplicated loaded-record scope are explicit. Strict per-metric totals stay unavailable when incomplete; separately labelled verified partial sums carry per-metric coverage and missing Ticket IDs. With missing funding but known gross, the PnL cell shows gross plus `（资费不完整）` and an explicit gross label; net remains null, Net R unknown, and gross never enters net sums or win/loss statistics |
+| Verification | Owner unit/interface slice329 PASS, PostgreSQL read-repository integration56 PASS, V2 component/hook111 PASS, Review contracts29 PASS, V1 regression57 PASS, affected Mypy11 files PASS, Ruff/diff and production build PASS. Actual browser read-only fixture path50→71 records changed net coverage45/50→59/71 and fees50/50→71/71, with no console errors/warnings. Production release code/read-role verified71 Reviews, coverage gross/fees71/71 and net/funding59/71, matching Trades/Strategy Ticket attribution and existing causality/K-line annotations |
+| Runtime / authority preservation | Four Kernel Worker PIDs remained2067875/2085006/2067874/2067876 with NRestarts0 and unchanged release paths. Owner Policy, Strategy Entry and Selection Control digests matched before/after; Schema stayed0012. Only Owner API restarted. No migration, historical rewrite, policy/control mutation, exchange request or exchange write from the acceptance probes |
+| Remaining boundary | Actual funding attribution gaps remain unknown. Authenticated production browser business-page acceptance was not performed after API session invalidation; public production login/provider/auth-boundary smoke and deployed readonly model queries passed. Production control-write acceptance remains NOT TESTED |
+
+Exact manifests, deploy logs, control/service before-after proofs, bounded
+readonly sample checks and public asset hashes are retained in
+`.local/owner-review-clarity-20261022/`; browser evidence is under
+`output/playwright/owner-review-clarity-20261022/`. Generated evidence is display-only.
+
 
 ### A+B+MPG R4 deployed; global ENTRY restored; MI Owner Resume verified
 
