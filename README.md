@@ -77,6 +77,10 @@ trading. Live posture and deferred acceptance are owned only by the roadmap.
 
 ## Documentation Index
 
+[项目知识地图](docs/knowledge/README.md) explains the current implementation in
+Chinese, from a complete trade lifecycle to topic guides, code and test evidence,
+and maintenance rules. It is explanatory material, not runtime authority.
+
 | Start here | Responsibility |
 | --- | --- |
 | `AGENTS.md` | Repository operating and engineering constraints |

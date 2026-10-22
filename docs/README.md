@@ -2,6 +2,14 @@
 
 Status: current Trading Kernel authority index
 
+## Code-Based Learning Guide
+
+[项目知识地图](knowledge/README.md) provides a Chinese reading path through the
+actual Kernel, transaction boundaries, dynamic selection, Owner controls, risk,
+data model and deployment recovery, with code and test references. It is an
+explanatory knowledge base, not an addition to the current authority set or a
+production-state source.
+
 ## Current Authority Set
 
 | Document | Responsibility |
