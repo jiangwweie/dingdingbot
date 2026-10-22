@@ -1,4 +1,4 @@
-import { formatReviewExitReason } from './reviewMapping.ts';
+import { formatPnlWithGrossFallback, formatReviewExitReason } from './reviewMapping.ts';
 import { MoneyDecimal, protectionFact, terminalFact } from './tradeTruth.ts';
 import type { TradeListItem, TradeEpisode, MoneyMetric, TradesSummaryMetrics } from '../types/trades.ts';
 import { cleanSymbol } from '../utils/symbol.ts';
@@ -87,6 +87,7 @@ export function mapTradeListItemToEpisode(
   const activePlaceholder = isActive ? '持仓中 · 未结' : '—';
   const eligible = !isActive && terminalFact(item) !== '未成交终止';
   const netPnlResult = formatMoneyMetric(eligible ? item.net_pnl : null, activePlaceholder);
+  const pnlDisplay = formatPnlWithGrossFallback(eligible ? item.net_pnl : null, eligible ? item.gross_pnl : null);
   const netRResult = formatMoneyMetric(eligible ? item.net_r : null, activePlaceholder);
   const grossPnlResult = formatMoneyMetric(item.gross_pnl, activePlaceholder);
   const feesResult = formatMoneyMetric(item.fees, activePlaceholder);
@@ -150,9 +151,10 @@ export function mapTradeListItemToEpisode(
     exit_reason_zh: exitReasonZh,
     protection_state: protectionState,
     is_protected: isProtected,
-    net_pnl_formatted: isActive ? '在管中 · 未结' : netPnlResult.formatted,
+    net_pnl_formatted: isActive ? '在管中 · 未结' : pnlDisplay.isGrossFallback ? pnlDisplay.formatted : netPnlResult.formatted,
+    net_pnl_is_gross: pnlDisplay.isGrossFallback,
     net_pnl_val: netPnlResult.value,
-    net_pnl_is_positive: netPnlResult.isPositive,
+    net_pnl_is_positive: pnlDisplay.isGrossFallback ? pnlDisplay.isPositive : netPnlResult.isPositive,
     net_r_formatted: isActive ? '在管中 · 未结' : netRResult.formatted,
     net_r_val: netRResult.value,
     net_r_is_positive: netRResult.isPositive,

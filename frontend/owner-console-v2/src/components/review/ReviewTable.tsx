@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import type { ReviewCenterItem } from '../../types/review.ts';
 import {
   formatReviewMoneyMetric,
+  formatPnlWithGrossFallback,
   formatExecutionClassification,
   formatReviewExitReason,
   formatReviewSentenceTemplate,
@@ -100,7 +101,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
               const execClass = formatExecutionClassification(item.review.execution_classification);
               const reviewStatus = { label: item.review.economic_gaps?.length ? '有核算缺项' : item.review.review_status === 'waiting_review' ? '尚无核算' : '核算完整', tone: item.review.economic_gaps?.length ? 'attention' : 'success' };
               const exitReason = formatReviewExitReason(item.review.exit_reason);
-              const pnl = formatReviewMoneyMetric(item.review.economic_summary.net_pnl, { sign: true });
+              const pnl = formatPnlWithGrossFallback(item.review.economic_summary.net_pnl, item.review.economic_summary.gross_pnl);
               const r = formatReviewMoneyMetric(item.review.economic_summary.net_r, { sign: true, fractionDigits: 4 });
               const fees = formatReviewMoneyMetric(item.review.economic_summary.fees);
               const funding = formatReviewMoneyMetric(item.review.economic_summary.funding);
@@ -207,6 +208,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                       >
                         {pnl.formatted}
                       </span>
+                      {pnl.isGrossFallback && <div className="text-[10px] font-normal text-text-muted" title="毛收益未扣手续费和资金费；净收益仍不可确认">毛收益 · 未扣手续费与资金费</div>}
                     </td>
 
                     {/* 6. Net R */}

@@ -1,4 +1,4 @@
-import { formatReviewExitReason } from '../../mapping/reviewMapping.ts';
+import { formatPnlWithGrossFallback, formatReviewExitReason } from '../../mapping/reviewMapping.ts';
 import React from 'react';
 import { useStrategyTicketsData } from '../../hooks/useStrategiesData.ts';
 import type { StrategyTicketListItem, StrategyTicketExitPath } from '../../types/strategies.ts';
@@ -262,7 +262,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
                   const isLong = ticket.position_side === 'long';
                   const symbolClean = cleanSymbol(ticket.exchange_instrument_id);
                   // P2-1: Exact Decimal formatting for MoneyMetric
-                  const pnlMetric = formatStrategyMoneyMetric(ticket.net_pnl, '—');
+                  const pnlMetric = formatPnlWithGrossFallback(ticket.net_pnl, ticket.gross_pnl);
                   const rMetric = formatStrategyMoneyMetric(ticket.net_r, '—');
 
                   return (
@@ -325,6 +325,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
                         >
                           {pnlMetric.formatted}
                         </span>
+                        {pnlMetric.isGrossFallback && <div className="text-[10px] font-normal text-text-muted" title="净收益仍未知；此处为未扣手续费和资金费的毛收益">毛收益 · 未扣手续费与资金费</div>}
                       </td>
 
                       {/* Net R (Exact Decimal) */}

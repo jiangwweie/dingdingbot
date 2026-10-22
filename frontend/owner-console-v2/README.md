@@ -68,3 +68,8 @@ coverage and missing Ticket IDs. Strict totals remain unavailable when incomplet
 `verified_totals` separately carries clearly labelled partial sums. Unknown
 funding is never zero. No historical Review, economic fact or trade policy is
 rewritten by these read models.
+
+If a row's net PnL is unavailable because funding evidence is incomplete but gross PnL
+is known, its PnL cell displays the gross amount with `（资费不完整）` and an
+explicit gross label. The underlying net value stays null, Net R stays unknown,
+and gross never enters net totals or win/loss classification.

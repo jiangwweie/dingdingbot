@@ -4,7 +4,9 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewCenterItem, ReviewCenterSummary } from '../../types/review';
 import { computeReviewSummary } from '../../mapping/reviewSummary';
-import { formatReviewExitReason } from '../../mapping/reviewMapping';
+import { formatPnlWithGrossFallback, formatReviewExitReason } from '../../mapping/reviewMapping';
+import { mapTradeListItemToEpisode, computeTradesSummaryMetrics } from '../../mapping/tradeEpisodeMapping';
+import type { TradeListItem } from '../../types/trades';
 import { ReviewMetricsDeck } from './ReviewMetricsDeck';
 import { ReviewTable } from './ReviewTable';
 
@@ -59,6 +61,32 @@ describe('Review explanations and metric coverage', () => {
     expect(summary.metric_coverage?.net_pnl.available_count).toBe(1);
     expect(computeReviewSummary([], base).verified_totals?.net_pnl.value).toBeNull();
     expect(computeReviewSummary([item('missing', true)], base).verified_totals?.net_pnl.value).toBeNull();
+  });
+  it('shows known gross PnL when funding is missing without calculating net PnL', () => {
+    const display = formatPnlWithGrossFallback(money(null), money('6.45'));
+    expect(display.formatted).toBe('+6.45 USDT（资费不完整）');
+    expect(display.isGrossFallback).toBe(true);
+    expect(formatPnlWithGrossFallback({ ...money(null), unavailable_reason: 'incomplete_review_economics' }, money('6.45')).isGrossFallback).toBe(false);
+    const trade: TradeListItem = {
+      ticket_id: 'ticket:gross', strategy_group_id: 'BRF2-001', event_spec_id: 'spec:1', exchange_instrument_id: 'binance-usdm:BTCUSDT:perpetual', position_side: 'long',
+      ticket_status: 'terminal', aggregate_status: 'terminal', lifecycle_stage: 'review', issued_at_ms: 1699999999000, terminal_at_ms: 1700000000000,
+      review_id: 'review:gross', review_revision: 1, economics_completeness: 'funding_unavailable', completed_stage_count: 8, total_stage_count: 8,
+      exit_reason: 'pre_tp1_time_stop_hit', exit_reason_unavailable_reason: null,
+      gross_pnl: money('6.45'), fees: money('0.2'), funding: money(null), net_pnl: money(null), net_r: money(null, 'R'), attention_items: [], evidence: [],
+    };
+    const episode = mapTradeListItemToEpisode(trade);
+    expect(episode.net_pnl_formatted).toBe('+6.45 USDT（资费不完整）');
+    expect(episode.net_pnl_val).toBeNull();
+    expect(episode.outcome).toBe('closed');
+    expect(computeTradesSummaryMetrics([episode]).totalNetPnlFormatted).toBe('—');
+    const row = item('ticket:gross', true);
+    row.review.economic_summary.gross_pnl = money('6.45');
+    render(<ReviewTable items={[row]} onSelectTicket={vi.fn()} />);
+    expect(container.textContent).toContain('+6.45 USDT（资费不完整）');
+    expect(container.textContent).toContain('毛收益');
+    expect(computeReviewSummary([row], base).net_pnl.value).toBeNull();
+    expect(formatPnlWithGrossFallback(money(null), money(null)).isGrossFallback).toBe(false);
+    expect(formatPnlWithGrossFallback(money('0'), money('6.45')).formatted).toBe('0.00 USDT');
   });
   it('uses readable reasons, retaining audit context separately', () => {
     const raw = 'owner_flatten_all:owner-authorization:exact';

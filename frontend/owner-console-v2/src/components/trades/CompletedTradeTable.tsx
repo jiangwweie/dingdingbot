@@ -146,6 +146,7 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
                     >
                       {ep.net_pnl_formatted}
                     </span>
+                    {ep.net_pnl_is_gross && <div className="text-[10px] font-normal text-text-muted" title="净收益仍未知；此处为未扣手续费和资金费的毛收益">毛收益 · 未扣手续费与资金费</div>}
                   </td>
 
                   {/* 5. Net R */}

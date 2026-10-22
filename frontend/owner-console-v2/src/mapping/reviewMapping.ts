@@ -80,6 +80,25 @@ export function formatReviewMoneyMetric(
   };
 }
 
+/** Display-only gross fallback. It never becomes a net amount for aggregation. */
+export function formatPnlWithGrossFallback(
+  net: MoneyMetric | null | undefined,
+  gross: MoneyMetric | null | undefined,
+): FormattedReviewMoney & { isGrossFallback: boolean } {
+  const confirmedNet = formatReviewMoneyMetric(net, { sign: true });
+  if (net?.value == null && net?.unavailable_reason === 'funding_unavailable') {
+    const knownGross = formatReviewMoneyMetric(gross, { sign: true });
+    if (!knownGross.isUnavailable) return {
+      ...knownGross,
+      formatted: `${knownGross.formatted}（资费不完整）`,
+      value: null,
+      unavailableReason: net?.unavailable_reason ?? null,
+      isGrossFallback: true,
+    };
+  }
+  return { ...confirmedNet, isGrossFallback: false };
+}
+
 export function formatExecutionClassification(
   classification: ExecutionClassification
 ): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
