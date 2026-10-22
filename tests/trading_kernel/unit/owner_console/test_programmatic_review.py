@@ -130,7 +130,7 @@ def test_complete_review_uses_only_exact_claim_evidence() -> None:
     )
     assert review.sentences[1].text == (
         "Net PnL 为 3.5100 U，Net R 为 0.4800R；"
-        "订单、费用、Funding 与 Review 证据完整。"
+        "毛收益、手续费、资金费与 Review 核算证据完整。"
     )
     assert review.sentences[0].evidence == _LIFECYCLE_REFS
     assert review.sentences[1].evidence == (_REVIEW,)
@@ -165,7 +165,7 @@ def test_missing_positive_lifecycle_proof_is_evidence_incomplete(
     review = build_programmatic_review(facts)
 
     assert review.execution_classification == "evidence_incomplete"
-    assert review.sentences[0].template_id == "economics_incomplete"
+    assert review.sentences[0].template_id == "execution_incomplete"
 
 
 def test_partial_fill_without_incident_cannot_replace_entry_filled_proof() -> None:
@@ -262,7 +262,8 @@ def test_funding_unavailable_does_not_become_zero_or_net_r() -> None:
         )
     )
 
-    assert review.execution_classification == "evidence_incomplete"
+    assert review.execution_classification == "complete"
+    assert review.review_status == "incomplete_evidence"
     assert review.economic_summary.funding.value is None
     assert review.economic_summary.net_pnl.value is None
     assert review.economic_summary.net_r.value is None
@@ -325,7 +326,8 @@ def test_external_exit_unavailable_never_builds_final_economics() -> None:
         )
     )
 
-    assert review.execution_classification == "evidence_incomplete"
+    assert review.execution_classification == "complete"
+    assert review.review_status == "incomplete_evidence"
     assert review.economic_summary.net_pnl.value is None
     assert review.sentences[-1].evidence == (_REVIEW,)
 
@@ -444,7 +446,7 @@ def test_missing_exit_reason_keeps_execution_evidence_incomplete() -> None:
     review = build_programmatic_review(_facts(exit_reason=None))
 
     assert review.execution_classification == "evidence_incomplete"
-    assert "退出原因证据不完整" in review.final_conclusion
+    assert "退出原因未确认" in review.final_conclusion
 
 
 def test_review_center_is_bounded_observe_only_and_never_ranks() -> None:
@@ -535,6 +537,10 @@ def test_incomplete_center_economics_never_contributes_as_zero() -> None:
     assert center.net_r.value is None
     assert center.funding.value is None
     assert center.incomplete_review_count == 1
+    assert center.fees.value == Decimal("0.8000")
+    assert center.verified_totals.net_pnl.value == Decimal("3.5100")
+    assert center.metric_coverage["net_pnl"].available_count == 1
+    assert center.metric_coverage["net_pnl"].total_count == 2
 
 
 def test_empty_review_center_is_no_evidence_not_computed_zero() -> None:
@@ -554,3 +560,28 @@ def test_empty_review_center_is_no_evidence_not_computed_zero() -> None:
     assert center.fees.value is None
     assert center.funding.value is None
     assert center.strategy_group_samples[0].evidence_state == "no_evidence"
+
+
+def test_missing_exit_attribution_does_not_deny_available_economics() -> None:
+    review = build_programmatic_review(_facts(exit_reason=None))
+    assert review.economic_summary.net_pnl.value == Decimal("3.5100")
+    assert "因此不计算" not in review.final_conclusion
+    assert review.execution_gaps
+    assert review.economic_gaps == ()
+    assert any(s.template_id == "economics_complete" for s in review.sentences)
+
+
+def test_funding_gap_is_independent_from_execution_proof() -> None:
+    review = build_programmatic_review(
+        _facts(
+            economics_completeness="funding_unavailable",
+            funding=_metric(None, reason="funding_unavailable"),
+            net_pnl=_metric(None, reason="funding_unavailable"),
+            net_r=_metric(None, unit="R", reason="funding_unavailable"),
+        )
+    )
+    assert review.execution_classification == "complete"
+    assert review.review_status == "incomplete_evidence"
+    assert review.execution_gaps == ()
+    assert {gap.code for gap in review.economic_gaps} == {"funding_unavailable"}
+    assert "资金费" in review.final_conclusion

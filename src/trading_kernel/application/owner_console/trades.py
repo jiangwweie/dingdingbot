@@ -6,8 +6,13 @@ from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from typing import Literal, cast
 
+from src.trading_kernel.application.owner_console.exit_attribution import (
+    canonical_exit_attribution,
+    review_fill_exit_attribution,
+)
 from src.trading_kernel.application.owner_console.models import (
     EvidenceRef,
+    ExitAttribution,
     LifecycleStageKey,
     MoneyMetric,
     PageCursor,
@@ -194,10 +199,7 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         facts,
         active=active,
     )
-    if (
-        facts.exit_event_id is not None
-        and facts.exit_event_occurred_at_ms is not None
-    ):
+    if facts.exit_event_id is not None and facts.exit_event_occurred_at_ms is not None:
         evidence.append(
             EvidenceRef(
                 kind="event",
@@ -227,9 +229,49 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
     else:
         economics, completeness = _review_economics(facts.review_metrics)
 
-    if completeness == "external_exit_unavailable":
-        exit_reason = "External Flat / Exit Fills Unavailable"
-        exit_reason_unavailable_reason = None
+    attribution = None
+    if exit_reason is not None:
+        attribution = ExitAttribution(
+            code=exit_reason,
+            label=canonical_exit_attribution(exit_reason).label,
+            source="exit_event",
+            evidence=tuple(
+                ref
+                for ref in evidence
+                if ref.kind == "event" and ref.identity == facts.exit_event_id
+            ),
+        )
+    elif not active and exit_reason_unavailable_reason != "exit_not_applicable":
+        attribution = review_fill_exit_attribution(facts)
+        if attribution is not None:
+            exit_reason = attribution.code
+            exit_reason_unavailable_reason = None
+            evidence.extend(attribution.evidence)
+    if attribution is None:
+        attribution = ExitAttribution(
+            code=None,
+            label="不适用（未形成持仓）"
+            if exit_reason_unavailable_reason == "exit_not_applicable"
+            else "持仓未退出"
+            if active
+            else "退出原因未确认",
+            source="not_applicable"
+            if exit_reason_unavailable_reason == "exit_not_applicable"
+            else "unavailable",
+        )
+
+    if exit_reason in {"pre_tp1_time_stop_hit", "absolute_time_stop_hit", "time_stop_hit"}:
+        from pydantic import ValidationError
+
+        from src.trading_kernel.domain.exit_policy import ExitProfile
+
+        if facts.frozen_exit_profile is not None:
+            try:
+                profile = ExitProfile.model_validate(facts.frozen_exit_profile)
+            except ValidationError:
+                profile = None
+            if profile is not None and profile.time_stop is not None:
+                attribution = attribution.model_copy(update={"detail": f"冻结退出方案：{profile.time_stop.max_holding_bars} 根 {profile.runner.timeframe} K 线；按持仓 K 线数判断，非固定墙钟时长。"})
 
     attention_items = (
         ()
@@ -259,6 +301,7 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         total_stage_count=8,
         exit_reason=exit_reason,
         exit_reason_unavailable_reason=exit_reason_unavailable_reason,
+        exit_attribution=attribution,
         gross_pnl=economics[0],
         fees=economics[1],
         funding=economics[2],
@@ -343,9 +386,8 @@ def _validate_lifecycle_shape(facts: TradeItemFacts) -> bool:
         or facts.terminal_at_ms < facts.issued_at_ms
     ):
         raise TradeFactsContradiction("Ticket and Aggregate status mismatch")
-    if (
-        ticket_status in _TERMINAL_REJECTION_TICKET_STATUSES
-        and _has_any_review_fact(facts)
+    if ticket_status in _TERMINAL_REJECTION_TICKET_STATUSES and _has_any_review_fact(
+        facts
     ):
         raise TradeFactsContradiction("terminal rejection has a Review")
     return False

@@ -19,8 +19,8 @@ const COMMON_STRATEGY_GROUPS = [
 
 const REVIEW_STATUS_OPTIONS: { value: ReviewStatusQuery | ''; label: string }[] = [
   { value: '', label: '全部状态 (All)' },
-  { value: 'complete', label: '复盘完整 (complete)' },
-  { value: 'incomplete_evidence', label: '证据不完整 (incomplete_evidence)' },
+  { value: 'complete', label: '复盘完整' },
+  { value: 'incomplete_evidence', label: '存在待核实项' },
   { value: 'waiting_for_review', label: '等待复盘 (waiting_for_review)' },
   { value: 'in_progress', label: '进行中 (in_progress)' },
 ];

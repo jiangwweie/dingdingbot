@@ -91,9 +91,7 @@ def test_unknown_persisted_ticket_status_is_contradictory() -> None:
         TradeFactsContradiction,
         match="unknown Ticket status",
     ):
-        build_trade_item(
-            trade_item_facts(ticket_status="future_terminal_status")
-        )
+        build_trade_item(trade_item_facts(ticket_status="future_terminal_status"))
 
 
 @pytest.mark.parametrize(
@@ -358,7 +356,8 @@ def test_external_exit_unavailable_never_exposes_final_economics() -> None:
     )
 
     assert item.economics_completeness == "external_exit_unavailable"
-    assert item.exit_reason == "External Flat / Exit Fills Unavailable"
+    assert item.exit_reason is None
+    assert item.exit_attribution.label == "退出原因未确认"
     assert item.gross_pnl.unavailable_reason == "external_exit_unavailable"
     assert item.net_pnl.unavailable_reason == "external_exit_unavailable"
     assert item.net_r.unavailable_reason == "external_exit_unavailable"
@@ -369,7 +368,11 @@ def test_external_exit_unavailable_never_exposes_final_economics() -> None:
     (
         {**COMPLETE_METRICS, "net_pnl_quote": None},
         {**COMPLETE_METRICS, "net_pnl_quote": 3.51},
-        {key: value for key, value in COMPLETE_METRICS.items() if key != "trading_fees_quote"},
+        {
+            key: value
+            for key, value in COMPLETE_METRICS.items()
+            if key != "trading_fees_quote"
+        },
         {**COMPLETE_METRICS, "economics_completeness": "future_shape"},
     ),
 )
@@ -428,3 +431,91 @@ def test_trade_page_removes_limit_plus_one_and_uses_exact_ticket_cursor() -> Non
 
     assert [item.ticket_id for item in page.items] == ["ticket:z", "ticket:y"]
     assert page.next_cursor is not None
+
+
+@pytest.mark.parametrize(
+    ("kind", "reason"),
+    [
+        ("initial_stop", "initial_stop_triggered"),
+        ("replace_protection", "protection_stop_triggered"),
+        ("take_profit", "take_profit_triggered"),
+    ],
+)
+def test_exit_reason_uses_exact_current_review_fill_and_command(
+    kind: str, reason: str
+) -> None:
+    facts = trade_item_facts()
+    metrics = dict(facts.review_metrics)
+    metrics["entry_quantity"] = "1"
+    metrics["order_attribution"] = [
+        {
+            "exchange_trade_id": "trade:1",
+            "role": "exit",
+            "command_id": "command:exit",
+            "exchange_order_id": "order:1",
+            "occurred_at_ms": 1799999990000,
+            "quantity": "1",
+            "price": "100",
+        }
+    ]
+    values = facts.model_dump()
+    values.update(
+        {
+            "review_metrics": metrics,
+            "exit_commands": (
+                {
+                    "command_id": "command:exit",
+                    "ticket_id": facts.ticket_id,
+                    "command_kind": kind,
+                    "status": "accepted",
+                    "created_at_ms": 1799999980000,
+                    "result_payload": {"exchange_order_id": "order:1"},
+                },
+            ),
+        }
+    )
+    facts = type(facts).model_validate(values)
+    item = build_trade_item(facts)
+    assert item.exit_reason == reason
+    assert item.exit_attribution.source == "review_fills"
+    assert {ref.kind for ref in item.exit_attribution.evidence} == {"review", "command"}
+
+
+def test_review_fill_without_exact_command_never_guesses_exit() -> None:
+    facts = trade_item_facts()
+    metrics = dict(facts.review_metrics)
+    metrics["order_attribution"] = [
+        {
+            "role": "exit",
+            "command_id": "command:someone-else",
+            "exchange_order_id": "other",
+            "occurred_at_ms": 1799999990000,
+        }
+    ]
+    item = build_trade_item(facts.model_copy(update={"review_metrics": metrics}))
+    assert item.exit_reason is None
+    assert item.exit_attribution.label == "退出原因未确认"
+
+
+@pytest.mark.parametrize("change", ["wrong_ticket", "unknown_command", "partial_exit", "duplicate_trade", "rejected_command", "ambiguous_last_fill"])
+def test_exit_fill_attribution_rejects_incomplete_or_unowned_facts(change: str) -> None:
+    facts=trade_item_facts()
+    fill={"role":"exit", "command_id":"command:1", "exchange_order_id":"actual:1", "exchange_trade_id":"fill:1", "quantity":"1", "occurred_at_ms":1799999990000}
+    command={"ticket_id":facts.ticket_id,"command_id":"command:1","command_kind":"initial_stop","status":"accepted","created_at_ms":1799999980000,"result_payload":{"exchange_order_id":"algo:1"}}
+    rows=[fill]
+    commands=[command]
+    if change=="wrong_ticket": command["ticket_id"]="ticket:other"
+    if change=="unknown_command": fill["command_id"]="command:other"
+    if change=="partial_exit": fill["quantity"]="0.5"
+    if change=="duplicate_trade": rows.append(dict(fill))
+    if change=="rejected_command": command["status"]="rejected"
+    if change=="ambiguous_last_fill":
+        fill["quantity"]="0.5"
+        rows.append({**fill,"command_id":"command:2","exchange_trade_id":"fill:2"})
+        commands.append({**command,"command_id":"command:2","command_kind":"take_profit"})
+    values=facts.model_dump()
+    values["review_metrics"]={**facts.review_metrics,"entry_quantity":"1","order_attribution":rows}
+    values["exit_commands"]=commands
+    item=build_trade_item(type(facts).model_validate(values))
+    assert item.exit_attribution.source == "unavailable"
+    assert item.exit_reason is None

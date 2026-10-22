@@ -18,12 +18,14 @@ interface ReviewMetricsDeckProps {
   summary: ReviewCenterSummary | null;
   totalAttentionCount: number;
   isLoading?: boolean;
+  onSelectTicket?: (ticketId: string) => void;
 }
 
 export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
   summary,
   totalAttentionCount,
   isLoading = false,
+  onSelectTicket,
 }) => {
   if (isLoading || !summary) {
     return (
@@ -41,10 +43,23 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
     );
   }
 
-  const pnl = formatReviewMoneyMetric(summary.net_pnl, { sign: true });
-  const r = formatReviewMoneyMetric(summary.net_r, { sign: true, fractionDigits: 4 });
-  const fees = formatReviewMoneyMetric(summary.fees);
-  const funding = formatReviewMoneyMetric(summary.funding);
+  const totals = summary.verified_totals ?? summary;
+  const pnl = formatReviewMoneyMetric(totals.net_pnl, { sign: true });
+  const r = formatReviewMoneyMetric(totals.net_r, { sign: true, fractionDigits: 4 });
+  const fees = formatReviewMoneyMetric(totals.fees);
+  const funding = formatReviewMoneyMetric(totals.funding);
+
+  const coverageNote = (name: string) => {
+    const coverage = summary.metric_coverage?.[name];
+    if (!coverage) return <span className="text-[10px] text-text-muted">覆盖范围未提供</span>;
+    const missing = coverage.missing_ticket_ids ?? [];
+    return <div className="mt-1 text-[10px] text-text-muted" data-testid={`coverage-${name}`}>
+      {coverage.available_count < coverage.total_count ? '已核实部分合计 · ' : '已核实合计 · '}覆盖 {coverage.available_count}/{coverage.total_count} 笔
+      {missing.length > 0 && <details className="mt-1"><summary className="cursor-pointer text-amber-600">查看 {missing.length} 笔缺项交易</summary>
+        {missing.map(id => <button key={id} type="button" className="block break-all text-left text-brand underline" onClick={() => onSelectTicket?.(id)}>{id}</button>)}
+      </details>}
+    </div>;
+  };
 
   const rangeDisplay = formatShanghaiRangeDisplay(summary.from_ms, summary.to_ms);
 
@@ -77,6 +92,8 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
               className={`font-mono text-lg font-bold tracking-tight tabular-number ${
                 pnl.isUnavailable
                   ? 'text-text-muted'
+                  : pnl.isPositive === null
+                  ? 'text-text-secondary'
                   : pnl.isPositive
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-rose-600 dark:text-rose-400'
@@ -85,6 +102,7 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
             >
               {pnl.formatted}
             </span>
+            {coverageNote('net_pnl')}
           </div>
         </div>
 
@@ -100,6 +118,8 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
               className={`font-mono text-lg font-bold tracking-tight tabular-number ${
                 r.isUnavailable
                   ? 'text-text-muted'
+                  : r.isPositive === null
+                  ? 'text-text-secondary'
                   : r.isPositive
                   ? 'text-emerald-600 dark:text-emerald-400'
                   : 'text-rose-600 dark:text-rose-400'
@@ -108,6 +128,7 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
             >
               {r.formatted}
             </span>
+            {coverageNote('net_r')}
           </div>
         </div>
 
@@ -121,6 +142,7 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
             <span data-testid="metric-fees" className="font-mono text-lg font-bold tracking-tight text-text-primary tabular-number truncate" title={fees.formatted}>
               {fees.formatted}
             </span>
+            {coverageNote('fees')}
           </div>
         </div>
 
@@ -134,6 +156,7 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
             <span data-testid="metric-funding" className="font-mono text-lg font-bold tracking-tight text-text-primary tabular-number truncate" title={funding.formatted}>
               {funding.formatted}
             </span>
+            {coverageNote('funding')}
           </div>
         </div>
 
@@ -147,21 +170,21 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
             <span data-testid="metric-complete-count" className="font-mono text-lg font-bold tracking-tight text-emerald-600 dark:text-emerald-400 tabular-number">
               {summary.complete_review_count}
             </span>
-            <span className="text-[10px] text-text-muted">笔通过</span>
+            <span className="text-[10px] text-text-muted">笔完整</span>
           </div>
         </div>
 
         {/* 7. 不完整 Review */}
         <div data-testid="card-incomplete-review" className="flex flex-col justify-between rounded-lg border border-border bg-surface p-3 shadow-xs min-h-[78px]">
           <div className="flex items-center justify-between text-[11px] font-medium text-text-secondary">
-            <span>Review 待补齐</span>
+            <span>复盘有待核实项</span>
             <HelpCircle className="h-3.5 w-3.5 text-amber-500" />
           </div>
           <div className="mt-1 flex items-baseline gap-1">
             <span data-testid="metric-incomplete-count" className={`font-mono text-lg font-bold tracking-tight tabular-number ${summary.incomplete_review_count > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-text-muted'}`}>
               {summary.incomplete_review_count}
             </span>
-            <span className="text-[10px] text-text-muted">待完善</span>
+            <span className="text-[10px] text-text-muted">待核实</span>
           </div>
         </div>
 
@@ -184,8 +207,8 @@ export const ReviewMetricsDeck: React.FC<ReviewMetricsDeckProps> = ({
       <div className="flex items-center gap-1.5 px-1 text-[11px] text-text-muted">
         <Info className="h-3.5 w-3.5 flex-none" />
         <span data-testid="review-scope-note">
-          统计口径：已加载终态记录统计（共 {summary.sample_count} 笔），基于查询窗口 {rangeDisplay}。所有经济指标保留后端 Decimal 精度，未结算或缺失事实不伪装为 0。
-          {summary.next_cursor ? ' 存在后续分页，已加载记录不进行前端浮点粗糙累加。' : ''}
+          统计口径：仅已加载终态记录统计（共 {summary.sample_count} 笔），基于查询窗口 {rangeDisplay}。各项金额独立列明覆盖笔数；部分合计不代表整个筛选范围的总收益，缺失事实不按 0 计算。
+          {summary.next_cursor ? ' 尚有后续分页，加载更多后更新覆盖范围。' : ''}
         </span>
       </div>
     </div>

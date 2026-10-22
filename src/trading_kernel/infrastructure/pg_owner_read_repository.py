@@ -23,6 +23,7 @@ from src.trading_kernel.application.owner_console.models import (
     EffectiveEntryScopeFacts,
     EntryScopeFacts,
     EvidenceRef,
+    ExitCommandFacts,
     Freshness,
     InstrumentCenterItem,
     InstrumentCenterPage,
@@ -87,6 +88,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     event_product_compatibility,
     event_specs,
     exchange_commands,
+    exit_policies,
     instrument_product_current,
     instrument_product_profiles,
     instruments,
@@ -1414,6 +1416,7 @@ class PostgresOwnerReadRepository:
             trade=_causality_trade_item_facts(
                 ticket_row,
                 events=events,
+                commands=commands,
                 incidents=incidents,
                 review=review,
             ),
@@ -1657,6 +1660,7 @@ def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
     return (
         sa.select(
             trade_tickets,
+            _frozen_exit_profile_column(),
             trade_tickets.c.status.label("ticket_status"),
             trade_tickets.c.created_at_ms.label("issued_at_ms"),
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
@@ -1934,6 +1938,7 @@ def _causality_trade_item_facts(
     ticket_row: RowMapping,
     *,
     events: tuple[TradeCausalityEventFacts, ...],
+    commands: tuple[TradeCausalityCommandFacts, ...],
     incidents: tuple[TradeCausalityIncidentFacts, ...],
     review: TradeCausalityReviewFacts | None,
 ) -> TradeItemFacts:
@@ -1970,6 +1975,9 @@ def _causality_trade_item_facts(
         review_revision=None if review is None else review.revision,
         review_created_at_ms=None if review is None else review.created_at_ms,
         review_metrics=None if review is None else review.metrics,
+        frozen_exit_profile=ticket_row["frozen_exit_profile"],
+        tp1_reached=any(e.event_type == "TakeProfitFilled" for e in events),
+        exit_commands=tuple(ExitCommandFacts.model_validate(c.model_dump(include=set(ExitCommandFacts.model_fields))) for c in commands if c.command_kind in {"initial_stop", "take_profit", "replace_protection"}),
         exit_event_id=None if exit_event is None else exit_event.event_id,
         exit_event_type=None if exit_event is None else exit_event.event_type,
         exit_event_payload=None if exit_event is None else exit_event.payload,
@@ -2250,6 +2258,57 @@ def _strategy_ticket_query(
     return _ticket_facts_select(conditions=conditions, limit=query.limit + 1)
 
 
+def _frozen_exit_profile_column() -> sa.ColumnElement[Any]:
+    return (
+        sa.select(exit_policies.c.policy)
+        .where(
+            exit_policies.c.exit_policy_id == trade_tickets.c.exit_policy_id,
+            exit_policies.c.semantic_hash == trade_tickets.c.exit_policy_semantic_hash,
+        )
+        .correlate(trade_tickets)
+        .scalar_subquery()
+        .label("frozen_exit_profile")
+    )
+
+
+def _exit_commands_column() -> sa.ColumnElement[Any]:
+    rows = (
+        sa.select(
+            exchange_commands.c.command_id,
+            exchange_commands.c.ticket_id,
+            exchange_commands.c.command_kind,
+            exchange_commands.c.status,
+            exchange_commands.c.created_at_ms,
+            exchange_commands.c.result_payload,
+        )
+        .where(
+            exchange_commands.c.ticket_id == trade_tickets.c.ticket_id,
+            exchange_commands.c.command_kind.in_(
+                ("initial_stop", "take_profit", "replace_protection")
+            ),
+            trade_reviews.c.metrics["order_attribution"].op("@>")(
+                sa.func.jsonb_build_array(
+                    sa.func.jsonb_build_object(
+                        "command_id",
+                        exchange_commands.c.command_id,
+                        "role",
+                        "exit",
+                    )
+                )
+            ),
+        )
+        .order_by(exchange_commands.c.created_at_ms, exchange_commands.c.command_id)
+        .limit(129)
+        .correlate(trade_tickets, trade_reviews)
+        .subquery()
+    )
+    return (
+        sa.select(sa.func.jsonb_agg(sa.func.to_jsonb(rows.table_valued())))
+        .scalar_subquery()
+        .label("exit_commands")
+    )
+
+
 def _ticket_facts_select(
     *,
     conditions: Sequence[sa.ColumnElement[bool]],
@@ -2352,6 +2411,9 @@ def _ticket_facts_select(
             trade_reviews.c.ticket_id.label("review_ticket_id"),
             trade_reviews.c.revision.label("review_revision"),
             trade_reviews.c.metrics.label("review_metrics"),
+            _exit_commands_column(),
+            _frozen_exit_profile_column(),
+            _take_profit_filled_exists().label("tp1_reached"),
             trade_reviews.c.created_at_ms.label("review_created_at_ms"),
             open_incident.c.open_incident_id,
             open_incident.c.open_incident_opened_at_ms,
@@ -2520,6 +2582,9 @@ def _review_center_ticket_query(
             trade_reviews.c.ticket_id.label("review_ticket_id"),
             trade_reviews.c.revision.label("review_revision"),
             trade_reviews.c.metrics.label("review_metrics"),
+            _exit_commands_column(),
+            _frozen_exit_profile_column(),
+            _take_profit_filled_exists().label("tp1_reached"),
             trade_reviews.c.created_at_ms.label("review_created_at_ms"),
             sa.null().label("open_incident_id"),
             sa.null().label("open_incident_opened_at_ms"),
@@ -2708,7 +2773,9 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
             if row["latest_incident_opened_at_ms"] is None
             else int(row["latest_incident_opened_at_ms"])
         ),
-        tp1_reached=tp1_event_id is not None,
+        tp1_reached=tp1_event_id is not None or bool(row.get("tp1_reached")),
+        frozen_exit_profile=row["frozen_exit_profile"],
+        exit_commands=tuple(ExitCommandFacts.model_validate(c) for c in (row["exit_commands"] or ())),
         evidence=tuple(evidence),
     )
 
@@ -3004,6 +3071,10 @@ def _review_center_item_facts(
         incident_evidence.append(incident_ref)
         evidence.append(incident_ref)
 
+    if exact_event_refs["exit_trigger_evidence"] is None and trade.exit_attribution is not None and trade.exit_attribution.source == "review_fills":
+        exact_event_refs["exit_trigger_evidence"] = next(ref for ref in trade.exit_attribution.evidence if ref.kind == "command")
+        evidence.extend(trade.exit_attribution.evidence)
+
     current_review_evidence = (
         None
         if joined_review_id is None
@@ -3056,6 +3127,12 @@ def _review_center_item_facts(
             unavailable_reason="actual_stop_risk_unavailable",
         ),
         exit_reason=trade.exit_reason,
+        exit_attribution=trade.exit_attribution,
+        funding_unavailable_reason=(
+            cast(str, (trade_facts.review_metrics or {}).get("funding_unavailable_reason"))
+            if isinstance((trade_facts.review_metrics or {}).get("funding_unavailable_reason"), str)
+            else None
+        ),
         runner_net_contribution=unavailable_runner,
         ticket_evidence=ticket_evidence,
         aggregate_evidence=aggregate_evidence,

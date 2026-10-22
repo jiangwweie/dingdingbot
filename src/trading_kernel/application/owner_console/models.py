@@ -587,6 +587,35 @@ class SignalAdmissionDetail(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class EvidenceGap(FrozenModel):
+    code: str
+    label: str
+    impact: str
+
+
+class ExitAttribution(FrozenModel):
+    detail: str | None = None
+    code: str | None
+    label: str
+    source: Literal["exit_event", "review_fills", "unavailable", "not_applicable"]
+    evidence: tuple[EvidenceRef, ...] = ()
+
+
+class ExitCommandFacts(FrozenModel):
+    command_id: str
+    ticket_id: str
+    command_kind: str
+    status: str
+    created_at_ms: int
+    result_payload: dict[str, JsonValue] | None
+
+
+class MetricCoverage(FrozenModel):
+    available_count: int = Field(ge=0)
+    total_count: int = Field(ge=0)
+    missing_ticket_ids: tuple[str, ...] = ()
+
+
 class TradeListItem(FrozenModel):
     ticket_id: str
     strategy_group_id: str
@@ -612,6 +641,7 @@ class TradeListItem(FrozenModel):
     total_stage_count: Literal[8]
     exit_reason: str | None
     exit_reason_unavailable_reason: str | None
+    exit_attribution: ExitAttribution | None = None
     gross_pnl: MoneyMetric
     fees: MoneyMetric
     funding: MoneyMetric
@@ -688,6 +718,7 @@ class TradePricePlanView(FrozenModel):
 
 
 class CausalityExitReason(FrozenModel):
+    detail: str | None = None
     code: str
     label: str
     evidence: tuple[EvidenceRef, ...]
@@ -763,6 +794,7 @@ class ReviewSentence(FrozenModel):
     template_id: Literal[
         "execution_complete",
         "execution_recovered",
+        "execution_incomplete",
         "economics_complete",
         "economics_incomplete",
         "review_waiting",
@@ -790,6 +822,9 @@ class ProgrammaticTradeReview(FrozenModel):
     ]
     execution_classification: ExecutionClassification
     economic_summary: ReviewEconomicSummary
+    execution_gaps: tuple[EvidenceGap, ...] = ()
+    economic_gaps: tuple[EvidenceGap, ...] = ()
+    exit_attribution: ExitAttribution | None = None
     exit_reason: str | None
     attention_items: tuple[str, ...]
     sentences: tuple[ReviewSentence, ...] = Field(min_length=1)
@@ -823,6 +858,9 @@ class ReviewCenterSummary(FrozenModel):
     from_ms: int
     to_ms: int
     sample_count: int
+    summary_scope: Literal["page", "loaded_records"] = "page"
+    metric_coverage: dict[str, MetricCoverage] = Field(default_factory=dict)
+    verified_totals: ReviewEconomicSummary | None = None
     next_cursor: str | None
     items: tuple[ReviewCenterItem, ...]
     net_pnl: MoneyMetric
@@ -1225,6 +1263,8 @@ class TradeItemFacts(FrozenModel):
     latest_incident_id: str | None
     latest_incident_opened_at_ms: int | None
     tp1_reached: bool = False
+    exit_commands: tuple[ExitCommandFacts, ...] = Field(default=(), max_length=128)
+    frozen_exit_profile: dict[str, JsonValue] | None = None
     evidence: tuple[EvidenceRef, ...]
 
 
@@ -1371,6 +1411,8 @@ class ProgrammaticReviewFacts(FrozenModel):
     actual_stop_risk: MoneyMetric
     exit_reason: str | None
     runner_net_contribution: MoneyMetric
+    exit_attribution: ExitAttribution | None = None
+    funding_unavailable_reason: str | None = None
     ticket_evidence: EvidenceRef | None = None
     aggregate_evidence: EvidenceRef | None = None
     entry_fill_evidence: EvidenceRef | None = None

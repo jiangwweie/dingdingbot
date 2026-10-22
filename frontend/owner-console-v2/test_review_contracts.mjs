@@ -219,7 +219,7 @@ it('R metric supports 4 fraction digits', () => {
 it('Missing or null value NEVER converts to 0.00 and honors honest unavailable reason', () => {
   const missingEconomics = { value: null, unit: 'USDT', unavailable_reason: 'incomplete_review_economics' };
   const res1 = formatReviewMoneyMetric(missingEconomics);
-  assert.strictEqual(res1.formatted, '经济数据不完整');
+  assert.strictEqual(res1.formatted, '净额尚未完整核实');
   assert.strictEqual(res1.isUnavailable, true);
   assert.strictEqual(res1.value, null);
 
@@ -235,16 +235,16 @@ it('Missing or null value NEVER converts to 0.00 and honors honest unavailable r
 console.log('\n--- Test Group 4: Statuses, Classifications & Exit Reasons Mapping ---');
 
 it('Execution classification mapping is strictly bounded and accurate', () => {
-  assert.deepStrictEqual(formatExecutionClassification('complete'), { label: '执行完整', tone: 'success' });
+  assert.deepStrictEqual(formatExecutionClassification('complete'), { label: '链路已核实', tone: 'success' });
   assert.deepStrictEqual(formatExecutionClassification('recovered_incident'), { label: '异常已恢复', tone: 'attention' });
-  assert.deepStrictEqual(formatExecutionClassification('evidence_incomplete'), { label: '证据不完整', tone: 'danger' });
+  assert.deepStrictEqual(formatExecutionClassification('evidence_incomplete'), { label: '存在待核实项', tone: 'attention' });
   assert.deepStrictEqual(formatExecutionClassification('waiting_review'), { label: '等待复盘', tone: 'neutral' });
   assert.deepStrictEqual(formatExecutionClassification('in_progress'), { label: '进行中', tone: 'neutral' });
 });
 
 it('Review status mapping preserves all server states and legacy fallback', () => {
   assert.deepStrictEqual(formatReviewStatus('complete'), { label: '完整', tone: 'success' });
-  assert.deepStrictEqual(formatReviewStatus('incomplete_evidence'), { label: '证据不完整', tone: 'danger' });
+  assert.deepStrictEqual(formatReviewStatus('incomplete_evidence'), { label: '存在待核实项', tone: 'attention' });
   assert.deepStrictEqual(formatReviewStatus('waiting_review'), { label: '等待复盘', tone: 'neutral' });
   assert.deepStrictEqual(formatReviewStatus('waiting_for_review'), { label: '等待复盘', tone: 'neutral' });
   assert.deepStrictEqual(formatReviewStatus('waiting_for_settlement'), { label: '等待结算', tone: 'neutral' });
@@ -254,13 +254,13 @@ it('Review status mapping preserves all server states and legacy fallback', () =
 it('Exit reason mapping renders human-readable labels without losing raw context', () => {
   assert.strictEqual(formatReviewExitReason('TP1 + Runner Exit').label, 'TP1 后 Runner 退出');
   assert.strictEqual(formatReviewExitReason('initial_stop_triggered').label, '初始止损触发');
-  assert.strictEqual(formatReviewExitReason('owner_flatten_all:manual:1').label, 'Owner 受控平仓');
+  assert.strictEqual(formatReviewExitReason('owner_flatten_all:manual:1').label, 'Owner 全部持仓受控平仓');
   assert.strictEqual(formatReviewExitReason('deployment_drain').label, '部署前安全退出');
-  assert.strictEqual(formatReviewExitReason(null).label, '—');
+  assert.strictEqual(formatReviewExitReason(null).label, '退出原因未确认');
 });
 
 it('Review sentence templates map accurately', () => {
-  assert.strictEqual(formatReviewSentenceTemplate('execution_complete').label, '执行完整');
+  assert.strictEqual(formatReviewSentenceTemplate('execution_complete').label, '链路已核实');
   assert.strictEqual(formatReviewSentenceTemplate('execution_recovered').label, '异常已恢复');
   assert.strictEqual(formatReviewSentenceTemplate('economics_complete').label, '经济结算完整');
   assert.strictEqual(formatReviewSentenceTemplate('economics_incomplete').label, '经济结算不完整');
@@ -422,19 +422,15 @@ it('Cross-page duplicates are deduplicated prior to aggregation and never double
   assert.strictEqual(recomputed.net_pnl.value, '600');
 });
 
-it('Incomplete economics: if any loaded item has null in net_pnl/net_r/fees/funding, entire aggregate is incomplete', () => {
-  const item1 = createDummyItem(1, { net_pnl: '100.00' });
-  const item2 = createDummyItem(2, { net_pnl: null }); // null economic fact
-
-  const economics = computeReviewEconomics([item1, item2]);
+it('Each metric retains independent totals and verified partial coverage', () => {
+  const economics = computeReviewEconomics([createDummyItem(1, { net_pnl: '100.00' }), createDummyItem(2, { net_pnl: null })]);
   assert.strictEqual(economics.net_pnl.value, null);
   assert.strictEqual(economics.net_pnl.unavailable_reason, 'incomplete_review_economics');
-  assert.strictEqual(economics.net_r.value, null);
-  assert.strictEqual(economics.net_r.unavailable_reason, 'incomplete_review_economics');
-  assert.strictEqual(economics.fees.value, null);
-  assert.strictEqual(economics.fees.unavailable_reason, 'incomplete_review_economics');
-  assert.strictEqual(economics.funding.value, null);
-  assert.strictEqual(economics.funding.unavailable_reason, 'incomplete_review_economics');
+  assert.strictEqual(economics.verified_totals.net_pnl.value, '100');
+  assert.deepStrictEqual(economics.metric_coverage.net_pnl, { available_count: 1, total_count: 2, missing_ticket_ids: ['t-2'] });
+  assert.strictEqual(economics.net_r.value, '2.4');
+  assert.notStrictEqual(economics.fees.value, null);
+  assert.notStrictEqual(economics.funding.value, null);
 });
 
 it('Zero items: economics returns no_review_evidence without fabricating zero values', () => {

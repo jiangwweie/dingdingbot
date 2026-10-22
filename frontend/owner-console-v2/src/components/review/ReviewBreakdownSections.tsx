@@ -139,7 +139,7 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
                           : 'bg-surface-subtle text-text-muted border-border'
                       }`}
                     >
-                      {item.evidence_state === 'observe_only' ? 'Observe Only' : 'No Evidence'}
+                      {item.evidence_state === 'observe_only' ? '仅供观察' : '无样本证据'}
                     </span>
                   </div>
                 </div>
@@ -155,12 +155,12 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
         </div>
       </div>
 
-      {/* 2. Execution Classification Breakdown */}
+      {/* 2. 执行证据分布 Breakdown */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xs flex flex-col">
         <div className="flex items-center justify-between border-b border-border bg-surface-subtle px-4 py-2.5">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-brand" />
-            <h3 className="text-xs font-bold text-text-primary">Execution Classification</h3>
+            <h3 className="text-xs font-bold text-text-primary">执行证据分布</h3>
           </div>
           <span className="font-mono text-[10px] text-text-muted">
             {summary.execution_quality_breakdown.length} 分类
@@ -169,7 +169,7 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
 
         <div className="divide-y divide-border text-xs flex-1">
           {summary.execution_quality_breakdown.length === 0 ? (
-            <div className="p-4 text-center text-text-muted text-[11px]">无执行质量记录</div>
+            <div className="p-4 text-center text-text-muted text-[11px]">无执行证据记录</div>
           ) : (
             summary.execution_quality_breakdown.map((item) => {
               const execClass = formatExecutionClassification(item.label as ExecutionClassification);
@@ -193,9 +193,6 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
                       >
                         {execClass.label}
                       </span>
-                      <span className="font-mono text-[10px] text-text-muted truncate">
-                        ({item.label})
-                      </span>
                     </div>
                     <strong className="font-mono font-bold text-text-primary tabular-number">
                       {item.ticket_count}
@@ -214,12 +211,12 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
         </div>
       </div>
 
-      {/* 3. Exit Reason Breakdown */}
+      {/* 3. 退出原因分布 Breakdown */}
       <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xs flex flex-col">
         <div className="flex items-center justify-between border-b border-border bg-surface-subtle px-4 py-2.5">
           <div className="flex items-center gap-2">
             <DoorOpen className="h-4 w-4 text-brand" />
-            <h3 className="text-xs font-bold text-text-primary">Exit Reason</h3>
+            <h3 className="text-xs font-bold text-text-primary">退出原因分布</h3>
           </div>
           <span className="font-mono text-[10px] text-text-muted">
             {summary.exit_reason_breakdown.length} 原因项

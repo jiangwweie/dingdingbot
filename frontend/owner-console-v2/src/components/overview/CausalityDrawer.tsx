@@ -259,7 +259,8 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
                 </span>
                 {causality?.exit_reason && (
                   <span className="inline-flex items-center rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-muted">
-                    退出原因: {causality.exit_reason.label || causality.exit_reason.code}
+                    退出原因: {causality.exit_reason.label || '退出原因未识别'}
+                    {causality.exit_reason.detail && <p className="mt-1 text-text-muted">{causality.exit_reason.detail}</p>}
                   </span>
                 )}
                 {resolvedEpisode?.net_r_formatted &&

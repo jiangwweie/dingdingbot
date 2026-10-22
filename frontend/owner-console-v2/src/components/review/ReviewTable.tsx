@@ -3,7 +3,6 @@ import type { ReviewCenterItem } from '../../types/review.ts';
 import {
   formatReviewMoneyMetric,
   formatExecutionClassification,
-  formatReviewStatus,
   formatReviewExitReason,
   formatReviewSentenceTemplate,
 } from '../../mapping/reviewMapping.ts';
@@ -68,7 +67,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                 策略组
               </th>
               <th scope="col" className="px-3 py-3 font-semibold">
-                执行质量
+                执行证据
               </th>
               <th scope="col" className="px-3 py-3 font-semibold">
                 退出原因
@@ -83,7 +82,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                 费用 / 资金费
               </th>
               <th scope="col" className="px-3 py-3 font-semibold">
-                证据状态
+                收益核算
               </th>
               <th scope="col" className="px-3 py-3 font-semibold text-center">
                 关注项
@@ -99,7 +98,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
               const isLong = item.position_side === 'long';
               const symbol = cleanSymbol(item.exchange_instrument_id);
               const execClass = formatExecutionClassification(item.review.execution_classification);
-              const reviewStatus = formatReviewStatus(item.review.review_status);
+              const reviewStatus = { label: item.review.economic_gaps?.length ? '有核算缺项' : item.review.review_status === 'waiting_review' ? '尚无核算' : '核算完整', tone: item.review.economic_gaps?.length ? 'attention' : 'success' };
               const exitReason = formatReviewExitReason(item.review.exit_reason);
               const pnl = formatReviewMoneyMetric(item.review.economic_summary.net_pnl, { sign: true });
               const r = formatReviewMoneyMetric(item.review.economic_summary.net_r, { sign: true, fractionDigits: 4 });
@@ -190,7 +189,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                         className="block max-w-[150px] truncate text-[11px] text-text-secondary"
                         title={exitReason.raw ?? '—'}
                       >
-                        {exitReason.label}
+                        {item.review.exit_attribution?.label ?? exitReason.label}
                       </span>
                     </td>
 
@@ -239,8 +238,8 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                           className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-semibold border ${
                             reviewStatus.tone === 'success'
                               ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                              : reviewStatus.tone === 'danger'
-                              ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                              : reviewStatus.tone === 'attention'
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                               : 'bg-surface-subtle text-text-secondary border-border'
                           }`}
                         >
@@ -303,6 +302,31 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                             </button>
                           </div>
 
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="review-economic-facts">
+                            {([
+                              ['毛收益', item.review.economic_summary.gross_pnl],
+                              ['手续费', item.review.economic_summary.fees],
+                              ['资金费', item.review.economic_summary.funding],
+                              ['净收益', item.review.economic_summary.net_pnl],
+                              ['净 R', item.review.economic_summary.net_r],
+                            ] as const).map(([label, metric]) => <div key={label} className="rounded border border-border p-2"><div className="text-text-muted">{label}</div><div className="mt-1 font-mono">{formatReviewMoneyMetric(metric).formatted}</div></div>)}
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2" data-testid="review-gaps">
+                            {[
+                              { title: '执行证据缺项', gaps: item.review.execution_gaps },
+                              { title: '收益核算缺项', gaps: item.review.economic_gaps },
+                            ].map(({ title, gaps }) => (
+                              <div key={title} className="rounded border border-border p-3 text-xs">
+                                <strong>{title}</strong>
+                                {gaps?.length ? gaps.map((gap) => <p key={gap.code} className="mt-1 text-amber-600">{gap.label}：{gap.impact}</p>) : <p className="mt-1 text-text-muted">无已声明缺项</p>}
+                              </div>
+                            ))}
+                          </div>
+                          <details className="text-xs text-text-muted"><summary>退出归因与审计详情</summary>
+                            <p>{item.review.exit_attribution?.detail}</p>
+                            <p className="break-all">原始原因：{item.review.exit_reason ?? '未确认'}</p>
+                            <p>依据：{item.review.exit_attribution?.source === 'review_fills' ? '当前 Review 成交与精确订单命令关联' : item.review.exit_attribution?.source === 'exit_event' ? '退出触发事件' : '尚无充分归因证据'}</p>
+                          </details>
                           {/* Review Sentences */}
                           <div className="space-y-2">
                             {item.review.sentences.map((sent, sIdx) => {
@@ -363,7 +387,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                               </div>
                               <ul className="list-disc list-inside space-y-0.5 text-[11px] font-mono pl-1">
                                 {item.review.attention_items.map((att, aIdx) => (
-                                  <li key={aIdx}>{att}</li>
+                                  <li key={aIdx}>{({ funding_unavailable: '资金费无法精确归因', external_exit_unavailable: '退出成交明细不可得', actual_stop_risk_above_frozen_plan: '实际止损风险高于冻结计划', runner_net_contribution_non_positive: '追踪段净贡献未转正' } as Record<string, string>)[att] ?? (att.startsWith('open_incident:') ? '存在未解除异常，详见因果链' : '存在待核实关注项')}<details><summary>原始标识</summary>{att}</details></li>
                                 ))}
                               </ul>
                             </div>

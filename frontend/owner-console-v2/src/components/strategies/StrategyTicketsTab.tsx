@@ -1,3 +1,4 @@
+import { formatReviewExitReason } from '../../mapping/reviewMapping.ts';
 import React from 'react';
 import { useStrategyTicketsData } from '../../hooks/useStrategiesData.ts';
 import type { StrategyTicketListItem, StrategyTicketExitPath } from '../../types/strategies.ts';
@@ -343,7 +344,7 @@ export const StrategyTicketsTab: React.FC<StrategyTicketsTabProps> = ({
 
                       {/* Exit Reason */}
                       <td className="px-3 py-2.5 text-[11px] text-text-secondary whitespace-nowrap">
-                        {ticket.exit_reason || ticket.exit_reason_unavailable_reason || '—'}
+                        {ticket.exit_attribution?.label ?? formatReviewExitReason(ticket.exit_reason ?? ticket.exit_reason_unavailable_reason).label}
                       </td>
 
                       {/* Issued At */}

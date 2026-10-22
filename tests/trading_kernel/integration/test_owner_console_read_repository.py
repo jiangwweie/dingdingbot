@@ -3926,3 +3926,75 @@ def _asyncpg_dsn(dsn: str) -> str:
         .set(drivername="postgresql")
         .render_as_string(hide_password=False)
     )
+
+
+async def test_review_protection_fill_attribution_is_shared_with_trades(
+    owner_read_dsn: str,
+) -> None:
+    await _seed_owner_console_trades(owner_read_dsn)
+    # This fixture has no lifecycle ExitRequested, but an exact current Review fill.
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        "DELETE FROM brc_trade_events WHERE ticket_id='ticket:y' AND event_type='ExitRequested'",
+    )
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        """
+        INSERT INTO brc_exchange_commands(command_id,ticket_id,command_kind,generation,idempotency_key,venue_client_order_id,status,quantity,request_payload,result_payload,created_at_ms,deadline_at_ms)
+        VALUES ('command:y:stop','ticket:y','initial_stop',1,'idem:y:stop','client:y:stop','accepted',1,'{}','{"exchange_order_id":"algo:1"}',1800000005000,1800000100000)
+    """,
+    )
+    await _execute_owner_console_admin(
+        owner_read_dsn,
+        """
+        UPDATE brc_trade_reviews SET metrics = metrics || $1::jsonb WHERE review_id='review:y:v2'
+    """,
+        json.dumps(
+            {
+                "entry_quantity": "1",
+                "order_attribution": [
+                    {
+                        "role": "exit",
+                        "command_id": "command:y:stop",
+                        "exchange_order_id": "actual:1",
+                        "exchange_trade_id": "fill:y:1",
+                        "quantity": "1",
+                        "occurred_at_ms": 1800000020000,
+                    }
+                ],
+            }
+        ),
+    )
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as connection:
+            repository = PostgresOwnerReadRepository(connection)
+            trades = build_trade_page(
+                await repository.read_trade_page_facts(
+                    TradeListQuery(from_ms=1799999000000, to_ms=1800001000000)
+                )
+            )
+            reviews = build_review_center(
+                await repository.read_review_center_facts(
+                    ReviewListQuery(from_ms=1799999000000, to_ms=1800001000000)
+                )
+            )
+        trade = next(item for item in trades.items if item.ticket_id == "ticket:y")
+        review = next(
+            item.review for item in reviews.items if item.ticket_id == "ticket:y"
+        )
+        assert trade.exit_reason == review.exit_reason == "initial_stop_triggered"
+        assert (
+            trade.exit_attribution.source
+            == review.exit_attribution.source
+            == "review_fills"
+        )
+        assert review.execution_classification == "recovered_incident"
+        assert review.review_status == "complete"
+        assert review.economic_summary.net_pnl.value == Decimal("3.5100")
+        assert any(
+            ref.kind == "command" and ref.identity == "command:y:stop"
+            for ref in review.evidence
+        )
+    finally:
+        await engine.dispose()

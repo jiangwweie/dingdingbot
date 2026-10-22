@@ -1021,6 +1021,8 @@ export interface components {
         CausalityExitReason: {
             /** Code */
             code: string;
+            /** Detail */
+            detail?: string | null;
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
             /** Label */
@@ -1239,6 +1241,15 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** EvidenceGap */
+        EvidenceGap: {
+            /** Code */
+            code: string;
+            /** Impact */
+            impact: string;
+            /** Label */
+            label: string;
+        };
         /** EvidenceRef */
         EvidenceRef: {
             /** Identity */
@@ -1250,6 +1261,25 @@ export interface components {
             kind: "signal" | "admission" | "ticket" | "aggregate" | "event" | "command" | "incident" | "settlement" | "review" | "shadow" | "fact";
             /** Occurred At Ms */
             occurred_at_ms: number;
+        };
+        /** ExitAttribution */
+        ExitAttribution: {
+            /** Code */
+            code: string | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Label */
+            label: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "exit_event" | "review_fills" | "unavailable" | "not_applicable";
         };
         /** ExitProfile */
         ExitProfile: {
@@ -1769,6 +1799,18 @@ export interface components {
          * @enum {string}
          */
         MaterializationGenerationState: "PENDING" | "DESIRED" | "DRAINING_ENTRY" | "MATERIALIZING" | "STAGED" | "ACTIVE" | "FALLBACK_PREVIOUS" | "SUPERSEDED" | "ABANDONED" | "FAILED_CLOSED";
+        /** MetricCoverage */
+        MetricCoverage: {
+            /** Available Count */
+            available_count: number;
+            /**
+             * Missing Ticket Ids
+             * @default []
+             */
+            missing_ticket_ids: string[];
+            /** Total Count */
+            total_count: number;
+        };
         /** MoneyMetric */
         MoneyMetric: {
             /** Unavailable Reason */
@@ -1949,6 +1991,11 @@ export interface components {
         ProgrammaticTradeReview: {
             /** Attention Items */
             attention_items: string[];
+            /**
+             * Economic Gaps
+             * @default []
+             */
+            economic_gaps: components["schemas"]["EvidenceGap"][];
             economic_summary: components["schemas"]["ReviewEconomicSummary"];
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
@@ -1957,6 +2004,12 @@ export interface components {
              * @enum {string}
              */
             execution_classification: "complete" | "recovered_incident" | "evidence_incomplete" | "in_progress" | "waiting_review";
+            /**
+             * Execution Gaps
+             * @default []
+             */
+            execution_gaps: components["schemas"]["EvidenceGap"][];
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Final Conclusion */
@@ -2094,6 +2147,10 @@ export interface components {
             incomplete_review_count: number;
             /** Items */
             items: components["schemas"]["ReviewCenterItem"][];
+            /** Metric Coverage */
+            metric_coverage?: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
             /** Next Cursor */
@@ -2102,8 +2159,15 @@ export interface components {
             sample_count: number;
             /** Strategy Group Samples */
             strategy_group_samples: components["schemas"]["StrategyGroupSampleState"][];
+            /**
+             * Summary Scope
+             * @default page
+             * @enum {string}
+             */
+            summary_scope: "page" | "loaded_records";
             /** To Ms */
             to_ms: number;
+            verified_totals?: components["schemas"]["ReviewEconomicSummary"] | null;
         };
         /** ReviewEconomicSummary */
         ReviewEconomicSummary: {
@@ -2121,7 +2185,7 @@ export interface components {
              * Template Id
              * @enum {string}
              */
-            template_id: "execution_complete" | "execution_recovered" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
+            template_id: "execution_complete" | "execution_recovered" | "execution_incomplete" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
             /** Text */
             text: string;
         };
@@ -2694,6 +2758,7 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Exchange Instrument Id */
             exchange_instrument_id: string;
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Exit Reason Unavailable Reason */
@@ -2907,6 +2972,7 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Exchange Instrument Id */
             exchange_instrument_id: string;
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Exit Reason Unavailable Reason */

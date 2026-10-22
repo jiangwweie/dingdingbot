@@ -25,77 +25,26 @@ export function deduplicateEvidence(evidence: Iterable<EvidenceRef>): EvidenceRe
   return exact;
 }
 
-/**
- * Recompute Review Center economics matching backend _center_economics logic:
- * - If 0 items: unavailable with 'no_review_evidence'
- * - If any item has null value in net_pnl, net_r, fees, or funding: unavailable with 'incomplete_review_economics'
- * - Otherwise: exact MoneyDecimal (80-digit precision) summation with string output
- */
-export function computeReviewEconomics(
-  items: readonly ReviewCenterItem[]
-): {
-  net_pnl: MoneyMetric;
-  net_r: MoneyMetric;
-  fees: MoneyMetric;
-  funding: MoneyMetric;
-} {
-  if (items.length === 0) {
-    const reason = 'no_review_evidence';
-    return {
-      net_pnl: { value: null, unit: 'USDT', unavailable_reason: reason },
-      net_r: { value: null, unit: 'R', unavailable_reason: reason },
-      fees: { value: null, unit: 'USDT', unavailable_reason: reason },
-      funding: { value: null, unit: 'USDT', unavailable_reason: reason },
-    };
-  }
-
-  let hasIncomplete = false;
-  for (const item of items) {
-    const econ = item.review?.economic_summary;
-    if (
-      econ?.net_pnl?.value === null ||
-      econ?.net_pnl?.value === undefined ||
-      econ?.net_r?.value === null ||
-      econ?.net_r?.value === undefined ||
-      econ?.fees?.value === null ||
-      econ?.fees?.value === undefined ||
-      econ?.funding?.value === null ||
-      econ?.funding?.value === undefined
-    ) {
-      hasIncomplete = true;
-      break;
+/** Strict totals and independently covered verified partials over loaded records. */
+export function computeReviewEconomics(items: readonly ReviewCenterItem[]) {
+  const names = ['gross_pnl', 'net_pnl', 'net_r', 'fees', 'funding'] as const;
+  const verified = {} as Record<typeof names[number], MoneyMetric>;
+  const totals = {} as Record<typeof names[number], MoneyMetric>;
+  const coverage: ReviewCenterSummary['metric_coverage'] = {};
+  for (const name of names) {
+    let sum = new MoneyDecimal(0);
+    const missing: string[] = [];
+    for (const item of items) {
+      const raw = item.review.economic_summary[name]?.value;
+      if (raw == null || !new MoneyDecimal(raw).isFinite()) missing.push(item.ticket_id);
+      else sum = sum.plus(new MoneyDecimal(raw));
     }
+    const available = items.length - missing.length;
+    verified[name] = { value: available ? sum.toFixed() : null, unit: name === 'net_r' ? 'R' : 'USDT', unavailable_reason: available ? null : items.length ? 'no_confirmed_metric' : 'no_review_evidence' };
+    totals[name] = missing.length ? { value: null, unit: verified[name].unit, unavailable_reason: 'incomplete_review_economics' } : verified[name];
+    coverage[name] = { available_count: available, total_count: items.length, missing_ticket_ids: missing };
   }
-
-  if (hasIncomplete) {
-    const reason = 'incomplete_review_economics';
-    return {
-      net_pnl: { value: null, unit: 'USDT', unavailable_reason: reason },
-      net_r: { value: null, unit: 'R', unavailable_reason: reason },
-      fees: { value: null, unit: 'USDT', unavailable_reason: reason },
-      funding: { value: null, unit: 'USDT', unavailable_reason: reason },
-    };
-  }
-
-  let netPnlSum = new MoneyDecimal(0);
-  let netRSum = new MoneyDecimal(0);
-  let feesSum = new MoneyDecimal(0);
-  let fundingSum = new MoneyDecimal(0);
-
-  for (const item of items) {
-    const econ = item.review.economic_summary;
-    netPnlSum = netPnlSum.plus(new MoneyDecimal(econ.net_pnl.value!));
-    netRSum = netRSum.plus(new MoneyDecimal(econ.net_r.value!));
-    feesSum = feesSum.plus(new MoneyDecimal(econ.fees.value!));
-    fundingSum = fundingSum.plus(new MoneyDecimal(econ.funding.value!));
-  }
-
-  return {
-    net_pnl: { value: netPnlSum.toFixed(), unit: 'USDT', unavailable_reason: null },
-    net_r: { value: netRSum.toFixed(), unit: 'R', unavailable_reason: null },
-    fees: { value: feesSum.toFixed(), unit: 'USDT', unavailable_reason: null },
-    funding: { value: fundingSum.toFixed(), unit: 'USDT', unavailable_reason: null },
-  };
+  return { ...totals, verified_totals: verified, metric_coverage: coverage };
 }
 
 /**
@@ -190,7 +139,8 @@ export function computeReviewSummary(
   // 3. Exit reason breakdown
   const exitMap = new Map<string, { count: number; evidence: EvidenceRef[] }>();
   for (const item of items) {
-    const label = item.review?.exit_reason || 'exit_reason_unavailable';
+    const raw = item.review?.exit_reason;
+    const label = raw?.startsWith('owner_flatten_all:') ? 'owner_flatten_all' : raw?.startsWith('deployment_drain:') ? 'deployment_drain' : raw || 'exit_reason_unavailable';
     if (!exitMap.has(label)) {
       exitMap.set(label, { count: 0, evidence: [] });
     }
@@ -218,6 +168,9 @@ export function computeReviewSummary(
     from_ms: baseSummary.from_ms,
     to_ms: baseSummary.to_ms,
     sample_count: items.length,
+    summary_scope: 'loaded_records',
+    verified_totals: economics.verified_totals,
+    metric_coverage: economics.metric_coverage,
     next_cursor: nextCursor !== undefined ? nextCursor : baseSummary.next_cursor,
     items: [...items],
     net_pnl: economics.net_pnl,

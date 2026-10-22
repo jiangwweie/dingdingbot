@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Iterable
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Literal
 
+from src.trading_kernel.application.owner_console.exit_attribution import (
+    exit_reason_group,
+)
 from src.trading_kernel.application.owner_console.models import (
+    EvidenceGap,
     EvidenceRef,
     ExecutionClassification,
+    MetricCoverage,
     MoneyMetric,
     PageCursor,
     ProgrammaticReviewFacts,
@@ -26,13 +31,12 @@ from src.trading_kernel.application.owner_console.models import (
 )
 
 TEMPLATES = {
+    "execution_incomplete": "执行证据待核实：{reason}。这不等同于已确认执行失败。",
     "execution_complete": "执行链完整。{entry_summary}；{exit_summary}。",
-    "execution_recovered": (
-        "执行链已终态，但发生并恢复了异常：{incident_summary}。"
-    ),
+    "execution_recovered": "执行链已终态，{incident_summary}。{exit_summary}。",
     "economics_complete": (
         "Net PnL 为 {net_pnl} U，Net R 为 {net_r}R；"
-        "订单、费用、Funding 与 Review 证据完整。"
+        "毛收益、手续费、资金费与 Review 核算证据完整。"
     ),
     "economics_incomplete": "{reason}；因此不计算 Net PnL 与 Net R。",
     "review_waiting": "Ticket 已终态，当前仍在等待 Review。",
@@ -67,6 +71,8 @@ def build_programmatic_review(
     """Render one fixed-template review without recomputing economics."""
 
     evidence = _deduplicate_evidence(facts.evidence)
+    execution_gaps = _execution_gaps(facts)
+    economic_gaps = _economic_gaps(facts)
     if not evidence:
         raise ProgrammaticReviewContradiction(
             "programmatic Review requires evidence"
@@ -96,6 +102,9 @@ def build_programmatic_review(
             review_status="in_progress",
             execution_classification="in_progress",
             economic_summary=economic_summary,
+            execution_gaps=execution_gaps,
+            economic_gaps=economic_gaps,
+            exit_attribution=facts.exit_attribution,
             exit_reason=facts.exit_reason,
             attention_items=_attention_items(facts),
             sentences=(sentence,),
@@ -113,6 +122,9 @@ def build_programmatic_review(
             review_status="waiting_review",
             execution_classification="waiting_review",
             economic_summary=economic_summary,
+            execution_gaps=execution_gaps,
+            economic_gaps=economic_gaps,
+            exit_attribution=facts.exit_attribution,
             exit_reason=facts.exit_reason,
             attention_items=_attention_items(facts),
             sentences=(sentence,),
@@ -128,6 +140,8 @@ def build_programmatic_review(
     review_status: Literal["complete", "incomplete_evidence"] = (
         "complete"
         if classification in {"complete", "recovered_incident"}
+        and not economic_gaps
+        and facts.current_review_evidence is not None
         else "incomplete_evidence"
     )
     return ProgrammaticTradeReview(
@@ -135,6 +149,9 @@ def build_programmatic_review(
         review_status=review_status,
         execution_classification=classification,
         economic_summary=economic_summary,
+        execution_gaps=execution_gaps,
+        economic_gaps=economic_gaps,
+        exit_attribution=facts.exit_attribution,
         exit_reason=facts.exit_reason,
         attention_items=_attention_items(facts),
         sentences=sentences,
@@ -158,12 +175,9 @@ def matches_review_status(
     if requested_status == "waiting_for_review":
         return review.execution_classification == "waiting_review"
     if requested_status == "complete":
-        return review.execution_classification in {
-            "complete",
-            "recovered_incident",
-        }
+        return review.review_status == "complete"
     if requested_status == "incomplete_evidence":
-        return review.execution_classification == "evidence_incomplete"
+        return review.review_status == "incomplete_evidence"
     raise ProgrammaticReviewContradiction(
         f"unknown Review status filter: {requested_status}"
     )
@@ -199,6 +213,7 @@ def build_review_center(facts: ReviewCenterFacts) -> ReviewCenterSummary:
         ref for _item, review in reviews for ref in review.evidence
     )
     net_pnl, net_r, fees, funding = _center_economics(reviews)
+    verified_totals, metric_coverage = _verified_economics(reviews)
     quality_breakdown = _quality_breakdown(reviews)
     exit_breakdown = _exit_breakdown(reviews)
     complete_count = sum(
@@ -208,6 +223,8 @@ def build_review_center(facts: ReviewCenterFacts) -> ReviewCenterSummary:
         from_ms=facts.from_ms,
         to_ms=facts.to_ms,
         sample_count=len(reviews),
+        verified_totals=verified_totals,
+        metric_coverage=metric_coverage,
         next_cursor=next_cursor,
         items=tuple(
             ReviewCenterItem(
@@ -239,27 +256,8 @@ def build_review_center(facts: ReviewCenterFacts) -> ReviewCenterSummary:
 def _terminal_classification(
     facts: ProgrammaticReviewFacts,
 ) -> ExecutionClassification:
-    chain_complete = all(
-        ref is not None
-        for ref in (
-            facts.entry_fill_evidence,
-            facts.protection_confirmed_evidence,
-            facts.exit_trigger_evidence,
-            facts.flat_evidence,
-            facts.reconciliation_matched_evidence,
-            facts.settlement_evidence,
-        )
-    )
     incidents = set(facts.incident_ids)
-    recovered = set(facts.recovered_incident_ids)
-    incidents_recovered = incidents == recovered
-    if (
-        not chain_complete
-        or not incidents_recovered
-        or facts.exit_reason is None
-        or facts.current_review_evidence is None
-        or facts.economics_completeness != "complete"
-    ):
+    if _execution_gaps(facts):
         return "evidence_incomplete"
     if incidents:
         return "recovered_incident"
@@ -271,55 +269,110 @@ def _terminal_sentences(
     *,
     classification: ExecutionClassification,
 ) -> tuple[ReviewSentence, ...]:
-    lifecycle_evidence = _lifecycle_evidence(facts)
     if classification == "complete":
         execution = _sentence(
             "execution_complete",
-            evidence=lifecycle_evidence,
+            evidence=_lifecycle_evidence(facts),
             entry_summary="ENTRY 后初始保护已确认",
             exit_summary=_exit_summary(facts.exit_reason),
         )
-        economics = _sentence(
-            "economics_complete",
-            evidence=_current_review_evidence(facts),
-            net_pnl=_required_value(facts.net_pnl, "Net PnL"),
-            net_r=_required_value(facts.net_r, "Net R"),
-        )
-        return execution, economics
-    if classification == "recovered_incident":
+    elif classification == "recovered_incident":
         execution = _sentence(
             "execution_recovered",
-            evidence=(*lifecycle_evidence, *facts.incident_evidence),
-            incident_summary="、".join(facts.incident_ids),
+            evidence=(*_lifecycle_evidence(facts), *facts.incident_evidence),
+            incident_summary=f"{len(facts.incident_ids)} 项异常均已解除，关联记录见证据详情",
+            exit_summary=_exit_summary(facts.exit_reason),
         )
+    else:
+        execution = _sentence(
+            "execution_incomplete",
+            evidence=_incomplete_evidence(facts),
+            reason="；".join(gap.label for gap in _execution_gaps(facts)),
+        )
+    if not _economic_gaps(facts):
         economics = _sentence(
             "economics_complete",
             evidence=_current_review_evidence(facts),
             net_pnl=_required_value(facts.net_pnl, "Net PnL"),
             net_r=_required_value(facts.net_r, "Net R"),
         )
-        return execution, economics
-    return (
-        _sentence(
+    else:
+        economics = _sentence(
             "economics_incomplete",
             evidence=_incomplete_evidence(facts),
-            reason=_incomplete_reason(facts),
+            reason="；".join(gap.label for gap in _economic_gaps(facts)),
+        )
+    return execution, economics
+
+
+def _execution_gaps(facts: ProgrammaticReviewFacts) -> tuple[EvidenceGap, ...]:
+    checks = (
+        ("entry_fill_unconfirmed", "入场成交证据缺失", facts.entry_fill_evidence),
+        (
+            "protection_unconfirmed",
+            "初始保护确认证据缺失",
+            facts.protection_confirmed_evidence,
+        ),
+        ("exit_trigger_unconfirmed", "退出触发证据缺失", facts.exit_trigger_evidence),
+        ("flat_unconfirmed", "持仓归零证据缺失", facts.flat_evidence),
+        (
+            "reconciliation_unconfirmed",
+            "对账匹配证据缺失",
+            facts.reconciliation_matched_evidence,
+        ),
+        ("settlement_unconfirmed", "结算证据缺失", facts.settlement_evidence),
+    )
+    gaps = [
+        EvidenceGap(
+            code=code, label=label, impact="该执行环节尚不能核实，不代表已确认执行失败"
+        )
+        for code, label, ref in checks
+        if ref is None
+    ]
+    if facts.exit_reason is None:
+        gaps.append(
+            EvidenceGap(
+                code="exit_reason_unconfirmed",
+                label="退出原因未确认",
+                impact="退出触发归因未知，不否认已核实的经济数据",
+            )
+        )
+    if set(facts.incident_ids) != set(facts.recovered_incident_ids):
+        gaps.append(
+            EvidenceGap(
+                code="unresolved_incident",
+                label="存在未解除异常",
+                impact="需查看关联 Incident 的处理状态",
+            )
+        )
+    return tuple(gaps)
+
+
+def _economic_gaps(facts: ProgrammaticReviewFacts) -> tuple[EvidenceGap, ...]:
+    if (
+        facts.economics_completeness == "complete"
+        and facts.current_review_evidence is not None
+    ):
+        return ()
+    code, label = {
+        "funding_unavailable": ("funding_unavailable", "资金费无法精确归因"),
+        "external_exit_unavailable": (
+            "external_exit_unavailable",
+            "退出成交明细不可得",
+        ),
+    }.get(
+        facts.economics_completeness,
+        ("review_economics_unconfirmed", "收益核算证据不完整"),
+    )
+    if facts.funding_unavailable_reason == "overlapping_instrument_exposure":
+        label = "同标的持仓时段重叠，资金费无法精确归因"
+    return (
+        EvidenceGap(
+            code=code,
+            label=label,
+            impact="净收益与净 R 暂不可确认；已有毛收益和手续费仍分别保留",
         ),
     )
-
-
-def _incomplete_reason(facts: ProgrammaticReviewFacts) -> str:
-    if set(facts.incident_ids) != set(facts.recovered_incident_ids):
-        return "存在未恢复 Incident"
-    if facts.economics_completeness == "funding_unavailable":
-        return "Funding 不可归因"
-    if facts.economics_completeness == "external_exit_unavailable":
-        return "外部平仓成交事实不可获得"
-    if not facts.review_complete:
-        return "当前 Review 证据不完整"
-    if facts.exit_reason is None:
-        return "退出原因证据不完整"
-    return "关键执行或经济证据不完整"
 
 
 def _attention_items(facts: ProgrammaticReviewFacts) -> tuple[str, ...]:
@@ -345,74 +398,53 @@ def _attention_items(facts: ProgrammaticReviewFacts) -> tuple[str, ...]:
 def _center_economics(
     reviews: tuple[tuple[ReviewCenterItemFacts, ProgrammaticTradeReview], ...],
 ) -> tuple[MoneyMetric, MoneyMetric, MoneyMetric, MoneyMetric]:
-    if not reviews:
-        reason = "no_review_evidence"
-        return (
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
+    verified, coverage = _verified_economics(reviews)
+    values = []
+    for name in ("net_pnl", "net_r", "fees", "funding"):
+        metric = getattr(verified, name)
+        if coverage[name].available_count != len(reviews):
+            metric = MoneyMetric(
+                value=None,
+                unit=metric.unit,
+                unavailable_reason="incomplete_review_economics",
+            )
+        values.append(metric)
+    return values[0], values[1], values[2], values[3]
+
+
+def _verified_economics(
+    reviews: tuple[tuple[ReviewCenterItemFacts, ProgrammaticTradeReview], ...],
+) -> tuple[ReviewEconomicSummary, dict[str, MetricCoverage]]:
+    metrics = {}
+    coverage = {}
+    for name in ("gross_pnl", "fees", "funding", "net_pnl", "net_r"):
+        available = [
+            getattr(review.economic_summary, name).value
+            for _, review in reviews
+            if getattr(review.economic_summary, name).value is not None
+        ]
+        with localcontext() as context:
+            context.prec = 80
+            value = sum(available, Decimal(0)) if available else None
+        metrics[name] = MoneyMetric(
+            value=value,
+            unit="R" if name == "net_r" else "USDT",
+            unavailable_reason=None
+            if available
+            else "no_review_evidence"
+            if not reviews
+            else "no_confirmed_metric",
         )
-    summaries = tuple(review.economic_summary for _item, review in reviews)
-    if any(
-        metric.value is None
-        for summary in summaries
-        for metric in (
-            summary.net_pnl,
-            summary.net_r,
-            summary.fees,
-            summary.funding,
+        coverage[name] = MetricCoverage(
+            available_count=len(available),
+            total_count=len(reviews),
+            missing_ticket_ids=tuple(
+                review.ticket_id
+                for _, review in reviews
+                if getattr(review.economic_summary, name).value is None
+            ),
         )
-    ):
-        reason = "incomplete_review_economics"
-        return (
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="R", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-            MoneyMetric(value=None, unit="USDT", unavailable_reason=reason),
-        )
-    return (
-        MoneyMetric(
-            value=sum(
-                (
-                    _required_value(summary.net_pnl, "Net PnL")
-                    for summary in summaries
-                ),
-                Decimal(0),
-            ),
-            unit="USDT",
-        ),
-        MoneyMetric(
-            value=sum(
-                (
-                    _required_value(summary.net_r, "Net R")
-                    for summary in summaries
-                ),
-                Decimal(0),
-            ),
-            unit="R",
-        ),
-        MoneyMetric(
-            value=sum(
-                (
-                    _required_value(summary.fees, "Fees")
-                    for summary in summaries
-                ),
-                Decimal(0),
-            ),
-            unit="USDT",
-        ),
-        MoneyMetric(
-            value=sum(
-                (
-                    _required_value(summary.funding, "Funding")
-                    for summary in summaries
-                ),
-                Decimal(0),
-            ),
-            unit="USDT",
-        ),
-    )
+    return ReviewEconomicSummary(**metrics), coverage
 
 
 def _quality_breakdown(
@@ -431,7 +463,7 @@ def _exit_breakdown(
 ) -> tuple[ReviewBreakdownItem, ...]:
     return _breakdown(
         (
-            (review.exit_reason or "exit_reason_unavailable", item.review.evidence)
+            (exit_reason_group(review.exit_reason), item.review.evidence)
             for item, review in reviews
         )
     )
@@ -490,6 +522,7 @@ def _sentence(
     template_id: Literal[
         "execution_complete",
         "execution_recovered",
+        "execution_incomplete",
         "economics_complete",
         "economics_incomplete",
         "review_waiting",
@@ -514,7 +547,13 @@ def _sentence(
 def _exit_summary(exit_reason: str | None) -> str:
     if exit_reason is None:
         return "退出原因证据不完整"
-    return _EXIT_SUMMARIES.get(exit_reason, "退出由明确 Lifecycle 事实触发")
+    from src.trading_kernel.application.owner_console.exit_attribution import (
+        canonical_exit_attribution,
+    )
+
+    return _EXIT_SUMMARIES.get(
+        exit_reason, canonical_exit_attribution(exit_reason).label
+    )
 
 
 def _required_value(metric: MoneyMetric, label: str) -> Decimal:
@@ -575,10 +614,16 @@ def _validate_exact_evidence(
         (facts.current_review_evidence, "review", "current Review"),
     )
     for ref, kind, label in typed_refs:
-        if ref is not None and ref.kind != kind:
-            raise ProgrammaticReviewContradiction(
-                f"{label} evidence kind mismatch"
-            )
+        allowed = (
+            {kind, "command"}
+            if label == "exit trigger"
+            and facts.exit_attribution is not None
+            and facts.exit_attribution.source == "review_fills"
+            and ref in facts.exit_attribution.evidence
+            else {kind}
+        )
+        if ref is not None and ref.kind not in allowed:
+            raise ProgrammaticReviewContradiction(f"{label} evidence kind mismatch")
     for ref in facts.incident_evidence:
         if ref.kind != "incident":
             raise ProgrammaticReviewContradiction(
@@ -680,11 +725,13 @@ def _validate_economics_shape(facts: ProgrammaticReviewFacts) -> None:
             "review_missing",
             "ticket_active",
         }
-        valid = all(
-            metric.value is None
-            and metric.unavailable_reason in allowed_reasons
-            for metric in metrics
-        ) and len({metric.unavailable_reason for metric in metrics}) == 1
+        valid = (
+            all(
+                metric.value is None and metric.unavailable_reason in allowed_reasons
+                for metric in metrics
+            )
+            and len({metric.unavailable_reason for metric in metrics}) == 1
+        )
     if not valid:
         raise ProgrammaticReviewContradiction(
             f"invalid {completeness} economics shape"

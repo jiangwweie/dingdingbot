@@ -29,9 +29,9 @@ export function formatReviewMoneyMetric(
     } else if (reason === 'ticket_active') {
       label = '持仓中 · 未结';
     } else if (reason === 'incomplete_review_economics') {
-      label = '经济数据不完整';
+      label = '净额尚未完整核实';
     } else if (reason) {
-      label = reason;
+      label = ({ funding_unavailable: '资金费无法归因', external_exit_unavailable: '退出成交明细缺失', review_missing: '尚无收益核算', no_review_evidence: '暂无已核实数据', no_confirmed_metric: '暂无已核实金额' } as Record<string, string>)[reason] ?? '该项暂不可确认';
     }
     return {
       formatted: label,
@@ -85,11 +85,11 @@ export function formatExecutionClassification(
 ): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
   switch (classification) {
     case 'complete':
-      return { label: '执行完整', tone: 'success' };
+      return { label: '链路已核实', tone: 'success' };
     case 'recovered_incident':
       return { label: '异常已恢复', tone: 'attention' };
     case 'evidence_incomplete':
-      return { label: '证据不完整', tone: 'danger' };
+      return { label: '存在待核实项', tone: 'attention' };
     case 'waiting_review':
       return { label: '等待复盘', tone: 'neutral' };
     case 'in_progress':
@@ -106,7 +106,7 @@ export function formatReviewStatus(
     case 'complete':
       return { label: '完整', tone: 'success' };
     case 'incomplete_evidence':
-      return { label: '证据不完整', tone: 'danger' };
+      return { label: '存在待核实项', tone: 'attention' };
     case 'waiting_review':
     case 'waiting_for_review':
       return { label: '等待复盘', tone: 'neutral' };
@@ -124,9 +124,11 @@ export function formatReviewSentenceTemplate(
 ): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
   switch (templateId) {
     case 'execution_complete':
-      return { label: '执行完整', tone: 'success' };
+      return { label: '链路已核实', tone: 'success' };
     case 'execution_recovered':
       return { label: '异常已恢复', tone: 'attention' };
+    case 'execution_incomplete':
+      return { label: '执行证据待核实', tone: 'attention' };
     case 'economics_complete':
       return { label: '经济结算完整', tone: 'success' };
     case 'economics_incomplete':
@@ -141,6 +143,17 @@ export function formatReviewSentenceTemplate(
 }
 
 const EXIT_REASON_ZH: Record<string, string> = {
+  owner_flatten_all: 'Owner 全部持仓受控平仓',
+  pre_tp1_time_stop_hit: 'TP1 前持仓超时退出',
+  absolute_time_stop_hit: '持仓达到最长时限退出',
+  protection_stop_triggered: '保护止损成交',
+  exit_reason_evidence_missing: '退出原因未确认',
+  exit_reason_unavailable: '退出原因未确认',
+  exit_not_applicable: '不适用（未形成持仓）',
+  ticket_active: '持仓未退出',
+  stop_loss: '止损触发',
+  take_profit: '止盈触发',
+  tp1_hit: 'TP1 触发',
   initial_stop_triggered: '初始止损触发',
   'Initial Stop': '初始止损触发',
   take_profit_triggered: '止盈成交触发',
@@ -169,9 +182,9 @@ const EXIT_REASON_ZH: Record<string, string> = {
 export function formatReviewExitReason(
   raw: string | null | undefined
 ): { label: string; raw: string | null } {
-  if (!raw) return { label: '—', raw: null };
-  if (raw.startsWith('owner_flatten_all')) {
-    return { label: 'Owner 受控平仓', raw };
+  if (!raw) return { label: '退出原因未确认', raw: null };
+  if (raw.startsWith('owner_flatten_all:')) {
+    return { label: 'Owner 全部持仓受控平仓', raw };
   }
   if (raw.startsWith('deployment_drain')) {
     return { label: '部署前安全退出', raw };
@@ -185,5 +198,5 @@ export function formatReviewExitReason(
   if (EXIT_REASON_ZH[raw]) {
     return { label: EXIT_REASON_ZH[raw], raw };
   }
-  return { label: raw, raw };
+  return { label: '退出原因未识别', raw };
 }

@@ -1,3 +1,4 @@
+import { formatReviewExitReason } from './reviewMapping.ts';
 import { MoneyDecimal, protectionFact, terminalFact } from './tradeTruth.ts';
 import type { TradeListItem, TradeEpisode, MoneyMetric, TradesSummaryMetrics } from '../types/trades.ts';
 import { cleanSymbol } from '../utils/symbol.ts';
@@ -24,18 +25,6 @@ export const STAGE_LABELS_ZH: Record<string, string> = {
   review: '事后复盘 (Review)',
 };
 
-export const EXIT_REASON_ZH: Record<string, string> = {
-  'Initial Stop': '初始止损 (Initial Stop)',
-  'TP1 + Runner Exit': '止盈平保 (TP1 + Runner Exit)',
-  'Controlled Exit': '受控平仓 (Controlled Exit)',
-  'External Flat / Exit Fills Unavailable': '外部平仓已确认',
-  'stop_loss': '止损触发',
-  'take_profit': '止盈触发',
-  'tp1_hit': 'TP1 触发',
-  'exit_reason_evidence_missing': '证据待补全',
-  'exit_not_applicable': '不适用',
-  'ticket_active': '持仓未退出',
-};
 
 export function formatMoneyMetric(
   metric: MoneyMetric | null | undefined,
@@ -132,11 +121,7 @@ export function mapTradeListItemToEpisode(
 
   // Exit reason
   const rawExitReason = item.exit_reason;
-  const exitReasonZh = rawExitReason
-    ? (EXIT_REASON_ZH[rawExitReason] ?? rawExitReason)
-    : item.exit_reason_unavailable_reason
-    ? (EXIT_REASON_ZH[item.exit_reason_unavailable_reason] ?? '未就绪')
-    : '—';
+  const exitReasonZh = item.exit_attribution?.label ?? formatReviewExitReason(rawExitReason ?? item.exit_reason_unavailable_reason).label;
 
   return {
     ticket_id: item.ticket_id,

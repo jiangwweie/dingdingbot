@@ -45,3 +45,26 @@ API, PostgreSQL and exchange controls are not changed by a static release.
 
 Current production identity is recorded only in
 `docs/current/MAIN_CONTROL_ROADMAP.md`.
+
+## Trade explanations and Review coverage
+
+The Owner read API owns exit attribution across Trades, Strategies and Review.
+An explicit `ExitRequested` reason has its exact event evidence. Otherwise a
+terminal Ticket may be attributed only from its current Review's complete exit
+fills and exact same-Ticket order commands. Conditional Algo IDs and actual fill
+Order IDs are distinct; the persisted Review owns their association. Missing,
+partial, duplicate or ambiguous facts remain unknown. Frozen time-stop details
+come from the Ticket's exact Profile ID and semantic hash, never today's Binding.
+
+Execution evidence and economic evidence are independent. A funding gap does
+not make the execution chain incomplete; a missing exit cause does not erase
+confirmed PnL. Review completeness still requires both dimensions. Raw reasons,
+authorization IDs and evidence remain available in details.
+
+Review responses describe one returned page (`summary_scope=page`). The UI
+combines deduplicated loaded Tickets (`summary_scope=loaded_records`); it never
+claims a full-window total before all pages are loaded. Each metric has its own
+coverage and missing Ticket IDs. Strict totals remain unavailable when incomplete;
+`verified_totals` separately carries clearly labelled partial sums. Unknown
+funding is never zero. No historical Review, economic fact or trade policy is
+rewritten by these read models.

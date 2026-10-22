@@ -196,6 +196,15 @@ def build_trade_causality(facts: TradeCausalityFacts) -> TradeCausalityDetail:
     raw_commands = _raw_commands(facts)
     raw_incidents = _raw_incidents(facts)
     exit_reason = _exit_reason(ordered_events)
+    if exit_reason is None and trade.exit_attribution is not None and trade.exit_attribution.code is not None:
+        exit_reason = CausalityExitReason(
+            detail=trade.exit_attribution.detail,
+            code=trade.exit_attribution.code,
+            label=trade.exit_attribution.label,
+            evidence=trade.exit_attribution.evidence,
+        )
+    if exit_reason is not None and trade.exit_attribution is not None:
+        exit_reason = exit_reason.model_copy(update={"detail": trade.exit_attribution.detail})
     annotations = _annotations(facts, ordered_events)
     stages = _stages(
         facts,

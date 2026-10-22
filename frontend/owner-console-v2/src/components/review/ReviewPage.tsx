@@ -65,7 +65,7 @@ export const ReviewPage: React.FC = () => {
             </span>
           </div>
           <p className="mt-1 text-xs text-text-secondary leading-relaxed">
-            逐笔终态执行质量、经济结算事实、证据完整性与事后因果追溯
+            逐笔核对退出原因、收益核算与执行证据，未知事实明确标注
           </p>
         </div>
 
@@ -162,6 +162,7 @@ export const ReviewPage: React.FC = () => {
           <ReviewMetricsDeck
             summary={summary}
             totalAttentionCount={totalAttentionCount}
+            onSelectTicket={setSelectedTicketId}
             isLoading={false}
           />
 
