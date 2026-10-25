@@ -110,3 +110,26 @@
 本地浏览器验收使用合成数据和生产构建样式，覆盖偏空确认、状态回读与 390px 无横向溢出。
 截图和 CLI 记录位于忽略的 `output/playwright/owner-directional-risk-v1/`；不作为运行权威提交。
 完整测试结果以冻结候选后的实际记录为准，本文不把局部成功合成生产 PASS。
+
+
+## 本地验收结果
+
+**功能基线 `2fd2823e` 完成整套本地回归；安全补充修复为 `c22b4778`。**
+补充修复只隔离发单／恢复取得确定结果之后的纯方向控制校验异常；新增准入仍严格拒绝
+无效控制，SQL 错误仍会使事务失败。以下区分完整基线与修复后的验证，不冒充正式发布证书。
+
+| 验证范围 | 结果 | 代码与证据边界 |
+| --- | --- | --- |
+| 完整集成回归 | **1741 PASS** | 功能基线；4 项周期资源测试按既有组合排除；`frozen-integration.log` |
+| 发单／未知结果／控制故障补充 | **53 PASS** | 安全修复后；包括 2 项损坏控制记录的新增回归；`final-safety-supplement.log` |
+| Unit、Architecture、HTTP | **1836 PASS** | 安全修复后；`final-safety-core.log` |
+| Full chain | **69 PASS** | 安全修复后；`final-safety-full-chain.log` |
+| V2 组件与交互 | **120 PASS** | 前端未被安全补充修改；`frozen-v2-tests.log` |
+| 静态与构建 | **Ruff / Mypy / V2 build / diff PASS** | Mypy 206 个源文件；`final-safety-ruff.log`、`final-safety-mypy.log`、`frozen-v2-build.log` |
+
+日志保存在忽略的 `.local/owner-directional-risk-v1/`，浏览器截图见上节。
+这些是本地验证证据，不是生产运行权威。独立验证分类为 **R4**；正式 exact-commit R4
+发布证书、Tokyo 行动时门槛、生产控制写入与自然交易验收尚未执行。
+
+**本次完成本地能力交付，不改变当前生产部署、Owner 选择、交易范围或研究配额。**
+经济有效性仍按已批准的前瞻研究边界评价。
