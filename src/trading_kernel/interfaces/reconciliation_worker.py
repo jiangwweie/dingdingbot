@@ -306,7 +306,14 @@ async def run_reconciliation_worker_once(
         uow_factory,
         now_ms=request.now_ms,
     )
-    if safety is None and housekeeping.status is ReconciliationWorkerStatus.NO_WORK:
+    # Position safety and routine certification can remain continuously due.
+    # Complete one bounded control recovery after those actions rather than
+    # requiring an idle cadence; unresolved commands retain exclusive priority.
+    if (
+        unknown is None
+        and (safety is None or safety.status is not ReconciliationWorkerStatus.RUNTIME_FENCED)
+        and housekeeping.status is not ReconciliationWorkerStatus.RUNTIME_FENCED
+    ):
         await recover_directional_transition_once(
             uow_factory,
             venue_truth,

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -39,6 +42,72 @@ from tests.trading_kernel.support.reducer_states import (
 from tests.trading_kernel.support.unknown_commands import (
     cancel_command as _cancel_command,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "housekeeping_status",
+    [
+        ReconciliationWorkerStatus.NO_WORK,
+        ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED,
+    ],
+)
+async def test_directional_recovery_progresses_with_continuous_position_safety(
+    monkeypatch, housekeeping_status
+):
+    state = SimpleNamespace(
+        exchange_commands=SimpleNamespace(get_one_unknown=AsyncMock(return_value=None)),
+        aggregates=SimpleNamespace(
+            claim_next_critical_reconciliation_work=AsyncMock(return_value=object())
+        ),
+    )
+
+    @asynccontextmanager
+    async def factory():
+        yield state
+
+    recovery = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        worker_module,
+        "_run_entry_vacuum_position_fact_drain_once",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_reconciliation_worker_once_core",
+        AsyncMock(
+            return_value=worker_module.ReconciliationWorkerResult(
+                status=ReconciliationWorkerStatus.POSITION_RECONCILED
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "_run_housekeeping_once",
+        AsyncMock(
+            return_value=worker_module.ReconciliationWorkerResult(
+                status=housekeeping_status
+            )
+        ),
+    )
+    monkeypatch.setattr(worker_module, "advance_flatten_operation_once", AsyncMock())
+    monkeypatch.setattr(worker_module, "recover_directional_transition_once", recovery)
+    result = await run_reconciliation_worker_once(
+        factory,
+        NoTicketVenueTruth(),
+        NoTicketPositionSource(),
+        ReconciliationWorkerRequest(
+            worker_id="reconciliation-worker-test",
+            runtime_commit="kernel-test-head",
+            schema_revision="0013_owner_directional_risk_v1",
+            now_ms=10000,
+            timeout_seconds=1,
+            unknown_visibility_grace_ms=30000,
+            idle_poll_interval_ms=2000,
+        ),
+    )
+    recovery.assert_awaited_once()
+    assert result.status is ReconciliationWorkerStatus.POSITION_RECONCILED
 
 
 class _CommandRepository:
@@ -84,6 +153,9 @@ class _AggregateRepository:
 
 class _UnitOfWork:
     def __init__(self, state):
+        self.directional_risk = SimpleNamespace(
+            next_resolved_send=AsyncMock(return_value=None)
+        )
         self.exchange_commands = state.commands
         self.aggregates = state.aggregates
         self.monitors = getattr(state, "monitors", None) or _MonitorRepository()
@@ -464,7 +536,9 @@ async def test_overdue_certification_preempts_continuous_routine_work_within_two
         )
 
     monkeypatch.setattr(worker_module, "_certify_one_due_instrument", certify)
-    monkeypatch.setattr(worker_module, "_run_reconciliation_worker_once_core", run_routine)
+    monkeypatch.setattr(
+        worker_module, "_run_reconciliation_worker_once_core", run_routine
+    )
     source = NoInstrumentCertificationSource()
     for now_ms in range(5_000, 130_000, 5_000):
         result = await run_reconciliation_worker_once(
