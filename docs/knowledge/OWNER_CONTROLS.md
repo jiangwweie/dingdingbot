@@ -81,6 +81,28 @@ flowchart LR
 
 **分析：控制页需要呈现 Operation 的事实进度，而不是用前端倒计时推断平仓成功。**具体页面验证参考 [ControlledFlattenModal](../../frontend/owner-console-v2/src/components/ControlledFlattenModal.tsx) 与 [ControlsFlattenIntegration 测试](../../frontend/owner-console-v2/src/components/ControlsFlattenIntegration.test.tsx)。
 
+## 方向风险偏好 V1
+
+**这是本地已实现的代码能力，部署与激活需独立证据。**Owner 的偏多／中性／偏空
+表达 Crypto 新开仓的方向风险意愿，Capacity 采用原政策与附加方向上限中更严格者；
+策略观察、维护暂停、选币和已有持仓管理仍各有权威。精确数值与口径归
+[实验风险契约](../current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md)，生产状态归
+[MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
+
+| 阅读问题 | 实现入口 | 关键语义 |
+| --- | --- | --- |
+| 选择怎样变成额度 | [directional_risk](../../src/trading_kernel/domain/directional_risk.py)、[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py) | 精确 Event 范围，只收紧，不扩大基础风险 |
+| 怎样保存选择与历史 | [pg_directional_risk_repository](../../src/trading_kernel/infrastructure/pg_directional_risk_repository.py) | 显式 unset、CAS、请求幂等、不可变规则及审计 |
+| 切换与发送怎样排序 | [dispatch_exchange_command](../../src/trading_kernel/application/dispatch_exchange_command.py)、[venue_adapter](../../src/trading_kernel/infrastructure/venue_adapter.py) | 共享事务锁、准确命令的最终授权、固定签名窗口 |
+| 已成交为何仍在切换中 | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py)、[recover_directional_transition](../../src/trading_kernel/application/recover_directional_transition.py) | 成交保护立即继续；控制完成还需关闭旧发送授权 |
+| 页面怎样处理超时 | [DirectionalRiskCard](../../frontend/owner-console-v2/src/components/overview/DirectionalRiskCard.tsx) | 核验准确请求回执，不用当前选择猜测旧请求是否成功 |
+
+**初始止损风险占用不是实时剩余止损风险。**非终结 Ticket（含未发送者）持续占用
+原始风险；浮盈或止损移动不自动产生额度。控制变化也不补发已经拒绝的 Signal。
+测试入口为[方向控制集成](../../tests/trading_kernel/integration/test_directional_risk_control.py)、
+[真实 HTTP 与受限角色](../../tests/trading_kernel/integration/test_directional_risk_http.py)、
+[完整源保全](../../tests/trading_kernel/integration/test_directional_risk_migration.py)。
+
 ## 读取、交易历史与经济事实
 
 **查询不是修复入口**。读取 Ticket/Review 不能刷新运行投影；完整窗口收益统计有自己的 readonly transaction、覆盖率和 snapshot fingerprint，不应从一页交易明细加总推断全量。（来源：[pg_owner_read_repository](../../src/trading_kernel/infrastructure/pg_owner_read_repository.py)、[performance](../../src/trading_kernel/application/owner_console/performance.py)、[performance 路由](../../src/trading_kernel/interfaces/owner_console_http/routes/performance.py)）

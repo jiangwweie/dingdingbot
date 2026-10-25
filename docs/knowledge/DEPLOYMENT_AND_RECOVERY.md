@@ -62,7 +62,7 @@ flowchart TB
 | **R3** | 同 schema Kernel 行为 | Kernel regular release | flat、当前事实、认证与运行身份；按失败阶段 fence / fix-forward |
 | **R4** | Schema / Registry / Policy / authority | preservation-gated compatible upgrade | 停写、flat、精确来源、保留证明、前向迁移与目标恢复 |
 
-来源：[classify_changed_paths](../../scripts/classify_release.py#L83)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)、[Owner 发布实现](../../scripts/owner_console/deploy_release.py#L111)。混合改动按最高级别，不能仅因有文档文件便归为 R0。
+来源：[classify_changed_paths](../../scripts/classify_release.py#L84)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)、[Owner 发布实现](../../scripts/owner_console/deploy_release.py#L111)。混合改动按最高级别，不能仅因有文档文件便归为 R0。
 
 ## Kernel 正式发布顺序
 

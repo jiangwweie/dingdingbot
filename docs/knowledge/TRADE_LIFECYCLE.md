@@ -19,7 +19,7 @@
 | 5. 获取行动时事实 | Entry 在数据库事务之外读取账户、报价、规则及必要产品 session | `EntryAdmissionSnapshot` 与规则 current | 网络失败、身份不符、事实过期 |
 | 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
 | 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
-| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L171) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
+| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L172) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
 | 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
 | 10. 生命周期维护 | [run_lifecycle_worker_once](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116) | TP1、保本、Runner 或退出命令及状态 | 事实不新鲜、替换/撤单未知 |
 | 11. 核对及清理 | Reconciliation 读取外部持仓与自有余单 | 清理精确残单；满足外部 flat 与无余单后推进闭合 | orphan / unowned order、未知结果、未完成清理 |
@@ -109,7 +109,7 @@ sequenceDiagram
     end
 ```
 
-**ENTRY 的 authoritative absence 不会产生第二代 ENTRY**。其他安全命令是否允许下一代，取决于种类、上一代终态和 reducer；不能套用统一重试规则。（来源：[recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L92)、[require_next_generation_allowed](../../src/trading_kernel/domain/commands.py#L379)、[未知结果测试](../../tests/trading_kernel/unit/test_unknown_command_recovery.py)）
+**ENTRY 的 authoritative absence 不会产生第二代 ENTRY**。其他安全命令是否允许下一代，取决于种类、上一代终态和 reducer；不能套用统一重试规则。（来源：[recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93)、[require_next_generation_allowed](../../src/trading_kernel/domain/commands.py#L379)、[未知结果测试](../../tests/trading_kernel/unit/test_unknown_command_recovery.py)）
 
 ### 部分成交与重启
 

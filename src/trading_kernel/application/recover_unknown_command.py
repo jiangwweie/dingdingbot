@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from decimal import Decimal
 from typing import TypedDict
 
@@ -260,9 +261,17 @@ async def recover_unknown_command(
                 exchange_time_ms=truth.exchange_observed_at_ms,
                 observed_at_ms=decision.observed_at_ms,
             )
-            await uow.directional_risk.progress(
-                domain.venue_id, domain.account_id, decision.observed_at_ms
-            )
+            try:
+                await uow.directional_risk.progress(
+                    domain.venue_id, domain.account_id, decision.observed_at_ms
+                )
+            except ValueError:
+                # The exact accepted/absent result and frozen Ticket safety
+                # commit even if the independent Owner overlay is malformed.
+                logging.getLogger(__name__).warning(
+                    "directional_control_invalid_after_entry_recovery",
+                    extra={"command_id": command.command_id},
+                )
     return decision
 
 

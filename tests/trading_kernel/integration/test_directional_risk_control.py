@@ -205,6 +205,122 @@ async def test_change_after_committed_send_right_waits_for_actual_result(
 
 
 @pytest.mark.asyncio
+async def test_corrupt_directional_control_after_send_does_not_rollback_acceptance(
+    head_template_engine,
+):
+    from src.trading_kernel.infrastructure.pg_models import directional_risk_controls
+
+    engine = head_template_engine
+    t = ticket()
+    await seed_policy(engine)
+    await issue(engine, t)
+
+    class Venue:
+        async def execute(self, request):
+            async with engine.begin() as c:
+                await c.execute(
+                    sa.update(directional_risk_controls).values(
+                        rule_digest="sha256:" + "f" * 64
+                    )
+                )
+            return ExchangeCommandResult(
+                status="accepted",
+                exchange_order_id="accepted-with-control-drift",
+                observed_at_ms=2000,
+            )
+
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        Venue(),
+        dispatch_request(t),
+        entry_facts_source=PreflightFacts(),
+    )
+    assert result.status is DispatchCommandStatus.ACCEPTED
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        aggregate = await uow.aggregates.get(t.identity.ticket_id)
+        assert aggregate.status.value == "entry_accepted"
+        with pytest.raises(ValueError):
+            await uow.directional_risk.get(
+                "binance-usdm", t.identity.netting_domain.account_id
+            )
+
+
+@pytest.mark.asyncio
+async def test_corrupt_control_during_unknown_recovery_preserves_accepted_outcome(
+    head_template_engine,
+):
+    from src.trading_kernel.application.recover_unknown_command import (
+        RecoverUnknownCommandRequest,
+        recover_unknown_command,
+    )
+    from src.trading_kernel.domain.venue_truth import (
+        VenueOrderTruth,
+        VenueTruthSnapshot,
+    )
+    from src.trading_kernel.infrastructure.pg_models import directional_risk_controls
+
+    engine = head_template_engine
+    t = ticket()
+    await seed_policy(engine)
+    await issue(engine, t)
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        SlowVenue(),
+        dispatch_request(t).model_copy(update={"timeout_seconds": 0.01}),
+        entry_facts_source=PreflightFacts(),
+    )
+    assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
+    async with engine.begin() as c:
+        await c.execute(
+            sa.update(directional_risk_controls).values(
+                rule_digest="sha256:" + "f" * 64
+            )
+        )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        command = await uow.exchange_commands.get(result.command_id)
+
+    class Truth:
+        async def lookup_command_truth(self, request):
+            return VenueTruthSnapshot(
+                lookup_status="visible",
+                order=VenueOrderTruth(
+                    exchange_order_id="recovered-entry",
+                    venue_client_order_id=command.venue_client_order_id,
+                    exchange_instrument_id=t.identity.netting_domain.exchange_instrument_id,
+                    position_side="long",
+                    order_side="buy",
+                    quantity=command.payload.quantity,
+                    reduce_only=False,
+                ),
+                position_quantity=0,
+                matching_fill_quantity=0,
+                regular_open_client_order_ids=(),
+                conditional_open_client_order_ids=(),
+                observed_at_ms=8000,
+                exchange_observed_at_ms=7000,
+            )
+
+    recovered = await recover_unknown_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        Truth(),
+        RecoverUnknownCommandRequest(
+            command_id=result.command_id,
+            now_ms=8000,
+            visibility_deadline_ms=5000,
+            timeout_seconds=1,
+        ),
+    )
+    assert recovered.status.value == "reconciled_submitted"
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        assert (
+            await uow.aggregates.get(t.identity.ticket_id)
+        ).status.value == "entry_accepted"
+        assert (
+            await uow.exchange_commands.get(result.command_id)
+        ).status is ExchangeCommandStatus.RECONCILED_ACCEPTED
+
+
+@pytest.mark.asyncio
 async def test_authorized_old_send_keeps_switch_pending_even_after_lease_expiry(
     head_template_engine,
 ):

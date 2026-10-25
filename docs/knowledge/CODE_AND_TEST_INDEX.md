@@ -20,9 +20,9 @@
 | **最终准入** | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) | AdmissionDecision、Policy、组合使用量、ExitBinding | [拒绝无交易权限](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L500) |
 | **定量与冻结 Claim** | [build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L172) | CapacityClaim、sizing 与 stress 证据 | [capacity sizing](../../tests/trading_kernel/unit/test_capacity_sizing.py)、[capacity claim integration](../../tests/trading_kernel/integration/test_capacity_claim_to_ticket.py) |
 | **原子签发** | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) | lane、account exposure、预算、域、Ticket、首命令 | [Decision 失败整体回滚](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L1169)、[issue_ticket integration](../../tests/trading_kernel/integration/test_issue_ticket.py) |
-| **命令派发** | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L171) | VenuePort、ExchangeCommand、独立网络阶段 | [command dispatch](../../tests/trading_kernel/integration/test_command_dispatch.py)、[commands unit](../../tests/trading_kernel/unit/test_commands.py) |
+| **命令派发** | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L172) | VenuePort、ExchangeCommand、独立网络阶段 | [command dispatch](../../tests/trading_kernel/integration/test_command_dispatch.py)、[commands unit](../../tests/trading_kernel/unit/test_commands.py) |
 | **派发前重查** | [revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L152) | 冻结 Claim/Ticket 与 fresh facts | [entry preflight](../../tests/trading_kernel/unit/test_entry_dispatch_preflight.py) |
-| **未知结果恢复** | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L92) | VenueTruthSnapshot、精确 namespace/client ID | [重启后仍不重发](../../tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py#L190) |
+| **未知结果恢复** | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93) | VenueTruthSnapshot、精确 namespace/client ID | [重启后仍不重发](../../tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py#L190) |
 | **持仓与保护确认** | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) | PositionSnapshot、EntryFilled、InitialStopConfirmed | [完整保护和终态](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158) |
 | **退出规则** | [maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116) | TicketLifecycleFacts、冻结 ExitProfile、guards、Runner | [exit policy](../../tests/trading_kernel/unit/test_exit_policy.py)、[lifecycle maintenance](../../tests/trading_kernel/integration/test_ticket_lifecycle_maintenance.py) |
 | **事件与副作用** | [reduce_event](../../src/trading_kernel/domain/reducer.py#L124)、[commit_reduction](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L193) | TradeAggregate、TradeEvent、KernelEffect | [reducer unit](../../tests/trading_kernel/unit/test_reducer.py)、[UoW integration](../../tests/trading_kernel/integration/test_pg_unit_of_work.py) |
@@ -47,7 +47,7 @@
 | **运行隔离** | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15) | certified commit/schema、Incident | [runtime workers](../../tests/trading_kernel/integration/test_global_runtime_workers.py) |
 | **Reconciliation 公平性** | [run_reconciliation_worker_once](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235) | unknown / critical / housekeeping、due claims | [reliability integration](../../tests/trading_kernel/integration/test_reconciliation_reliability.py)、[fairness unit](../../tests/trading_kernel/unit/test_reconciliation_worker_fairness.py) |
 | **常驻与重启** | [run_worker_process_group](../../src/trading_kernel/interfaces/worker_process.py#L99) | independently hosted loops、stop signal、burst bounds | [selection hosting](../../tests/trading_kernel/unit/test_selection_runtime_hosting.py)、[shutdown](../../tests/trading_kernel/unit/test_worker_process_shutdown.py) |
-| **发布分类与恢复** | [classify_changed_paths](../../scripts/classify_release.py#L83)、[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L321) | R0–R4、identity、preservation、阶段化恢复 | [deployment tests](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py)、[release classification](../../tests/trading_kernel/unit/test_release_classification.py) |
+| **发布分类与恢复** | [classify_changed_paths](../../scripts/classify_release.py#L84)、[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L321) | R0–R4、identity、preservation、阶段化恢复 | [deployment tests](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py)、[release classification](../../tests/trading_kernel/unit/test_release_classification.py) |
 
 ## 用五个问题贯通验收
 
@@ -70,6 +70,17 @@
 ### 5. 重启或发布失败怎样恢复
 
 **结论：持久化恢复必须先区分实际 identity/schema 的来源、目标或未知状态。**验证包括[未知 identity 不重启旧写者](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2342)、[已迁移目标走 fix-forward](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L565)、[信号安全关闭](../../tests/trading_kernel/unit/test_worker_process_shutdown.py)。
+
+### 6. 方向偏好切换为何需要区分请求与生效
+
+**结论：旧 ENTRY 已取得发送权时，市场判断切换保持 pending；已有交易照常保护。**
+从[方向规则](../../src/trading_kernel/domain/directional_risk.py)和
+[控制／最终发送授权仓储](../../src/trading_kernel/infrastructure/pg_directional_risk_repository.py)
+追踪到[未知结果恢复](../../src/trading_kernel/application/recover_unknown_command.py)。
+验证包括[真实 PostgreSQL 锁等待及发送交错](../../tests/trading_kernel/integration/test_directional_risk_control.py)、
+[固定签名时间窗](../../tests/trading_kernel/unit/test_entry_send_window.py)、
+[HTTP 权限与准确请求回执](../../tests/trading_kernel/integration/test_directional_risk_http.py)。
+现有能力是否生产激活仍由主控路线图与行动时事实决定。
 
 ## 证据不能跨越的边界
 

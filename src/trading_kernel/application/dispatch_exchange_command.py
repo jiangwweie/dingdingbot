@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from enum import StrEnum
 from typing import TypedDict
 
@@ -424,11 +425,19 @@ async def dispatch_one_command(
                 await uow.directional_risk.finish_send(
                     command.command_id, dispatch_result.observed_at_ms
                 )
-                await uow.directional_risk.progress(
-                    command.ticket_identity.netting_domain.venue_id,
-                    command.ticket_identity.netting_domain.account_id,
-                    dispatch_result.observed_at_ms,
-                )
+                try:
+                    await uow.directional_risk.progress(
+                        command.ticket_identity.netting_domain.venue_id,
+                        command.ticket_identity.netting_domain.account_id,
+                        dispatch_result.observed_at_ms,
+                    )
+                except ValueError:
+                    # Pure control validation must never roll back a known
+                    # ENTRY result. New ENTRY still fails its strict control gate.
+                    logging.getLogger(__name__).warning(
+                        "directional_control_invalid_after_entry_result",
+                        extra={"command_id": command.command_id},
+                    )
         await uow.commit_reduction(
             event=event,
             reduction=reduce_event(aggregate, event),
