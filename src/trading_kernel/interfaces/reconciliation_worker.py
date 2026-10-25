@@ -245,7 +245,7 @@ async def run_reconciliation_worker_once(
     instrument_certification_source: InstrumentCertificationSource | None = None,
     account_position_audit_source: AccountPositionAuditSource | None = None,
 ) -> ReconciliationWorkerResult:
-    """Advance at most one safety and one housekeeping action."""
+    """Advance one safety/housekeeping action each, plus bounded control progress."""
 
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
