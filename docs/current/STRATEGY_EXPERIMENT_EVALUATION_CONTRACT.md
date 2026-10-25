@@ -157,8 +157,8 @@ execution economics and may coexist with the Signal-owned observation.
 
 ## Owner Regime Attribution Boundary
 
-An Owner Regime Gate is a prospective scope restriction on new ENTRY, not a
-source of strategy signals or a substitute execution path. When that product
+An Owner Regime Gate is a prospective scope or risk-budget restriction on new
+ENTRY, not a source of strategy signals or a substitute execution path. When that product
 capability is active, its Journal freezes the effective direction and
 StrategyGroup range before an AdmissionDecision is made. Existing Tickets keep
 their frozen lifecycle and are not reclassified when the Gate later changes.
@@ -176,6 +176,25 @@ the Owner selected `BOTH`. Review must label absent Gate, effective Gate and
 expired Gate states explicitly. Owner attribution never changes Review
 economics, Exit Attribution, StrategyVersion identity or the underlying
 immutable Ticket lineage.
+
+The approved, not-yet-implemented Owner Directional Risk V1 baseline is in the
+[design record](../superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md).
+Its exact numerical matrix belongs only to the experiment profile. A risk
+overlay may reduce a candidate's size as well as reject it; attribution must
+record the effective rule/choice, relevant usage, actual admission outcome and
+dispatch authority without rewriting the original Decision or frozen Ticket.
+A first-blocker label does not prove that removing the overlay would result
+in an executable trade. Minimal authority/admission evidence is mandatory;
+optional market-path samples retain their existing quota and failure disclosure.
+
+The first eight-week review checks operation, coverage and opportunity costs,
+not statistical sufficiency or guaranteed profit. Owner-view prediction,
+excluded opportunity paths and actual portfolio economics remain distinct.
+Capacity-constrained counterfactuals require chronological replay with explicit
+execution assumptions; summing every excluded path is not a feasible baseline
+portfolio. New evidence work remains bounded and does not create a second
+execution chain, expand research quota or defer engineering acceptance until
+profitability is demonstrated.
 
 ## Outcomes
 

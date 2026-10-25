@@ -112,6 +112,29 @@ existing Tickets retain their frozen lifecycle. CPM/MPG/MI/BRF2 have independent
 Selection controls; Crypto SOR remains retired and must not be resumed.
 
 Capacity B allows two distinct same-strategy/side opportunities under the
-unchanged global three-Ticket, risk and Family ceilings. Manual Regime controls
-eligibility only, Selection controls instruments, and Capacity bounds risk.
-No extra economic review or mandatory Shadow waiting period is introduced.
+unchanged global three-Ticket, risk and Family ceilings. Selection controls
+instruments, and Capacity bounds risk. No extra economic review or mandatory
+Shadow waiting period is introduced.
+
+## Owner Directional Risk V1 — approved target
+
+Status: **approved design, not implemented or activated**. Owner Directional
+Risk V1 replaces the earlier eligibility-only planning boundary with an
+explicit directional-risk preference: Owner selects bullish, neutral or
+bearish; Capacity applies a tightening-only overlay to scoped Crypto new ENTRY.
+The [experiment profile](RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md) owns the
+exact approved matrix and risk denominator. The choice does not assert that
+the account is already net long/short, reserve a strategy slot, or override a
+maintenance pause. Signals and existing Ticket lifecycle retain their rules.
+
+The Console shows requested/pending/effective state, effective time, direction
+usage, over-limit existing exposure and a reminder after 24 hours. A saved
+request is not yet effective when an old-authorized ENTRY is still in flight.
+The Owner need not operate internal gates; Entry and Reconciliation resolve
+the transition through the existing durable-command path. No automatic
+neutral reset, flatten, historical Signal replay, or leverage change occurs.
+
+See the [approved design](../superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md)
+and its implementation plan for concurrency proof and acceptance boundaries.
+Software capability, authenticated Owner activation, and economic evidence
+remain separate; current production facts belong only to `MAIN_CONTROL_ROADMAP.md`.

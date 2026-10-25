@@ -97,6 +97,18 @@ headroom, PostgreSQL size, Observation/Shadow scheduling costs, and bounded
 workload scenarios. It is a one-time assessment, not current runtime authority,
 a peak-load certification, or authorization to optimize or upgrade production.
 
+## Owner Directional Risk V1 Design
+
+[Owner 方向风险偏好 V1 设计](superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md)
+records the Owner-approved product baseline and engineering proposals for
+bullish/neutral/bearish Crypto new-ENTRY risk preferences.
+[实施计划](superpowers/plans/2026-10-25-owner-directional-risk-v1-implementation-plan.md)
+orders concurrency proof, persisted authority, Capacity, dispatch recovery,
+Owner Console V2 and evidence work. Implementation and activation are not claimed.
+The existing experiment profile owns the approved numerical matrix; production
+identity and activation remain solely with the main control roadmap. These
+records do not add a new runtime authority or replace existing acceptance gates.
+
 ## Version Nodes
 
 Project releases under `docs/releases/` are immutable publication notes, not

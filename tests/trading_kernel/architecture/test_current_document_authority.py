@@ -143,6 +143,32 @@ def test_current_documents_are_the_minimal_kernel_authority_set() -> None:
     )
 
 
+def test_owner_directional_risk_plan_is_distinct_from_runtime_activation() -> None:
+    profile = (CURRENT_DOCS_ROOT / "RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md").read_text(
+        encoding="utf-8"
+    )
+    owner_model = (CURRENT_DOCS_ROOT / "OWNER_RUNTIME_OPERATING_MODEL.md").read_text(
+        encoding="utf-8"
+    )
+    design = "docs/superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md"
+    plan = "docs/superpowers/plans/2026-10-25-owner-directional-risk-v1-implementation-plan.md"
+    for source in (profile, owner_model):
+        assert "Owner Directional Risk V1" in source
+        assert "approved design, not implemented or activated" in source
+        assert Path(design).name in source
+    for marker in (
+        "| bullish | 0.04 | 0.02 |",
+        "| neutral | 0.04 | 0.04 |",
+        "| bearish | 0.02 | 0.04 |",
+        "Missing or unreadable control is not neutral",
+    ):
+        assert marker in profile
+    index = (REPO_ROOT / "docs/README.md").read_text(encoding="utf-8")
+    for relative_path in (design, plan):
+        assert (REPO_ROOT / relative_path).is_file()
+        assert relative_path.removeprefix("docs/") in index
+
+
 def test_entry_documents_reference_only_existing_current_documents() -> None:
     missing: list[str] = []
     reference_pattern = re.compile(r"docs/current/[A-Za-z0-9_./-]+\.md")

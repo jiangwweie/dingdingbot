@@ -99,6 +99,45 @@ The `new_entry_submit_enabled` setting controls only new ENTRY; it never removes
 protection, controlled flatten, reconciliation, Settlement, or Review authority
 from existing exchange exposure.
 
+## Owner Directional Risk V1 — approved target
+
+Status: **approved design, not implemented or activated**. Owner Directional
+Risk V1 adds a tightening-only Crypto direction overlay to the base Policy
+above. This section owns its approved initial numerical matrix:
+
+| Owner view | LONG planned stop-risk ceiling | SHORT planned stop-risk ceiling |
+| --- | --- | --- |
+| bullish | 0.04 | 0.02 |
+| neutral | 0.04 | 0.04 |
+| bearish | 0.02 | 0.04 |
+
+These fractions use action-time `total_wallet_balance`. The effective ceiling
+is the minimum of current base Policy and the selected overlay. The matrix
+does not change base single-Ticket/gross risk, materialization, leverage,
+margin, Family, strategy-side, or Ticket-count limits. It is not a target
+allocation, an instruction to fill capacity, or a guaranteed loss bound.
+
+Scope is the explicitly Owner-authorized Crypto Events of CPM-RO-001, MPG-001,
+MI-001, BRF2-001 and SOR-1H-001 on the exact account/venue. No special MPG pause,
+new Event side, retired SOR-001 permission, or direct TradFi control is added.
+The existing account-wide same-side nonterminal Ticket initial-risk sum still
+counts when evaluating a scoped Crypto candidate; there is no new funds pool.
+Existing exposure above a newly tightened ceiling remains protected and blocks
+additional scoped risk until capacity is available. Pending Tickets count;
+floating profit and moved stops do not create extra risk budget.
+
+Explicit initial `unset` adds no overlay but is distinct from Owner-selected
+neutral. **Missing or unreadable control is not neutral** and blocks affected
+new ENTRY without removing existing-Ticket safety authority. Installation must
+not invent an Owner selection or resume trading. Changes persist until another
+authenticated Owner choice; the 24-hour reminder never resets the choice.
+
+Product rationale, transition protocol and implementation gates are in the
+[approved design](../superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md).
+The numbers are an approved experiment starting point, not an empirically
+optimal parameter claim. Current activation requires formal runtime evidence
+owned by `MAIN_CONTROL_ROADMAP.md`.
+
 ## Real-Order Permission
 
 Exchange-command capability may be enabled only after:
