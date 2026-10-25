@@ -6,6 +6,7 @@ import { ActiveEpisodesSection } from './ActiveEpisodesSection';
 import { StrategyContributionSection } from './StrategyContributionSection';
 import { RecentAttentionSection } from './RecentAttentionSection';
 import { CausalityDrawer } from './CausalityDrawer';
+import { DirectionalRiskCard } from './DirectionalRiskCard';
 import type { TradeEpisodeSummary } from '../../types/overview';
 import { RefreshCw, AlertCircle } from 'lucide-react';
 
@@ -87,6 +88,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
 
       {/* 2. 今日核心表现 (真实今日净收益 $ / 净 R / 今日信号与准入) */}
       <TodayMetricsDeck metrics={todayMetrics} />
+      <DirectionalRiskCard />
 
       {/* 3. 当前在管交易 (Active Trade Episodes - 严格来自真实 Ticket 列表) */}
       <ActiveEpisodesSection

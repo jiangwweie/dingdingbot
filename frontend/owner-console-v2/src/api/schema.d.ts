@@ -200,6 +200,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/directional-risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Directional Risk */
+        get: operations["get_directional_risk_api_owner_v1_controls_directional_risk_get"];
+        put?: never;
+        /** Change Directional Risk */
+        post: operations["change_directional_risk_api_owner_v1_controls_directional_risk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/directional-risk/requests/{idempotency_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Directional Receipt */
+        get: operations["get_directional_receipt_api_owner_v1_controls_directional_risk_requests__idempotency_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/entry/pause": {
         parameters: {
             query?: never;
@@ -1148,6 +1183,83 @@ export interface components {
             /** Projection Version */
             projection_version: number;
         };
+        /** DirectionalControl */
+        DirectionalControl: {
+            /** Account Id */
+            account_id: string;
+            /** Effective At Ms */
+            effective_at_ms: number;
+            /** Pending Request Id */
+            pending_request_id?: string | null;
+            pending_view?: components["schemas"]["DirectionalView"] | null;
+            /** Requested At Ms */
+            requested_at_ms?: number | null;
+            /**
+             * Rule Digest
+             * @default sha256:2379d5e3f0db356c026c214e9e2713cab7bf335d0026a903d12e82ec3902f23c
+             */
+            rule_digest: string;
+            /**
+             * Rule Id
+             * @default owner-directional-risk:v1
+             */
+            rule_id: string;
+            /** Venue Id */
+            venue_id: string;
+            /** Version */
+            version: number;
+            view: components["schemas"]["DirectionalView"];
+        };
+        /** DirectionalRiskBody */
+        DirectionalRiskBody: {
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "bullish" | "neutral" | "bearish";
+        };
+        /** DirectionalRiskReceipt */
+        DirectionalRiskReceipt: {
+            current: components["schemas"]["DirectionalControl"];
+            result: components["schemas"]["DirectionalControl"] | null;
+        };
+        /** DirectionalRiskView */
+        DirectionalRiskView: {
+            /** Balance Captured At Ms */
+            balance_captured_at_ms: number | null;
+            control: components["schemas"]["DirectionalControl"];
+            /** Long Limit */
+            long_limit: string;
+            /** Long Over Limit At Last Balance */
+            long_over_limit_at_last_balance: boolean | null;
+            /** Long Risk At Stop */
+            long_risk_at_stop: string;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            /** Review Due */
+            review_due: boolean;
+            /** Short Limit */
+            short_limit: string;
+            /** Short Over Limit At Last Balance */
+            short_over_limit_at_last_balance: boolean | null;
+            /** Short Risk At Stop */
+            short_risk_at_stop: string;
+            /** Wallet Balance At Last Admission */
+            wallet_balance_at_last_admission: string | null;
+        };
+        /**
+         * DirectionalView
+         * @enum {string}
+         */
+        DirectionalView: "unset" | "bullish" | "neutral" | "bearish";
         /** DynamicSelectionActivationBody */
         DynamicSelectionActivationBody: {
             /** Effective Session Start Ms */
@@ -3573,6 +3685,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ControlsResponse"];
+                };
+            };
+        };
+    };
+    get_directional_risk_api_owner_v1_controls_directional_risk_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalRiskView"];
+                };
+            };
+        };
+    };
+    change_directional_risk_api_owner_v1_controls_directional_risk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectionalRiskBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_directional_receipt_api_owner_v1_controls_directional_risk_requests__idempotency_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalRiskReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

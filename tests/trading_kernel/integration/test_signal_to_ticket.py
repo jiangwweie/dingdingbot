@@ -1355,6 +1355,11 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
 
 
 async def _seed_runtime_authority(engine: AsyncEngine) -> None:
+    from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+        PostgresDirectionalRiskRepository,
+    )
+    async with engine.begin() as connection:
+        await PostgresDirectionalRiskRepository(connection).initialize(venue_id="binance-usdm", account_id="subaccount-main", now_ms=1_000)
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
 

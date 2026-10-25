@@ -55,9 +55,9 @@ sequenceDiagram
 
 ## 为什么暂停后还有动作
 
-**`new_entry_submit_enabled` 只控制新 ENTRY**。保护、退出、对账、结算与 Review 依赖已暴露 Ticket 冻结的安全权限继续执行；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L150)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
+**`new_entry_submit_enabled` 只控制新 ENTRY**。保护、退出、对账、结算与 Review 依赖已暴露 Ticket 冻结的安全权限继续执行；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L152)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
 
-在数据库中，“配置允许”与“此时有效允许”也不同：Policy 开启之后仍可能被 runtime fence、策略暂停、Vacuum、Authority 到期、账户或容量门槛阻断。读取控制页时要看具体 blocker，而非只看按钮状态。（来源：[read_controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py#L277)、[entry_scope](../../src/trading_kernel/application/owner_console/entry_scope.py)）
+在数据库中，“配置允许”与“此时有效允许”也不同：Policy 开启之后仍可能被 runtime fence、策略暂停、Vacuum、Authority 到期、账户或容量门槛阻断。读取控制页时要看具体 blocker，而非只看按钮状态。（来源：[read_controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py#L421)、[entry_scope](../../src/trading_kernel/application/owner_console/entry_scope.py)）
 
 ## flatten-all 是异步受控操作
 

@@ -16,6 +16,8 @@ const approvedPaths = [
   "/api/owner/v1/control-events",
   "/api/owner/v1/control-operations/{authorization_id}",
   "/api/owner/v1/controls",
+  "/api/owner/v1/controls/directional-risk",
+  "/api/owner/v1/controls/directional-risk/requests/{idempotency_key}",
   "/api/owner/v1/controls/entry/pause",
   "/api/owner/v1/controls/entry/resume",
   "/api/owner/v1/controls/exit-profiles",

@@ -6,7 +6,7 @@
 
 **系统目标是单 Owner、小资本、允许亏损、受边界约束的右尾交易实验**。策略给出机会，Kernel 统一负责资金准入、执行和生命周期；收益稳定性不属于承诺。（现行契约：[实验 Profile](../current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md)、[评估契约](../current/STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md)）
 
-**代码已验证：只有一条 Signal→Ticket→Command 执行链。**研究投影、Owner 查询和选币都复用相关对象边界，不能自行建立第二条交易路径。（来源：[issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L105)、[project_shadow_outcome](../../src/trading_kernel/application/project_shadow_outcome.py)、[owner_control](../../src/trading_kernel/application/owner_control.py)）
+**代码已验证：只有一条 Signal→Ticket→Command 执行链。**研究投影、Owner 查询和选币都复用相关对象边界，不能自行建立第二条交易路径。（来源：[issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110)、[project_shadow_outcome](../../src/trading_kernel/application/project_shadow_outcome.py)、[owner_control](../../src/trading_kernel/application/owner_control.py)）
 
 ## 系统上下文
 
@@ -74,7 +74,7 @@ flowchart TB
 | **Lifecycle** | 已有安全命令、Owner Operation、受保护 Ticket | Initial Stop、止盈、Runner、退出、受控平仓 | 退出事实只读；非 ENTRY 安全命令写 |
 | **Reconciliation** | unknown、critical work、housekeeping due | 外部事实恢复、成交/保护确认、认证、结算与 Review | 只读真相获取；可持久化后续清理命令 |
 
-来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L108)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L232)。
+来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L108)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235)。
 
 **分析：这不是把一个函数拆成四段顺序调用。**Worker 通过数据库的持久化状态、精确键和租约协作；单个进程退出不会把已提交的 Ticket 或 Command 变成内存中的“丢失任务”。Recovery 仍需当前身份和外部事实验证。
 

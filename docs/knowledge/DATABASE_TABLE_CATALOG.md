@@ -4,16 +4,16 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 85 张业务表、1035 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **88 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 90 张业务表、1071 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **85** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **90** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **88** | 不能直接用 len(metadata.tables) 得到总数 | 当前实库一致性证据见 roadmap |
+| 以上三类合计 | **93** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
-**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。代码结构仍为 `0012_generic_signal_path_v1`；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
+**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。代码目标结构为 `0013_owner_directional_risk_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
 ## 怎样读这份目录
 
@@ -30,6 +30,7 @@
 | **[策略与事实语义](#catalog-registry)** | **5** | 定义策略“是什么”，不授予当前下单权限。 |
 | **[标的、产品与市场规则](#catalog-product)** | **5** | 描述交易产品、市场状态、精度及最小下单约束。 |
 | **[退出方案及版本绑定](#catalog-exit)** | **4** | 不可变方案与可切换绑定分离；Ticket 冻结签发时的方案。 |
+| **[方向风险与最终发送授权](#catalog-directional)** | **5** | Owner 偏好、不可变审计和最终 ENTRY 发送时间窗。 |
 | **[Owner 政策、授权与控制](#catalog-owner)** | **7** | 控制允许范围和异步操作，不直接写交易所。 |
 | **[运行配置、认证身份与元数据](#catalog-runtime)** | **5** | 区分运行身份、能力开关、scope 和发布兼容证据。 |
 | **[交易币池与标的认证](#catalog-universe)** | **6** | 维护版本化币池、当前指针、预热与只读资格认证。 |
@@ -1613,6 +1614,72 @@
 **维护与用途**：journal 开始/失败/完成阶段时更新；支持幂等判断和恢复定位，不能证明交易当前已启用。
 
 **字段清单**：`cutover_id`、`phase`、`phase_order`、`status`、`attempt_count`、`started_at_ms`、`completed_at_ms`、`last_error`
+
+<a id="catalog-directional"></a>
+
+## 方向风险与最终发送授权
+
+来源：[方向风险仓储](../../src/trading_kernel/infrastructure/pg_directional_risk_repository.py)、[前向迁移](../../migrations/trading_kernel/versions/0013_owner_directional_risk_v1.py)。
+
+### `brc_directional_risk_rules`
+
+**职责**：不可变方向风险预设。
+
+**主要内容**：一行代表精确规则身份、摘要及方向上限；安装不等于 Owner 激活。
+
+**主键**：`rule_id`
+
+**字段清单**：`rule_id`, `rule_digest`, `limits`, `event_spec_ids`
+
+**维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
+
+### `brc_directional_risk_controls`
+
+**职责**：账户与 venue 的唯一方向风险控制。
+
+**主要内容**：保存当前选择、版本、生效时间及待切换选择；初始化为显式 unset，读失败不等于中性。
+
+**主键**：`venue_id`, `account_id`
+
+**字段清单**：`venue_id`, `account_id`, `version`, `view`, `rule_id`, `rule_digest`, `effective_at_ms`, `pending_view`, `pending_request_id`, `requested_at_ms`
+
+**维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
+
+### `brc_directional_risk_events`
+
+**职责**：追加式 Owner 变更和生效沿革。
+
+**主要内容**：保存请求身份、Owner 理由、幂等指纹与结果；不允许覆写历史请求。
+
+**主键**：`event_id`
+
+**字段清单**：`event_id`, `venue_id`, `account_id`, `event_kind`, `payload`, `occurred_at_ms`
+
+**维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
+
+### `brc_directional_risk_admissions`
+
+**职责**：Signal 出生时方向风险证据。
+
+**主要内容**：关联精确 Signal/Ticket、冻结控制、风险占用、钱包快照、实际准入结果；不改原 AdmissionDecision 或收益。
+
+**主键**：`signal_event_id`
+
+**字段清单**：`signal_event_id`, `ticket_id`, `control`, `directional_risk`, `effective_limit`, `wallet_balance`, `outcome`, `observed_at_ms`
+
+**维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
+
+### `brc_entry_send_authorizations`
+
+**职责**：准确 ENTRY 命令的最终发送授权。
+
+**主要内容**：记录发送者、冻结签名时间窗和采用的控制身份；未知结果不能仅凭本地租约到期释放切换。
+
+**主键**：`command_id`
+
+**字段清单**：`command_id`, `venue_id`, `account_id`, `worker_id`, `authorized_at_ms`, `expires_at_ms`, `control`, `completed_at_ms`
+
+**维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
 ## 沿交易链读表
 

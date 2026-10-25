@@ -2,6 +2,11 @@ from __future__ import annotations
 
 EXPECTED_KERNEL_TABLES = frozenset(
     {
+        "brc_directional_risk_rules",
+        "brc_directional_risk_controls",
+        "brc_directional_risk_events",
+        "brc_directional_risk_admissions",
+        "brc_entry_send_authorizations",
         "brc_account_exposure_current",
         "brc_admission_decisions",
         "brc_budget_reservations",

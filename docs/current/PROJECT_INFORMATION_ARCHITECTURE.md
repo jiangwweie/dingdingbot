@@ -79,6 +79,7 @@ is one unbranched forward Alembic chain:
 -> 0010_dynamic_intent_v1
 -> 0011_orb_session_1h_v1
 -> 0012_generic_signal_path_v1
+-> 0013_owner_directional_risk_v1
 ```
 
 `0001` is a frozen historical schema snapshot. `0002 -> 0003` is a stopped,
@@ -196,3 +197,15 @@ software deployment never enables prospective research collection. Its exact
 limit requires a separate Owner decision. Research cannot create exchange commands
 or change trading policy. Scope and economic interpretation remain owned by
 `STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md`.
+
+## Owner directional risk and final ENTRY send authority
+
+`0012 -> 0013` is a stopped, flat, quiescent, forward-only preservation upgrade.
+It retains all source rows and adds immutable directional rule/scope facts,
+versioned current Owner controls, append-only mutation/admission evidence and
+one final send authorization per exact ENTRY command. Initial controls are
+explicit `unset`; installation never selects an Owner view or resumes ENTRY.
+The fixed signing window and independent recovery of known execution versus
+pending control authority remain inside the existing Kernel and workers.
+The experiment profile owns limits; the operating model owns Owner interaction.
+This is the local tracked target, not evidence of production installation.

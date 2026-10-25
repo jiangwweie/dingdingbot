@@ -17,9 +17,9 @@
 | 3. 生成并摄取 Signal | [produce_strategy_signal](../../src/trading_kernel/application/produce_strategy_signal.py#L27)、[ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806) | 冻结事实、Signal、readiness；检查 Registry/Scope/Universe/Authority | 重复 Episode、过期、不一致事实、退役策略 |
 | 4. 选择候选 | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L108) 先处理已有命令，再检查 lane 和候选 | 有界候选排序，读取策略控制和 scope | lane 忙、无候选、策略暂停 |
 | 5. 获取行动时事实 | Entry 在数据库事务之外读取账户、报价、规则及必要产品 session | `EntryAdmissionSnapshot` 与规则 current | 网络失败、身份不符、事实过期 |
-| 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L105) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
-| 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L91) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
-| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L167) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
+| 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
+| 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
+| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L171) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
 | 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
 | 10. 生命周期维护 | [run_lifecycle_worker_once](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116) | TP1、保本、Runner 或退出命令及状态 | 事实不新鲜、替换/撤单未知 |
 | 11. 核对及清理 | Reconciliation 读取外部持仓与自有余单 | 清理精确残单；满足外部 flat 与无余单后推进闭合 | orphan / unowned order、未知结果、未完成清理 |

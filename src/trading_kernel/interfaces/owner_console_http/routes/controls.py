@@ -31,6 +31,11 @@ from src.trading_kernel.application.owner_control import (
     switch_event_exit_profile,
 )
 from src.trading_kernel.application.ports import RuntimeProfileSnapshot
+from src.trading_kernel.domain.directional_risk import (
+    RULE_LIMITS,
+    DirectionalChangeRequest,
+    DirectionalControl,
+)
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     ExitProfileRecord,
@@ -45,11 +50,18 @@ from src.trading_kernel.domain.selection_authority import (
     SelectionControl,
     SelectionMode,
 )
+from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+    PostgresDirectionalRiskRepository,
+)
 from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
     PostgresExitProfileAuthorityRepository,
 )
+from src.trading_kernel.infrastructure.pg_models import capacity_claims
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     owner_read_transaction,
+)
+from src.trading_kernel.infrastructure.pg_repositories import (
+    PostgresEntryAdmissionRepository,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.interfaces.owner_console_http.auth import (
@@ -93,6 +105,136 @@ class FlattenBody(ControlWriteBody):
     confirmation_text: Literal["确认平仓全部持仓"]
 
 
+class DirectionalRiskBody(ControlWriteBody):
+    view: Literal["bullish", "neutral", "bearish"]
+
+
+class DirectionalRiskView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    control: DirectionalControl
+    long_limit: Decimal
+    short_limit: Decimal
+    long_risk_at_stop: Decimal
+    short_risk_at_stop: Decimal
+    observed_at_ms: int
+    review_due: bool
+    wallet_balance_at_last_admission: Decimal | None
+    balance_captured_at_ms: int | None
+    long_over_limit_at_last_balance: bool | None
+    short_over_limit_at_last_balance: bool | None
+
+
+class DirectionalRiskReceipt(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    result: DirectionalControl | None
+    current: DirectionalControl
+
+
+@router.get("/controls/directional-risk/requests/{idempotency_key}")
+async def get_directional_receipt(
+    idempotency_key: str, request: Request
+) -> DirectionalRiskReceipt:
+    if not idempotency_key.strip() or len(idempotency_key) > 160:
+        raise OwnerControlBlocked("directional_idempotency_key_invalid")
+    settings = get_settings(request)
+    async with owner_read_transaction(get_read_engine(request)) as c:
+        repo = PostgresDirectionalRiskRepository(c)
+        current = await repo.get(settings.venue_id, settings.account_id)
+        if current is None:
+            raise OwnerControlBlocked("directional_control_missing")
+        result = await repo.request_receipt(
+            settings.venue_id, settings.account_id, idempotency_key
+        )
+    return DirectionalRiskReceipt(result=result, current=current)
+
+
+@router.get("/controls/directional-risk")
+async def get_directional_risk(request: Request) -> DirectionalRiskView:
+    settings = get_settings(request)
+    now_ms = get_clock_ms(request)
+    async with owner_read_transaction(get_read_engine(request)) as connection:
+        control = await PostgresDirectionalRiskRepository(connection).get(
+            settings.venue_id, settings.account_id
+        )
+        if control is None:
+            raise OwnerControlBlocked("directional_control_missing")
+        admission = PostgresEntryAdmissionRepository(connection)
+        policy = await admission.get_owner_policy(settings.owner_policy_id)
+        if policy is None:
+            raise OwnerControlBlocked("owner_policy_missing")
+        long_usage = await admission.sum_active_directional_stop_risk(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            position_side="long",
+        )
+        short_usage = await admission.sum_active_directional_stop_risk(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            position_side="short",
+        )
+        balance = (
+            await connection.execute(
+                sa.select(
+                    capacity_claims.c.total_wallet_balance_at_claim,
+                    capacity_claims.c.created_at_ms,
+                )
+                .where(
+                    capacity_claims.c.venue_id == settings.venue_id,
+                    capacity_claims.c.account_id == settings.account_id,
+                )
+                .order_by(capacity_claims.c.created_at_ms.desc())
+                .limit(1)
+            )
+        ).first()
+    limits = RULE_LIMITS[control.view]
+    long_limit = min(policy.directional_stop_risk_limit_fraction, Decimal(limits[0]))
+    short_limit = min(policy.directional_stop_risk_limit_fraction, Decimal(limits[1]))
+    return DirectionalRiskView(
+        control=control,
+        long_limit=min(policy.directional_stop_risk_limit_fraction, Decimal(limits[0])),
+        short_limit=min(
+            policy.directional_stop_risk_limit_fraction, Decimal(limits[1])
+        ),
+        long_risk_at_stop=long_usage,
+        short_risk_at_stop=short_usage,
+        wallet_balance_at_last_admission=None if balance is None else balance[0],
+        balance_captured_at_ms=None if balance is None else balance[1],
+        long_over_limit_at_last_balance=None
+        if balance is None
+        else long_usage > balance[0] * long_limit,
+        short_over_limit_at_last_balance=None
+        if balance is None
+        else short_usage > balance[0] * short_limit,
+        observed_at_ms=now_ms,
+        review_due=control.view != "unset"
+        and now_ms - control.effective_at_ms >= 86_400_000,
+    )
+
+
+@router.post("/controls/directional-risk")
+async def change_directional_risk(
+    body: DirectionalRiskBody, request: Request
+) -> DirectionalControl:
+    _validate_write_request(request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    try:
+        mutation = DirectionalChangeRequest(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            expected_version=body.expected_version,
+            view=body.view,
+            owner_identity=settings.auth.username,
+            reason=body.reason,
+            idempotency_key=body.idempotency_key,
+            requested_at_ms=get_clock_ms(request),
+        )
+        async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            return await uow.directional_risk.request_change(mutation)
+    except ValueError as exc:
+        raise OwnerControlConflict(str(exc)) from exc
+
+
 class DynamicSelectionActivationBody(ControlWriteBody):
     effective_session_start_ms: int = Field(gt=0)
 
@@ -102,12 +244,12 @@ class GenericSelectionActivationBody(ControlWriteBody):
 
 
 class GenericStaticSelectionActivationBody(GenericSelectionActivationBody):
-    rollback_baseline_id: str = Field(min_length=1,max_length=160)
-    selection_epoch_id: str = Field(min_length=1,max_length=160)
+    rollback_baseline_id: str = Field(min_length=1, max_length=160)
+    selection_epoch_id: str = Field(min_length=1, max_length=160)
 
 
 class GenericSelectionPreviewView(BaseModel):
-    model_config=ConfigDict(frozen=True,extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid")
     control: SelectionControl | None
     runtime: GenericSelectionRuntimeReadonlyView
     cadence_hours: int
@@ -116,8 +258,10 @@ class GenericSelectionPreviewView(BaseModel):
 
 
 class OrbSelectionPreviewView(BaseModel):
-    model_config=ConfigDict(frozen=True,extra='forbid')
-    strategy_label: Literal['SOR-1H（1h 入场 / 15m 退出）']='SOR-1H（1h 入场 / 15m 退出）'
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    strategy_label: Literal["SOR-1H（1h 入场 / 15m 退出）"] = (
+        "SOR-1H（1h 入场 / 15m 退出）"
+    )
     installed: bool
     control: SelectionControl | None
     runtime: SelectionRuntimeReadonlyView | None

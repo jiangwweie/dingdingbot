@@ -1048,7 +1048,12 @@ async def _seed_policy(
     max_concurrent_tickets: int = 3,
     max_same_strategy_side: int | None = None,
 ) -> None:
+    from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+        PostgresDirectionalRiskRepository,
+    )
     async with engine.begin() as connection:
+        d = _ticket().identity.netting_domain
+        await PostgresDirectionalRiskRepository(connection).initialize(venue_id=d.venue_id, account_id=d.account_id, now_ms=1_000)
         await connection.execute(
             sa.insert(owner_policy_current).values(
                 owner_policy_id="policy-main",
@@ -1390,6 +1395,11 @@ async def _seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
     """Give direct Ticket tests the same current Scope authority as production."""
 
     identity = ticket.identity
+    from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+        PostgresDirectionalRiskRepository,
+    )
+    async with engine.begin() as c:
+        await PostgresDirectionalRiskRepository(c).initialize(venue_id=identity.netting_domain.venue_id, account_id=identity.netting_domain.account_id, now_ms=ticket.created_at_ms)
     values = {
         "runtime_scope_id": ticket.runtime_scope_id,
         "strategy_group_id": identity.runtime.strategy_group_id,

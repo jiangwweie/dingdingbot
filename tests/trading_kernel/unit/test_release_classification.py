@@ -15,6 +15,7 @@ def test_release_classification_uses_the_heaviest_changed_boundary() -> None:
             ReleaseLevel.R2,
         ),
         (("src/trading_kernel/application/entry.py",), ReleaseLevel.R3),
+        (("src/trading_kernel/domain/directional_risk.py",), ReleaseLevel.R4),
         (("migrations/trading_kernel/versions/0005_example.py",), ReleaseLevel.R4),
         (
             (

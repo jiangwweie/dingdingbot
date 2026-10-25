@@ -46,6 +46,7 @@ from src.trading_kernel.application.runtime_facts import (
 )
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
+    ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
     OrderCommandPayload,
@@ -56,6 +57,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     AccountRiskSnapshot,
     MaintenanceMarginBracket,
 )
+from src.trading_kernel.domain.directional_risk import ENTRY_SEND_WINDOW_MS
 from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOrder,
     EntryAdmissionSnapshot,
@@ -103,6 +105,7 @@ CcxtNetworkError = ccxt_errors.NetworkError
 
 
 class _CcxtExchange(Protocol):
+    def fapiPublicGetTime(self, params: Mapping[str, object]) -> object: ...
     def load_markets(self, reload: bool = False) -> object: ...
 
     def market(self, symbol: str) -> Mapping[str, object]: ...
@@ -1108,6 +1111,28 @@ class CcxtVenueAdapter:
 
         params: dict[str, object] = {"positionSide": request.position_side.upper()}
 
+        if request.kind is ExchangeCommandKind.ENTRY:
+            authorized = request.entry_authorized_at_ms
+            now_ms = self._clock_ms()
+            reason = None
+            if authorized is None or authorized <= 0:
+                reason = "entry_send_authority_missing"
+            elif now_ms < authorized or now_ms >= min(
+                authorized + ENTRY_SEND_WINDOW_MS, request.deadline_at_ms
+            ):
+                reason = "entry_send_window_expired"
+            if reason is not None:
+                return ExchangeCommandResult(
+                    status=ExchangeCommandStatus.REJECTED,
+                    observed_at_ms=now_ms,
+                    reason=reason,
+                )
+            assert authorized is not None
+            params["timestamp"] = authorized
+            params["recvWindow"] = min(
+                ENTRY_SEND_WINDOW_MS, request.deadline_at_ms - authorized
+            )
+
         if isinstance(request.payload, CancelCommandPayload):
             response = await _call_exchange(
                 exchange.cancel_order,
@@ -1276,6 +1301,25 @@ class CcxtVenueAdapter:
             account_id=request.account_id,
             exchange_instrument_id=request.exchange_instrument_id,
         )
+        exchange_time_ms = None
+        if request.entry_window_expires_at_ms is not None:
+            try:
+                time_response = await _call_raw_exchange(exchange.fapiPublicGetTime, {})
+                raw_time = (
+                    time_response.get("serverTime")
+                    if isinstance(time_response, Mapping)
+                    else None
+                )
+                if (
+                    not isinstance(raw_time, bool)
+                    and isinstance(raw_time, int)
+                    and raw_time > 0
+                ):
+                    exchange_time_ms = raw_time
+            except Exception:  # noqa: BLE001 - visible fills must still obtain protection.
+                # Absence cannot resolve without this proof, but exact visible
+                # acceptance must not wait for the signing window to close.
+                exchange_time_ms = None
         order_response: object | None
         if isinstance(request.payload, CancelCommandPayload):
             lookup_order_id: object = request.payload.exchange_order_id
@@ -1375,6 +1419,7 @@ class CcxtVenueAdapter:
             fills, exchange_order_id=(order.exchange_order_id if order else None),
         )
         return VenueTruthSnapshot(
+            exchange_observed_at_ms=exchange_time_ms,
             lookup_status=(
                 VenueLookupStatus.ABSENT
                 if order is None

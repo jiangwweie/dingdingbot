@@ -68,8 +68,14 @@ def build_capacity_claim(
     exit_profile: ExitProfileRecord,
     netting_domain_occupied: bool,
     now_ms: int,
+    directional_overlay_limit: Decimal | None = None,
 ) -> CapacityClaimDecision:
     account_risk = admission_snapshot.account_risk_snapshot
+    directional_limit = (
+        min(policy.directional_stop_risk_limit_fraction, directional_overlay_limit)
+        if directional_overlay_limit is not None
+        else policy.directional_stop_risk_limit_fraction
+    )
     if now_ms < signal.observed_at_ms or now_ms >= signal.expires_at_ms:
         return _refused(CapacityClaimStatus.SIGNAL_INVALID_OR_STALE)
     if (
@@ -127,7 +133,7 @@ def build_capacity_claim(
     ):
         return _refused(CapacityClaimStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED)
     if usage.directional_risk_at_stop >= (
-        account_risk.total_wallet_balance * policy.directional_stop_risk_limit_fraction
+        account_risk.total_wallet_balance * directional_limit
     ):
         return _refused(CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED)
 
@@ -218,7 +224,7 @@ def build_capacity_claim(
                 policy.max_gross_initial_margin_utilization
             ),
             directional_stop_risk_limit_fraction=(
-                policy.directional_stop_risk_limit_fraction
+                directional_limit
             ),
             min_materialization_ratio=policy.min_materialization_ratio,
             permitted_max_leverage=min(

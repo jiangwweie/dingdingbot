@@ -104,7 +104,8 @@ records the Owner-approved product baseline and engineering proposals for
 bullish/neutral/bearish Crypto new-ENTRY risk preferences.
 [实施计划](superpowers/plans/2026-10-25-owner-directional-risk-v1-implementation-plan.md)
 orders concurrency proof, persisted authority, Capacity, dispatch recovery,
-Owner Console V2 and evidence work. Implementation and activation are not claimed.
+Owner Console V2 and evidence work. Local implementation exists; release
+certification, production installation and activation are separately evidenced.
 The existing experiment profile owns the approved numerical matrix; production
 identity and activation remain solely with the main control roadmap. These
 records do not add a new runtime authority or replace existing acceptance gates.

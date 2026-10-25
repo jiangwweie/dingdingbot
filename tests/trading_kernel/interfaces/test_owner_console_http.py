@@ -60,6 +60,24 @@ trade_item_facts = cast(Any, _FACTORIES.trade_item_facts)
 PASSWORD = "correct horse"
 TOTP_SEED = "JBSWY3DPEHPK3PXP"
 BASE_MS = 1_800_000_000_000
+
+
+@pytest.mark.asyncio
+async def test_directional_mutation_requires_fresh_step_up(owner_console_client):
+    response = await owner_console_client.post(
+        "/api/owner/v1/controls/directional-risk", headers={"origin": "https://owner.example.test"},
+        json={"view": "bearish", "expected_version": 1, "reason": "outlook", "idempotency_key": "direction-test"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_directional_mutation_never_accepts_arbitrary_scope_or_limits(owner_console_client):
+    response = await owner_console_client.post(
+        "/api/owner/v1/controls/directional-risk", headers={"origin": "https://owner.example.test"},
+        json={"view": "bearish", "expected_version": 1, "reason": "outlook", "idempotency_key": "direction-test", "long_limit": "0.10", "account_id": "other"},
+    )
+    assert response.status_code == 422
 PASSWORD_HASHER = PasswordHasher(
     time_cost=3,
     memory_cost=65536,
@@ -733,6 +751,8 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/strategies/{strategy_version_id}/tickets",
         "/api/owner/v1/market/candles",
         "/api/owner/v1/controls",
+        "/api/owner/v1/controls/directional-risk",
+        "/api/owner/v1/controls/directional-risk/requests/{idempotency_key}",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/pause",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/resume",
         "/api/owner/v1/controls/strategies/{strategy_group_id}/selection/dynamic/activate",

@@ -29,6 +29,7 @@ GRANT USAGE ON SCHEMA public TO brc_owner_control;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO brc_owner_control;
 
 GRANT INSERT ON TABLE
+    brc_directional_risk_events,
     brc_owner_authorizations,
     brc_strategy_entry_control_events,
     brc_owner_control_operation_events,
@@ -53,6 +54,7 @@ GRANT EXECUTE ON FUNCTION brc_lock_owner_static_retry_sources_v1(text,text),
 TO brc_owner_control;
 
 GRANT UPDATE ON TABLE
+    brc_directional_risk_controls,
     brc_strategy_entry_controls_current,
     brc_owner_control_operations_current,
     brc_owner_policy_current,

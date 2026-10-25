@@ -14,6 +14,7 @@ from src.trading_kernel.application.ports import (
     AggregateVersionConflict,
     BudgetRepository,
     CapacityClaimRepository,
+    DirectionalRiskRepository,
     EntryAdmissionRepository,
     EventRepository,
     ExchangeCommandRepository,
@@ -77,6 +78,9 @@ from src.trading_kernel.domain.incident_blocking import (
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
+from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+    PostgresDirectionalRiskRepository,
+)
 from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
     PostgresExitProfileAuthorityRepository,
 )
@@ -113,6 +117,7 @@ __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
 
 
 class PostgresKernelUnitOfWork:
+    directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository
     events: EventRepository
@@ -143,6 +148,7 @@ class PostgresKernelUnitOfWork:
             raise RuntimeError("unit of work is already active")
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
+        self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
         self.aggregates = PostgresAggregateRepository(self._connection)
         self.events = PostgresEventRepository(self._connection)

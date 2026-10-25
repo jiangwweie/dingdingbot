@@ -398,7 +398,7 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
-    if source_revision in {GENERIC_SELECTION_SOURCE_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
+    if source_revision in {GENERIC_SELECTION_SOURCE_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1"}:
         return await _verify_generic_selection_source(database_url, source_revision)
     if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
         return await _verify_dynamic_selection_source(
@@ -497,6 +497,7 @@ async def _verify_preservation(
         "0009_capacity_policy_v0",
         "0010_dynamic_intent_v1",
         "0011_orb_session_1h_v1",
+        "0012_generic_signal_path_v1",
     }:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
@@ -508,7 +509,9 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            if source_revision == "0011_orb_session_1h_v1":
+            if source_revision == "0012_generic_signal_path_v1":
+                manifest=await _directional_source_preservation_manifest(connection)
+            elif source_revision == "0011_orb_session_1h_v1":
                 manifest=await _signal_path_source_preservation_manifest(connection)
             elif source_revision == "0010_dynamic_intent_v1":
                 manifest=await _orb_source_preservation_manifest(connection)
@@ -535,7 +538,8 @@ async def _verify_preservation(
     finally:
         await engine.dispose()
     allowed_targets_by_source: dict[str, frozenset[str]] = {
-        "0011_orb_session_1h_v1":frozenset({"0011_orb_session_1h_v1",EXPECTED_ALEMBIC_REVISION}),
+        "0012_generic_signal_path_v1":frozenset({"0012_generic_signal_path_v1",EXPECTED_ALEMBIC_REVISION}),
+        "0011_orb_session_1h_v1":frozenset({"0011_orb_session_1h_v1","0012_generic_signal_path_v1",EXPECTED_ALEMBIC_REVISION}),
         "0010_dynamic_intent_v1":frozenset({"0010_dynamic_intent_v1",EXPECTED_ALEMBIC_REVISION}),
         "0009_capacity_policy_v0": frozenset({"0009_capacity_policy_v0", "0010_dynamic_intent_v1", EXPECTED_ALEMBIC_REVISION}),
         COMPATIBLE_SOURCE_REVISION: frozenset(
@@ -930,7 +934,7 @@ async def _verify_generic_selection_source(
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
             shape = await _verify_exact_metadata_shape(
-                connection, expected_columns=(_source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
+                connection, expected_columns=(_source_0012_table_columns() if source_revision=="0012_generic_signal_path_v1" else _source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
                     else _source_0010_table_columns() if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1"}
                     else _source_0007_table_columns()),
             )
@@ -949,10 +953,10 @@ async def _verify_generic_selection_source(
                 ))) or 0),
                 "open_selection_vacuums": await connection.run_sync(
                     lambda bind: count_nonquiescent_source_vacuums(bind,
-                        allow_paused_failed_generic=source_revision in {"0010_dynamic_intent_v1","0011_orb_session_1h_v1"})
+                        allow_paused_failed_generic=source_revision in {"0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1"})
                 ),
             })
-            manifest = (await _signal_path_source_preservation_manifest(connection) if source_revision=="0011_orb_session_1h_v1" else
+            manifest = (await _directional_source_preservation_manifest(connection) if source_revision=="0012_generic_signal_path_v1" else await _signal_path_source_preservation_manifest(connection) if source_revision=="0011_orb_session_1h_v1" else
                 await _orb_source_preservation_manifest(connection) if source_revision=="0010_dynamic_intent_v1" else
                 await _dynamic_intent_source_preservation_manifest(connection) if source_revision=="0009_capacity_policy_v0" else await _generic_source_preservation_manifest(connection))
             preserved_runtime = await read_preserved_runtime_state(connection)
@@ -964,7 +968,7 @@ async def _verify_generic_selection_source(
             capabilities = await _current_capabilities(
                 connection, runtime_identity=runtime_identity,
             )
-            if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1","0011_orb_session_1h_v1"}:
+            if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1"}:
                 provenance: dict[str, object] = {"status": "pass" if shape["status"] == "pass" and revision == source_revision else "fail", "basis": "exact unchanged 0009 authority"}
             else:
                 try:
@@ -2675,6 +2679,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 "0009_capacity_policy_v0",
                 "0010_dynamic_intent_v1",
                 "0011_orb_session_1h_v1",
+        "0012_generic_signal_path_v1",
                 EXPECTED_ALEMBIC_REVISION,
             }
             else "fail"
@@ -2859,9 +2864,79 @@ def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
 
 
 
-_SIGNAL_PATH_NEW_TABLES = {"brc_research_collection_control","brc_research_collection_daily","brc_research_collection_events"}
-_SIGNAL_PATH_NEW_COLUMNS = {"reference_at_ms","price_basis","path_spec_digest","path_metrics",
-    "attempt_count","next_attempt_at_ms","retry_deadline_ms","source_runtime_commit","last_attempted_at_ms"}
+_DIRECTIONAL_NEW_TABLES = {
+    "brc_directional_risk_rules",
+    "brc_directional_risk_controls",
+    "brc_directional_risk_events",
+    "brc_directional_risk_admissions",
+    "brc_entry_send_authorizations",
+}
+
+
+def _source_0012_table_columns() -> dict[str, tuple[str, ...]]:
+    return {
+        table.name: tuple(table.c.keys())
+        for table in metadata.tables.values()
+        if table.name not in _DIRECTIONAL_NEW_TABLES
+    }
+
+
+async def _directional_source_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
+    revision = await _alembic_revision(connection)
+    if revision not in {"0012_generic_signal_path_v1", EXPECTED_ALEMBIC_REVISION}:
+        raise ValueError(
+            "Directional risk preservation requires exact 0012 source or target"
+        )
+    tables = []
+    count = 0
+    for name, columns in sorted(_source_0012_table_columns().items()):
+        table = metadata.tables[name]
+        rows = [
+            dict(row)
+            for row in (
+                await connection.execute(sa.select(*(table.c[c] for c in columns)))
+            ).mappings()
+        ]
+        canonical = sorted(
+            (_canonical_value(row) for row in rows),
+            key=lambda row: json.dumps(row, sort_keys=True),
+        )
+        item = {
+            "table": name,
+            "columns": list(columns),
+            "rows": canonical,
+            "row_count": len(rows),
+        }
+        tables.append({**item, "digest": _sha256_json(item)})
+        count += len(rows)
+    payload = {
+        "schema": "brc.trading_kernel.0012_preservation.v1",
+        "source_revision": "0012_generic_signal_path_v1",
+        "tables": tables,
+        "table_count": len(tables),
+        "row_count": count,
+    }
+    return {**payload, "digest": _sha256_json(payload)}
+
+
+_SIGNAL_PATH_NEW_TABLES = {
+    "brc_research_collection_control",
+    "brc_research_collection_daily",
+    "brc_research_collection_events",
+}
+_SIGNAL_PATH_NEW_COLUMNS = {
+    "reference_at_ms",
+    "price_basis",
+    "path_spec_digest",
+    "path_metrics",
+    "attempt_count",
+    "next_attempt_at_ms",
+    "retry_deadline_ms",
+    "source_runtime_commit",
+    "last_attempted_at_ms",
+}
 
 
 def _source_tables_before_signal_path() -> tuple[sa.Table, ...]:
@@ -2871,18 +2946,18 @@ def _source_tables_before_signal_path() -> tuple[sa.Table, ...]:
         *(sa.Column(column.name,column.type) for column in table.c
           if table.name!="brc_shadow_outcomes_current" or column.name not in _SIGNAL_PATH_NEW_COLUMNS))
         for table in sorted(metadata.tables.values(),key=lambda item:item.name)
-        if table.name not in _SIGNAL_PATH_NEW_TABLES)
+        if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES))
 
 
 def _source_0011_table_columns() -> dict[str, tuple[str, ...]]:
     return {table.name:tuple(c.name for c in table.c if table.name!="brc_shadow_outcomes_current"
         or c.name not in _SIGNAL_PATH_NEW_COLUMNS)
-        for table in metadata.tables.values() if table.name not in _SIGNAL_PATH_NEW_TABLES}
+        for table in metadata.tables.values() if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES)}
 
 
 async def _signal_path_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:
     revision=await _alembic_revision(connection)
-    if revision not in {"0011_orb_session_1h_v1",EXPECTED_ALEMBIC_REVISION}:
+    if revision not in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1",EXPECTED_ALEMBIC_REVISION}:
         raise ValueError("Signal path preservation requires exact 0011 source or target")
     tables=[];count=0
     for name,columns in sorted(_source_0011_table_columns().items()):
@@ -2902,7 +2977,7 @@ def _source_0010_table_columns() -> dict[str,tuple[str,...]]:
 
 
 def _registry_contracts_for_revision(revision: str):
-    return tuple(c for c in registered_strategy_contracts() if revision in {EXPECTED_ALEMBIC_REVISION,"0011_orb_session_1h_v1"} or c.strategy_group_id!='SOR-1H-001')
+    return tuple(c for c in registered_strategy_contracts() if revision in {EXPECTED_ALEMBIC_REVISION,"0011_orb_session_1h_v1", "0012_generic_signal_path_v1"} or c.strategy_group_id!='SOR-1H-001')
 
 
 async def _orb_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:

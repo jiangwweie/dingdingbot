@@ -43,6 +43,10 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandPayload,
     SetLeverageCommandResult,
 )
+from src.trading_kernel.domain.directional_risk import (
+    SCOPED_EVENTS,
+    effective_directional_limit,
+)
 from src.trading_kernel.domain.events import (
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
@@ -342,6 +346,9 @@ async def dispatch_one_command(
                 venue_client_order_id=command.venue_client_order_id,
                 payload=command.payload,
                 deadline_at_ms=command.deadline_at_ms,
+                entry_authorized_at_ms=request.now_ms
+                if command.kind is ExchangeCommandKind.ENTRY
+                else None,
             )
             dispatch_result = await asyncio.wait_for(
                 venue.execute(venue_request),
@@ -385,6 +392,11 @@ async def dispatch_one_command(
         )
 
     async with uow_factory() as uow:
+        if command.kind is ExchangeCommandKind.ENTRY:
+            await uow.directional_risk.lock(
+                command.ticket_identity.netting_domain.venue_id,
+                command.ticket_identity.netting_domain.account_id,
+            )
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         if aggregate is None:
             raise RuntimeError("claimed command has no Ticket aggregate")
@@ -405,6 +417,18 @@ async def dispatch_one_command(
                 worker_id=request.worker_id,
                 result=dispatch_result,
             )
+            if (
+                command.kind is ExchangeCommandKind.ENTRY
+                and dispatch_result.status is not ExchangeCommandStatus.OUTCOME_UNKNOWN
+            ):
+                await uow.directional_risk.finish_send(
+                    command.command_id, dispatch_result.observed_at_ms
+                )
+                await uow.directional_risk.progress(
+                    command.ticket_identity.netting_domain.venue_id,
+                    command.ticket_identity.netting_domain.account_id,
+                    dispatch_result.observed_at_ms,
+                )
         await uow.commit_reduction(
             event=event,
             reduction=reduce_event(aggregate, event),
@@ -636,6 +660,44 @@ async def _preflight_new_entry_mutation(
             selection_authority_valid=selection_authority_valid,
         )
     )
+    if decision.status is not EntryDispatchPreflightStatus.ALLOWED or command.kind is not ExchangeCommandKind.ENTRY:
+        return decision.status
+    # Final send right is serialized with Owner changes; no transaction crosses venue I/O.
+    async with uow_factory() as uow:
+        await uow.directional_risk.lock(domain.venue_id, domain.account_id)
+        control = None
+        if aggregate.ticket.identity.runtime.event_spec_id in SCOPED_EVENTS:
+            try:
+                control = await uow.directional_risk.progress(
+                    domain.venue_id, domain.account_id, request.now_ms
+                )
+                assert policy is not None
+                limit = effective_directional_limit(
+                    control,
+                    domain.position_side,
+                    policy.directional_stop_risk_limit_fraction,
+                )
+            except ValueError:
+                return EntryDispatchPreflightStatus.DIRECTIONAL_CONTROL_BLOCKED
+            usage = await uow.entry_admission.sum_active_directional_stop_risk(
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                position_side=domain.position_side,
+            )
+            if usage > snapshot.account_risk_snapshot.total_wallet_balance * limit:
+                return EntryDispatchPreflightStatus.DIRECTIONAL_RISK_EXHAUSTED
+        try:
+            await uow.directional_risk.authorize_send(
+                command_id=command.command_id,
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                worker_id=request.worker_id,
+                now_ms=request.now_ms,
+                deadline_at_ms=command.deadline_at_ms,
+                control=control,
+            )
+        except ValueError:
+            return EntryDispatchPreflightStatus.COMMAND_MISMATCH
     return decision.status
 
 

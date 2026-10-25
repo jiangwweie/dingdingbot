@@ -78,6 +78,7 @@ class VenueTruthSnapshot(BaseModel):
     regular_open_client_order_ids: tuple[str, ...]
     conditional_open_client_order_ids: tuple[str, ...]
     observed_at_ms: int
+    exchange_observed_at_ms: int | None = None
     reason: str | None = None
 
     @field_validator("position_quantity", "matching_fill_quantity")
@@ -162,7 +163,7 @@ def decide_unknown_recovery(
         order = truth.order
         if order is None:
             raise ValueError("visible venue truth lacks order")
-        contradiction = _identity_contradiction(command, order)
+        contradiction = order_identity_contradiction(command, order)
         if contradiction is not None:
             return _decision(
                 UnknownRecoveryStatus.IDENTITY_CONTRADICTION,
@@ -269,7 +270,7 @@ def _decide_cancel_recovery(
     )
 
 
-def _identity_contradiction(
+def order_identity_contradiction(
     command: ExchangeCommand,
     order: VenueOrderTruth,
 ) -> str | None:

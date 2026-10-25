@@ -42,6 +42,7 @@ _LEVEL_ORDER = {
 _AUTHORITY_FILES = frozenset(
     {
         "src/trading_kernel/domain/strategy_registry.py",
+        "src/trading_kernel/domain/directional_risk.py",
         "src/trading_kernel/infrastructure/runtime_authority_seed.py",
         "src/trading_kernel/infrastructure/runtime_identity.py",
     }

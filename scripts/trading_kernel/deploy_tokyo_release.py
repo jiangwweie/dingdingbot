@@ -123,7 +123,7 @@ class DeploymentPlan:
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("regular deployment cannot change schema revision")
         elif self.mode is DeploymentMode.COMPATIBLE_UPGRADE:
-            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
+            if self.source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1"}:
                 raise ValueError("compatible upgrade requires the exact compatible source")
             if self.schema_revision != SCHEMA_REVISION:
                 raise ValueError("compatible upgrade requires the current schema head")
@@ -997,8 +997,8 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
             preserved_runtime=baseline["preserved_runtime"],
-            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1"}),
-            orb_already_installed=plan.source_schema_revision == "0011_orb_session_1h_v1",
+            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1"}),
+            orb_already_installed=plan.source_schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1"},
         )
         policy=certification.get("owner_policy")
         if not isinstance(policy,Mapping) or policy.get("max_same_strategy_side")!=2 or policy.get("family_ticket_limits")!={
@@ -1742,7 +1742,7 @@ class SshTokyoReleaseBackend:
         source_schema_revision: str,
         target_schema_revision: str,
     ) -> None:
-        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1"}:
+        if source_schema_revision not in {COMPATIBLE_SOURCE_SCHEMA_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1"}:
             raise ValueError("compatible migration source revision differs")
         self._release_command(
             release,

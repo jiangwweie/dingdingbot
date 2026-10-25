@@ -232,12 +232,22 @@ def test_strategy_side_limit_rejects_invalid_values(invalid) -> None:
         )
 
 
+@pytest.mark.parametrize(("usage", "expected"), [(Decimal(0), CapacityClaimStatus.CLAIMED), (Decimal(15), CapacityClaimStatus.BUDGET_EXHAUSTED), (Decimal(20), CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED)])
+def test_overlay_shares_direction_usage_and_keeps_minimum_materialization(usage, expected):
+    _, decision = _build_decision(directional_risk_at_stop=usage, directional_overlay_limit=Decimal("0.02"))
+    assert decision.status is expected
+    if decision.claim is not None:
+        assert decision.claim.directional_stop_risk_limit_fraction == Decimal("0.04")
+        assert decision.claim.risk_at_stop <= Decimal(20)
+
+
 def _build_decision(
     *,
     active_family_ticket_count: int = 0,
     active_strategy_side_ticket_count: int = 0,
     max_same_strategy_side: int | None = None,
     directional_risk_at_stop: Decimal = Decimal(0),
+    directional_overlay_limit: Decimal | None = None,
     configured_leverage: int = 5,
     selection_authority_id: str | None = None,
     exit_profile_status: Literal["active", "retired"] = "active",
@@ -277,6 +287,7 @@ def _build_decision(
             created_at_ms=binding.created_at_ms,
         )
     decision = build_capacity_claim(
+        directional_overlay_limit=directional_overlay_limit,
         signal=signal,
         runtime_profile_id="tiny-live-v1",
         venue_id="binance-usdm",

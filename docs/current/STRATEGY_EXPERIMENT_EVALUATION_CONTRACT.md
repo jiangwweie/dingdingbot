@@ -177,7 +177,7 @@ expired Gate states explicitly. Owner attribution never changes Review
 economics, Exit Attribution, StrategyVersion identity or the underlying
 immutable Ticket lineage.
 
-The approved, not-yet-implemented Owner Directional Risk V1 baseline is in the
+The locally implemented, not-yet-activated Owner Directional Risk V1 baseline is in the
 [design record](../superpowers/specs/2026-10-25-owner-directional-risk-v1-design.md).
 Its exact numerical matrix belongs only to the experiment profile. A risk
 overlay may reduce a candidate's size as well as reject it; attribution must

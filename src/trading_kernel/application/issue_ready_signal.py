@@ -41,6 +41,11 @@ from src.trading_kernel.domain.capacity import (
     CapacityPolicy,
     CapacityUsage,
 )
+from src.trading_kernel.domain.directional_risk import (
+    RULE_LIMITS,
+    SCOPED_EVENTS,
+    effective_directional_limit,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import NettingDomain
@@ -247,6 +252,17 @@ async def issue_ready_signal(
             IssueTicketStatus.INSTRUMENT_RULES_INVALID,
             request.now_ms,
         )
+    directional_control = None
+    directional_limit = None
+    if signal.event_spec_id in SCOPED_EVENTS:
+        try:
+            directional_control = await uow.directional_risk.progress(
+                profile.venue_id, profile.account_id, request.now_ms
+            )
+        except ValueError:
+            # Invalid authority remains missing, so the common refusal path
+            # persists a blocker; it is never interpreted as neutral.
+            directional_control = None
     current_exit_binding = await uow.exit_profiles.get_current_binding(
         signal.event_spec_id,
         for_update=True,
@@ -334,6 +350,24 @@ async def issue_ready_signal(
             exposure_family=contract.exposure_family,
         ),
     )
+    if signal.event_spec_id in SCOPED_EVENTS:
+        try:
+            directional_limit = effective_directional_limit(
+                directional_control,
+                signal.position_side,
+                policy.directional_stop_risk_limit_fraction,
+            )
+        except ValueError:
+            return await _refuse(
+                uow,
+                signal,
+                IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED,
+                request.now_ms,
+                admission_context=admission_context,
+                entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+                binding_constraint="directional_authority_unavailable",
+                admission_snapshot=request.admission_snapshot,
+            )
     if current_exit_binding is None or exit_binding is None or exit_profile is None:
         return await _refuse(
             uow,
@@ -404,6 +438,7 @@ async def issue_ready_signal(
         position_side=signal.position_side,
     )
     decision = build_capacity_claim(
+        directional_overlay_limit=directional_limit,
         signal=signal,
         runtime_profile_id=profile.runtime_profile_id,
         venue_id=profile.venue_id,
@@ -498,6 +533,17 @@ async def issue_ready_signal(
             admission_snapshot=request.admission_snapshot,
         )
     if result.status is IssueTicketStatus.ISSUED:
+        if directional_control is not None and directional_limit is not None:
+            await uow.directional_risk.record_admission(
+                signal_event_id=signal.signal_event_id,
+                ticket_id=result.ticket_id,
+                control=directional_control,
+                directional_risk=usage.directional_risk_at_stop,
+                effective_limit=directional_limit,
+                wallet_balance=request.admission_snapshot.account_risk_snapshot.total_wallet_balance,
+                outcome="admitted",
+                now_ms=request.now_ms,
+            )
         if result.ticket_id is None:
             raise RuntimeError("issued Ticket is missing its identity")
         await uow.admission_decisions.add(
@@ -554,6 +600,40 @@ async def _refuse(
         }
         else status.value
     )
+    if admission_context is not None and signal.event_spec_id in SCOPED_EVENTS:
+        try:
+            control = await uow.directional_risk.get(
+                admission_context.venue_id, admission_context.account_id
+            )
+        except ValueError:
+            control = None
+        policy = await uow.entry_admission.get_owner_policy(
+            admission_context.owner_policy_id
+        )
+        if (
+            control is not None
+            and policy is not None
+            and admission_snapshot is not None
+        ):
+            raw_limit = Decimal(
+                RULE_LIMITS[control.view][0 if signal.position_side == "long" else 1]
+            )
+            await uow.directional_risk.record_admission(
+                signal_event_id=signal.signal_event_id,
+                ticket_id=None,
+                control=control,
+                directional_risk=await uow.entry_admission.sum_active_directional_stop_risk(
+                    venue_id=admission_context.venue_id,
+                    account_id=admission_context.account_id,
+                    position_side=signal.position_side,
+                ),
+                effective_limit=min(
+                    raw_limit, policy.directional_stop_risk_limit_fraction
+                ),
+                wallet_balance=admission_snapshot.account_risk_snapshot.total_wallet_balance,
+                outcome=blocker,
+                now_ms=now_ms,
+            )
     if admission_context is not None:
         decision = freeze_admission_decision(
             signal=signal,

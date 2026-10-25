@@ -83,7 +83,7 @@ class StaticTruthPort:
         request: VenueTruthRequest,
     ) -> VenueTruthSnapshot:
         self.requests.append(request)
-        return self.truth
+        return self.truth.model_copy(update={"exchange_observed_at_ms": request.entry_window_expires_at_ms + 1}) if request.entry_window_expires_at_ms is not None else self.truth
 
     async def read_configured_leverage(
         self, request: LeverageTruthRequest

@@ -100,6 +100,11 @@ async def recover_unknown_command(
             raise ValueError("unknown recovery command does not exist")
         if command.status is not ExchangeCommandStatus.OUTCOME_UNKNOWN:
             raise ValueError("command is not in unknown-outcome state")
+        send_expiry = (
+            await uow.directional_risk.send_expiry(command.command_id)
+            if command.kind is ExchangeCommandKind.ENTRY
+            else None
+        )
 
     if command.kind is ExchangeCommandKind.SET_LEVERAGE:
         return await reconcile_leverage_command(
@@ -116,6 +121,7 @@ async def recover_unknown_command(
     if venue_client_order_id is None:
         raise RuntimeError("unknown order command lacks venue client order identity")
     truth_request = VenueTruthRequest(
+        entry_window_expires_at_ms=send_expiry,
         command_id=command.command_id,
         kind=command.kind,
         venue_id=command.ticket_identity.netting_domain.venue_id,
@@ -153,6 +159,21 @@ async def recover_unknown_command(
             observed_at_ms=request.now_ms,
             reason=f"venue_truth_error:{type(exc).__name__}",
         )
+    if (
+        send_expiry is not None
+        and truth.lookup_status is not VenueLookupStatus.VISIBLE
+        and (
+            truth.exchange_observed_at_ms is None
+            or truth.exchange_observed_at_ms <= send_expiry
+        )
+    ):
+        truth = truth.model_copy(
+            update={
+                "lookup_status": VenueLookupStatus.LOOKUP_FAILED,
+                "order": None,
+                "reason": "entry_send_window_unverified",
+            }
+        )
     decision = decide_unknown_recovery(
         command,
         truth,
@@ -165,6 +186,8 @@ async def recover_unknown_command(
         return decision
 
     async with uow_factory() as uow:
+        if command.kind is ExchangeCommandKind.ENTRY:
+            await uow.directional_risk.lock(command.ticket_identity.netting_domain.venue_id, command.ticket_identity.netting_domain.account_id)
         current_command = await uow.exchange_commands.get(request.command_id)
         if (
             current_command is None
@@ -228,6 +251,18 @@ async def recover_unknown_command(
             reduction=reduce_event(aggregate, event),
             expected_version=aggregate.version,
         )
+        if send_expiry is not None and truth.exchange_observed_at_ms is not None:
+            domain = command.ticket_identity.netting_domain
+            await uow.directional_risk.recover_resolved_sends(
+                domain.venue_id,
+                domain.account_id,
+                command_id=command.command_id,
+                exchange_time_ms=truth.exchange_observed_at_ms,
+                observed_at_ms=decision.observed_at_ms,
+            )
+            await uow.directional_risk.progress(
+                domain.venue_id, domain.account_id, decision.observed_at_ms
+            )
     return decision
 
 

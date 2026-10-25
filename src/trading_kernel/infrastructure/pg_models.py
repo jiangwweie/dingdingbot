@@ -20,6 +20,90 @@ LONG_TEXT = sa.String(512)
 MONEY = sa.Numeric(38, 18)
 SELECTION_DECIMAL = sa.Numeric()
 
+directional_risk_rules = sa.Table(
+    "brc_directional_risk_rules",
+    metadata,
+    sa.Column("rule_id", ID, primary_key=True),
+    sa.Column("rule_digest", ID, nullable=False),
+    sa.Column("limits", JSONB, nullable=False),
+    sa.Column("event_spec_ids", JSONB, nullable=False),
+)
+directional_risk_controls = sa.Table(
+    "brc_directional_risk_controls",
+    metadata,
+    sa.Column("venue_id", ID, primary_key=True),
+    sa.Column("account_id", ID, primary_key=True),
+    sa.Column("version", sa.BigInteger, nullable=False),
+    sa.Column("view", SHORT_TEXT, nullable=False),
+    sa.Column(
+        "rule_id",
+        ID,
+        sa.ForeignKey("brc_directional_risk_rules.rule_id"),
+        nullable=False,
+    ),
+    sa.Column("rule_digest", ID, nullable=False),
+    sa.Column("effective_at_ms", sa.BigInteger, nullable=False),
+    sa.Column("pending_view", SHORT_TEXT),
+    sa.Column("pending_request_id", ID),
+    sa.Column("requested_at_ms", sa.BigInteger),
+    sa.CheckConstraint("version>0 AND effective_at_ms>0", name="positive"),
+    sa.CheckConstraint(
+        "view IN ('unset','bullish','neutral','bearish')", name="view_valid"
+    ),
+    sa.CheckConstraint(
+        "COALESCE((pending_view IS NULL AND pending_request_id IS NULL) OR (pending_view IN ('bullish','neutral','bearish') AND pending_request_id IS NOT NULL AND requested_at_ms>0),false)",
+        name="pending_valid",
+    ),
+)
+directional_risk_events = sa.Table(
+    "brc_directional_risk_events",
+    metadata,
+    sa.Column("event_id", ID, primary_key=True),
+    sa.Column("venue_id", ID, nullable=False),
+    sa.Column("account_id", ID, nullable=False),
+    sa.Column("event_kind", SHORT_TEXT, nullable=False),
+    sa.Column("payload", JSONB, nullable=False),
+    sa.Column("occurred_at_ms", sa.BigInteger, nullable=False),
+)
+directional_risk_admissions = sa.Table(
+    "brc_directional_risk_admissions",
+    metadata,
+    sa.Column("signal_event_id", ID, primary_key=True),
+    sa.Column("ticket_id", ID, nullable=True),
+    sa.Column("control", JSONB, nullable=False),
+    sa.Column("directional_risk", MONEY, nullable=False),
+    sa.Column("effective_limit", MONEY, nullable=False),
+    sa.Column("wallet_balance", MONEY, nullable=False),
+    sa.Column("outcome", SHORT_TEXT, nullable=False),
+    sa.Column("observed_at_ms", sa.BigInteger, nullable=False),
+)
+entry_send_authorizations = sa.Table(
+    "brc_entry_send_authorizations",
+    metadata,
+    sa.Column(
+        "command_id",
+        ID,
+        sa.ForeignKey("brc_exchange_commands.command_id"),
+        primary_key=True,
+    ),
+    sa.Column("venue_id", ID, nullable=False),
+    sa.Column("account_id", ID, nullable=False),
+    sa.Column("worker_id", ID, nullable=False),
+    sa.Column("authorized_at_ms", sa.BigInteger, nullable=False),
+    sa.Column("expires_at_ms", sa.BigInteger, nullable=False),
+    sa.Column("control", JSONB, nullable=True),
+    sa.Column("completed_at_ms", sa.BigInteger),
+    sa.CheckConstraint(
+        "authorized_at_ms>0 AND expires_at_ms>authorized_at_ms", name="window_valid"
+    ),
+)
+sa.Index(
+    "ix_brc_entry_send_authorizations_pending",
+    entry_send_authorizations.c.venue_id,
+    entry_send_authorizations.c.account_id,
+    postgresql_where=entry_send_authorizations.c.completed_at_ms.is_(None),
+)
+
 
 def _id(name: str, *, primary_key: bool = False, nullable: bool = False) -> sa.Column:
     return sa.Column(name, ID, primary_key=primary_key, nullable=nullable)
@@ -2523,6 +2607,8 @@ sa.Index(
     "ix_brc_capacity_claims_selection_authority_id",
     capacity_claims.c.selection_authority_id,
 )
+
+sa.Index("ix_brc_capacity_claims_account_latest", capacity_claims.c.venue_id, capacity_claims.c.account_id, capacity_claims.c.created_at_ms.desc(), capacity_claims.c.capacity_claim_id)
 
 trade_tickets = sa.Table(
     "brc_trade_tickets",

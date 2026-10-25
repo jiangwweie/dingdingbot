@@ -68,7 +68,12 @@ async def seed_replacement_universe(engine: AsyncEngine, ticket) -> None:
 async def seed_ticket_runtime_scope(engine: AsyncEngine, ticket) -> None:
     """Give direct Ticket tests the same current Scope authority as production."""
 
+    from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+        PostgresDirectionalRiskRepository,
+    )
     identity = ticket.identity
+    async with engine.begin() as connection:
+        await PostgresDirectionalRiskRepository(connection).initialize(venue_id=identity.netting_domain.venue_id, account_id=identity.netting_domain.account_id, now_ms=ticket.created_at_ms)
     values = {
         "runtime_scope_id": ticket.runtime_scope_id,
         "strategy_group_id": identity.runtime.strategy_group_id,

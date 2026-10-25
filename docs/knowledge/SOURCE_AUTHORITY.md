@@ -12,7 +12,7 @@
 | Strategy Registry | Group、Version、Event、事实及方向语义 | 精确版本和语义摘要匹配 | [registered_strategy_contracts](../../src/trading_kernel/domain/strategy_registry.py#L258) |
 | Owner Policy / Controls | 允许范围、资本边界、暂停与模式意图 | 数据库 current 与版本、授权记录 | [owner_control](../../src/trading_kernel/application/owner_control.py) |
 | PostgreSQL current | 当前投影、租约、权限、持仓与进度 | action-time 精确身份读取 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
-| PostgreSQL events / facts | 信号快照、已签发身份、生命周期和授权沿革 | 不可变身份、事件序号、版本链 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L115) |
+| PostgreSQL events / facts | 信号快照、已签发身份、生命周期和授权沿革 | 不可变身份、事件序号、版本链 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L119) |
 | 交易所只读事实 | 账户模式、外部订单、成交和持仓 | 实时读取、时效与身份一致 | [venue_adapter](../../src/trading_kernel/infrastructure/venue_adapter.py) |
 | `docs/current` | 稳定契约及各自负责的状态记录 | 白名单、责任范围、与代码核对 | [文档权威测试](../../tests/trading_kernel/architecture/test_current_document_authority.py) |
 | 历史设计、发布记录 | 解释决策背景与当时证据 | 按日期和被替代关系阅读 | [docs 导航](../README.md) |
@@ -57,7 +57,7 @@
 | --- | --- | --- | --- |
 | D1 | README / AGENTS 的 Crypto 家族摘要只列 CPM/MPG/MI/BRF2；Registry 另有 SOR-1H | 概览文字不足以覆盖代码能力；独立列出 SOR-1H，旧 SOR-001 仍永久禁入；不推断当前启用 | [README](../../README.md)、[Registry](../../src/trading_kernel/domain/strategy_registry.py#L258)、[策略准入硬边界](../../src/trading_kernel/application/owner_control.py#L1094) |
 | D2 | P0 设计正文列出的迁移链到 0011，实施计划部分到 0010；代码身份已到 0012 | 数据模型以迁移源码及 runtime_identity 为准；不将其写成部署版本 | [runtime_identity](../../src/trading_kernel/infrastructure/runtime_identity.py)、[0012](../../migrations/trading_kernel/versions/0012_generic_signal_path_v1.py) |
-| D3 | `docs/README` 部分历史栏目仍写“implementation not claimed” | 它只适合作历史导航；实现有无查代码，生产状态查唯一 roadmap | [docs 索引](../README.md)、[Reconciliation Worker](../../src/trading_kernel/interfaces/reconciliation_worker.py#L232) |
+| D3 | `docs/README` 部分历史栏目仍写“implementation not claimed” | 它只适合作历史导航；实现有无查代码，生产状态查唯一 roadmap | [docs 索引](../README.md)、[Reconciliation Worker](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235) |
 | D4 | `observation_process_component_map` 描述三个角色；启动脚本还安装各策略 facts 刷新循环 | 角色映射不是完整 OS 进程内任务清单；部署图按启动脚本标明 | [角色映射](../../src/trading_kernel/application/runtime.py#L126)、[启动装配](../../scripts/trading_kernel/run_observation_worker_once.py#L97) |
 | D5 | AGENTS 对部分 ENTRY 成交写的是撤余量并 flatten；Vacuum drain 代码存在 `VacuumPartialRetained` 分支 | 分别描述普通部分成交事故与切换撤单后的受验证余仓；契约是否需要补充这一特例尚待裁定，本轮不改交易行为 | [plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L170)、[对应测试](../../tests/trading_kernel/unit/test_drain_strategy_entry_vacuum.py#L69) |
 | D6 | 架构扫描发现两处既有 test 模块直接导入其他 test 模块 | 已用阅读基准的原始文件重现；本轮不移动无关夹具，不把全部架构检查写成 PASS | [共享测试边界检查](../../tests/trading_kernel/architecture/test_test_support_boundaries.py#L21)、[验收记录](MAINTENANCE.md) |

@@ -72,7 +72,8 @@ The forward schema chain is `0001_trading_kernel_baseline_v4 ->
 0004_owner_control_plane -> 0005_tradfi_instrument_center ->
 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1 ->
 0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0
--> 0010_dynamic_intent_v1 -> 0011_orb_session_1h_v1`.
+-> 0010_dynamic_intent_v1 -> 0011_orb_session_1h_v1 -> 0012_generic_signal_path_v1
+-> 0013_owner_directional_risk_v1`.
 The frozen `0001_trading_kernel_baseline_v4` definition remains historical
 source lineage only. PostgreSQL owns current runtime truth and append-only
 lifecycle facts. Exchange readonly facts own external truth. Repository

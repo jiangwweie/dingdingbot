@@ -899,3 +899,20 @@ control version, explicit quota, Owner identity and reason; its revision is
 persisted atomically and append-only. `--show` is readonly and reports the current
 control and one UTC-day coverage record. Enabling or disabling this control cannot
 change Owner ENTRY, Strategy Controls, Selection Authority or risk policy.
+
+## Owner directional risk authority upgrade
+
+The local target adds `0012_generic_signal_path_v1 ->
+0013_owner_directional_risk_v1` as a stopped, flat, quiescent, forward-only
+upgrade. Every existing source table/column/row participates in the exact
+0012 preservation manifest; installation deduplicates account/venue scopes
+before evaluating initialization timestamps and creates only explicit `unset`
+controls. It neither selects an Owner view nor resumes ENTRY. No downgrade,
+active-position handover, dual writer or compatibility reader is introduced.
+
+The candidate is an R4 Kernel/authority release. The associated Owner API and
+V2 static changes require their R2/R1 evidence and normal role provisioning
+after the schema exists. Owner Control receives INSERT on directional events
+and UPDATE on the control projection; it receives no write permission on rule,
+admission evidence or ENTRY send-authorization tables. Exact production
+identity and activation evidence remain solely in `MAIN_CONTROL_ROADMAP.md`.

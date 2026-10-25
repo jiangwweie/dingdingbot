@@ -73,6 +73,10 @@ from src.trading_kernel.domain.comparison_universe import (
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.directional_risk import (
+    DirectionalChangeRequest,
+    DirectionalControl,
+)
 from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
 )
@@ -936,6 +940,57 @@ class MonitorRepository(Protocol):
         self,
         state: MonitorStateRecord,
     ) -> MonitorStateRecord: ...
+
+
+class DirectionalRiskRepository(Protocol):
+    async def next_resolved_send(self) -> str | None: ...
+    async def send_expiry(self, command_id: str) -> int | None: ...
+    async def recover_resolved_sends(
+        self,
+        venue_id: str,
+        account_id: str,
+        *,
+        exchange_time_ms: int,
+        observed_at_ms: int,
+        command_id: str,
+    ) -> None: ...
+    async def lock(self, venue_id: str, account_id: str) -> None: ...
+    async def get(
+        self, venue_id: str, account_id: str, *, for_update: bool = False
+    ) -> DirectionalControl | None: ...
+    async def initialize(
+        self, *, venue_id: str, account_id: str, now_ms: int
+    ) -> None: ...
+    async def request_change(
+        self, request: DirectionalChangeRequest
+    ) -> DirectionalControl: ...
+    async def progress(
+        self, venue_id: str, account_id: str, now_ms: int
+    ) -> DirectionalControl | None: ...
+    async def authorize_send(
+        self,
+        *,
+        command_id: str,
+        venue_id: str,
+        account_id: str,
+        worker_id: str,
+        now_ms: int,
+        deadline_at_ms: int,
+        control: DirectionalControl | None,
+    ) -> int: ...
+    async def finish_send(self, command_id: str, now_ms: int) -> None: ...
+    async def record_admission(
+        self,
+        *,
+        signal_event_id: str,
+        ticket_id: str | None,
+        control: DirectionalControl,
+        directional_risk: Decimal,
+        effective_limit: Decimal,
+        wallet_balance: Decimal,
+        outcome: str,
+        now_ms: int,
+    ) -> None: ...
 
 
 class OwnerControlRepository(Protocol):
@@ -2289,6 +2344,7 @@ class VenueCommandRequest(BaseModel):
     venue_client_order_id: str | None
     payload: CommandPayload
     deadline_at_ms: int
+    entry_authorized_at_ms: int | None = None
 
 
 class VenueSetLeverageRequest(BaseModel):
@@ -2384,6 +2440,7 @@ class VenueTruthRequest(BaseModel):
     venue_client_order_id: str
     payload: CommandPayload
     observed_at_ms: int
+    entry_window_expires_at_ms: int | None = None
 
 
 class VenueTruthPort(Protocol):
@@ -2402,6 +2459,7 @@ UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]
 
 
 class KernelUnitOfWork(Protocol):
+    directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository
     events: EventRepository

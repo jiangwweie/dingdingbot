@@ -24,6 +24,8 @@ passes.
 | `entry_lane_busy` | Another new ENTRY owns the global lane | None; process serially |
 | `netting_domain_occupied` | The same Netting Domain already owns exposure, Ticket, order, or hold | None unless recovery fails |
 | `budget_exhausted` | Current policy capacity cannot reserve the Ticket | Policy only when expansion is intended |
+| `directional_control_blocked` | Explicit directional authority is missing, invalid or pending | None during a healthy transition; intervention only if recovery fails |
+| `directional_risk_exhausted` | Same-side occupied initial stop risk exceeds available base/Owner-overlay budget | None; existing exposure keeps its protection |
 | `protection_unavailable` | A valid Initial Stop plan or accepted protection is missing | Intervention if recovery cannot close |
 | `command_outcome_unknown` | Venue outcome cannot be proven and command must not be resent | Intervention if reconciliation cannot resolve |
 | `runtime_incident_open` | Partial fill, orphan, mismatch, or other abnormal state is unresolved | Intervention only when requested |

@@ -101,7 +101,7 @@ from existing exchange exposure.
 
 ## Owner Directional Risk V1 — approved target
 
-Status: **approved design, not implemented or activated**. Owner Directional
+Status: **implemented locally, not deployed or activated**. Owner Directional
 Risk V1 adds a tightening-only Crypto direction overlay to the base Policy
 above. This section owns its approved initial numerical matrix:
 
@@ -137,6 +137,15 @@ Product rationale, transition protocol and implementation gates are in the
 The numbers are an approved experiment starting point, not an empirically
 optimal parameter claim. Current activation requires formal runtime evidence
 owned by `MAIN_CONTROL_ROADMAP.md`.
+
+The local implementation stores immutable rule/scope facts, Owner request
+events, current controls, Signal admission evidence and exact ENTRY send
+authorizations in PostgreSQL. An ENTRY freezes a bounded Binance signing
+window; a delayed sender cannot refresh its authorization timestamp. Exact
+visible acceptance proceeds to protection immediately. Unknown absence and
+pending control completion require proof that the old signing window has
+closed; local lease expiry alone is insufficient. Installation starts with
+explicit `unset` and does not change the Owner's trading controls.
 
 ## Real-Order Permission
 

@@ -200,6 +200,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/directional-risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Directional Risk */
+        get: operations["get_directional_risk_api_owner_v1_controls_directional_risk_get"];
+        put?: never;
+        /** Change Directional Risk */
+        post: operations["change_directional_risk_api_owner_v1_controls_directional_risk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/directional-risk/requests/{idempotency_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Directional Receipt */
+        get: operations["get_directional_receipt_api_owner_v1_controls_directional_risk_requests__idempotency_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/entry/pause": {
         parameters: {
             query?: never;
@@ -532,6 +567,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Performance */
+        get: operations["performance_api_owner_v1_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/review": {
         parameters: {
             query?: never;
@@ -827,6 +879,17 @@ export interface components {
             /** Source Watermark */
             source_watermark: string | null;
         };
+        /** ApiEnvelope[PerformanceSummary] */
+        ApiEnvelope_PerformanceSummary_: {
+            data: components["schemas"]["PerformanceSummary"];
+            freshness: components["schemas"]["Freshness"];
+            /** Generated At */
+            generated_at: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Watermark */
+            source_watermark: string | null;
+        };
         /** ApiEnvelope[ReviewCenterSummary] */
         ApiEnvelope_ReviewCenterSummary_: {
             data: components["schemas"]["ReviewCenterSummary"];
@@ -1021,6 +1084,8 @@ export interface components {
         CausalityExitReason: {
             /** Code */
             code: string;
+            /** Detail */
+            detail?: string | null;
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
             /** Label */
@@ -1118,6 +1183,83 @@ export interface components {
             /** Projection Version */
             projection_version: number;
         };
+        /** DirectionalControl */
+        DirectionalControl: {
+            /** Account Id */
+            account_id: string;
+            /** Effective At Ms */
+            effective_at_ms: number;
+            /** Pending Request Id */
+            pending_request_id?: string | null;
+            pending_view?: components["schemas"]["DirectionalView"] | null;
+            /** Requested At Ms */
+            requested_at_ms?: number | null;
+            /**
+             * Rule Digest
+             * @default sha256:2379d5e3f0db356c026c214e9e2713cab7bf335d0026a903d12e82ec3902f23c
+             */
+            rule_digest: string;
+            /**
+             * Rule Id
+             * @default owner-directional-risk:v1
+             */
+            rule_id: string;
+            /** Venue Id */
+            venue_id: string;
+            /** Version */
+            version: number;
+            view: components["schemas"]["DirectionalView"];
+        };
+        /** DirectionalRiskBody */
+        DirectionalRiskBody: {
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "bullish" | "neutral" | "bearish";
+        };
+        /** DirectionalRiskReceipt */
+        DirectionalRiskReceipt: {
+            current: components["schemas"]["DirectionalControl"];
+            result: components["schemas"]["DirectionalControl"] | null;
+        };
+        /** DirectionalRiskView */
+        DirectionalRiskView: {
+            /** Balance Captured At Ms */
+            balance_captured_at_ms: number | null;
+            control: components["schemas"]["DirectionalControl"];
+            /** Long Limit */
+            long_limit: string;
+            /** Long Over Limit At Last Balance */
+            long_over_limit_at_last_balance: boolean | null;
+            /** Long Risk At Stop */
+            long_risk_at_stop: string;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            /** Review Due */
+            review_due: boolean;
+            /** Short Limit */
+            short_limit: string;
+            /** Short Over Limit At Last Balance */
+            short_over_limit_at_last_balance: boolean | null;
+            /** Short Risk At Stop */
+            short_risk_at_stop: string;
+            /** Wallet Balance At Last Admission */
+            wallet_balance_at_last_admission: string | null;
+        };
+        /**
+         * DirectionalView
+         * @enum {string}
+         */
+        DirectionalView: "unset" | "bullish" | "neutral" | "bearish";
         /** DynamicSelectionActivationBody */
         DynamicSelectionActivationBody: {
             /** Effective Session Start Ms */
@@ -1239,6 +1381,15 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** EvidenceGap */
+        EvidenceGap: {
+            /** Code */
+            code: string;
+            /** Impact */
+            impact: string;
+            /** Label */
+            label: string;
+        };
         /** EvidenceRef */
         EvidenceRef: {
             /** Identity */
@@ -1250,6 +1401,25 @@ export interface components {
             kind: "signal" | "admission" | "ticket" | "aggregate" | "event" | "command" | "incident" | "settlement" | "review" | "shadow" | "fact";
             /** Occurred At Ms */
             occurred_at_ms: number;
+        };
+        /** ExitAttribution */
+        ExitAttribution: {
+            /** Code */
+            code: string | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Evidence
+             * @default []
+             */
+            evidence: components["schemas"]["EvidenceRef"][];
+            /** Label */
+            label: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "exit_event" | "review_fills" | "unavailable" | "not_applicable";
         };
         /** ExitProfile */
         ExitProfile: {
@@ -1769,6 +1939,18 @@ export interface components {
          * @enum {string}
          */
         MaterializationGenerationState: "PENDING" | "DESIRED" | "DRAINING_ENTRY" | "MATERIALIZING" | "STAGED" | "ACTIVE" | "FALLBACK_PREVIOUS" | "SUPERSEDED" | "ABANDONED" | "FAILED_CLOSED";
+        /** MetricCoverage */
+        MetricCoverage: {
+            /** Available Count */
+            available_count: number;
+            /**
+             * Missing Ticket Ids
+             * @default []
+             */
+            missing_ticket_ids: string[];
+            /** Total Count */
+            total_count: number;
+        };
         /** MoneyMetric */
         MoneyMetric: {
             /** Unavailable Reason */
@@ -1931,6 +2113,7 @@ export interface components {
             execution_incident_count: number | null;
             /** Observed At Ms */
             observed_at_ms: number;
+            performance?: components["schemas"]["PerformanceSummary"] | null;
             /** Rejected Signal Count */
             rejected_signal_count: number;
             /** Ticket Capacity */
@@ -1939,6 +2122,88 @@ export interface components {
             today_net_r: components["schemas"]["MoneyMetric"];
             /** Today Signal Count */
             today_signal_count: number;
+        };
+        /** PerformanceMetrics */
+        PerformanceMetrics: {
+            /** Breakeven Count */
+            breakeven_count: number;
+            /** Confirmed Count */
+            confirmed_count: number;
+            /** Loss Count */
+            loss_count: number;
+            /** Metric Coverage */
+            metric_coverage: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
+            /** Sample Count */
+            sample_count: number;
+            /** Unreviewed Count */
+            unreviewed_count: number;
+            verified_totals: components["schemas"]["ReviewEconomicSummary"];
+            /** Win Count */
+            win_count: number;
+        };
+        /** PerformanceSummary */
+        PerformanceSummary: {
+            /** Attention Count */
+            attention_count: number;
+            /** Breakdown */
+            breakdown: {
+                [key: string]: components["schemas"]["PerformanceMetrics"];
+            };
+            /** Breakeven Count */
+            breakeven_count: number;
+            /** By Strategy Group */
+            by_strategy_group?: {
+                [key: string]: components["schemas"]["PerformanceMetrics"];
+            };
+            /** Complete Review Count */
+            complete_review_count: number;
+            /** Confirmed Count */
+            confirmed_count: number;
+            /**
+             * Exit Scope
+             * @enum {string}
+             */
+            exit_scope: "all" | "strategy" | "owner" | "safety" | "unknown";
+            /** From Ms */
+            from_ms: number;
+            /** Incomplete Review Count */
+            incomplete_review_count: number;
+            /** Loss Count */
+            loss_count: number;
+            /** Metric Coverage */
+            metric_coverage: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
+            /** Sample Count */
+            sample_count: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Summary Scope
+             * @default full_window
+             * @constant
+             */
+            summary_scope: "full_window";
+            /**
+             * Time Basis
+             * @default terminal
+             * @constant
+             */
+            time_basis: "terminal";
+            /** To Ms */
+            to_ms: number;
+            /** Unreviewed Count */
+            unreviewed_count: number;
+            verified_totals: components["schemas"]["ReviewEconomicSummary"];
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "current" | "all";
+            /** Win Count */
+            win_count: number;
         };
         /**
          * PreTp1GuardKind
@@ -1949,6 +2214,11 @@ export interface components {
         ProgrammaticTradeReview: {
             /** Attention Items */
             attention_items: string[];
+            /**
+             * Economic Gaps
+             * @default []
+             */
+            economic_gaps: components["schemas"]["EvidenceGap"][];
             economic_summary: components["schemas"]["ReviewEconomicSummary"];
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
@@ -1957,6 +2227,12 @@ export interface components {
              * @enum {string}
              */
             execution_classification: "complete" | "recovered_incident" | "evidence_incomplete" | "in_progress" | "waiting_review";
+            /**
+             * Execution Gaps
+             * @default []
+             */
+            execution_gaps: components["schemas"]["EvidenceGap"][];
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Final Conclusion */
@@ -2094,6 +2370,10 @@ export interface components {
             incomplete_review_count: number;
             /** Items */
             items: components["schemas"]["ReviewCenterItem"][];
+            /** Metric Coverage */
+            metric_coverage?: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
             /** Next Cursor */
@@ -2102,8 +2382,15 @@ export interface components {
             sample_count: number;
             /** Strategy Group Samples */
             strategy_group_samples: components["schemas"]["StrategyGroupSampleState"][];
+            /**
+             * Summary Scope
+             * @default page
+             * @enum {string}
+             */
+            summary_scope: "page" | "loaded_records";
             /** To Ms */
             to_ms: number;
+            verified_totals?: components["schemas"]["ReviewEconomicSummary"] | null;
         };
         /** ReviewEconomicSummary */
         ReviewEconomicSummary: {
@@ -2121,7 +2408,7 @@ export interface components {
              * Template Id
              * @enum {string}
              */
-            template_id: "execution_complete" | "execution_recovered" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
+            template_id: "execution_complete" | "execution_recovered" | "execution_incomplete" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
             /** Text */
             text: string;
         };
@@ -2665,6 +2952,7 @@ export interface components {
             from_ms: number;
             /** Items */
             items: components["schemas"]["StrategyVersionSummary"][];
+            performance?: components["schemas"]["PerformanceSummary"] | null;
             /** To Ms */
             to_ms: number;
             /**
@@ -2687,13 +2975,14 @@ export interface components {
              * Evaluation Path
              * @enum {string}
              */
-            evaluation_path: "tp1_reached" | "tp1_not_reached" | "controlled_exit" | "not_terminal";
+            evaluation_path: "tp1_reached" | "tp1_not_reached" | "controlled_exit" | "safety_exit" | "unknown_exit" | "not_terminal";
             /** Event Spec Id */
             event_spec_id: string;
             /** Evidence */
             evidence: components["schemas"]["EvidenceRef"][];
             /** Exchange Instrument Id */
             exchange_instrument_id: string;
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Exit Reason Unavailable Reason */
@@ -2765,6 +3054,11 @@ export interface components {
             completed_observation_count: number;
             /** Confirmed Natural Review Count */
             confirmed_natural_review_count: number;
+            /**
+             * Confirmed Review Count
+             * @default 0
+             */
+            confirmed_review_count: number;
             /** Controlled Exit Count */
             controlled_exit_count: number;
             /** Evidence */
@@ -2781,6 +3075,10 @@ export interface components {
             median_mfe_r: string | null;
             /** Median Spread Bps */
             median_spread_bps: string | null;
+            /** Metric Coverage */
+            metric_coverage?: {
+                [key: string]: components["schemas"]["MetricCoverage"];
+            };
             /** Natural Terminal Count */
             natural_terminal_count: number;
             net_pnl: components["schemas"]["MoneyMetric"];
@@ -2796,6 +3094,16 @@ export interface components {
              * @default []
              */
             product_events: components["schemas"]["StrategyProductEventFacts"][];
+            /**
+             * Safety Exit Count
+             * @default 0
+             */
+            safety_exit_count: number;
+            /**
+             * Selected Terminal Count
+             * @default 0
+             */
+            selected_terminal_count: number;
             /** Session Exit Count */
             session_exit_count: number;
             /** Strategy Group Display Name */
@@ -2818,6 +3126,11 @@ export interface components {
             tp1_reached_count: number;
             /** Unavailable Observation Count */
             unavailable_observation_count: number;
+            /**
+             * Unknown Exit Count
+             * @default 0
+             */
+            unknown_exit_count: number;
             /** Version */
             version: number;
             /** Win Count */
@@ -2907,6 +3220,7 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Exchange Instrument Id */
             exchange_instrument_id: string;
+            exit_attribution?: components["schemas"]["ExitAttribution"] | null;
             /** Exit Reason */
             exit_reason: string | null;
             /** Exit Reason Unavailable Reason */
@@ -3371,6 +3685,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ControlsResponse"];
+                };
+            };
+        };
+    };
+    get_directional_risk_api_owner_v1_controls_directional_risk_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalRiskView"];
+                };
+            };
+        };
+    };
+    change_directional_risk_api_owner_v1_controls_directional_risk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectionalRiskBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalControl"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_directional_receipt_api_owner_v1_controls_directional_risk_requests__idempotency_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectionalRiskReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3974,6 +4372,47 @@ export interface operations {
             };
         };
     };
+    performance_api_owner_v1_performance_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                from_ms?: number | null;
+                to_ms?: number | null;
+                strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                review_status?: ("in_progress" | "waiting_for_settlement" | "waiting_for_review" | "complete" | "incomplete_evidence") | null;
+                aggregate_status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiEnvelope_PerformanceSummary_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     review_center_api_owner_v1_review_get: {
         parameters: {
             query?: {
@@ -3983,6 +4422,13 @@ export interface operations {
                 cursor?: string | null;
                 review_status?: ("in_progress" | "waiting_for_settlement" | "waiting_for_review" | "complete" | "incomplete_evidence") | null;
                 strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                snapshot?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
+                aggregate_status?: string | null;
             };
             header?: never;
             path?: never;
@@ -4085,6 +4531,11 @@ export interface operations {
                 from_ms?: number | null;
                 to_ms?: number | null;
                 view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                exchange_instrument_id?: string | null;
+                position_side?: ("long" | "short") | null;
             };
             header?: never;
             path?: never;
@@ -4156,6 +4607,8 @@ export interface operations {
                 to_ms?: number | null;
                 limit?: number;
                 cursor?: string | null;
+                snapshot?: string | null;
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
                 scope?: "natural" | "all";
                 exit_path?: ("tp1_reached" | "tp1_not_reached" | "controlled_exit") | null;
             };
@@ -4196,6 +4649,11 @@ export interface operations {
                 cursor?: string | null;
                 aggregate_status?: string | null;
                 strategy_group_id?: string | null;
+                strategy_version_id?: string | null;
+                view?: "current" | "all";
+                exit_scope?: "all" | "strategy" | "owner" | "safety" | "unknown";
+                snapshot?: string | null;
+                time_basis?: "terminal" | "created";
                 exchange_instrument_id?: string | null;
                 position_side?: ("long" | "short") | null;
             };

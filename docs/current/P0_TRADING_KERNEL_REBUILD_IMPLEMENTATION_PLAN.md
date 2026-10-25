@@ -58,7 +58,7 @@ settle, and review concurrently.
 | --- | --- | --- |
 | Kernel identities and reducer | Complete | Pure domain models, immutable Ticket, events, effects, and fault branches |
 | PostgreSQL revision chain | Complete in the current tracked authority | Exact `0001_trading_kernel_baseline_v4 -> 0002_sor_v3_strategy_group_capacity -> 0003_portfolio_admission_observability -> 0004_owner_control_plane -> 0005_tradfi_instrument_center -> 0006_sor_dynamic_selection_v0 -> 0007_exit_profile_authority_v1 -> 0008_generic_dynamic_selection_v1 -> 0009_capacity_policy_v0
--> 0010_dynamic_intent_v1`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
+-> 0010_dynamic_intent_v1 -> 0011_orb_session_1h_v1 -> 0012_generic_signal_path_v1 -> 0013_owner_directional_risk_v1`; exact deployed revision and release state belong only to `MAIN_CONTROL_ROADMAP.md` |
 | Owner control plane | Complete | Explicit StrategyGroup pause/resume, global new-ENTRY pause/resume, durable flatten-all authorization and progress projection, authenticated Owner API, and `/trading/` console |
 | Registered Strategy Events | Complete | CPM/MPG/MI/BRF2 Crypto Events; retained retired Crypto SOR and independent paused TradFi contracts are not implicit ENTRY permission |
 | Observation and StrategySignal | Complete | Closed candles, bounded Facts, rising-edge or session Exposure Episode identity, deterministic Live/Replay parity |

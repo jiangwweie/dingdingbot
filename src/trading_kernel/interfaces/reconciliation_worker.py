@@ -49,6 +49,9 @@ from src.trading_kernel.application.reconciliation_scheduler import (
     ReconciliationScheduleInput,
     select_reconciliation_schedule,
 )
+from src.trading_kernel.application.recover_directional_transition import (
+    recover_directional_transition_once,
+)
 from src.trading_kernel.application.recover_unknown_command import (
     RecoverUnknownCommandRequest,
     recover_unknown_command,
@@ -303,6 +306,16 @@ async def run_reconciliation_worker_once(
         uow_factory,
         now_ms=request.now_ms,
     )
+    if safety is None and housekeeping.status is ReconciliationWorkerStatus.NO_WORK:
+        await recover_directional_transition_once(
+            uow_factory,
+            venue_truth,
+            now_ms=request.now_ms,
+            timeout_seconds=request.timeout_seconds,
+            worker_id=request.worker_id,
+            runtime_commit=request.runtime_commit,
+            schema_revision=request.schema_revision,
+        )
     if safety is None:
         return housekeeping
     if housekeeping.status is ReconciliationWorkerStatus.NO_WORK:

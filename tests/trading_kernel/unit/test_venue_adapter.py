@@ -1216,6 +1216,8 @@ async def test_ccxt_adapter_sends_explicit_hedge_side_and_client_identity() -> N
         {
             "newClientOrderId": "brc-entry-1",
             "positionSide": "LONG",
+            "timestamp": 1_000,
+            "recvWindow": 5_000,
         },
     )
 
@@ -2795,6 +2797,7 @@ async def test_cancel_truth_marks_historical_terminal_target_as_not_open() -> No
 
 def _request() -> VenueCommandRequest:
     return VenueCommandRequest(
+        entry_authorized_at_ms=1_000,
         command_id="command:entry-1",
         kind=ExchangeCommandKind.ENTRY,
         venue_id="binance-usdm",

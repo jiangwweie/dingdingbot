@@ -24,12 +24,18 @@ from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.capacity_sizing import (
     FIXED_EXCHANGE_CONFIGURED_LEVERAGE,
 )
+from src.trading_kernel.domain.directional_risk import (
+    SCOPED_EVENTS,
+    effective_directional_limit,
+)
 from src.trading_kernel.domain.events import TicketIssued
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class IssueTicketStatus(StrEnum):
+    DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"
+    DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     ISSUED = "issued"
     NO_READY_SIGNAL = "no_ready_signal"
     SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
@@ -94,6 +100,11 @@ async def issue_ticket(
 ) -> IssueTicketResult:
     claim = request.capacity_claim
     ticket = claim.to_ticket()
+    if ticket.identity.runtime.event_spec_id in SCOPED_EVENTS:
+        await uow.directional_risk.lock(
+            ticket.identity.netting_domain.venue_id,
+            ticket.identity.netting_domain.account_id,
+        )
     lane = await uow.entry_admission.lock_global_lane()
     if lane.status != "idle":
         return IssueTicketResult(
@@ -132,6 +143,30 @@ async def issue_ticket(
             status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
             ticket_id=None,
         )
+    if ticket.identity.runtime.event_spec_id in SCOPED_EVENTS:
+        domain = ticket.identity.netting_domain
+        try:
+            control = await uow.directional_risk.progress(
+                domain.venue_id, domain.account_id, request.now_ms
+            )
+            limit = effective_directional_limit(
+                control,
+                domain.position_side,
+                claim.directional_stop_risk_limit_fraction,
+            )
+        except ValueError:
+            return IssueTicketResult(
+                status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None
+            )
+        usage = await uow.entry_admission.sum_active_directional_stop_risk(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            position_side=domain.position_side,
+        )
+        if usage + ticket.risk_at_stop > claim.total_wallet_balance_at_claim * limit:
+            return IssueTicketResult(
+                status=IssueTicketStatus.DIRECTIONAL_RISK_EXHAUSTED, ticket_id=None
+            )
     owner_controls = getattr(uow, "owner_controls", None)
     if owner_controls is not None:
         strategy_control = await owner_controls.get_strategy_control(
