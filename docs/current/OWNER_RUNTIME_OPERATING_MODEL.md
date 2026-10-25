@@ -79,6 +79,20 @@ The primary Owner surface uses product language. Internal identities and
 diagnostic fields remain available for audit without turning the Owner into an
 execution operator.
 
+## Optional Feishu entry notice
+
+When `TRADING_KERNEL_FEISHU_WEBHOOK_URL` is configured for a Feishu custom bot,
+the worker makes one best-effort text POST after a committed `EntryAccepted`
+event. This includes an unknown ENTRY subsequently confirmed accepted. Ticket
+creation, rejection, rollback and unresolved outcomes do not emit a notice.
+The text reports acceptance, requested quantity and the planned Initial Stop;
+it does not assert fill or protection completion.
+
+Sending runs in a daemon thread with a two-second network timeout and no retry,
+deduplication or durable queue. Delivery can be lost during failure or shutdown;
+notification failure does not alter trading state. Missing configuration disables
+the notice. No frontend, schema or new worker is required.
+
 ## Multi-Position Meaning
 
 Multi-position is the default kernel capability. Different Netting Domains can

@@ -916,3 +916,18 @@ after the schema exists. Owner Control receives INSERT on directional events
 and UPDATE on the control projection; it receives no write permission on rule,
 admission evidence or ENTRY send-authorization tables. Exact production
 identity and activation evidence remain solely in `MAIN_CONTROL_ROADMAP.md`.
+
+## Optional Feishu accepted-entry notice
+
+Set `TRADING_KERNEL_FEISHU_WEBHOOK_URL` only in the existing protected Worker
+environment file for an HTTPS `open.feishu.cn` custom-bot endpoint. Do not put
+the URL in Git or command output. An absent value disables sending. This
+minimal text sender does not implement optional bot signing credentials; bot
+security configuration must accept its text payload. Failures are ignored after
+a sanitized log message, without retry or delivery guarantees.
+
+The notice is scheduled after a committed `EntryAccepted`, including confirmed
+unknown outcomes, and runs outside the database transaction and trading await
+path. It adds no table, migration or service. Its same-schema Kernel release is
+R3; any combined release still takes the highest classification. Existing R4,
+R2 and R1 certificates remain evidence for their exact original commits.

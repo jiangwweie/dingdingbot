@@ -71,13 +71,14 @@ from src.trading_kernel.domain.effects import (
     ResolveTicketIncidentsAtClosure,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-from src.trading_kernel.domain.events import TicketIssued, TradeEvent
+from src.trading_kernel.domain.events import EntryAccepted, TicketIssued, TradeEvent
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
+from src.trading_kernel.infrastructure.feishu_entry_notice import notify_entry_accepted
 from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
     PostgresDirectionalRiskRepository,
 )
@@ -142,6 +143,7 @@ class PostgresKernelUnitOfWork:
         self._engine = engine
         self._connection: AsyncConnection | None = None
         self._transaction: AsyncTransaction | None = None
+        self._entry_notices: list[tuple[TradeTicket, EntryAccepted]] = []
 
     async def __aenter__(self) -> Self:
         if self._connection is not None:
@@ -180,6 +182,8 @@ class PostgresKernelUnitOfWork:
     ) -> None:
         transaction = self._require_transaction()
         connection = self._require_connection()
+        notices = self._entry_notices
+        self._entry_notices = []
         try:
             if exc_type is None:
                 await transaction.commit()
@@ -189,6 +193,9 @@ class PostgresKernelUnitOfWork:
             await connection.close()
             self._transaction = None
             self._connection = None
+        if exc_type is None:
+            for ticket, event in notices:
+                notify_entry_accepted(ticket, event)
 
     async def commit_reduction(
         self,
@@ -557,6 +564,9 @@ class PostgresKernelUnitOfWork:
                 status="terminal",
                 terminal_at_ms=event.occurred_at_ms,
             )
+
+        if isinstance(event, EntryAccepted):
+            self._entry_notices.append((aggregate.ticket, event))
 
     async def _next_retryable_generation(
         self,
