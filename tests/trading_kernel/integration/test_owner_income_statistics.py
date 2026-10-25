@@ -21,10 +21,10 @@ from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     create_owner_read_engine,
     owner_read_transaction,
 )
-from tests.trading_kernel.integration.test_owner_console_read_repository import (
+from tests.trading_kernel.integration.owner_console_support import owner_read_dsn
+from tests.trading_kernel.support.owner_income import (
     _execute_owner_console_admin,
     _seed_owner_console_trades,
-    owner_read_dsn,
 )
 
 __all__ = ["owner_read_dsn"]

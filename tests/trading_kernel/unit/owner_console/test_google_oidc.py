@@ -18,7 +18,7 @@ from src.trading_kernel.interfaces.owner_console_http.google_oidc import (
     GoogleOidcService,
     GoogleOidcSettings,
 )
-from tests.trading_kernel.unit.owner_console.test_auth import (
+from tests.trading_kernel.support.owner_auth import (
     BASE_MS,
     PASSWORD,
     TOTP_SEED,
