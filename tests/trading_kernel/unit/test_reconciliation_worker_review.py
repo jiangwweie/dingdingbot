@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -149,6 +151,7 @@ class _Monitors:
 
 class _FakeUnitOfWork:
     def __init__(self, state: _WorkerState) -> None:
+        self.directional_risk = SimpleNamespace(next_resolved_send=AsyncMock(return_value=None))
         self.monitors = _Monitors()
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands
