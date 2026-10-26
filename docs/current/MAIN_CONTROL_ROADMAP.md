@@ -26,7 +26,32 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
-### Recovery repairs deployed and enabled trading chains restored
+### ENTRY action-time send-window repair deployed
+
+This snapshot supersedes the Kernel identity and send-capability conclusion
+in the earlier recovery snapshot below. Independent Owner API/static remain
+at their prior360fd425 release; only Kernel software changed.
+
+| Area | Direct evidence |
+| --- | --- |
+| Exact production release | Kernel `c7d02c2adfedc810727a3d7d42dbfab9770aa5e5`, immutable tag `tokyo-runtime-2026.10.26.4`; exact candidate fast-forwarded/pushed to dev. Official R3 same-schema regular deployment PASS in210194ms; schema remains `0013_owner_directional_risk_v1` |
+| Corrected prior conclusion | Valid services/selection authority and zero current exposure did not prove successful sends.17:00–19:41 production evidence had4 BRF2 signals,3 admitted Tickets (FIL/APT/NEAR) rejected locally as `entry_send_window_expired`, with no exchange order IDs. Their final send timestamps incorrectly reused worker-start time; actual arrival was11.889–12.021s later. AVAX separately had a stored budget_exhausted admission refusal; no finer cause was established |
+| Repair | Entry Worker uses real source/issue/dispatch times. Dispatcher fetches action facts outside PG, evaluates current Policy/runtime/strategy/Selection and deadlines at real post-I/O time, then commits exact final send authorization in a short transaction. Venue signs with that same persisted timestamp. Lifetime is at most5s and further bounded by fact/account/rule/claim/command/lease/session expiries. ENTRY exceptions use actual outcome time; unknown results retain their recovery barrier |
+| Exact R3 certification | PASS:1788 Unit/Architecture,1772 Integration,69 Full-chain; Ruff, Mypy207 source files and diff PASS. The earlier7c2872cd/c965cbbe attempts are invalid incomplete diagnostics, not release certificates. Local environment and historical-fixture defects were corrected without weakening gates; final certification used the repository-attested Docker PostgreSQL |
+| Production-shaped regression | Real PG to actual CcxtVenueAdapter reproduces12s preflight and proves exactly one accepted recording-order call with persisted timestamp. Full Entry Worker covers two6s reads. Both default real-clock and explicit fixture-clock paths are exercised. Expired facts/deadline/lease, backwards clock, Owner pause, runtime fence, postcommit delay, unknown and terminal no-resend boundaries pass |
+| Cutover preservation | Action-time source PG/exchange flatness and current member certification passed. Operational ENTRY fence and all-writer stop included independent Owner API. Stopped source Universe/history/control baseline preserved before identity rotation. No schema migration, policy SQL, old/new writer overlap or direct exchange write |
+| Owner controls and restoration | Policy30 genuine Resume remained enabled; official promoter returned `promoted`. Exact Owner Policy/Strategy/Selection/Research/Directional controls match source; direction unset/v1 and research enabled50/control4 retained. Four exact Workers and independent Owner API active/NRestarts0; operational fence absent. Configured Feishu endpoint presence/HTTPS host checks PASS without exposing URL |
+| Postflight authority | At22:35–22:36 Asia/Shanghai: BRF2/CPM/MI16/16 and MPG15/15 current selection observation/ENTRY authority valid; SOR-1H7/14 valid and7 normal first-trigger suppressions retained. PG Ticket/position/command/Incident counts0. This verifies runtime readiness, not actual accepted ENTRY |
+| Live-send acceptance boundary | No synthetic Signal, forced trade or replay of old terminal rejected Tickets is permitted. A newly naturally admitted command must prove actual final send timestamp/window and exchange result before live-send success is claimed. New post-release natural-send evidence is recorded separately; service uptime and no current Incident alone are insufficient |
+| Scope and safety | No credential mutation, sizing/risk expansion, manual ARMED, historical rewrite, strategy reactivation or Feishu test. Retired SOR-001 and Owner-paused TradFi remain paused. The deleted periodic monitor has not been recreated |
+
+Evidence: `.local/entry-send-clock-repair-20261026/` holds exact certification,
+formal deployment/promotion, source/target controls, stopped baseline and direct
+postflight facts. `.local/no-trade-forensics-20261026/` preserves the original
+signals, admissions, rejected commands and their actual send windows. These
+artifacts are display-only and never runtime authority.
+
+### Earlier recovery repair snapshot: selection restored, send path later found defective
 
 This snapshot supersedes the Kernel/control posture in older snapshots below.
 Independent Owner API and V2 static remain at their prior360fd425 release;
