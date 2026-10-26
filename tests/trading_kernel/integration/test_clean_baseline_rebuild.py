@@ -76,10 +76,8 @@ async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None
 
 
 def _database_url(database_name: str) -> str:
-    return (
-        "postgresql+asyncpg://dingdingbot:dingdingbot_dev@127.0.0.1:5432/"
-        f"{database_name}"
-    )
+    base = ADMIN_DSN.rsplit("/", 1)[0].replace("postgresql://", "postgresql+asyncpg://", 1)
+    return f"{base}/{database_name}"
 
 
 def _run_alembic(database_url: str, *arguments: str) -> subprocess.CompletedProcess[str]:

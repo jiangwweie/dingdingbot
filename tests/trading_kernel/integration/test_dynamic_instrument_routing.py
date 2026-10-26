@@ -402,7 +402,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
-        clock_ms=lambda: 1_100,
+        clock_ms=lambda: 3_000,
     )
     assert entry.status is DispatchCommandStatus.ACCEPTED
 
