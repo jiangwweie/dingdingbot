@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-10-22
+last_verified: 2026-10-26
 ---
 
 # Main Control Roadmap
@@ -25,6 +25,34 @@ One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
 ## Current Verified State
+
+### Owner directional risk V1 and Feishu notices deployed; Owner ENTRY remains paused
+
+This snapshot supersedes the Kernel, schema, Owner API and static production
+identities recorded below. Older snapshots remain dated evidence only.
+
+| Area | Directly verified state |
+| --- | --- |
+| Release identity | Kernel, Owner API and V2 static all `360fd425f82e2bc5716f4f58f2584063c0ca8925`; immutable annotated tag `tokyo-runtime-2026.10.26.1` pushed to origin. Official R4 compatible upgrade completed at approximately 10:37 Asia/Shanghai, followed by R2 API and R1 static. This is the combined directional-risk and Feishu release, not a notifications-only R3 |
+| Exact certification | Same-commit R4/R2/R1 manifests PASS. R4: 1,788 Unit/Architecture, 1,752 Integration and 69 Full-chain; Ruff, Mypy207 source files and diff PASS; Golden/Core parity961 Snapshots/23,064 member decisions. Periodic resource audits remain outside the existing release portfolio. One pre-existing resident-test UTC01:00 assertion was corrected in tests only before the final candidate was frozen |
+| Owner maintenance and closure | Genuine Console Owner ENTRY pause produced Policy29 with `new_entry_submit_enabled=false`; genuine Owner flatten-all completed three Tickets. All three Ticket/Aggregate pairs are terminal, position/protected quantities zero, active domains and budgets released, Review present; Owner operation completed. No agent-created live order or direct exchange mutation |
+| Source Selection quiescence | Four exact source Generic Generations reached STAGED while Owner Policy was paused. Observation was stopped to prevent new preparation; Lifecycle/Reconciliation and the old API remained available. The exact deployed0012 coordinator processed their actual30-minute deadlines, last10:32:18.904; all became FAILED_CLOSED and targets were abandoned. The existing authenticated Owner-pause/zero-debt predicate proved their retained negative Vacuums quiescent. No forged clock, shortened timeout, manual SQL repair, forced activation or extra Owner strategy/Selection change |
+| Schema and preservation | Official stopped, flat, forward-only0012→0013 upgrade PASS in191404ms. All five writers were stopped before the final source check. Every existing0012 table/column/row participated in the85-table preservation manifest; final stopped-source digest `sha256:517b02bd01e3df4327ebeea9742998a7b424fbb0c194b9add051ab17109e6468` matched after DDL and before identity rotation. Exact COMPATIBLE_RESTART Fact persisted; new Seed `sha256:eed0c812d181f995581b6a083cea6b0db9362ed902866bcab820227831789852` |
+| Owner directional control | Exact Owner read-role query through a READ ONLY transaction verified account control `unset`, version1, no pending view. Directional events, admissions and send-authorizations all zero at installation. Tracked grants give Owner Control UPDATE on controls and INSERT on events, with no INSERT/UPDATE on immutable rules, admissions or send-authorizations. Existing roles/passwords retained |
+| Owner trading authority | Policy29 remains paused and unchanged. Official `promote_entry.py --prepare-owner-resume` returned `prepared_owner_paused`: Entry process active and operational Fence removed only after fresh PG/exchange checks; no Owner Resume or trading permission was written. A genuine Console Resume/TOTP remains the only way for the Owner to reopen ENTRY |
+| Runtime ownership | Four persistent Workers active/enabled at exact360fd425/0013, NRestarts0; PIDs Observation887095, Entry893297, Lifecycle887094, Reconciliation887096. Independent Owner API active/NRestarts0, PID889914, `/healthz` returns `ok`. No old/new writer overlap or timer cold-start cadence |
+| Feishu notices | Protected Worker environment configured; Entry/Lifecycle/Reconciliation process-environment readback matches its HTTPS Feishu endpoint without printing the URL. Notices cover accepted ENTRY, full TP1 fill and post-TP1 Runner flatness. Runner messages retain “成交明细待确认” when only flatness is known. Best effort, two-second timeout, no retry/durable queue; no real notification delivery or live lifecycle acceptance is claimed by configuration alone |
+| Owner API / public static | Official R2/R1 deployment and health smoke PASS. Public index/JS/CSS HTTPS200 with exact public/disk SHA-256 equality; unauthenticated directional-control GET401. API restart invalidated prior in-process Sessions. Directional data accepted through the actual readonly role; genuine authenticated browser control-write acceptance remains NOT TESTED |
+| Current safety sample | At10:40–10:41 Asia/Shanghai: PG Ticket/position/reservation/domain/unreviewed-terminal/command/Incident/busy-lane/nonterminal-Aggregate/nonquiescent-Vacuum counts all0; nonterminal Generations/Owner operations0. Exact exchange probe during paused preparation confirmed zero positions/orders, independent sides/Cross/5x and exact current Universe/account scope |
+| Dynamic / control preservation | Ten Active Universe pointers and frozen membership preserved,106 active scopes over31 current instruments with31 fresh certifications at postflight. Strategy Controls and Selection mode/version/pending controls match source. Four FAILED_CLOSED attempts and negative fences are retained historical/recovery evidence, not successful new Authority takeover. Research control/quota unchanged. Crypto SOR-001 remains permanently ENTRY-disabled |
+| Remaining boundary | Software delivery and paused operating readiness are complete. Owner direction selection, real notification delivery, future current-period Authority/recovery and natural live lifecycle/economics remain separate evidence. The completed deployment-window heartbeat was deleted when the authorized deployment began; it must not redeploy this completed release |
+
+Evidence: `.local/feishu-release-e984381a/` contains exact certificate hashes,
+the source deadline audit, formal Kernel/API/static release logs, stopped-source
+preservation baseline, role/control and public-asset postflight, current Writer
+identities and protected Webhook existence checks. Generated evidence is
+display-only and never runtime authority. Action-time PostgreSQL, systemd and
+exchange facts must be refreshed for any subsequent operation.
 
 ### Readonly database table inventory for the knowledge catalog
 
