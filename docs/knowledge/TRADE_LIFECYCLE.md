@@ -15,11 +15,11 @@
 | 1. 领取观察 | [run_observation_worker_once](../../src/trading_kernel/interfaces/observation_worker.py#L88) 领取 due scope 租约 | 锁定 scope、观察代次和本次收盘 | 无任务、代次被替代 |
 | 2. 构造行情与检测 | [observe_strategy_scope](../../src/trading_kernel/application/observe_strategy_scope.py#L246) 在事务外读市场，再验证身份和时间 | 当前事实、检测结果、Episode；warming 只预热 | 数据缺失、当前权限无效、条件未满足 |
 | 3. 生成并摄取 Signal | [produce_strategy_signal](../../src/trading_kernel/application/produce_strategy_signal.py#L27)、[ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806) | 冻结事实、Signal、readiness；检查 Registry/Scope/Universe/Authority | 重复 Episode、过期、不一致事实、退役策略 |
-| 4. 选择候选 | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L108) 先处理已有命令，再检查 lane 和候选 | 有界候选排序，读取策略控制和 scope | lane 忙、无候选、策略暂停 |
+| 4. 选择候选 | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L110) 先处理已有命令，再检查 lane 和候选 | 有界候选排序，读取策略控制和 scope | lane 忙、无候选、策略暂停 |
 | 5. 获取行动时事实 | Entry 在数据库事务之外读取账户、报价、规则及必要产品 session | `EntryAdmissionSnapshot` 与规则 current | 网络失败、身份不符、事实过期 |
 | 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
 | 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
-| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L172) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
+| 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L205) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
 | 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
 | 10. 生命周期维护 | [run_lifecycle_worker_once](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116) | TP1、保本、Runner 或退出命令及状态 | 事实不新鲜、替换/撤单未知 |
 | 11. 核对及清理 | Reconciliation 读取外部持仓与自有余单 | 清理精确残单；满足外部 flat 与无余单后推进闭合 | orphan / unowned order、未知结果、未完成清理 |
@@ -133,3 +133,10 @@ sequenceDiagram
 ## 本页验证与边界
 
 行为证据见 [CODE_AND_TEST_INDEX](CODE_AND_TEST_INDEX.md)，本轮实际命令及结果见 [MAINTENANCE](MAINTENANCE.md)。完整生命周期测试从受控本地输入出发，**证明代码路径，不证明自然生产信号已完成交易**；真实生产闭合仍需直接外部事实。
+
+
+## ENTRY 最终发送时间
+
+**行情和账户读取完成后，才按真实行动时间建立发送授权。**Entry Worker 在事实读取后用当前时间核验并发行 Ticket；dispatcher 重新读取行动时事实，在短事务内锁定方向与 Owner Policy、读取当前策略/Selection 控制并核验权限和截止时间，再持久化最终发送权。交易所适配器使用这份授权的同一个时间戳签名，不能沿用本轮任务开始时间，也不能临时刷新签名来延长旧授权。（来源：[发送实现](../../src/trading_kernel/application/dispatch_exchange_command.py)、[Entry Worker](../../src/trading_kernel/interfaces/entry_worker.py)）
+
+**发送窗口最多5秒**，并受账户/行情/规则事实有效期、Claim/Command 截止时间和租约剩余时间进一步收紧。网络读取和交易所写入均在数据库事务之外；过期、暂停或身份变化拒绝发送，已终态拒绝的 ENTRY 不重放。（来源：[持久化授权](../../src/trading_kernel/infrastructure/pg_directional_risk_repository.py)、[真实 PostgreSQL 时钟回归](../../tests/trading_kernel/integration/test_entry_send_action_clock.py)）

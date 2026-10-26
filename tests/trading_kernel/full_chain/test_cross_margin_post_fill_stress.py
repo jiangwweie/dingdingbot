@@ -484,6 +484,7 @@ async def test_failed_stress_materializes_one_flatten_and_keeps_lane_blocked(
             lease_until_ms=8_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_100,
     )
     assert flatten.status is DispatchCommandStatus.ACCEPTED
 
@@ -523,6 +524,7 @@ async def test_failed_stress_materializes_one_flatten_and_keeps_lane_blocked(
             lease_until_ms=8_300,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_300,
     )
     assert cancel_stop.status is DispatchCommandStatus.ACCEPTED
 
@@ -581,6 +583,7 @@ async def _reach_post_fill_pending(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=TicketPreflightFacts(ticket),
+        clock_ms=lambda: 1_100,
     )
     assert entry.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -627,6 +630,7 @@ async def _reach_post_fill_pending(
             lease_until_ms=7_200,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_200,
     )
     assert stop.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(engine) as uow:

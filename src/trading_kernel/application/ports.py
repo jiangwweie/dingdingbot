@@ -976,6 +976,7 @@ class DirectionalRiskRepository(Protocol):
         worker_id: str,
         now_ms: int,
         deadline_at_ms: int,
+        valid_until_ms: int,
         control: DirectionalControl | None,
     ) -> int: ...
     async def finish_send(self, command_id: str, now_ms: int) -> None: ...

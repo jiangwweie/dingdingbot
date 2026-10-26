@@ -196,6 +196,7 @@ async def test_entry_without_action_time_facts_is_rejected_before_venue(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=None,
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.SUPERSEDED
@@ -241,6 +242,7 @@ async def test_policy_disable_before_entry_preflight_causes_zero_venue_mutations
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.SUPERSEDED
@@ -365,6 +367,7 @@ async def test_action_time_entry_authority_drift_causes_zero_venue_mutations(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.SUPERSEDED
@@ -417,6 +420,7 @@ async def test_unregistered_event_at_dispatch_is_terminally_fenced_before_venue(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.SUPERSEDED
@@ -470,6 +474,7 @@ async def test_retired_strategy_version_before_entry_preflight_causes_zero_venue
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.SUPERSEDED
@@ -502,6 +507,7 @@ async def test_selection_vacuum_opened_during_preflight_supersedes_before_venue(
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=facts,
+            clock_ms=lambda: 1_100,
         )
     )
     await asyncio.wait_for(facts.started.wait(), timeout=2)
@@ -550,6 +556,7 @@ async def test_selection_vacuum_does_not_block_initial_stop_for_existing_ticket(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     assert entry.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -581,6 +588,7 @@ async def test_selection_vacuum_does_not_block_initial_stop_for_existing_ticket(
             lease_until_ms=7_200,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_200,
     )
 
     assert protection.status is DispatchCommandStatus.ACCEPTED
@@ -619,6 +627,7 @@ async def test_universe_pointer_switch_after_preflight_is_fenced_by_claimed_entr
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=PreflightFacts(),
+            clock_ms=lambda: 1_100,
         )
     )
     await asyncio.wait_for(barrier_factory.preflight_closed.wait(), timeout=2)
@@ -817,6 +826,7 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
             lease_until_ms=7_400,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_400,
     )
 
     assert superseded.status is DispatchCommandStatus.SUPERSEDED
@@ -842,6 +852,7 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
             lease_until_ms=7_500,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_500,
     )
     assert cleanup.status is DispatchCommandStatus.ACCEPTED
     assert venue.calls == 1
@@ -972,6 +983,7 @@ async def test_tp1_rejection_is_persisted_without_losing_initial_protection(
             lease_until_ms=7_300,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_300,
     )
     assert rejected.status is DispatchCommandStatus.REJECTED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -1037,6 +1049,7 @@ async def test_replacement_rejection_preserves_the_prior_active_stop(
             lease_until_ms=7_400,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_400,
     )
     assert rejected.status is DispatchCommandStatus.REJECTED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -1069,6 +1082,7 @@ async def _dispatch_for_ticket(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 2_200,
     )
     assert result.status is DispatchCommandStatus.ACCEPTED
     await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
@@ -1131,6 +1145,7 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.ACCEPTED
@@ -1159,6 +1174,7 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
             lease_until_ms=7_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_100,
     )
     assert repeated.status is DispatchCommandStatus.NO_COMMAND
 
@@ -1184,6 +1200,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.REJECTED
@@ -1219,6 +1236,7 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
             lease_until_ms=7_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_100,
     )
     assert repeated.status is DispatchCommandStatus.NO_COMMAND
 
@@ -1244,6 +1262,7 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1274,6 +1293,7 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
             lease_until_ms=12_000,
             timeout_seconds=0.01,
         ),
+        clock_ms=lambda: 7_000,
     )
     assert repeated.status is DispatchCommandStatus.NO_COMMAND
 
@@ -1304,6 +1324,7 @@ async def test_restart_conserves_expired_claim_as_unknown_without_redispatch(
             lease_until_ms=6_300,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 1_300,
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1342,6 +1363,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1369,6 +1391,7 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
             lease_until_ms=7_200,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_200,
     )
 
     assert result.status is DispatchCommandStatus.REJECTED
@@ -1413,6 +1436,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1440,6 +1464,7 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
             lease_until_ms=7_200,
             timeout_seconds=0.01,
         ),
+        clock_ms=lambda: 2_200,
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1484,6 +1509,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         await reconcile_ticket(
@@ -1510,6 +1536,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             lease_until_ms=7_200,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_200,
     )
     await _dispatch_for_ticket(
         dispatch_engine,
@@ -1535,6 +1562,7 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
             lease_until_ms=8_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_100,
     )
     assert rejected.status is DispatchCommandStatus.REJECTED
 
@@ -1583,6 +1611,7 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
             lease_until_ms=8_300,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_300,
     )
 
     assert rejected.status is DispatchCommandStatus.REJECTED
@@ -1649,6 +1678,7 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
             lease_until_ms=8_500,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_500,
     )
 
     assert accepted.status is DispatchCommandStatus.ACCEPTED
@@ -1680,6 +1710,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
             lease_until_ms=8_300,
             timeout_seconds=0.01,
         ),
+        clock_ms=lambda: 3_300,
     )
 
     assert unknown.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1710,6 +1741,7 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
             lease_until_ms=13_500,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 8_500,
     )
     assert repeated.status is DispatchCommandStatus.NO_COMMAND
 
@@ -1904,6 +1936,7 @@ async def _reach_cancel_pending(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(
@@ -1930,6 +1963,7 @@ async def _reach_cancel_pending(
             lease_until_ms=7_200,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 2_200,
     )
     await _dispatch_for_ticket(engine, accepting, ticket.identity.ticket_id)
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -1950,6 +1984,7 @@ async def _reach_cancel_pending(
             lease_until_ms=8_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 3_100,
     )
     async with PostgresKernelUnitOfWork(engine) as uow:
         await reconcile_ticket(

@@ -215,6 +215,7 @@ async def dispatch_for_ticket(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: now_ms,
     )
     assert result.status is DispatchCommandStatus.ACCEPTED
     await commit_passed_post_fill_stress_if_pending(engine, ticket_id)

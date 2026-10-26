@@ -783,6 +783,7 @@ async def test_tradfi_dispatch_rejects_mismatched_product_family_before_venue(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=_MismatchedTradFiProductFacts(),
+        clock_ms=lambda: 1_100,
     )
 
     assert dispatched.status is DispatchCommandStatus.SUPERSEDED
@@ -841,6 +842,7 @@ async def test_tradfi_entry_worker_rejects_mismatched_product_family_before_tick
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_002,
     )
 
     assert result.status is EntryWorkerStatus.ISSUE_REFUSED

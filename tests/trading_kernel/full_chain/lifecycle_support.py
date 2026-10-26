@@ -57,6 +57,7 @@ async def dispatch_lifecycle_command(
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
+        clock_ms=lambda: now_ms,
     )
     await _commit_passed_post_fill_stress_if_pending(engine, ticket_id)
     return result

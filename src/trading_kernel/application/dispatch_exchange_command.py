@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Callable
 from enum import StrEnum
 from typing import TypedDict
 
@@ -45,6 +47,7 @@ from src.trading_kernel.domain.commands import (
     SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.directional_risk import (
+    ENTRY_SEND_WINDOW_MS,
     SCOPED_EVENTS,
     effective_directional_limit,
 )
@@ -169,13 +172,47 @@ class DispatchCommandResult(BaseModel):
     command_id: str | None = None
 
 
+class _EntryMutationPreflight(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: EntryDispatchPreflightStatus
+    evaluated_at_ms: int
+    entry_authorized_at_ms: int | None = None
+    entry_send_expires_at_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _require_exact_send_window(self) -> _EntryMutationPreflight:
+        if self.status is EntryDispatchPreflightStatus.ALLOWED:
+            if self.entry_authorized_at_ms != self.evaluated_at_ms or (
+                self.entry_send_expires_at_ms is None
+                or self.entry_send_expires_at_ms <= self.evaluated_at_ms
+            ):
+                raise ValueError(
+                    "allowed ENTRY requires its exact committed send window"
+                )
+        elif (
+            self.entry_authorized_at_ms is not None
+            or self.entry_send_expires_at_ms is not None
+        ):
+            raise ValueError("refused ENTRY cannot carry send authority")
+        return self
+
+
+def action_clock_ms() -> int:
+    return int(time.time() * 1_000)
+
+
 async def dispatch_one_command(
     uow_factory: UnitOfWorkFactory,
     venue: VenuePort,
     request: DispatchCommandRequest,
     *,
     entry_facts_source: EntryFactsSource | None = None,
+    clock_ms: Callable[[], int] | None = None,
 ) -> DispatchCommandResult:
+    clock_ms = action_clock_ms if clock_ms is None else clock_ms
+    entry_authorized_at_ms = None
+    entry_send_expires_at_ms = None
     async with uow_factory() as uow:
         expired = await uow.exchange_commands.get_one_expired_claim(
             now_ms=request.now_ms,
@@ -219,9 +256,7 @@ async def dispatch_one_command(
             command_kinds=request.command_kinds,
         )
         if command is not None:
-            aggregate = await uow.aggregates.get(
-                command.ticket_identity.ticket_id
-            )
+            aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("claimed command has no Ticket aggregate")
             if not _command_is_applicable(command, aggregate.status):
@@ -229,10 +264,7 @@ async def dispatch_one_command(
                     command_id=command.command_id,
                     worker_id=request.worker_id,
                     observed_at_ms=request.now_ms,
-                    reason=(
-                        "aggregate_state_moved_on:"
-                        f"{aggregate.status.value}"
-                    ),
+                    reason=(f"aggregate_state_moved_on:{aggregate.status.value}"),
                 )
                 return DispatchCommandResult(
                     status=DispatchCommandStatus.SUPERSEDED,
@@ -262,10 +294,7 @@ async def dispatch_one_command(
                         command_id=command.command_id,
                         worker_id=request.worker_id,
                         observed_at_ms=request.now_ms,
-                        reason=(
-                            "selection_entry_vacuum:"
-                            f"{vacuum.entry_vacuum_id}"
-                        ),
+                        reason=(f"selection_entry_vacuum:{vacuum.entry_vacuum_id}"),
                     )
                     event = EntryVacuumSuperseded(
                         event_id=(
@@ -299,40 +328,48 @@ async def dispatch_one_command(
             command=command,
             request=request,
             entry_facts_source=entry_facts_source,
+            clock_ms=clock_ms,
         )
-        if preflight is not EntryDispatchPreflightStatus.ALLOWED:
+        if preflight.status is not EntryDispatchPreflightStatus.ALLOWED:
             await _record_preflight_refusal(
                 uow_factory,
                 command=command,
                 worker_id=request.worker_id,
-                now_ms=request.now_ms,
-                status=preflight,
+                now_ms=preflight.evaluated_at_ms,
+                status=preflight.status,
             )
             return DispatchCommandResult(
                 status=DispatchCommandStatus.SUPERSEDED,
                 command_id=command.command_id,
+            )
+        entry_authorized_at_ms = preflight.entry_authorized_at_ms
+        entry_send_expires_at_ms = preflight.entry_send_expires_at_ms
+        if command.kind is ExchangeCommandKind.ENTRY:
+            assert (
+                entry_authorized_at_ms is not None
+                and entry_send_expires_at_ms is not None
             )
 
     try:
         if command.kind is ExchangeCommandKind.SET_LEVERAGE:
             if not isinstance(command.payload, SetLeverageCommandPayload):
                 raise RuntimeError("SET_LEVERAGE command payload is invalid")
-            dispatch_result: ExchangeCommandResult | SetLeverageCommandResult = (
-                await asyncio.wait_for(
-                    venue.set_leverage(
-                        VenueSetLeverageRequest(
-                            command_id=command.command_id,
-                            venue_id=command.ticket_identity.netting_domain.venue_id,
-                            account_id=command.ticket_identity.netting_domain.account_id,
-                            exchange_instrument_id=(
-                                command.ticket_identity.netting_domain.exchange_instrument_id
-                            ),
-                            payload=command.payload,
-                            deadline_at_ms=command.deadline_at_ms,
-                        )
-                    ),
-                    timeout=request.timeout_seconds,
-                )
+            dispatch_result: (
+                ExchangeCommandResult | SetLeverageCommandResult
+            ) = await asyncio.wait_for(
+                venue.set_leverage(
+                    VenueSetLeverageRequest(
+                        command_id=command.command_id,
+                        venue_id=command.ticket_identity.netting_domain.venue_id,
+                        account_id=command.ticket_identity.netting_domain.account_id,
+                        exchange_instrument_id=(
+                            command.ticket_identity.netting_domain.exchange_instrument_id
+                        ),
+                        payload=command.payload,
+                        deadline_at_ms=command.deadline_at_ms,
+                    )
+                ),
+                timeout=request.timeout_seconds,
             )
         else:
             venue_request = VenueCommandRequest(
@@ -346,10 +383,12 @@ async def dispatch_one_command(
                 position_side=command.ticket_identity.netting_domain.position_side,
                 venue_client_order_id=command.venue_client_order_id,
                 payload=command.payload,
-                deadline_at_ms=command.deadline_at_ms,
-                entry_authorized_at_ms=request.now_ms
-                if command.kind is ExchangeCommandKind.ENTRY
-                else None,
+                deadline_at_ms=(
+                    entry_send_expires_at_ms
+                    if entry_send_expires_at_ms is not None
+                    else command.deadline_at_ms
+                ),
+                entry_authorized_at_ms=entry_authorized_at_ms,
             )
             dispatch_result = await asyncio.wait_for(
                 venue.execute(venue_request),
@@ -358,25 +397,25 @@ async def dispatch_one_command(
     except VenueMutationRejected as exc:
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.REJECTED,
-            observed_at_ms=request.now_ms,
+            observed_at_ms=clock_ms() if command.kind is ExchangeCommandKind.ENTRY else request.now_ms,
             reason=f"venue_rejected:{type(exc).__name__}",
         )
     except VenueMutationFailure as exc:
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
-            observed_at_ms=request.now_ms,
+            observed_at_ms=clock_ms() if command.kind is ExchangeCommandKind.ENTRY else request.now_ms,
             reason=f"venue_error:{exc.reason}",
         )
     except TimeoutError:
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
-            observed_at_ms=request.now_ms,
+            observed_at_ms=clock_ms() if command.kind is ExchangeCommandKind.ENTRY else request.now_ms,
             reason="venue_timeout",
         )
     except Exception as exc:  # noqa: BLE001 - unknown venue outcome must fail closed.
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
-            observed_at_ms=request.now_ms,
+            observed_at_ms=clock_ms() if command.kind is ExchangeCommandKind.ENTRY else request.now_ms,
             reason=f"venue_error:{type(exc).__name__}",
         )
 
@@ -384,7 +423,8 @@ async def dispatch_one_command(
         command.kind is ExchangeCommandKind.SET_LEVERAGE
         and isinstance(dispatch_result, SetLeverageCommandResult)
         and isinstance(command.payload, SetLeverageCommandPayload)
-        and dispatch_result.exchange_configured_leverage != command.payload.desired_leverage
+        and dispatch_result.exchange_configured_leverage
+        != command.payload.desired_leverage
     ):
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.OUTCOME_UNKNOWN,
@@ -460,7 +500,12 @@ async def _preflight_new_entry_mutation(
     command: ExchangeCommand,
     request: DispatchCommandRequest,
     entry_facts_source: EntryFactsSource | None,
-) -> EntryDispatchPreflightStatus:
+    clock_ms: Callable[[], int],
+) -> _EntryMutationPreflight:
+    def refused(status: EntryDispatchPreflightStatus) -> _EntryMutationPreflight:
+        return _EntryMutationPreflight(status=status, evaluated_at_ms=clock_ms())
+
+    facts_requested_at_ms = clock_ms()
     if (
         entry_facts_source is None
         or not request.runtime_commit
@@ -468,20 +513,20 @@ async def _preflight_new_entry_mutation(
         or request.admission_snapshot_validity_ms is None
         or request.admission_snapshot_validity_ms <= 0
     ):
-        return EntryDispatchPreflightStatus.RUNTIME_FENCED
+        return refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
     domain = command.ticket_identity.netting_domain
     snapshot_request = EntryAdmissionSnapshotRequest(
         venue_id=domain.venue_id,
         account_id=domain.account_id,
         exchange_instrument_id=domain.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     rules_request = InstrumentRulesRequest(
         venue_id=domain.venue_id,
         account_id=domain.account_id,
         exchange_instrument_id=domain.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     try:
@@ -489,12 +534,12 @@ async def _preflight_new_entry_mutation(
             command.ticket_identity.runtime.event_spec_id
         )
     except ValueError:
-        return EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
+        return refused(EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED)
     product_request = ProductSessionRequest(
         venue_id=domain.venue_id,
         account_id=domain.account_id,
         exchange_instrument_id=domain.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
     )
     async with uow_factory() as uow:
         product_profile = await uow.signals.get_product_profile(
@@ -517,16 +562,17 @@ async def _preflight_new_entry_mutation(
             timeout=request.timeout_seconds,
         )
     except Exception:  # noqa: BLE001 - unreadable admission facts must fence Entry.
-        return EntryDispatchPreflightStatus.STALE_SNAPSHOT
+        return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
     source_product_decision = evaluate_event_product_entry(
         compatibility=product_compatibility,
         profile=product_profile,
         snapshot=product_session,
-        now_ms=request.now_ms,
+        now_ms=clock_ms(),
     )
     if source_product_decision.status is ProductEntryStatus.IDENTITY_MISMATCH:
-        return EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED
+        return refused(EntryDispatchPreflightStatus.PRODUCT_ENTRY_BLOCKED)
     async with uow_factory() as uow:
+        await uow.directional_risk.lock(domain.venue_id, domain.account_id)
         if product_session is not None:
             await uow.signals.upsert_product_sessions((product_session,))
         current_command = await uow.exchange_commands.get(command.command_id)
@@ -535,9 +581,9 @@ async def _preflight_new_entry_mutation(
             command.ticket_identity.ticket_id
         )
         if current_command is None or aggregate is None or claim is None:
-            return EntryDispatchPreflightStatus.COMMAND_MISMATCH
+            return refused(EntryDispatchPreflightStatus.COMMAND_MISMATCH)
         policy = await uow.entry_admission.get_owner_policy(
-            aggregate.ticket.owner_policy_id
+            aggregate.ticket.owner_policy_id, for_update=True
         )
         scope = await uow.signals.get_runtime_scope(aggregate.ticket.runtime_scope_id)
         active_universe = await uow.signals.get_active_universe_member(
@@ -566,35 +612,15 @@ async def _preflight_new_entry_mutation(
                 selection_spec_id=selection_control.selection_spec_id,
             )
         )
-        selection_authority_valid = True
-        if selection_control is not None:
-            source_signal = await uow.signals.get(
-                aggregate.ticket.identity.signal_event_id
-            )
-            if (
-                source_signal is None
-                or source_signal.selection_authority_id
-                != aggregate.ticket.selection_authority_id
-                or source_signal.selection_authority_id != claim.selection_authority_id
-            ) or scope is None:
-                selection_authority_valid = False
-            else:
-                selection = await resolve_selection_entry_authority(
-                    uow,
-                    runtime_scope=scope,
-                    birth_selection_authority_id=(source_signal.selection_authority_id),
-                    observed_close_time_ms=source_signal.occurred_at_ms,
-                    now_ms=request.now_ms,
-                    allow_current_as_birth=False,
-                )
-                selection_authority_valid = selection.allowed
         strategy_version = await uow.signals.get_strategy_version(
             aggregate.ticket.identity.runtime.strategy_version_id
         )
         event_spec = await uow.signals.get_event_spec(
             aggregate.ticket.identity.runtime.event_spec_id
         )
-        capability = await uow.signals.get_runtime_capability("exchange_commands")
+        capability = await uow.signals.get_runtime_capability(
+            "exchange_commands", for_update=True
+        )
         current_product_profile = await uow.signals.get_product_profile(
             domain.exchange_instrument_id
         )
@@ -628,57 +654,12 @@ async def _preflight_new_entry_mutation(
                 position_side=domain.position_side,
             )
         )
-    product_entry_decision = evaluate_event_product_entry(
-        compatibility=product_compatibility,
-        profile=current_product_profile,
-        snapshot=current_product_session,
-        now_ms=request.now_ms,
-    )
-    decision = revalidate_entry_dispatch(
-        EntryDispatchPreflightRequest(
-            command=current_command,
-            ticket=aggregate.ticket,
-            capacity_claim=claim,
-            owner_policy=policy,
-            runtime_scope=scope,
-            active_universe=active_universe,
-            strategy_group=strategy_group,
-            strategy_version=strategy_version,
-            event_spec=event_spec,
-            runtime_capability=capability,
-            runtime_commit=request.runtime_commit,
-            schema_revision=request.schema_revision,
-            admission_snapshot=snapshot,
-            instrument_rules=rules,
-            account_entry_health=classify_account_entry_health(snapshot, ownership),
-            instrument_entry_health=classify_instrument_entry_health(
-                snapshot,
-                ownership,
-                exchange_instrument_id=domain.exchange_instrument_id,
-                requested_position_side=domain.position_side,
-            ),
-            active_family_ticket_count=active_family_ticket_count,
-            active_strategy_side_ticket_count=active_strategy_side_ticket_count,
-            active_directional_risk_at_stop=active_directional_risk_at_stop,
-            now_ms=request.now_ms,
-            product_entry_decision=product_entry_decision,
-            strategy_entry_enabled=strategy_entry_is_enabled(strategy_control),
-            selection_entry_vacuum_open=bool(
-                selection_vacuum and selection_vacuum.blocks_new_entry
-            ),
-            selection_authority_valid=selection_authority_valid,
-        )
-    )
-    if decision.status is not EntryDispatchPreflightStatus.ALLOWED or command.kind is not ExchangeCommandKind.ENTRY:
-        return decision.status
-    # Final send right is serialized with Owner changes; no transaction crosses venue I/O.
-    async with uow_factory() as uow:
-        await uow.directional_risk.lock(domain.venue_id, domain.account_id)
+        # Start the signed window only after I/O and current-state lock acquisition.
         control = None
         if aggregate.ticket.identity.runtime.event_spec_id in SCOPED_EVENTS:
             try:
                 control = await uow.directional_risk.progress(
-                    domain.venue_id, domain.account_id, request.now_ms
+                    domain.venue_id, domain.account_id, clock_ms()
                 )
                 assert policy is not None
                 limit = effective_directional_limit(
@@ -687,27 +668,122 @@ async def _preflight_new_entry_mutation(
                     policy.directional_stop_risk_limit_fraction,
                 )
             except ValueError:
-                return EntryDispatchPreflightStatus.DIRECTIONAL_CONTROL_BLOCKED
-            usage = await uow.entry_admission.sum_active_directional_stop_risk(
-                venue_id=domain.venue_id,
-                account_id=domain.account_id,
-                position_side=domain.position_side,
+                return refused(EntryDispatchPreflightStatus.DIRECTIONAL_CONTROL_BLOCKED)
+            if (
+                active_directional_risk_at_stop
+                > snapshot.account_risk_snapshot.total_wallet_balance * limit
+            ):
+                return refused(EntryDispatchPreflightStatus.DIRECTIONAL_RISK_EXHAUSTED)
+        evaluated_at_ms = clock_ms()
+        if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
+            return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+        selection_authority_valid = True
+        if selection_control is not None:
+            source_signal = await uow.signals.get(
+                aggregate.ticket.identity.signal_event_id
             )
-            if usage > snapshot.account_risk_snapshot.total_wallet_balance * limit:
-                return EntryDispatchPreflightStatus.DIRECTIONAL_RISK_EXHAUSTED
+            if (
+                source_signal is None
+                or source_signal.selection_authority_id
+                != aggregate.ticket.selection_authority_id
+                or source_signal.selection_authority_id != claim.selection_authority_id
+            ) or scope is None:
+                selection_authority_valid = False
+            else:
+                selection = await resolve_selection_entry_authority(
+                    uow,
+                    runtime_scope=scope,
+                    birth_selection_authority_id=(source_signal.selection_authority_id),
+                    observed_close_time_ms=source_signal.occurred_at_ms,
+                    now_ms=evaluated_at_ms,
+                    allow_current_as_birth=False,
+                    lock_current=False,
+                )
+                selection_authority_valid = selection.allowed
+        # Selection validation performs bounded reads; sample after those too.
+        evaluated_at_ms = clock_ms()
+        if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
+            return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+        product_entry_decision = evaluate_event_product_entry(
+            compatibility=product_compatibility,
+            profile=current_product_profile,
+            snapshot=current_product_session,
+            now_ms=evaluated_at_ms,
+        )
+        decision = revalidate_entry_dispatch(
+            EntryDispatchPreflightRequest(
+                command=current_command,
+                ticket=aggregate.ticket,
+                capacity_claim=claim,
+                owner_policy=policy,
+                runtime_scope=scope,
+                active_universe=active_universe,
+                strategy_group=strategy_group,
+                strategy_version=strategy_version,
+                event_spec=event_spec,
+                runtime_capability=capability,
+                runtime_commit=request.runtime_commit,
+                schema_revision=request.schema_revision,
+                admission_snapshot=snapshot,
+                instrument_rules=rules,
+                account_entry_health=classify_account_entry_health(snapshot, ownership),
+                instrument_entry_health=classify_instrument_entry_health(
+                    snapshot,
+                    ownership,
+                    exchange_instrument_id=domain.exchange_instrument_id,
+                    requested_position_side=domain.position_side,
+                ),
+                active_family_ticket_count=active_family_ticket_count,
+                active_strategy_side_ticket_count=active_strategy_side_ticket_count,
+                active_directional_risk_at_stop=active_directional_risk_at_stop,
+                now_ms=evaluated_at_ms,
+                product_entry_decision=product_entry_decision,
+                strategy_entry_enabled=strategy_entry_is_enabled(strategy_control),
+                selection_entry_vacuum_open=bool(
+                    selection_vacuum and selection_vacuum.blocks_new_entry
+                ),
+                selection_authority_valid=selection_authority_valid,
+            )
+        )
+        if (
+            decision.status is not EntryDispatchPreflightStatus.ALLOWED
+            or command.kind is not ExchangeCommandKind.ENTRY
+        ):
+            return refused(decision.status)
+        valid_until_ms = min(
+            snapshot.valid_until_ms,
+            snapshot.account_risk_snapshot.valid_until_ms,
+            rules.valid_until_ms,
+            claim.expires_at_ms,
+            request.lease_until_ms,
+            current_product_session.valid_until_ms
+            if current_product_session is not None
+            and product_compatibility.product_family == "tradfi_equity_perpetual"
+            else command.deadline_at_ms,
+        )
         try:
-            await uow.directional_risk.authorize_send(
+            authorized_at_ms = await uow.directional_risk.authorize_send(
                 command_id=command.command_id,
                 venue_id=domain.venue_id,
                 account_id=domain.account_id,
                 worker_id=request.worker_id,
-                now_ms=request.now_ms,
+                now_ms=evaluated_at_ms,
                 deadline_at_ms=command.deadline_at_ms,
+                valid_until_ms=valid_until_ms,
                 control=control,
             )
         except ValueError:
-            return EntryDispatchPreflightStatus.COMMAND_MISMATCH
-    return decision.status
+            return refused(EntryDispatchPreflightStatus.COMMAND_MISMATCH)
+    return _EntryMutationPreflight(
+        status=decision.status,
+        evaluated_at_ms=evaluated_at_ms,
+        entry_authorized_at_ms=authorized_at_ms,
+        entry_send_expires_at_ms=min(
+            authorized_at_ms + ENTRY_SEND_WINDOW_MS,
+            command.deadline_at_ms,
+            valid_until_ms,
+        ),
+    )
 
 
 async def _no_product_session():

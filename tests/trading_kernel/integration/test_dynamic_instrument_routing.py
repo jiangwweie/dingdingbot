@@ -325,6 +325,7 @@ async def test_pending_certification_alone_creates_no_ticket_command_or_venue_wr
             lease_until_ms=6_100,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: 1_100,
     )
     async with dispatch_engine.connect() as connection:
         ticket_count = int(
@@ -401,6 +402,7 @@ async def test_removed_instrument_ticket_still_protects_exits_and_reconciles(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     assert entry.status is DispatchCommandStatus.ACCEPTED
 
@@ -655,4 +657,5 @@ async def _dispatch_ticket_command(
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: now_ms,
     )

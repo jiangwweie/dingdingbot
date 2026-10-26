@@ -348,6 +348,7 @@ async def _dispatch(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: now_ms,
     )
 
 

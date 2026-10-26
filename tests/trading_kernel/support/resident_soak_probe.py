@@ -221,7 +221,7 @@ async def main(role: str = "all") -> None:
         at = clock()
         return await run_entry_worker_once(factory,no_io,no_io,EntryWorkerRequest(worker_id="soak:entry",
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,now_ms=at,lease_until_ms=at+30000,
-            timeout_seconds=10,admission_snapshot_validity_ms=5000))
+            timeout_seconds=10,admission_snapshot_validity_ms=5000), clock_ms=lambda: at)
     async def lifecycle():
         at = clock()
         return await run_lifecycle_worker_once(factory,no_io,safety_facts,LifecycleWorkerRequest(worker_id="soak:lifecycle",

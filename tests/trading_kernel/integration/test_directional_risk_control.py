@@ -65,6 +65,7 @@ async def test_owner_change_during_real_preflight_uses_new_control(
             venue,
             dispatch_request(t),
             entry_facts_source=Facts(),
+            clock_ms=lambda: 1100,
         )
     )
     try:
@@ -131,6 +132,7 @@ async def test_tightening_rejects_unsent_ticket_and_releases_its_authorities(
         venue,
         dispatch_request(t),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1100,
     )
     assert result.status is DispatchCommandStatus.SUPERSEDED and venue.calls == 0
     async with engine.connect() as c:
@@ -165,7 +167,7 @@ async def test_change_after_committed_send_right_waits_for_actual_result(
         async def execute(self, request):
             async with engine.connect() as c:
                 repo = PostgresDirectionalRiskRepository(c)
-                assert await repo.send_expiry(request.command_id) == 6100
+                assert await repo.send_expiry(request.command_id) == 2100
             assert request.entry_authorized_at_ms == 1100
             started.set()
             await release.wait()
@@ -181,6 +183,7 @@ async def test_change_after_committed_send_right_waits_for_actual_result(
             Venue(),
             dispatch_request(t),
             entry_facts_source=PreflightFacts(),
+            clock_ms=lambda: 1100,
         )
     )
     try:
@@ -234,6 +237,7 @@ async def test_corrupt_directional_control_after_send_does_not_rollback_acceptan
         Venue(),
         dispatch_request(t),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1100,
     )
     assert result.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -268,6 +272,7 @@ async def test_corrupt_control_during_unknown_recovery_preserves_accepted_outcom
         SlowVenue(),
         dispatch_request(t).model_copy(update={"timeout_seconds": 0.01}),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1100,
     )
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     async with engine.begin() as c:
@@ -345,6 +350,7 @@ async def test_authorized_old_send_keeps_switch_pending_even_after_lease_expiry(
             worker_id="sender",
             now_ms=1_500,
             deadline_at_ms=t.expires_at_ms,
+            valid_until_ms=t.expires_at_ms,
             control=control,
         )
     async with engine.begin() as c:
@@ -416,6 +422,7 @@ async def test_unknown_visibility_and_control_completion_are_independent(
         SlowVenue(),
         dispatch_request(t).model_copy(update={"timeout_seconds": 0.01}),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1100,
     )
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     async with engine.begin() as c:
@@ -429,7 +436,7 @@ async def test_unknown_visibility_and_control_completion_are_independent(
 
     class Truth:
         async def lookup_command_truth(self, request):
-            assert request.entry_window_expires_at_ms == 6100
+            assert request.entry_window_expires_at_ms == 2100
             order = (
                 None
                 if not visible
@@ -534,6 +541,7 @@ async def test_pending_control_recovers_when_another_safety_path_resolved_comman
             worker_id="sender",
             now_ms=1500,
             deadline_at_ms=t.expires_at_ms,
+            valid_until_ms=t.expires_at_ms,
             control=await repo.get(domain.venue_id, domain.account_id),
         )
         await repo.request_change(

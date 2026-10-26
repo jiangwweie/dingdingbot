@@ -16,11 +16,11 @@
 | **Signal 生成** | [produce_strategy_signal](../../src/trading_kernel/application/produce_strategy_signal.py#L27) | StrategySignal、Episode、fact_digest | [重复信号幂等](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L236) |
 | **摄取与权限** | [ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806)、[validate_signal_authority](../../src/trading_kernel/application/ingest_signal.py#L844) | Readiness、Registry、scope/version、选择权限 | [权限矩阵](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L287) |
 | **候选仲裁** | [select_entry_candidate](../../src/trading_kernel/application/select_entry_candidate.py#L40) | bounded ready candidates、排序快照 | [arbitration](../../tests/trading_kernel/unit/test_arbitration.py)、[到期候选修复](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L405) |
-| **ENTRY 工作者** | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L108) | EntryFactsSource、EntryAdmissionSnapshot | [runtime fact workers](../../tests/trading_kernel/integration/test_runtime_fact_workers.py) |
+| **ENTRY 工作者** | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L110) | EntryFactsSource、EntryAdmissionSnapshot | [runtime fact workers](../../tests/trading_kernel/integration/test_runtime_fact_workers.py) |
 | **最终准入** | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) | AdmissionDecision、Policy、组合使用量、ExitBinding | [拒绝无交易权限](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L500) |
 | **定量与冻结 Claim** | [build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L172) | CapacityClaim、sizing 与 stress 证据 | [capacity sizing](../../tests/trading_kernel/unit/test_capacity_sizing.py)、[capacity claim integration](../../tests/trading_kernel/integration/test_capacity_claim_to_ticket.py) |
-| **原子签发** | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) | lane、account exposure、预算、域、Ticket、首命令 | [Decision 失败整体回滚](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L1169)、[issue_ticket integration](../../tests/trading_kernel/integration/test_issue_ticket.py) |
-| **命令派发** | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L172) | VenuePort、ExchangeCommand、独立网络阶段 | [command dispatch](../../tests/trading_kernel/integration/test_command_dispatch.py)、[commands unit](../../tests/trading_kernel/unit/test_commands.py) |
+| **原子签发** | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) | lane、account exposure、预算、域、Ticket、首命令 | [Decision 失败整体回滚](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L1171)、[issue_ticket integration](../../tests/trading_kernel/integration/test_issue_ticket.py) |
+| **命令派发** | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L205) | VenuePort、ExchangeCommand、独立网络阶段 | [command dispatch](../../tests/trading_kernel/integration/test_command_dispatch.py)、[commands unit](../../tests/trading_kernel/unit/test_commands.py) |
 | **派发前重查** | [revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L152) | 冻结 Claim/Ticket 与 fresh facts | [entry preflight](../../tests/trading_kernel/unit/test_entry_dispatch_preflight.py) |
 | **未知结果恢复** | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93) | VenueTruthSnapshot、精确 namespace/client ID | [重启后仍不重发](../../tests/trading_kernel/integration/test_unknown_outcome_reconciliation.py#L190) |
 | **持仓与保护确认** | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) | PositionSnapshot、EntryFilled、InitialStopConfirmed | [完整保护和终态](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158) |
@@ -54,7 +54,7 @@
 
 ### 1. 有 Signal 为什么没有 Ticket
 
-**结论：先判断是否到最终准入，再区分权限、事实、仲裁和容量阻断。**沿 `ingest_signal → select_entry_candidate → Entry facts → issue_ready_signal → issue_ticket` 追踪。验证包括[容量拒绝不创建权限](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L500)和[Decision 写失败时全部回滚](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L1169)。
+**结论：先判断是否到最终准入，再区分权限、事实、仲裁和容量阻断。**沿 `ingest_signal → select_entry_candidate → Entry facts → issue_ready_signal → issue_ticket` 追踪。验证包括[容量拒绝不创建权限](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L500)和[Decision 写失败时全部回滚](../../tests/trading_kernel/integration/test_signal_to_ticket.py#L1171)。
 
 ### 2. 下单结果未知如何处理
 

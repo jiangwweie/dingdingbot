@@ -674,6 +674,7 @@ async def test_exact_late_fill_rejoins_original_ticket_and_prepares_protection(
             timeout_seconds=1,runtime_commit="kernel-test-head",
             schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: vacuum.fenced_at_ms+10,
     )
     assert dispatched_stop.status is DispatchCommandStatus.ACCEPTED, dispatched_stop
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -716,6 +717,7 @@ async def test_exact_late_fill_rejoins_original_ticket_and_prepares_protection(
             timeout_seconds=1,runtime_commit="kernel-test-head",
             schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: vacuum.fenced_at_ms+12,
     )
     assert dispatched_tp1.status is DispatchCommandStatus.ACCEPTED, dispatched_tp1
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -773,6 +775,7 @@ async def _finish_exact_late_fill_ticket(dispatch_engine, ticket, vacuum, venue)
                 admission_snapshot_validity_ms=1_000,
             ),
             entry_facts_source=PreflightFacts(),
+            clock_ms=lambda: venue.now_ms,
         )
         assert dispatched.status is DispatchCommandStatus.ACCEPTED, dispatched
 
@@ -793,6 +796,7 @@ async def _finish_exact_late_fill_ticket(dispatch_engine, ticket, vacuum, venue)
             timeout_seconds=1,runtime_commit="kernel-test-head",
             schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1_000,
         ),entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: venue.now_ms,
     )
     assert dispatched_cleanup.status is DispatchCommandStatus.ACCEPTED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -1904,6 +1908,7 @@ async def _assert_unknown_cancel(
             lease_until_ms=vacuum.fenced_at_ms + 5_002,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: vacuum.fenced_at_ms + 2,
     )
     assert unknown.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
@@ -1923,7 +1928,7 @@ async def _assert_unknown_cancel(
     no_resend = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),MustNotDispatch(),
         DispatchCommandRequest(worker_id="unknown-retry",ticket_id=ticket.identity.ticket_id,
-            now_ms=vacuum.fenced_at_ms+3,lease_until_ms=vacuum.fenced_at_ms+5_003,timeout_seconds=1))
+            now_ms=vacuum.fenced_at_ms+3,lease_until_ms=vacuum.fenced_at_ms+5_003,timeout_seconds=1), clock_ms=lambda: vacuum.fenced_at_ms+3)
     assert no_resend.status == DispatchCommandStatus.NO_COMMAND
 
     commands_before = await _commands(dispatch_engine, ticket)
@@ -2102,6 +2107,7 @@ async def test_retained_partial_initial_stop_rejection_requires_controlled_flatt
             lease_until_ms=vacuum.fenced_at_ms + 5_005,
             timeout_seconds=1,
         ),
+        clock_ms=lambda: vacuum.fenced_at_ms + 5,
     )
 
     assert rejected.status is DispatchCommandStatus.REJECTED

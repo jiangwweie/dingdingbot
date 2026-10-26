@@ -226,6 +226,7 @@ class PostgresDirectionalRiskRepository:
         worker_id: str,
         now_ms: int,
         deadline_at_ms: int,
+        valid_until_ms: int,
         control: DirectionalControl | None,
     ) -> int:
         await self.lock(venue_id, account_id)
@@ -272,7 +273,7 @@ class PostgresDirectionalRiskRepository:
             or command["lease_until_ms"] <= now_ms
         ):
             raise ValueError("entry_send_claim_changed")
-        if deadline_at_ms <= now_ms:
+        if min(deadline_at_ms, valid_until_ms) <= now_ms:
             raise ValueError("entry_send_window_expired")
         await self._connection.execute(
             sa.insert(entry_send_authorizations).values(
@@ -281,7 +282,7 @@ class PostgresDirectionalRiskRepository:
                 account_id=account_id,
                 worker_id=worker_id,
                 authorized_at_ms=now_ms,
-                expires_at_ms=min(now_ms + ENTRY_SEND_WINDOW_MS, deadline_at_ms),
+                expires_at_ms=min(now_ms + ENTRY_SEND_WINDOW_MS, deadline_at_ms, valid_until_ms),
                 control=sa.null()
                 if control is None
                 else control.model_dump(mode="json"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from decimal import Decimal
 from enum import StrEnum
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandRequest,
     DispatchCommandStatus,
+    action_clock_ms,
     dispatch_one_command,
 )
 from src.trading_kernel.application.issue_ready_signal import (
@@ -110,13 +112,17 @@ async def run_entry_worker_once(
     venue: VenuePort,
     facts_source: EntryFactsSource,
     request: EntryWorkerRequest,
+    *,
+    clock_ms: Callable[[], int] | None = None,
 ) -> EntryWorkerResult:
+    clock_ms = action_clock_ms if clock_ms is None else clock_ms
     existing = await _dispatch_entry(
         uow_factory,
         venue,
         request,
         ticket_id=None,
         entry_facts_source=facts_source,
+        clock_ms=clock_ms,
     )
     if existing.status is not DispatchCommandStatus.NO_COMMAND:
         return EntryWorkerResult(
@@ -182,25 +188,26 @@ async def run_entry_worker_once(
             )
             return EntryWorkerResult(status=EntryWorkerStatus.ISSUE_REFUSED)
 
+    facts_requested_at_ms = clock_ms()
     snapshot_request = EntryAdmissionSnapshotRequest(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
         exchange_instrument_id=signal.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     rules_request = InstrumentRulesRequest(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
         exchange_instrument_id=signal.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
         valid_for_ms=request.admission_snapshot_validity_ms,
     )
     product_session_request = ProductSessionRequest(
         venue_id=profile.venue_id,
         account_id=profile.account_id,
         exchange_instrument_id=signal.exchange_instrument_id,
-        observed_at_ms=request.now_ms,
+        observed_at_ms=facts_requested_at_ms,
     )
     try:
         product_compatibility = product_compatibility_for(signal.event_spec_id)
@@ -213,8 +220,7 @@ async def run_entry_worker_once(
                         facts_source,
                         product_session_request,
                     )
-                    if product_compatibility.product_family
-                    == "tradfi_equity_perpetual"
+                    if product_compatibility.product_family == "tradfi_equity_perpetual"
                     else _no_product_session()
                 ),
             ),
@@ -226,16 +232,17 @@ async def run_entry_worker_once(
                 uow,
                 signal_event_id=signal.signal_event_id,
                 failure_type=type(exc).__name__,
-                now_ms=request.now_ms,
+                now_ms=clock_ms(),
             )
         return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
 
+    admission_at_ms = clock_ms()
     action_time_product_decision = (
         evaluate_event_product_entry(
             compatibility=product_compatibility,
             profile=product_profile,
             snapshot=product_session,
-            now_ms=request.now_ms,
+            now_ms=admission_at_ms,
         )
         if product_compatibility.product_family == "tradfi_equity_perpetual"
         else None
@@ -275,7 +282,7 @@ async def run_entry_worker_once(
                 claim_owner=request.worker_id,
                 runtime_commit=request.runtime_commit,
                 schema_revision=request.schema_revision,
-                now_ms=request.now_ms,
+                now_ms=admission_at_ms,
                 action_time_product_decision=action_time_product_decision,
             ),
         )
@@ -291,6 +298,7 @@ async def run_entry_worker_once(
         request,
         ticket_id=issued.ticket_id,
         entry_facts_source=facts_source,
+        clock_ms=clock_ms,
     )
     return EntryWorkerResult(
         status=(
@@ -429,7 +437,9 @@ async def _dispatch_entry(
     *,
     ticket_id: str | None,
     entry_facts_source: EntryFactsSource | None = None,
+    clock_ms: Callable[[], int],
 ):
+    dispatch_at_ms = clock_ms()
     return await dispatch_one_command(
         uow_factory,
         venue,
@@ -440,12 +450,13 @@ async def _dispatch_entry(
                 ExchangeCommandKind.SET_LEVERAGE,
                 ExchangeCommandKind.ENTRY,
             ),
-            now_ms=request.now_ms,
-            lease_until_ms=request.lease_until_ms,
+            now_ms=dispatch_at_ms,
+            lease_until_ms=dispatch_at_ms + (request.lease_until_ms - request.now_ms),
             timeout_seconds=request.timeout_seconds,
             runtime_commit=request.runtime_commit,
             schema_revision=request.schema_revision,
             admission_snapshot_validity_ms=request.admission_snapshot_validity_ms,
         ),
         entry_facts_source=entry_facts_source,
+        clock_ms=clock_ms,
     )

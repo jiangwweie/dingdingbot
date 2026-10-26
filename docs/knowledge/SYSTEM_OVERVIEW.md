@@ -74,7 +74,7 @@ flowchart TB
 | **Lifecycle** | 已有安全命令、Owner Operation、受保护 Ticket | Initial Stop、止盈、Runner、退出、受控平仓 | 退出事实只读；非 ENTRY 安全命令写 |
 | **Reconciliation** | unknown、critical work、housekeeping due | 外部事实恢复、成交/保护确认、认证、结算与 Review | 只读真相获取；可持久化后续清理命令 |
 
-来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L108)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235)。
+来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L110)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235)。
 
 **分析：这不是把一个函数拆成四段顺序调用。**Worker 通过数据库的持久化状态、精确键和租约协作；单个进程退出不会把已提交的 Ticket 或 Command 变成内存中的“丢失任务”。Recovery 仍需当前身份和外部事实验证。
 

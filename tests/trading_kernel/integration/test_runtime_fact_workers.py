@@ -568,6 +568,7 @@ async def test_entry_worker_owns_candidate_facts_ticket_and_entry_dispatch(
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_003,
     )
 
     assert result.status is EntryWorkerStatus.DISPATCHED
@@ -621,6 +622,7 @@ async def test_entry_action_facts_timeout_records_infrastructure_decision(
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_003,
     )
 
     assert result.status is EntryWorkerStatus.FACTS_UNAVAILABLE
@@ -689,6 +691,7 @@ async def test_adm_010_higher_candidate_during_network_read_supersedes_original(
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_003,
     )
 
     assert result.status is EntryWorkerStatus.ISSUE_REFUSED
@@ -746,6 +749,7 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_003,
     )
     assert entry.ticket_id is not None
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
@@ -827,6 +831,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             timeout_seconds=1,
             admission_snapshot_validity_ms=1_000,
         ),
+        clock_ms=lambda: 1_003,
     )
     assert entry.ticket_id is not None
     async with PostgresKernelUnitOfWork(runtime_fact_worker_engine) as uow:
@@ -1088,3 +1093,50 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         "cancel_order",
         "replace_protection",
     ]
+
+
+@pytest.mark.asyncio
+async def test_entry_worker_uses_each_real_action_time_after_both_slow_fact_reads(runtime_fact_worker_engine, monkeypatch):
+    from src.trading_kernel.domain.signal import build_signal_fact_digest
+    from src.trading_kernel.infrastructure.pg_models import (
+        entry_send_authorizations,
+        facts_current,
+    )
+    from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
+
+    engine = runtime_fact_worker_engine
+    await _seed_runtime_authority(engine)
+    await _enable_exchange_commands(engine)
+    original = _signal(signal_event_id="signal-slow-live-shaped-entry")
+    facts = tuple(f.model_copy(update={"valid_until_ms":31_000}) for f in original.facts)
+    signal = original.model_copy(update={"facts":facts,"fact_digest":build_signal_fact_digest(facts),"expires_at_ms":31_000})
+    async with engine.begin() as c:
+        await c.execute(sa.update(facts_current).where(facts_current.c.runtime_scope_id==signal.runtime_scope_id).values(valid_until_ms=31_000))
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await ingest_signal(uow,IngestSignalRequest(signal=signal,runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,now_ms=1_002))
+    now = 1_003
+    monkeypatch.setattr('src.trading_kernel.interfaces.entry_worker.action_clock_ms',lambda:now)
+    class SlowFacts(FakeEntryAdmissionFactsSource):
+        async def read_entry_admission_snapshot(self,request):
+            nonlocal now
+            result = await super().read_entry_admission_snapshot(request)
+            now += 6_000
+            return result
+    class Exchange:
+        async def create_order(self,*args):
+            assert args[-1]['timestamp'] == 13_003
+            async with engine.connect() as c:
+                row=(await c.execute(sa.select(entry_send_authorizations))).mappings().one()
+                assert row['authorized_at_ms']==13_003 and row['expires_at_ms']==18_003
+            return {'id':'entry-after-two-fact-reads'}
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','subaccount-main'):Exchange()},clock_ms=lambda:now)
+    source=SlowFacts()
+    result=await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(engine),adapter,source,
+        EntryWorkerRequest(worker_id='slow-entry-worker',runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=1_003,lease_until_ms=31_003,timeout_seconds=2,admission_snapshot_validity_ms=30_000))
+    assert result.dispatch_status.value=='accepted',result
+    assert [r.observed_at_ms for r in source.requests]==[1_003,7_003]
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        created=await uow.tickets.get(result.ticket_id)
+        assert created.created_at_ms==7_003

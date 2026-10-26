@@ -958,6 +958,7 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: now_ms,
     )
     assert result.command_id is not None
     await commit_passed_post_fill_stress_if_pending(

@@ -605,6 +605,7 @@ async def run_event_chain(
             timeout_seconds=1,
             admission_snapshot_validity_ms=30_000,
         ),
+        clock_ms=lambda: NOW_MS + 1_000,
     )
     async with uow_factory() as uow:
         entry_decision = await uow.admission_decisions.get_for_signal(

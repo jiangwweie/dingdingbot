@@ -810,6 +810,7 @@ async def _make_unknown_entry(engine):
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: 1_100,
     )
     assert dispatched.status is DispatchCommandStatus.OUTCOME_UNKNOWN
     async with PostgresKernelUnitOfWork(engine) as uow:
@@ -1163,6 +1164,7 @@ async def _dispatch(
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,
+        clock_ms=lambda: now_ms,
     )
     assert result.status is not DispatchCommandStatus.NO_COMMAND
     await _commit_all_passed_post_fill_stress(engine)

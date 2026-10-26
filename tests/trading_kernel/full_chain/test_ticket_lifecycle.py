@@ -613,6 +613,7 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
             lease_until_ms=8_100,
             timeout_seconds=0.01,
         ),
+        clock_ms=lambda: 3_100,
     )
 
     assert result.status is DispatchCommandStatus.OUTCOME_UNKNOWN
@@ -1227,6 +1228,7 @@ async def _dispatch(
             admission_snapshot_validity_ms=1_000,
         ),
         entry_facts_source=PreflightFacts(),
+        clock_ms=lambda: now_ms,
     )
     await _commit_all_passed_post_fill_stress(engine)
     return result

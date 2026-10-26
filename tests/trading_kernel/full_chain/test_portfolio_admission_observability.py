@@ -968,7 +968,7 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(
                 return await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(issue_engine),venue,facts,
                     EntryWorkerRequest(worker_id=worker,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION,
                         now_ms=NOW_MS+offset+1000,lease_until_ms=NOW_MS+offset+31000,timeout_seconds=10,
-                        admission_snapshot_validity_ms=30000))
+                        admission_snapshot_validity_ms=30000), clock_ms=lambda: NOW_MS+offset+1000)
             results=await asyncio.gather(contender("capacity-race-a"),contender("capacity-race-b"))
             winners=[item for item in results if item.status is EntryWorkerStatus.DISPATCHED]
             assert len(winners)==1,results
@@ -977,7 +977,7 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(
             retried = await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(issue_engine),venue,facts,
                 EntryWorkerRequest(worker_id="capacity-race-followup",runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION,
                     now_ms=NOW_MS+offset+15000,lease_until_ms=NOW_MS+offset+45000,timeout_seconds=10,
-                    admission_snapshot_validity_ms=30000))
+                    admission_snapshot_validity_ms=30000), clock_ms=lambda offset=offset: NOW_MS+offset+15000)
             assert retried.status is EntryWorkerStatus.ISSUE_REFUSED, retried
             assert retried.issue_status.value in {"exposure_family_capacity_exhausted","strategy_side_capacity_exhausted","budget_exhausted"},retried
             break
@@ -1069,7 +1069,7 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(
             await request_exit(uow,ExitTicketRequest(ticket_id=ticket_id,reason="capacity_validation_controlled_exit",requested_at_ms=at))
         result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(issue_engine),venue,
             DispatchCommandRequest(worker_id="capacity-exit",ticket_id=ticket_id,now_ms=at+1,
-                lease_until_ms=at+5000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION))
+                lease_until_ms=at+5000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION), clock_ms=lambda at=at: at+1)
         assert result.status.value=="accepted"
         matched = False
         for step in range(5):
@@ -1082,7 +1082,7 @@ async def test_capacity_v0_two_natural_same_strategy_tickets_and_third_refusal(
                 break
             cancel = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(issue_engine),venue,
                 DispatchCommandRequest(worker_id="capacity-cleanup",ticket_id=ticket_id,now_ms=at+200+step*1000,
-                    lease_until_ms=at+5200+step*1000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION))
+                    lease_until_ms=at+5200+step*1000,timeout_seconds=1,runtime_commit="kernel-test-head",schema_revision=CURRENT_SCHEMA_REVISION), clock_ms=lambda at=at,step=step: at+200+step*1000)
             assert cancel.status.value=="accepted"
             async with PostgresKernelUnitOfWork(issue_engine) as uow:
                 command = await uow.exchange_commands.get(cancel.command_id)
@@ -1366,6 +1366,7 @@ async def _observe_and_admit(
             timeout_seconds=1,
             admission_snapshot_validity_ms=30_000,
         ),
+        clock_ms=lambda: observed_at_ms + 1_000,
     )
     async with PostgresKernelUnitOfWork(engine) as uow:
         persisted_decision = await uow.admission_decisions.get_for_signal(
