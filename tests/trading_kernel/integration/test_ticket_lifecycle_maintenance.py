@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from unittest.mock import Mock
 
 import pytest
 import sqlalchemy as sa
@@ -40,6 +41,10 @@ from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.domain.ticket import build_ticket_id
+from src.trading_kernel.infrastructure import (
+    feishu_notice as notice_module,
+)
+from src.trading_kernel.infrastructure import pg_unit_of_work as uow_module
 from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
@@ -68,7 +73,17 @@ from tests.trading_kernel.support.tickets import make_ticket
 @pytest.mark.asyncio
 async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protection(
     lifecycle_engine,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setenv(
+        "TRADING_KERNEL_FEISHU_WEBHOOK_URL",
+        "https://open.feishu.cn/open-apis/bot/v2/hook/test-token",
+    )
+    monkeypatch.setattr(
+        notice_module.threading, "Thread", Mock(side_effect=RuntimeError("thread failed"))
+    )
+    notify = Mock(wraps=notice_module.notify_tp1_filled)
+    monkeypatch.setattr(uow_module, "notify_tp1_filled", notify)
     ticket = _registered_sor_long_ticket()
     await _reach_position_protected(lifecycle_engine, ticket)
 
@@ -92,7 +107,16 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
                 now_ms=2_500,
             ),
         )
+        notify.assert_not_called()
 
+    notify.assert_called_once()
+    notice_ticket, event = notify.call_args.args
+    assert notice_ticket.identity == ticket.identity
+    assert event.filled_qty == ticket.take_profit_quantities[0]
+    assert event.average_fill_price == ticket.take_profit_prices[0]
+    assert notify.call_args.kwargs["remaining_qty"] == (
+        ticket.quantity - ticket.take_profit_quantities[0]
+    )
     assert result.status is LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
@@ -108,6 +132,77 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
     )
     assert isinstance(replacement.payload, OrderCommandPayload)
     assert replacement.payload.stop_price == Decimal("60080.3")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("after_tp1", "requested_exit", "rollback"),
+    [
+        (True, False, False),
+        (True, True, False),
+        (False, False, False),
+        (False, True, False),
+        (True, False, True),
+    ],
+)
+async def test_runner_notice_requires_committed_flatness_after_tp1(
+    lifecycle_engine,
+    monkeypatch,
+    after_tp1,
+    requested_exit,
+    rollback,
+) -> None:
+    notify = Mock()
+    monkeypatch.setattr(uow_module, "notify_runner_exited", notify)
+    ticket = _registered_sor_long_ticket()
+    if after_tp1:
+        await _reach_runner_protected(lifecycle_engine, ticket)
+    else:
+        await _reach_position_protected(lifecycle_engine, ticket)
+    notify.assert_not_called()  # Replacing or moving a stop is not a Runner exit.
+    if requested_exit:
+        async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+            await request_exit(
+                uow,
+                ExitTicketRequest(
+                    ticket_id=ticket.identity.ticket_id,
+                    reason="strategy_exit",
+                    requested_at_ms=3_000,
+                ),
+            )
+        await _dispatch(
+            lifecycle_engine,
+            KindAwareAcceptingVenue(),
+            ticket.identity.ticket_id,
+            now_ms=3_100,
+        )
+    try:
+        async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+            await reconcile_ticket(
+                uow,
+                ReconcileTicketRequest(
+                    ticket_id=ticket.identity.ticket_id,
+                    snapshot=PositionSnapshot(
+                        netting_domain=ticket.identity.netting_domain,
+                        quantity=Decimal(0),
+                        average_entry_price=None,
+                        observed_at_ms=3_200,
+                    ),
+                ),
+            )
+            notify.assert_not_called()
+            if rollback:
+                raise RuntimeError("rollback fixture")
+    except RuntimeError as error:
+        if not rollback or str(error) != "rollback fixture":
+            raise
+    if after_tp1 and not rollback:
+        notify.assert_called_once()
+        assert notify.call_args.kwargs["previous_qty"] == (
+            ticket.quantity - ticket.take_profit_quantities[0]
+        )
+    else:
+        notify.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -165,7 +260,9 @@ async def test_sor_profile_position_protected_exit_plan_is_durable(
         )
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
     assert aggregate is not None and aggregate.status is AggregateStatus.EXIT_PENDING
-    assert events[-1].reason == reason
+    event = events[-1]
+    assert isinstance(event, ExitRequested)
+    assert event.reason == reason
     assert any(command.kind is ExchangeCommandKind.EXIT for command in commands)
 
 
@@ -237,7 +334,9 @@ async def test_mi_pre_tp1_time_stop_triggers_at_exact_twelfth_closed_bar(
         events = await uow.events.list_for_ticket(ticket.identity.ticket_id)
 
     assert at_boundary.status is LifecycleMaintenanceStatus.EXIT_REQUESTED
-    assert events[-1].reason == "pre_tp1_time_stop_hit"
+    event = events[-1]
+    assert isinstance(event, ExitRequested)
+    assert event.reason == "pre_tp1_time_stop_hit"
 
 
 @pytest.mark.asyncio

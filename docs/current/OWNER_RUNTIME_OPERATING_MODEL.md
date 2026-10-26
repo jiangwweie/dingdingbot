@@ -79,14 +79,23 @@ The primary Owner surface uses product language. Internal identities and
 diagnostic fields remain available for audit without turning the Owner into an
 execution operator.
 
-## Optional Feishu entry notice
+## Optional Feishu trading notices
 
 When `TRADING_KERNEL_FEISHU_WEBHOOK_URL` is configured for a Feishu custom bot,
-the worker makes one best-effort text POST after a committed `EntryAccepted`
-event. This includes an unknown ENTRY subsequently confirmed accepted. Ticket
-creation, rejection, rollback and unresolved outcomes do not emit a notice.
-The text reports acceptance, requested quantity and the planned Initial Stop;
-it does not assert fill or protection completion.
+the worker makes best-effort text POSTs after committed trading events:
+
+| Trigger | Notice | Confirmed facts |
+| --- | --- | --- |
+| `EntryAccepted`, including a subsequently confirmed unknown ENTRY | 开仓已接单 | Requested quantity and planned Initial Stop, not a fill or completed protection |
+| `TakeProfitFilled` | TP1 已成交 | Full TP1 filled quantity, average fill price and remaining position |
+| `PositionFlatConfirmed` / `ExternalFlatDetected` after TP1 | Runner 已退出，成交明细待确认 | Position is zero; previous position is labelled 退出前仓位, not filled quantity |
+
+Runner flatness alone does not supply its exit fill quantity, average price or
+reason. The notice omits these unconfirmed details and makes no extra exchange
+query. Initial-stop exits before TP1 and protection replacement confirmations
+do not emit a Runner notice. Ticket creation, rejection, rollback and unresolved
+outcomes do not emit a notice. Messages use the instrument symbol, position
+side, Beijing event-confirmation time and exact Ticket identity.
 
 Sending runs in a daemon thread with a two-second network timeout and no retry,
 deduplication or durable queue. Delivery can be lost during failure or shutdown;

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import partial
 from types import TracebackType
 from typing import Literal
 
@@ -71,14 +73,25 @@ from src.trading_kernel.domain.effects import (
     ResolveTicketIncidentsAtClosure,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
-from src.trading_kernel.domain.events import EntryAccepted, TicketIssued, TradeEvent
+from src.trading_kernel.domain.events import (
+    EntryAccepted,
+    ExternalFlatDetected,
+    PositionFlatConfirmed,
+    TakeProfitFilled,
+    TicketIssued,
+    TradeEvent,
+)
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
-from src.trading_kernel.infrastructure.feishu_entry_notice import notify_entry_accepted
+from src.trading_kernel.infrastructure.feishu_notice import (
+    notify_entry_accepted,
+    notify_runner_exited,
+    notify_tp1_filled,
+)
 from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
     PostgresDirectionalRiskRepository,
 )
@@ -143,7 +156,7 @@ class PostgresKernelUnitOfWork:
         self._engine = engine
         self._connection: AsyncConnection | None = None
         self._transaction: AsyncTransaction | None = None
-        self._entry_notices: list[tuple[TradeTicket, EntryAccepted]] = []
+        self._trade_notices: list[Callable[[], None]] = []
 
     async def __aenter__(self) -> Self:
         if self._connection is not None:
@@ -182,8 +195,8 @@ class PostgresKernelUnitOfWork:
     ) -> None:
         transaction = self._require_transaction()
         connection = self._require_connection()
-        notices = self._entry_notices
-        self._entry_notices = []
+        notices = self._trade_notices
+        self._trade_notices = []
         try:
             if exc_type is None:
                 await transaction.commit()
@@ -194,8 +207,8 @@ class PostgresKernelUnitOfWork:
             self._transaction = None
             self._connection = None
         if exc_type is None:
-            for ticket, event in notices:
-                notify_entry_accepted(ticket, event)
+            for notify in notices:
+                notify()
 
     async def commit_reduction(
         self,
@@ -566,7 +579,33 @@ class PostgresKernelUnitOfWork:
             )
 
         if isinstance(event, EntryAccepted):
-            self._entry_notices.append((aggregate.ticket, event))
+            self._trade_notices.append(
+                partial(notify_entry_accepted, aggregate.ticket, event)
+            )
+        elif isinstance(event, TakeProfitFilled):
+            self._trade_notices.append(
+                partial(
+                    notify_tp1_filled,
+                    aggregate.ticket,
+                    event,
+                    remaining_qty=aggregate.position_qty,
+                )
+            )
+        elif (
+            isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected))
+            and current is not None
+            and current.tp1_filled_qty > 0
+            and current.position_qty > 0
+            and aggregate.position_qty == 0
+        ):
+            self._trade_notices.append(
+                partial(
+                    notify_runner_exited,
+                    aggregate.ticket,
+                    event,
+                    previous_qty=current.position_qty,
+                )
+            )
 
     async def _next_retryable_generation(
         self,

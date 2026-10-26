@@ -12,7 +12,7 @@
 | Strategy Registry | Group、Version、Event、事实及方向语义 | 精确版本和语义摘要匹配 | [registered_strategy_contracts](../../src/trading_kernel/domain/strategy_registry.py#L258) |
 | Owner Policy / Controls | 允许范围、资本边界、暂停与模式意图 | 数据库 current 与版本、授权记录 | [owner_control](../../src/trading_kernel/application/owner_control.py) |
 | PostgreSQL current | 当前投影、租约、权限、持仓与进度 | action-time 精确身份读取 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
-| PostgreSQL events / facts | 信号快照、已签发身份、生命周期和授权沿革 | 不可变身份、事件序号、版本链 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L120) |
+| PostgreSQL events / facts | 信号快照、已签发身份、生命周期和授权沿革 | 不可变身份、事件序号、版本链 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L133) |
 | 交易所只读事实 | 账户模式、外部订单、成交和持仓 | 实时读取、时效与身份一致 | [venue_adapter](../../src/trading_kernel/infrastructure/venue_adapter.py) |
 | `docs/current` | 稳定契约及各自负责的状态记录 | 白名单、责任范围、与代码核对 | [文档权威测试](../../tests/trading_kernel/architecture/test_current_document_authority.py) |
 | 历史设计、发布记录 | 解释决策背景与当时证据 | 按日期和被替代关系阅读 | [docs 导航](../README.md) |
