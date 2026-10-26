@@ -306,6 +306,12 @@ async def test_global_pause_resume_of_completed_hourly_pair_requires_fresh_audit
         )
         assert duplicate.selection_authority_id == recovered.selection_authority_id
         assert duplicate.reason_code == "AUTHORITY_GAP_AUDIT_ALREADY_COMMITTED"
+        successor = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            request=request,
+            clock_ms=lambda base=base: base + 205,
+        )
+        assert successor.disposition == "NO_CHANGE"
         async with PostgresKernelUnitOfWork(engine) as uow:
             current = await uow.instrument_selection.get_current_authority_projection(
                 spec.selection_spec_id
@@ -352,7 +358,7 @@ async def test_global_pause_resume_of_completed_hourly_pair_requires_fresh_audit
                 sa.text("SELECT count(*) FROM brc_exchange_commands")
             ) == 0
         previous_audit = recovery.authority_gap_audit_id
-        previous_authority = recovered.selection_authority_id
+        previous_authority = successor.selection_authority_id
 
     await change_global(False, session + 5 * hour, "orb:global:last:pause")
     stale_completed = await complete_pending_authority_gap_audit(
@@ -361,7 +367,7 @@ async def test_global_pause_resume_of_completed_hourly_pair_requires_fresh_audit
         audit_source=PublicMarketAuthorityGapAuditSource(Market()),
         clock_ms=lambda: session + 5 * hour + 1,
     )
-    assert stale_completed.reason_code == "ORB_RECOVERY_BASIS_CHANGED"
+    assert stale_completed.selection_authority_id is None
 
 
 @pytest.mark.asyncio

@@ -3402,6 +3402,8 @@ def _build_no_change_successor(
             "continued_from_selection_authority_id": (
                 predecessor.selection_authority_id
             ),
+            "continuity_source_kind": ContinuitySourceKind.SELECTION_AUTHORITY,
+            "authority_gap_audit_id": None,
             "authority_outcome": AuthorityOutcome.NO_CHANGE,
             "grant_proof": AuthorityGrantProof(
                 kind=AuthorityGrantProofKind.CONTINUOUS_ELIGIBLE_CLOSES,
