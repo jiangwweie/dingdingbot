@@ -2108,7 +2108,13 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             # inherit a recorded gap fence and a future-close recovery proof.
             if initial.lifecycle_state is MaterializationGenerationState.DESIRED and (
                 source is not None and isinstance(source.authority, GenericRecoveryAuthority)
+                and source.authority.selection_mode == "dynamic_selection"
                 and now_ms >= source.authority.expires_at_ms
+                and await uow.instrument_selection.generic_recovery_transition_blocker(
+                    selection_spec_id=initial.selection_spec_id,
+                    target_members=(await uow.instrument_selection.get_generic_snapshot(
+                        initial.selection_snapshot_id)).selected_members,
+                ) == "GENERIC_RECOVERY_REBASE_PENDING"
             ):
                 vacuum = await uow.instrument_selection.get_current_entry_vacuum(
                     strategy_group_id=initial.strategy_group_id,
