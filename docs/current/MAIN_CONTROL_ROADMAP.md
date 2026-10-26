@@ -26,7 +26,32 @@ continue concurrently across independent Netting Domains.
 
 ## Current Verified State
 
-### Owner directional risk V1 and Feishu notices deployed; Owner ENTRY remains paused
+### Recovery repairs deployed and enabled trading chains restored
+
+This snapshot supersedes the Kernel/control posture in older snapshots below.
+Independent Owner API and V2 static remain at their prior360fd425 release;
+only Kernel software changed in these two R3 releases.
+
+| Area | Direct evidence |
+| --- | --- |
+| Current Kernel | `c85d289bdd09e9451d2d4342476bc0f2687faec1`, immutable tag `tokyo-runtime-2026.10.26.3` pushed to origin; exact candidate fast-forwarded and pushed to dev. Official R3 regular release PASS in167127ms; schema remains `0013_owner_directional_risk_v1` |
+| Exact certification | R3 PASS:1788 Unit/Architecture,1760 Integration,69 Full-chain; Ruff, Mypy207 source files and diff PASS. Earlier d8994c79 failed local certification and debdf8a6 was interrupted to add successor coverage; neither is deployment evidence |
+| SOR-1H repair | Prior Kernel b549a0be/tag2026.10.26.2 repaired same-session global pause/resume lineage and clean NO_CHANGE successor identity. Real PG tests cover repeated genuine pause/resume, drift/source outages and early/old birth rejection. Production Gap Audit completed14 scopes:7 checked-negative and7 historical triggers suppressed. Actual post14:00 Entry resolver accepted7/14; other7 remain legitimate first-trigger suppression. The original lineage-interrupted blocker disappeared |
+| Generic repair | Expired recovery with a newer existing Desired no longer waits forever for old ARMED checkpoints. Exact Dynamic REBASE_PENDING alone enters the existing gap fence/drain/ledger; the existing Desired is retained by CAS. Existing SQL proof grants only future-close recovered activation and fresh checkpoints. This also covers a normal NO_CHANGE successor retaining an unarmed recovery origin; Static and already-armed paths retain prior behavior |
+| Actual BRF2 takeover | New production `ACTIVE_NEW` recovery Authority `authority:recovery:3291fa3f7130e195e299b4e066073812c4c27d8ae4c53638b4db68eaed453790` committed through the existing original Desired; prior source Authority and gap ledger preserved. New future-close recovery plan starts at17:00 Asia/Shanghai, not a retrospective trade; Vacuum resolved |
+| Cutover and control preservation | Source action-time empty PG/exchange and exact current member/account gates PASS. Entry fenced and all four Workers plus independent Owner API stopped for identity rotation. Stopped current-Universe/history and control baseline preserved. Policy30 genuine Owner Resume remains enabled; official promoter returned `promoted`. Exact Owner/Strategy/Selection/Research/Directional controls match source. Direction unset/v1, research enabled50/control4 unchanged |
+| Running services | Four Workers active at exact target Commit/Schema, NRestarts0; independent Owner API active/NRestarts0. Operational write fence absent. Protected Feishu endpoint present with valid HTTPS host in each Worker; no URL printed or test message sent |
+| Runtime acceptance | Actual17:00 closed-bar observations armed BRF2 recovery checkpoints16/16, last detector status NOT_TRIGGERED16/16. At17:04–17:05 Asia/Shanghai, BRF2 observation authority16/16 valid, ENTRY resolver reports RECOVERY_TRIGGER_NOT_CURRENT because no fresh post-arm trigger exists; no rebase or expired-authority blocker remains. CPM16/16, MI16/16 and MPG15/15 exact current observation/ENTRY authority PASS. SOR-1H7/14 current authority valid; other7 remain legitimate consumed-first-trigger suppression. Owner Policy30/Resume and account gates remain valid. These prove restored capability, not immediate execution or profitability |
+| Current preparation | The17:00 hour caused normal serialized Universe preparation; MPG finished and current membership became15. Other unfenced Desired targets may defer after a consumed close while their current authorities remain valid. These do not justify pausing/resuming Owner controls, rearming checkpoints, or forcing orders |
+| Safety sample | Post-release readonly PG Ticket/position/command/Incident counts0, four exact Workers/API active, no operational fence. Exact exchange account has independent sides/Cross/5x with zero positions/orders;32 current instrument rule facts at the16:59:55 probe. Later operations must reread these volatile facts; no natural post-repair live Ticket/economic outcome is claimed |
+| Safety boundary | No migration, credential mutation, direct production SQL repair, fabricated clock/Signal, forced ARMED or test order. No forced flatten and no risk/control expansion. Retired SOR-001 and Owner-paused TradFi remain paused. The `brc` automatic monitor was deleted at Owner request and has not been recreated |
+
+Evidence: `.local/sor1h-authority-repair-20261026/` and
+`.local/generic-expired-recovery-repair-20261026/` retain exact certificates,
+formal release/promotion logs, stopped baseline, preserved controls and current
+readonly resolver/checkpoint evidence. Generated artifacts are display-only.
+
+### Earlier10:40 installation snapshot: directional risk and Feishu, ENTRY paused
 
 This snapshot supersedes the Kernel, schema, Owner API and static production
 identities recorded below. Older snapshots remain dated evidence only.

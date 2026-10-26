@@ -154,7 +154,9 @@ def test_owner_directional_risk_plan_is_distinct_from_runtime_activation() -> No
     plan = "docs/superpowers/plans/2026-10-25-owner-directional-risk-v1-implementation-plan.md"
     for source in (profile, owner_model):
         assert "Owner Directional Risk V1" in source
-        assert "implemented locally, not deployed or activated" in source
+        assert "exact deployment/Owner activation posture are recorded only" in source
+        assert "[MAIN_CONTROL_ROADMAP.md](MAIN_CONTROL_ROADMAP.md)" in source
+        assert "implemented locally, not deployed or activated" not in source
         assert Path(design).name in source
     for marker in (
         "| bullish | 0.04 | 0.02 |",

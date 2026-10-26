@@ -141,7 +141,8 @@ Shadow waiting period is introduced.
 
 ## Owner Directional Risk V1 — approved target
 
-Status: **implemented locally, not deployed or activated**. Owner Directional
+Implementation and exact deployment/Owner activation posture are recorded only
+in [MAIN_CONTROL_ROADMAP.md](MAIN_CONTROL_ROADMAP.md). Owner Directional
 Risk V1 replaces the earlier eligibility-only planning boundary with an
 explicit directional-risk preference: Owner selects bullish, neutral or
 bearish; Capacity applies a tightening-only overlay to scoped Crypto new ENTRY.

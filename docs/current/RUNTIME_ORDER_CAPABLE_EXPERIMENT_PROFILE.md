@@ -101,7 +101,8 @@ from existing exchange exposure.
 
 ## Owner Directional Risk V1 — approved target
 
-Status: **implemented locally, not deployed or activated**. Owner Directional
+Implementation and exact deployment/Owner activation posture are recorded only
+in [MAIN_CONTROL_ROADMAP.md](MAIN_CONTROL_ROADMAP.md). Owner Directional
 Risk V1 adds a tightening-only Crypto direction overlay to the base Policy
 above. This section owns its approved initial numerical matrix:
 
