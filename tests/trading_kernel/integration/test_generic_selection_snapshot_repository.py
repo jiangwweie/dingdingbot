@@ -653,7 +653,11 @@ async def test_generic_member_status_reads_current_policy_without_materializatio
 
 
 @pytest.mark.asyncio
-async def test_real_static_resident_process_restarts_without_network_or_dynamic_facts(database: AsyncEngine,tmp_path: Path) -> None:
+@pytest.mark.parametrize(("now_ms", "orb_status", "orb_reason"), [
+    (4*24*HOUR+HOUR-1, "not_due", None),
+    (CUTOFF, "not_installed", "ORB_CONTROL_NOT_INSTALLED"),
+])
+async def test_real_static_resident_process_restarts_without_network_or_dynamic_facts(database: AsyncEngine,tmp_path: Path,now_ms: int,orb_status: str,orb_reason: str | None) -> None:
     import os
     import sys
 
@@ -662,8 +666,16 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
     for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
         expected.update(f"resident:{plane}:{group}" for plane in ("selection","materialization","facts"))
     expected.update(f"resident:{plane}:SOR-1H-001" for plane in ("selection", "materialization", "facts"))
+    # Freeze only the subprocess wall clock; resident shutdown/polling retains
+    # the real monotonic clock. Both sides of the UTC 01:00 boundary are exact.
+    bootstrap = (
+        "import runpy,sys,time; "
+        "script=sys.argv[1]; now_ms=int(sys.argv[2]); "
+        "time.time=lambda:now_ms/1000; "
+        "sys.argv=[script,*sys.argv[3:]]; runpy.run_path(script,run_name='__main__')"
+    )
     for _ in range(2):
-        process=await asyncio.create_subprocess_exec(sys.executable,str(script),
+        process=await asyncio.create_subprocess_exec(sys.executable,"-c",bootstrap,str(script),str(now_ms),
             "--market-source-factory","tests.trading_kernel.support.resident_no_network:NoNetworkMarket",
             "--worker-id","resident","--run-forever","--runtime-commit","a"*40,"--schema-revision",CURRENT_SCHEMA_REVISION,
             "--poll-interval-ms","50","--selection-poll-interval-ms","50","--materialization-poll-interval-ms","50",
@@ -680,7 +692,7 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
                     if result["component_id"]=="resident:selection" and result["status"]=="blocked":
                         assert result["reason_code"]=="SELECTION_CONTROL_MISSING_OR_DRIFTED",result
                     elif result["component_id"] == "resident:selection:SOR-1H-001":
-                        assert result["status"] == "not_installed" and result["reason_code"] == "ORB_CONTROL_NOT_INSTALLED", result
+                        assert (result["status"], result["reason_code"]) == (orb_status, orb_reason), result
                     else:
                         assert result["status"] in {"not_due","no_work"},result
                     seen.add(result["component_id"])
