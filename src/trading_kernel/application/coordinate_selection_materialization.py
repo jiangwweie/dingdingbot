@@ -33,6 +33,8 @@ from src.trading_kernel.application.install_strategy_universe import (
 from src.trading_kernel.application.ports import (
     GenericCloseAlreadyConsumed,
     KernelUnitOfWork,
+    OwnerPolicySnapshot,
+    RuntimeCapabilitySnapshot,
     SelectionPersistenceConflict,
     UnitOfWorkFactory,
 )
@@ -355,6 +357,86 @@ _MATERIALIZATION_TIMEOUT_MS = 1_800_000
 _GENERIC_TRANSIENT_WARMING_BLOCKERS = _TRANSIENT_WARMING_BLOCKERS | {
     "COMPARATIVE_PROJECTION_INCOMPLETE",
 }
+
+
+class OrbGapRuntimeBasis(BaseModel):
+    """Current Policy and runtime identity frozen around an hourly Gap Audit."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy: OwnerPolicySnapshot
+    capability: RuntimeCapabilitySnapshot
+
+
+async def _orb_gap_runtime_basis(
+    uow: KernelUnitOfWork, *, for_update: bool = False
+) -> OrbGapRuntimeBasis | None:
+    context = await uow.strategy_universes.resolve_install_context(
+        runtime_profile_id="tiny-live-v1",
+        event_id=strategy_contract_for(ORB_EVENT_SPEC_IDS[0]).event_id,
+    )
+    policy = await uow.entry_admission.get_owner_policy(
+        context.owner_policy_id, for_update=for_update
+    )
+    capability = await uow.signals.get_runtime_capability(
+        "exchange_commands", for_update=for_update
+    )
+    if policy is None or capability is None:
+        return None
+    return OrbGapRuntimeBasis(policy=policy, capability=capability)
+
+
+def _orb_recovery_basis_digest(
+    *,
+    runtime: OrbGapRuntimeBasis,
+    current: CurrentSelectionAuthority,
+    control: SelectionControl,
+    owner_control_version: int,
+    pair: UniverseAuthorityPair,
+) -> str:
+    return canonical_digest(
+        {
+            "runtime": runtime.model_dump(mode="json"),
+            "predecessor": current.authority.selection_authority_id,
+            "selection_control": control.model_dump(mode="json"),
+            "owner_control_version": owner_control_version,
+            "pair": pair.model_dump(mode="json"),
+        }
+    )
+
+
+async def _orb_current_authority_interrupted(
+    uow: KernelUnitOfWork,
+    *,
+    runtime: OrbGapRuntimeBasis,
+    current: CurrentSelectionAuthority,
+    now_ms: int,
+) -> bool:
+    return await uow.signals.selection_authority_was_interrupted(
+        strategy_group_id="SOR-1H-001",
+        selection_spec_id=ORB_SELECTION_SPEC_ID,
+        owner_policy_id=runtime.policy.owner_policy_id,
+        after_ms=current.authority.created_at_ms,
+        through_ms=now_ms,
+    )
+
+
+def _orb_authority_matches_current_control(
+    current: CurrentSelectionAuthority,
+    control: SelectionControl,
+    owner_control_version: int,
+    pair: UniverseAuthorityPair,
+    now_ms: int,
+) -> bool:
+    authority = current.authority
+    return bool(
+        authority.selection_epoch_id == control.selection_epoch_id
+        and authority.selection_control_version == control.control_version
+        and authority.owner_control_version == owner_control_version
+        and authority.selection_mode == control.selection_mode
+        and authority.authorized_pair == pair
+        and authority.effective_from_ms <= now_ms < authority.expires_at_ms
+    )
 
 
 def plan_authority_gap_audit_window(
@@ -870,6 +952,47 @@ async def coordinate_selection_materialization_once(
                 entry_vacuum_id=None if vacuum is None else vacuum.entry_vacuum_id,
                 reason_code="OWNER_PAUSED_NO_CHANGE" if pause_unchanged else "OWNER_PAUSE_PRECEDES_MATERIALIZATION",
             )
+        if (
+            spec.selection_spec_id == ORB_SELECTION_SPEC_ID
+            and vacuum is None
+            and current_authority is not None
+            and current_authority.authority.session_start_ms == request.session_start_ms
+            and current_authority.authority.authorized_pair == current_pair
+            and current_authority.authority.authority_outcome in {
+                AuthorityOutcome.ACTIVE_NEW,
+                AuthorityOutcome.NO_CHANGE,
+                AuthorityOutcome.FALLBACK_PREVIOUS,
+                AuthorityOutcome.PRE_FENCE_CONTINUITY,
+            }
+        ):
+            runtime = await _orb_gap_runtime_basis(uow)
+            if runtime is None:
+                return _blocked("ORB_GAP_RUNTIME_AUTHORITY_MISSING")
+            if not _orb_authority_matches_current_control(
+                current_authority, selection_control, owner_control.control_version,
+                current_pair, now_ms,
+            ):
+                return _blocked("ORB_CURRENT_AUTHORITY_CONTROL_CHANGED")
+            if await _orb_current_authority_interrupted(
+                uow, runtime=runtime, current=current_authority, now_ms=now_ms
+            ):
+                if not runtime.policy.enabled or not runtime.policy.new_entry_submit_enabled:
+                    return _blocked("GLOBAL_ENTRY_DISABLED")
+                return await _prepare_gap_audit(
+                    uow=uow,
+                    spec_id=spec.selection_spec_id,
+                    session_start_ms=request.session_start_ms,
+                    long_members=long_members,
+                    short_members=short_members,
+                    now_ms=now_ms,
+                    recovery_basis_digest=_orb_recovery_basis_digest(
+                        runtime=runtime,
+                        current=current_authority,
+                        control=selection_control,
+                        owner_control_version=owner_control.control_version,
+                        pair=current_pair,
+                    ),
+                )
         if (
             vacuum is None
             and snapshot is not None
@@ -2253,6 +2376,17 @@ async def _complete_pending_authority_gap_audit(
                 and current.authority.authority_outcome
                 is audit.proposed_authority_outcome
             ):
+                if audit.authority_gap_audit_id.startswith("gap-audit:orb:recovery:"):
+                    runtime = await _orb_gap_runtime_basis(uow)
+                    if (
+                        runtime is None
+                        or not runtime.policy.enabled
+                        or not runtime.policy.new_entry_submit_enabled
+                        or await _orb_current_authority_interrupted(
+                            uow, runtime=runtime, current=current, now_ms=clock_ms()
+                        )
+                    ):
+                        return _blocked("ORB_RECOVERY_BASIS_CHANGED")
                 return CoordinateSelectionMaterializationResult(
                     disposition=_authority_disposition(
                         audit.proposed_authority_outcome
@@ -2324,6 +2458,49 @@ async def _complete_pending_authority_gap_audit(
             return _blocked("AUTHORITY_GAP_AUDIT_PAIR_MISSING")
         initial_long_current = long_current
         initial_short_current = short_current
+        initial_orb_runtime = (
+            await _orb_gap_runtime_basis(uow)
+            if audit.selection_spec_id == ORB_SELECTION_SPEC_ID
+            else None
+        )
+        if audit.authority_gap_audit_id.startswith("gap-audit:orb:recovery:"):
+            if (
+                initial_orb_runtime is None
+                or not initial_orb_runtime.policy.enabled
+                or not initial_orb_runtime.policy.new_entry_submit_enabled
+                or not initial_orb_runtime.capability.enabled
+                or initial_current_authority is None
+            ):
+                return _blocked("ORB_RECOVERY_POLICY_OR_IDENTITY_BLOCKED")
+            expected_id = _gap_audit_id(
+                spec_id=audit.selection_spec_id,
+                session_start_ms=audit.session_start_ms,
+                gap_kind=audit.gap_kind,
+                proposed_outcome=audit.proposed_authority_outcome,
+                recovery_basis_digest=_orb_recovery_basis_digest(
+                    runtime=initial_orb_runtime,
+                    current=initial_current_authority,
+                    control=initial_selection_control,
+                    owner_control_version=initial_owner_control.control_version,
+                    pair=UniverseAuthorityPair(
+                        long_universe_version_id=long_current.universe_version_id,
+                        short_universe_version_id=short_current.universe_version_id,
+                    ),
+                ),
+            )
+            if expected_id != audit.authority_gap_audit_id:
+                return _blocked("ORB_RECOVERY_BASIS_CHANGED")
+            for uid in (long_current.universe_version_id, short_current.universe_version_id):
+                ready = await advance_strategy_universe(
+                    uow,
+                    UniverseActivationRequest(
+                        universe_version_id=uid,
+                        attempted_at_ms=clock_ms(),
+                        operation=UniverseActivationOperation.CERTIFY_CURRENT,
+                    ),
+                )
+                if ready.status is not UniverseActivationStatus.ALREADY_ACTIVE:
+                    return _blocked("ORB_CURRENT_PAIR_" + (ready.reason_code or "NOT_READY"))
         long_members = await uow.strategy_universes.get_members(
             long_current.universe_version_id
         )
@@ -2431,6 +2608,10 @@ async def _complete_pending_authority_gap_audit(
         return _blocked("AUTHORITY_GAP_AUDIT_INCOMPLETE")
     async with uow_factory() as uow:
         await uow.strategy_universes.lock_mutation()
+        if audit.selection_spec_id == ORB_SELECTION_SPEC_ID:
+            final_runtime = await _orb_gap_runtime_basis(uow, for_update=True)
+            if final_runtime is None or final_runtime != initial_orb_runtime:
+                return _blocked("AUTHORITY_GAP_AUDIT_POLICY_OR_IDENTITY_DRIFT")
         owner_control = await uow.owner_controls.get_strategy_control(
             spec.strategy_group_id,
             for_update=True,
@@ -2513,7 +2694,12 @@ async def _complete_pending_authority_gap_audit(
             ),
             owner_control_version=owner_control.control_version,
             selection_snapshot_id=(
-                None if snapshot is None else snapshot.snapshot.selection_snapshot_id
+                None
+                if snapshot is None or (
+                    audit.selection_spec_id == ORB_SELECTION_SPEC_ID
+                    and audit.proposed_authority_outcome is AuthorityOutcome.PRE_FENCE_CONTINUITY
+                )
+                else snapshot.snapshot.selection_snapshot_id
             ),
             created_at_ms=completed_at_ms,
             selection_mode=(
@@ -2639,6 +2825,7 @@ async def _prepare_gap_audit(
     gap_kind: AuthorityGapAuditKind = AuthorityGapAuditKind.LATE_PRE_FENCE_CONTINUITY,
     source_entry_vacuum_id: str | None = None,
     source_generation_id: str | None = None,
+    recovery_basis_digest: str | None = None,
 ) -> CoordinateSelectionMaterializationResult:
     control=await uow.instrument_selection.get_selection_control("SOR-1H-001") if spec_id==ORB_SELECTION_SPEC_ID else None
     audit_id = _gap_audit_id(
@@ -2647,6 +2834,7 @@ async def _prepare_gap_audit(
         gap_kind=gap_kind,
         proposed_outcome=proposed_outcome,
         selection_epoch_id=None if control is None else control.selection_epoch_id,source_generation_id=source_generation_id,source_entry_vacuum_id=source_entry_vacuum_id,
+        recovery_basis_digest=recovery_basis_digest,
     )
     existing = await uow.instrument_selection.get_authority_gap_audit(
         audit_id,
@@ -2692,8 +2880,15 @@ def _gap_audit_id(
     selection_epoch_id: str | None=None,
     source_generation_id: str | None=None,
     source_entry_vacuum_id: str | None=None,
+    recovery_basis_digest: str | None = None,
 ) -> str:
     if spec_id==ORB_SELECTION_SPEC_ID:
+        if recovery_basis_digest is not None:
+            return "gap-audit:orb:recovery:" + canonical_digest({
+                "spec": spec_id, "session": session_start_ms,
+                "kind": gap_kind.value, "outcome": proposed_outcome.value,
+                "recovery_basis": recovery_basis_digest,
+            })[7:]
         return "gap-audit:orb:"+canonical_digest({"spec":spec_id,"session":session_start_ms,"epoch":selection_epoch_id,
             "generation":source_generation_id,"vacuum":source_entry_vacuum_id,"kind":gap_kind.value,"outcome":proposed_outcome.value})[7:]
     return (

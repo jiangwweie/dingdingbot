@@ -1093,6 +1093,8 @@ class EntryAdmissionRepository(Protocol):
     async def get_owner_policy(
         self,
         owner_policy_id: str,
+        *,
+        for_update: bool = False,
     ) -> OwnerPolicySnapshot | None: ...
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool: ...

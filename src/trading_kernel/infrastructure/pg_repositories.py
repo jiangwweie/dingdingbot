@@ -2538,12 +2538,15 @@ class PostgresEntryAdmissionRepository:
     async def get_owner_policy(
         self,
         owner_policy_id: str,
+        *,
+        for_update: bool = False,
     ) -> OwnerPolicySnapshot | None:
-        result = await self._connection.execute(
-            sa.select(owner_policy_current).where(
-                owner_policy_current.c.owner_policy_id == owner_policy_id
-            )
+        statement = sa.select(owner_policy_current).where(
+            owner_policy_current.c.owner_policy_id == owner_policy_id
         )
+        if for_update:
+            statement = statement.with_for_update(of=owner_policy_current)
+        result = await self._connection.execute(statement)
         row = result.mappings().one_or_none()
         if row is None:
             return None

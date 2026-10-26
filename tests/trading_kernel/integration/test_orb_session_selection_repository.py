@@ -16,6 +16,355 @@ D = 1_800_000_000_000 // 86_400_000 * 86_400_000
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    ["none", "pause_during_audit", "pause_resume_during_audit", "identity_during_audit", "source_failure", "crossed_close"],
+)
+async def test_global_pause_resume_of_completed_hourly_pair_requires_fresh_audit(
+    head_template_engine,
+    fault,
+):
+    from decimal import Decimal
+
+    from src.trading_kernel.application.coordinate_selection_materialization import (
+        CoordinateSelectionMaterializationRequest,
+        complete_pending_authority_gap_audit,
+        coordinate_selection_materialization_once,
+    )
+    from src.trading_kernel.application.ingest_signal import (
+        resolve_selection_entry_authority,
+    )
+    from src.trading_kernel.application.owner_control import (
+        ControlMutationRequest,
+        set_global_entry_state,
+        set_strategy_entry_state,
+        stage_orb_dynamic_selection_mode,
+    )
+    from src.trading_kernel.domain.instrument_selection import (
+        SelectionKline,
+        SelectionSourceWindow,
+    )
+    from src.trading_kernel.domain.market import ClosedCandle
+    from src.trading_kernel.domain.orb_session_selection import (
+        ORB_EVENT_SPEC_IDS,
+        ORB_STATIC_MEMBERS,
+        build_orb_session_period,
+        compute_orb_selection,
+    )
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+    from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+    from src.trading_kernel.interfaces.authority_gap_audit_source import (
+        PublicMarketAuthorityGapAuditSource,
+    )
+    from tests.trading_kernel.integration.universe_activation_support import (
+        make_warming_ready,
+    )
+
+    engine = head_template_engine
+    hour = 3_600_000
+    session = D + 86_400_000
+    spec = OrbSessionSelectionSpec()
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await seed_runtime_authority(
+            uow,
+            RuntimeAuthoritySeedRequest(
+                account_id="orb-test",
+                runtime_commit="orb-local-test",
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=D,
+            ),
+        )
+        await uow.instrument_selection.install_orb_spec(spec, installed_at_ms=D + 1)
+        await uow._connection.execute(
+            sa.update(runtime_capabilities_current)
+            .where(runtime_capabilities_current.c.capability_key == "exchange_commands")
+            .values(enabled=True)
+        )
+    pair = await install_static_pair(engine)
+    for uid in pair:
+        await make_warming_ready(
+            engine,
+            universe_version_id=uid,
+            warm_closed_bar_time_ms=session + hour,
+            valid_until_ms=session + 24 * hour,
+        )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        control = await stage_orb_dynamic_selection_mode(
+            uow,
+            effective_session_start_ms=session,
+            request=ControlMutationRequest(
+                expected_version=1,
+                reason="dynamic",
+                idempotency_key="orb:global:first:dynamic",
+                owner_identity="owner",
+                now_ms=D + hour + 100,
+            ),
+            authentication_strength="totp_step_up",
+        )
+        await set_strategy_entry_state(
+            uow,
+            strategy_group_id=spec.strategy_group_id,
+            target_state=StrategyEntryState.ENABLED,
+            request=ControlMutationRequest(
+                expected_version=1,
+                reason="enable",
+                idempotency_key="orb:global:first:enable",
+                owner_identity="owner",
+                now_ms=D + hour + 101,
+            ),
+            authentication_strength="totp_step_up",
+        )
+        policy = await uow.entry_admission.get_owner_policy("policy-main")
+        await set_global_entry_state(
+            uow,
+            owner_policy_id="policy-main",
+            enabled=True,
+            request=ControlMutationRequest(
+                expected_version=policy.policy_version,
+                reason="initial resume",
+                idempotency_key="orb:global:first:resume",
+                owner_identity="owner",
+                now_ms=D + hour + 102,
+            ),
+            authentication_strength="totp_step_up",
+        )
+    windows = tuple(
+        SelectionSourceWindow(
+            exchange_instrument_id=member,
+            input_window_start_ms=session - 23 * hour,
+            feature_cutoff_at_ms=session + hour,
+            klines=tuple(
+                SelectionKline(
+                    open_time_ms=session - 23 * hour + i * 900_000,
+                    close_time_ms=session - 23 * hour + (i + 1) * 900_000,
+                    open=Decimal(100),
+                    close=Decimal(100),
+                    high=Decimal(101 if i < 92 or member in ORB_STATIC_MEMBERS else 103),
+                    low=Decimal(99),
+                    quote_volume=Decimal(1_000_000),
+                )
+                for i in range(96)
+            ),
+        )
+        for member in spec.candidate_ids
+    )
+    computation = compute_orb_selection(
+        spec=spec,
+        period=build_orb_session_period(session),
+        selection_epoch_id=control.selection_epoch_id,
+        source_windows=windows,
+        decision_at_ms=session + hour,
+        source_observed_at_ms=session + hour + 1,
+        created_at_ms=session + hour + 2,
+    )
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        claim = await uow.instrument_selection.claim_orb_selection_job(
+            selection_spec_id=spec.selection_spec_id,
+            selection_epoch_id=control.selection_epoch_id,
+            session_start_ms=session,
+            worker_id="orb:global:selector",
+            now_ms=session + hour,
+            lease_duration_ms=120_000,
+        )
+        await uow.instrument_selection.complete_orb_selection_snapshot(
+            claim=claim, computation=computation, completed_at_ms=session + hour + 2
+        )
+    request = CoordinateSelectionMaterializationRequest(
+        selection_spec_id=spec.selection_spec_id,
+        strategy_group_id=spec.strategy_group_id,
+        session_start_ms=session,
+        worker_id="orb:global:materializer",
+    )
+    initial = await coordinate_selection_materialization_once(
+        uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+        request=request,
+        clock_ms=lambda: session + hour + 3,
+    )
+    assert initial.disposition == "NO_CHANGE"
+
+    async def change_global(enabled, at_ms, key):
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            policy = await uow.entry_admission.get_owner_policy("policy-main")
+            return await set_global_entry_state(
+                uow,
+                owner_policy_id="policy-main",
+                enabled=enabled,
+                request=ControlMutationRequest(
+                    expected_version=policy.policy_version,
+                    reason="maintenance",
+                    idempotency_key=key,
+                    owner_identity="owner",
+                    now_ms=at_ms,
+                ),
+                authentication_strength="totp_step_up" if enabled else "session",
+            )
+
+    class Market:
+        async def fetch_closed_candles(self, request):
+            return tuple(
+                ClosedCandle(
+                    open_time_ms=session + i * hour,
+                    close_time_ms=session + (i + 1) * hour,
+                    open=Decimal(100),
+                    close=Decimal(100),
+                    high=Decimal(101),
+                    low=Decimal(99),
+                    volume=Decimal(100),
+                )
+                for i in range(request.limit)
+            )
+
+    previous_audit = None
+    previous_authority = initial.selection_authority_id
+    for turn in range(2):
+        base = session + (2 + turn) * hour
+        await change_global(False, base + 100, f"orb:global:pause:{turn}")
+        paused = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            request=request,
+            clock_ms=lambda base=base: base + 101,
+        )
+        assert paused.selection_authority_id is None
+        await change_global(True, base + 200, f"orb:global:resume:{turn}")
+        recovery = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            request=request,
+            clock_ms=lambda base=base: base + 201,
+        )
+        assert recovery.disposition == "GAP_AUDIT_PENDING"
+        assert recovery.authority_gap_audit_id != previous_audit
+        repeated = await coordinate_selection_materialization_once(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            request=request,
+            clock_ms=lambda base=base: base + 202,
+        )
+        assert repeated.authority_gap_audit_id == recovery.authority_gap_audit_id
+        if turn == 0 and fault != "none":
+            clock = [base + 203]
+
+            class ChangingAudit:
+                async def evaluate_authority_gap(self, audit_request, base=base, clock=clock):
+                    if fault == "source_failure":
+                        raise TimeoutError("market unavailable")
+                    if fault in {"pause_during_audit", "pause_resume_during_audit"}:
+                        await change_global(False, base + 203, "orb:global:audit:pause")
+                    if fault == "pause_resume_during_audit":
+                        await change_global(True, base + 204, "orb:global:audit:resume")
+                    if fault == "identity_during_audit":
+                        async with engine.begin() as connection:
+                            await connection.execute(
+                                sa.update(runtime_capabilities_current)
+                                .where(runtime_capabilities_current.c.capability_key == "exchange_commands")
+                                .values(certified_commit="different-runtime")
+                            )
+                    if fault == "crossed_close":
+                        clock[0] = base + hour + 1
+                    return await PublicMarketAuthorityGapAuditSource(Market()).evaluate_authority_gap(audit_request)
+
+            rejected = await complete_pending_authority_gap_audit(
+                uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+                authority_gap_audit_id=recovery.authority_gap_audit_id,
+                audit_source=ChangingAudit(),
+                clock_ms=lambda clock=clock: clock[0],
+            )
+            assert rejected.disposition in {"BLOCKED", "GAP_AUDIT_WINDOW_EXPIRED"}
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                current = await uow.instrument_selection.get_current_authority_projection(spec.selection_spec_id)
+                assert current.authority.selection_authority_id == previous_authority
+                audit = await uow.instrument_selection.get_authority_gap_audit(recovery.authority_gap_audit_id)
+                assert audit.state == ("FAILED" if fault == "source_failure" else "PENDING")
+                assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+            if fault == "pause_resume_during_audit":
+                newer = await coordinate_selection_materialization_once(
+                    uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+                    request=request,
+                    clock_ms=lambda base=base: base + 205,
+                )
+                assert newer.disposition == "GAP_AUDIT_PENDING"
+                assert newer.authority_gap_audit_id != recovery.authority_gap_audit_id
+                stale = await complete_pending_authority_gap_audit(
+                    uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+                    authority_gap_audit_id=recovery.authority_gap_audit_id,
+                    audit_source=PublicMarketAuthorityGapAuditSource(Market()),
+                    clock_ms=lambda base=base: base + 206,
+                )
+                assert stale.reason_code == "ORB_RECOVERY_BASIS_CHANGED"
+            return
+        recovered = await complete_pending_authority_gap_audit(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            authority_gap_audit_id=recovery.authority_gap_audit_id,
+            audit_source=PublicMarketAuthorityGapAuditSource(Market()),
+            clock_ms=lambda base=base: base + 203,
+        )
+        assert recovered.disposition == "PRE_FENCE_CONTINUITY"
+        assert recovered.selection_authority_id != previous_authority
+        duplicate = await complete_pending_authority_gap_audit(
+            uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+            authority_gap_audit_id=recovery.authority_gap_audit_id,
+            audit_source=PublicMarketAuthorityGapAuditSource(Market()),
+            clock_ms=lambda base=base: base + 204,
+        )
+        assert duplicate.selection_authority_id == recovered.selection_authority_id
+        assert duplicate.reason_code == "AUTHORITY_GAP_AUDIT_ALREADY_COMMITTED"
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            current = await uow.instrument_selection.get_current_authority_projection(
+                spec.selection_spec_id
+            )
+            first = current.authority.first_eligible_close_time_ms
+            assert first == base + hour
+            for event in ORB_EVENT_SPEC_IDS:
+                scope_id = await uow._connection.scalar(
+                    sa.text(
+                        "SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+                        "WHERE event_spec_id=:event AND lifecycle_state='active' LIMIT 1"
+                    ),
+                    {"event": event},
+                )
+                scope = await uow.signals.get_runtime_scope(scope_id)
+                early = await resolve_selection_entry_authority(
+                    uow,
+                    runtime_scope=scope,
+                    birth_selection_authority_id=current.authority.selection_authority_id,
+                    observed_close_time_ms=first - hour,
+                    now_ms=first - 1,
+                    allow_current_as_birth=False,
+                )
+                assert not early.allowed
+                fresh = await resolve_selection_entry_authority(
+                    uow,
+                    runtime_scope=scope,
+                    birth_selection_authority_id=current.authority.selection_authority_id,
+                    observed_close_time_ms=first,
+                    now_ms=first + 1,
+                    allow_current_as_birth=False,
+                )
+                assert fresh.allowed
+                old = await resolve_selection_entry_authority(
+                    uow,
+                    runtime_scope=scope,
+                    birth_selection_authority_id=previous_authority,
+                    observed_close_time_ms=first,
+                    now_ms=first + 1,
+                    allow_current_as_birth=False,
+                )
+                assert not old.allowed
+            assert await uow._connection.scalar(
+                sa.text("SELECT count(*) FROM brc_exchange_commands")
+            ) == 0
+        previous_audit = recovery.authority_gap_audit_id
+        previous_authority = recovered.selection_authority_id
+
+    await change_global(False, session + 5 * hour, "orb:global:last:pause")
+    stale_completed = await complete_pending_authority_gap_audit(
+        uow_factory=lambda: PostgresKernelUnitOfWork(engine),
+        authority_gap_audit_id=previous_audit,
+        audit_source=PublicMarketAuthorityGapAuditSource(Market()),
+        clock_ms=lambda: session + 5 * hour + 1,
+    )
+    assert stale_completed.reason_code == "ORB_RECOVERY_BASIS_CHANGED"
+
+
+@pytest.mark.asyncio
 async def test_hourly_spec_installs_as_independent_paused_pair_with_frozen_candidate_panel(
     head_template_engine: AsyncEngine,
 ) -> None:

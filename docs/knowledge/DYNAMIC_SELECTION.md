@@ -4,7 +4,7 @@
 
 ## 核心结论与对象边界
 
-**选币计算只产生不可变 Snapshot；物化另行建立 Universe 与 Authority。**拥有排名结果不能直接发 Signal，更不能占用资金。（代码已验证：[run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106)、[coordinate_selection_materialization_once](../../src/trading_kernel/application/coordinate_selection_materialization.py#L495)）
+**选币计算只产生不可变 Snapshot；物化另行建立 Universe 与 Authority。**拥有排名结果不能直接发 Signal，更不能占用资金。（代码已验证：[run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106)、[coordinate_selection_materialization_once](../../src/trading_kernel/application/coordinate_selection_materialization.py#L577)）
 
 | 对象 | 负责什么 | 不负责什么 | 实现 |
 | --- | --- | --- | --- |
@@ -93,7 +93,7 @@ sequenceDiagram
 
 | 分支 | 判定依据 | 可以消费哪个收盘 | 核查入口 |
 | --- | --- | --- | --- |
-| **NORMAL_TRANSITION** | 预提交 Snapshot、连续 epoch/比较集合及最新未消费收盘证明 | 满足 proof 的最新收盘；慢几秒不自动构成缺口 | [prepare_generic_current_close_proof](../../src/trading_kernel/application/coordinate_selection_materialization.py#L1746) |
+| **NORMAL_TRANSITION** | 预提交 Snapshot、连续 epoch/比较集合及最新未消费收盘证明 | 满足 proof 的最新收盘；慢几秒不自动构成缺口 | [prepare_generic_current_close_proof](../../src/trading_kernel/application/coordinate_selection_materialization.py#L1869) |
 | **RECOVERY_TRANSITION** | 实际失败/权限缺口、恢复 proof 和 Episode/Comparison rebase | 严格未来收盘，不能补吃缺口内信号 | [authority_recovery_rebase](../../src/trading_kernel/domain/authority_recovery_rebase.py)、[timing](../../src/trading_kernel/domain/dynamic_selection_timing.py) |
 | **VALID_EMPTY** | 合法计算结果没有可授予成员 | 不授予新 ENTRY 成员 | [coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
 | **Owner paused** | 策略控制暂停 | 不允许通过 fallback 恢复新 ENTRY | [owner_control](../../src/trading_kernel/application/owner_control.py)、[coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
@@ -107,6 +107,8 @@ sequenceDiagram
 1. UTC 00–01 的闭合 opening range 后准备，首个合格小时收盘为 UTC 02，前一 session 的午夜收盘不能获准新入场。
 2. 配对切换、rollback baseline、失败后的前一交易基础恢复均要求对应 proof；休眠物理行不自动拥有权限。
 3. 当前启动、Owner 授权和交易启用不能由该能力存在性推断。
+
+**全局暂停后 Resume 会重新核验当前授权沿革。**相同 Snapshot 和 LONG/SHORT 币池不能单独证明已恢复；检测到中断后，协调器基于当前 Policy 版本、Owner/Selection 控制、前序 Authority、配对 Universe 和运行身份建立新的 Gap Audit。每次恢复有独立身份，正常重入幂等；审计期间状态漂移、缺失行情或跨过拟授予收盘时拒绝提交。恢复只授予审计完成后的合法小时收盘，旧出生信号不跨越暂停沿革。（来源：[协调器](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[真实 PostgreSQL 回归](../../tests/trading_kernel/integration/test_orb_session_selection_repository.py)）
 
 数值及边界来源：[OrbSessionSelectionSpec](../../src/trading_kernel/domain/orb_session_selection.py#L31)、[SOR-1H detector](../../src/trading_kernel/domain/detectors/sor_1h.py)、[hourly 测试](../../tests/trading_kernel/unit/test_hourly_recovery_clock.py)。
 
