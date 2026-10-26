@@ -2107,8 +2107,7 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
             # expired it cannot arm old checkpoints, so a newer Desired must
             # inherit a recorded gap fence and a future-close recovery proof.
             if initial.lifecycle_state is MaterializationGenerationState.DESIRED and (
-                source is not None and isinstance(source.authority, GenericRecoveryAuthority)
-                and source.authority.selection_mode == "dynamic_selection"
+                source is not None and source.authority.selection_mode == "dynamic_selection"
                 and now_ms >= source.authority.expires_at_ms
                 and await uow.instrument_selection.generic_recovery_transition_blocker(
                     selection_spec_id=initial.selection_spec_id,
@@ -2127,7 +2126,7 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                         return CoordinateSelectionMaterializationResult(
                             disposition=MaterializationDisposition.GENERATION_DESIRED,
                             materialization_generation_id=initial.materialization_generation_id,
-                            reason_code="EXPIRED_RECOVERY_AWAITING_GAP_CLOSE",
+                            reason_code="GENERIC_RECOVERY_REBASE_PENDING",
                         )
                     fenced = await uow.instrument_selection.read_authority_clock_ms()
                     gap = StrategyEntryVacuum(
