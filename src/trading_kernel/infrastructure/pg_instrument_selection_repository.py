@@ -3142,8 +3142,10 @@ class PostgresInstrumentSelectionRepository:
     ) -> GenericMaterializationGeneration:
         """A fresh nonempty Desired inherits the original drained gap fence."""
         generation = GenericMaterializationGeneration.model_validate(generation.model_dump())
-        if generation.lifecycle_state is not MaterializationGenerationState.PENDING:
-            raise SelectionJobConflict("Gap replacement Generation must start PENDING")
+        if generation.lifecycle_state not in {
+            MaterializationGenerationState.PENDING, MaterializationGenerationState.DESIRED
+        }:
+            raise SelectionJobConflict("Gap replacement Generation must remain unfenced")
         owner = (await self._connection.execute(sa.select(strategy_entry_controls_current).where(
             strategy_entry_controls_current.c.strategy_group_id==generation.strategy_group_id).with_for_update())).mappings().one_or_none()
         control = await self.get_selection_control(generation.strategy_group_id,for_update=True)
@@ -3198,15 +3200,37 @@ class PostgresInstrumentSelectionRepository:
             or current.authority.comparison_universe_id!=prior.comparison_universe_id
             or current.authority.comparison_transition_revision!=prior.comparison_transition_revision):
             raise SelectionJobConflict("Gap replacement previous Active Authority changed")
-        await self.add_generic_pending_materialization_generation(generation)
+        existing = await self.get_generic_materialization_generation(
+            generation.materialization_generation_id, for_update=True
+        )
+        if existing is None:
+            await self.add_generic_pending_materialization_generation(generation)
+            expected_version = 1
+            expected_state = "PENDING"
+            desired_at = now
+        else:
+            if existing != generation or existing.fenced_at_ms is not None or (
+                existing.lifecycle_state not in {
+                    MaterializationGenerationState.PENDING, MaterializationGenerationState.DESIRED
+                }
+                or existing.projection_version not in {1, 2}
+                or existing.lease_owner is not None
+                or existing.lease_expires_at_ms is not None
+            ):
+                raise SelectionJobConflict("Gap replacement existing Desired changed")
+            expected_version = existing.projection_version
+            expected_state = existing.lifecycle_state.value
+            desired_at = existing.desired_at_ms or now
         moved = await self._connection.execute(sa.update(strategy_universe_materialization_generations).where(
             strategy_universe_materialization_generations.c.materialization_generation_id==generation.materialization_generation_id,
-            strategy_universe_materialization_generations.c.lifecycle_state=="PENDING",
-            strategy_universe_materialization_generations.c.projection_version==1).values(
-                lifecycle_state="MATERIALIZING",desired_at_ms=now,fenced_at_ms=now,projection_version=4))
+            strategy_universe_materialization_generations.c.lifecycle_state==expected_state,
+            strategy_universe_materialization_generations.c.projection_version==expected_version).values(
+                lifecycle_state="MATERIALIZING",desired_at_ms=desired_at,fenced_at_ms=now,projection_version=4))
         if moved.rowcount!=1:
             raise SelectionJobConflict("Gap replacement Generation CAS changed")
         for sequence,event_type in ((2,"DESIRED"),(3,"DRAINING_ENTRY"),(4,"MATERIALIZING")):
+            if sequence <= expected_version:
+                continue
             await self._connection.execute(sa.insert(strategy_universe_materialization_events).values(
                 materialization_event_id=f"materialization-event:{generation.materialization_generation_id}:{sequence}",
                 materialization_generation_id=generation.materialization_generation_id,event_sequence=sequence,
@@ -3229,7 +3253,7 @@ class PostgresInstrumentSelectionRepository:
         if changed.rowcount!=1:
             raise SelectionJobConflict("Gap replacement Vacuum CAS changed")
         return GenericMaterializationGeneration.model_validate({**generation.model_dump(),
-            "lifecycle_state":"MATERIALIZING","desired_at_ms":now,"fenced_at_ms":now,
+            "lifecycle_state":"MATERIALIZING","desired_at_ms":desired_at,"fenced_at_ms":now,
             "projection_version":4})
 
     async def retarget_interrupted_generic_vacuum_with_generation(self,

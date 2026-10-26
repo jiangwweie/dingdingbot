@@ -98,6 +98,8 @@ sequenceDiagram
 | **VALID_EMPTY** | 合法计算结果没有可授予成员 | 不授予新 ENTRY 成员 | [coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
 | **Owner paused** | 策略控制暂停 | 不允许通过 fallback 恢复新 ENTRY | [owner_control](../../src/trading_kernel/application/owner_control.py)、[coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
 
+**过期的恢复授权不能继续等待旧检查点 ARMED。**有效恢复期内仍须保留原观察和 rebase；过期且已形成真实后续收盘缺口时，已有未围栏的 Desired 通过同一 Gap Vacuum 排空、记录源授权和缺口，再继承原围栏安装新目标。新目标只能由现有恢复 proof 授予未来收盘，并重新建立恢复检查点；不清除旧 Episode/事件，也不补吃缺口信号。（来源：[协调器](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[Gap 交接](../../src/trading_kernel/infrastructure/pg_instrument_selection_repository.py)、[真实 PostgreSQL 回归](../../tests/trading_kernel/integration/test_generic_selection_snapshot_repository.py)）
+
 **MPG/MI 的 ComparisonUniverse 独立于 TradableUniverse**，否则选币改变比较基准会改变策略检测本身。比较集合切换有自己的 revision 和 rebase。（来源：[comparison_universe](../../src/trading_kernel/domain/comparison_universe.py)、[project_comparative_universe](../../src/trading_kernel/application/project_comparative_universe.py)）
 
 ## SOR-1H 的独立日内分支

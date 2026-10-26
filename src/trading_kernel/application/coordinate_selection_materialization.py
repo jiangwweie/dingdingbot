@@ -2100,6 +2100,84 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 await uow.instrument_selection.expire_unfenced_generic_generation(initial.materialization_generation_id)
                 return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
                     materialization_generation_id=initial.materialization_generation_id,reason_code="MATERIALIZATION_PERIOD_EXPIRED")
+            source = await uow.instrument_selection.get_current_generic_authority(
+                initial.selection_spec_id, for_update=True
+            )
+            # A live recovery must retain its observation/rebase window. Once
+            # expired it cannot arm old checkpoints, so a newer Desired must
+            # inherit a recorded gap fence and a future-close recovery proof.
+            if initial.lifecycle_state is MaterializationGenerationState.DESIRED and (
+                source is not None and isinstance(source.authority, GenericRecoveryAuthority)
+                and now_ms >= source.authority.expires_at_ms
+            ):
+                vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                    strategy_group_id=initial.strategy_group_id,
+                    selection_spec_id=initial.selection_spec_id,
+                    for_update=True,
+                )
+                if vacuum is None:
+                    gap_anchor = source.authority.expires_at_ms - HOUR_MS
+                    if now_ms < source.authority.expires_at_ms + HOUR_MS:
+                        return CoordinateSelectionMaterializationResult(
+                            disposition=MaterializationDisposition.GENERATION_DESIRED,
+                            materialization_generation_id=initial.materialization_generation_id,
+                            reason_code="EXPIRED_RECOVERY_AWAITING_GAP_CLOSE",
+                        )
+                    fenced = await uow.instrument_selection.read_authority_clock_ms()
+                    gap = StrategyEntryVacuum(
+                        entry_vacuum_id="vacuum:gap:" + canonical_digest({
+                            "selection_spec_id": initial.selection_spec_id,
+                            "period_anchor_ms": gap_anchor,
+                            "source_selection_authority_id": source.authority.selection_authority_id,
+                        })[7:],
+                        strategy_group_id=initial.strategy_group_id,
+                        selection_spec_id=initial.selection_spec_id,
+                        period_anchor_ms=gap_anchor,
+                        source_generation_id=None,
+                        state=StrategyEntryVacuumState.OPEN,
+                        fenced_at_ms=fenced,
+                        drained_at_ms=None,
+                        resolved_at_ms=None,
+                        first_blocker="AUTHORITY_GAP",
+                        projection_version=1,
+                    )
+                    await uow.instrument_selection.open_generic_authority_gap_vacuum(
+                        gap,
+                        source_selection_authority_id=source.authority.selection_authority_id,
+                        expected_current_version=source.projection_version,
+                    )
+                    return CoordinateSelectionMaterializationResult(
+                        disposition=MaterializationDisposition.WAITING_VACUUM,
+                        materialization_generation_id=initial.materialization_generation_id,
+                        entry_vacuum_id=gap.entry_vacuum_id,
+                        reason_code="EXPIRED_RECOVERY_GAP_FENCED",
+                    )
+                if vacuum.source_generation_id is None and vacuum.first_blocker == "AUTHORITY_GAP":
+                    if vacuum.state in {StrategyEntryVacuumState.OPEN, StrategyEntryVacuumState.DRAINING_ENTRY}:
+                        drained = await drain_strategy_entry_vacuum_once(
+                            uow,
+                            DrainStrategyEntryVacuumRequest(
+                                strategy_group_id=initial.strategy_group_id,
+                                selection_spec_id=initial.selection_spec_id,
+                                now_ms=now_ms,
+                            ),
+                        )
+                        return CoordinateSelectionMaterializationResult(
+                            disposition=MaterializationDisposition.WAITING_VACUUM,
+                            materialization_generation_id=initial.materialization_generation_id,
+                            entry_vacuum_id=vacuum.entry_vacuum_id,
+                            reason_code=drained.reason_code or drained.status.value,
+                        )
+                    if vacuum.state is StrategyEntryVacuumState.RECOVERY_PENDING:
+                        replacement = await uow.instrument_selection.retarget_generic_gap_vacuum_with_generation(
+                            initial, entry_vacuum_id=vacuum.entry_vacuum_id
+                        )
+                        return CoordinateSelectionMaterializationResult(
+                            disposition=MaterializationDisposition.GENERATION_MATERIALIZING,
+                            materialization_generation_id=replacement.materialization_generation_id,
+                            entry_vacuum_id=vacuum.entry_vacuum_id,
+                            reason_code="EXPIRED_RECOVERY_FRESH_TARGET_HANDOFF",
+                        )
         claim = await uow.instrument_selection.claim_generic_materialization_generation(
             initial.materialization_generation_id,worker_id=request.worker_id,now_ms=now_ms,lease_duration_ms=30_000)
         if claim.status is MaterializationGenerationClaimStatus.LEASE_HELD:

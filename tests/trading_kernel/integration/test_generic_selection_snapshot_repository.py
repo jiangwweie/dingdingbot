@@ -14099,6 +14099,176 @@ async def test_dynamic_handover_waits_unfenced_for_rebase_or_an_unconsumed_close
 
 
 @pytest.mark.asyncio
+async def test_expired_unarmed_recovery_hands_existing_desired_to_gap_recovery(database):
+    """Production BRF2: an expired rebase may not deadlock a fresh Desired."""
+    source, snapshot, _, uid = await _exercise_generic_generation(
+        database, "BRF2-001", False, durable=True,
+        first_activation=True, natural_selection=True,
+    )
+    async with database.begin() as connection:
+        await connection.execute(sa.text(
+            "UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true "
+            "WHERE owner_policy_id='policy-main'"
+        ))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        original = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    gap_period = snapshot.feature_cutoff_at_ms + source.spec.cadence_hours * HOUR
+    first_gap = original.authority.expires_at_ms + HOUR + 10
+    await make_warming_ready(database, universe_version_id=uid,
+        warm_closed_bar_time_ms=first_gap // HOUR * HOUR, valid_until_ms=first_gap + HOUR)
+    period_request = CoordinateGenericPeriodRequest(strategy_group_id=source.spec.strategy_group_id,
+        selection_spec_id=source.spec.selection_spec_id,period_anchor_ms=gap_period,worker_id="expired-rebase:period")
+    recovery = None
+    for offset in range(6):
+        tick = first_gap + offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=period_request,clock_ms=lambda tick=tick:tick)
+        async with PostgresKernelUnitOfWork(database) as uow:
+            current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        if isinstance(current.authority, GenericRecoveryAuthority):
+            recovery = current.authority
+            break
+    assert recovery is not None
+    async with PostgresKernelUnitOfWork(database) as uow:
+        for cursor in recovery.recovery_proof.observation_cursors:
+            checkpoint = await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)
+            assert checkpoint.state == "REBASE_REQUIRED"
+    newer_source = next_input(next_input(source)).model_copy(update={"predecessor_snapshot":snapshot})
+    retained = snapshot.selected_members[0]
+    outsider = next(member for member in source.spec.candidate_ids if member not in snapshot.selected_members)
+    retained_candles = next(window.candles for window in newer_source.member_windows
+        if window.exchange_instrument_id == retained)
+    newer_source = newer_source.model_copy(update={"member_windows":tuple(
+        qualify_window(window.model_copy(update={"candles":retained_candles}),
+            window.exchange_instrument_id in {retained,outsider})
+        for window in newer_source.member_windows
+    )})
+    newer = compute_generic_selection(newer_source)
+    assert set(newer.selected_members) == {retained,outsider}
+    assert newer.effective_from_ms == recovery.expires_at_ms
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(newer,
+            decision_at_ms=newer_source.decision_at_ms,source_observed_at_ms=newer_source.source_observed_at_ms)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=newer.selection_snapshot_id,
+        worker_id="expired-rebase:desired")
+    for offset in (1,2):
+        tick = newer.effective_from_ms + offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            planned = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda tick=tick:tick)
+    assert planned.disposition is MaterializationDisposition.GENERATION_DESIRED
+    async with PostgresKernelUnitOfWork(database) as uow:
+        desired = await uow.instrument_selection.get_generic_materialization_generation(planned.materialization_generation_id)
+        assert desired.lifecycle_state.value == "DESIRED"
+        assert desired.fenced_at_ms is None
+    early = recovery.expires_at_ms + HOUR - 1
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=early)):
+        waiting = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=request,clock_ms=lambda:early)
+    assert waiting.reason_code == "EXPIRED_RECOVERY_AWAITING_GAP_CLOSE"
+    assert waiting.entry_vacuum_id is None
+    now = recovery.expires_at_ms + HOUR + 10
+    await make_warming_ready(database,universe_version_id=uid,
+        warm_closed_bar_time_ms=now // HOUR * HOUR,valid_until_ms=now + HOUR)
+    outcomes = []
+    for offset in range(10):
+        tick = now + offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            progress = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=request,clock_ms=lambda tick=tick:tick)
+        outcomes.append(progress)
+        if progress.disposition is MaterializationDisposition.GENERATION_MATERIALIZING:
+            break
+    assert any(item.entry_vacuum_id is not None for item in outcomes), outcomes
+    assert outcomes[-1].disposition is MaterializationDisposition.GENERATION_MATERIALIZING, outcomes
+    assert outcomes[-1].materialization_generation_id == planned.materialization_generation_id
+    async with PostgresKernelUnitOfWork(database) as uow:
+        current = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+        assert current.authority == recovery
+        for cursor in recovery.recovery_proof.observation_cursors:
+            assert (await uow.signals.get_authority_recovery_checkpoint(cursor.episode_domain_key)).state == "REBASE_REQUIRED"
+        assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+        gap = await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)
+        assert gap.drained_at_ms is not None
+        assert gap.fenced_at_ms < (await uow.instrument_selection.get_generic_materialization_generation(
+            planned.materialization_generation_id)).fenced_at_ms
+    generation_request = CoordinateGenericGenerationRequest(
+        materialization_generation_id=planned.materialization_generation_id,worker_id=request.worker_id)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=now+20)):
+        installed = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+            request=generation_request,clock_ms=lambda:now+20)
+    assert installed.disposition is MaterializationDisposition.TARGET_WARMING, installed
+    async with PostgresKernelUnitOfWork(database) as uow:
+        targets = await uow.strategy_universes.get_generation_universe_targets(planned.materialization_generation_id)
+    assert len(targets) == 1
+    target_uid = targets[0].universe_version_id
+    await make_warming_ready(database,universe_version_id=target_uid,
+        warm_closed_bar_time_ms=now//HOUR*HOUR,valid_until_ms=now+HOUR)
+    for offset in (21,22):
+        tick = now+offset
+        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+            activated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),
+                request=generation_request,clock_ms=lambda tick=tick:tick)
+        if offset == 21:
+            assert activated.disposition is MaterializationDisposition.GENERATION_STAGED, activated
+            with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=tick)):
+                async with PostgresKernelUnitOfWork(database) as uow:
+                    proof = await uow.instrument_selection.prepare_generic_recovered_activation_proof(planned.materialization_generation_id)
+                    assert await uow._connection.scalar(sa.text("SELECT brc_generic_recovered_activation_proof_matches("
+                        "CAST(:proof AS jsonb),:at)"),{"proof":proof.model_dump_json(),"at":tick}) is True
+    assert activated.disposition is MaterializationDisposition.ACTIVE_NEW, activated
+    async with PostgresKernelUnitOfWork(database) as uow:
+        replacement = (await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)).authority
+        assert isinstance(replacement, GenericRecoveryAuthority)
+        assert replacement.authority_outcome == "ACTIVE_NEW"
+        assert replacement.recovery_proof.source_selection_authority_id == recovery.selection_authority_id
+        assert replacement.recovery_proof.recovery_close_plan.reason == "AUTHORITY_GAP"
+        assert replacement.first_eligible_close_time_ms > now+22
+        assert await uow.instrument_selection.get_current_entry_vacuum(
+            strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id) is None
+        scope_id = await uow._connection.scalar(sa.text("SELECT runtime_scope_id FROM brc_runtime_scopes_current "
+            "WHERE universe_version_id=:uid AND exchange_instrument_id=:member"),{"uid":target_uid,"member":retained})
+        checkpoint = await uow.signals.get_authority_recovery_checkpoint(
+            build_episode_domain_key(event_spec_id=source.spec.event_spec_id,
+                exchange_instrument_id=retained,position_side=source.spec.position_side))
+        assert checkpoint.state == "REBASE_REQUIRED"
+        assert checkpoint.recovery_id == replacement.recovery_proof.recovery_close_plan.recovery_id
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        early = await resolve_selection_entry_authority(uow,runtime_scope=scope,birth_selection_authority_id=None,
+            observed_close_time_ms=now//HOUR*HOUR,now_ms=now+23,allow_current_as_birth=True)
+        assert not early.allowed
+    class RecoveryMarket:
+        def __init__(self,close):
+            self.delta = close-cpm_flat_snapshot().trigger_candle_close_time_ms
+        async def fetch_closed_candles(self,request):
+            template = cpm_flat_snapshot()
+            candles = template.candles_1h if request.timeframe == "1h" else template.candles_4h
+            return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+self.delta,
+                "close_time_ms":c.close_time_ms+self.delta}) for c in candles)
+    close = replacement.first_eligible_close_time_ms
+    await make_warming_ready(database,universe_version_id=target_uid,
+        warm_closed_bar_time_ms=close,valid_until_ms=close+HOUR)
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=close+1)):
+        observed = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),RecoveryMarket(close),
+            ObservationRequest(runtime_scope_id=scope_id,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
+                trigger_candle_close_time_ms=close,attempted_at_ms=close+1))
+    assert observed.status is ObservationStatus.NO_SIGNAL, observed
+    async with PostgresKernelUnitOfWork(database) as uow:
+        checkpoint = await uow.signals.get_authority_recovery_checkpoint(
+            build_episode_domain_key(event_spec_id=source.spec.event_spec_id,
+                exchange_instrument_id=retained,position_side=source.spec.position_side))
+        assert checkpoint.state == "ARMED"
+        scope = await uow.signals.get_runtime_scope(scope_id)
+        old_birth = await resolve_selection_entry_authority(uow,runtime_scope=scope,
+            birth_selection_authority_id=recovery.selection_authority_id,observed_close_time_ms=close,now_ms=close+2,
+            allow_current_as_birth=False)
+        assert not old_birth.allowed
+        assert await uow._connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
+
+
+@pytest.mark.asyncio
 async def test_recovered_target_and_certification_share_install_lock_before_row(database):
     """Production MI STAGED recovery competes with real certification activation."""
     from src.trading_kernel.infrastructure.pg_universe_repository import (
