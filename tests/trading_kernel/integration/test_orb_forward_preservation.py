@@ -33,9 +33,11 @@ async def test_hourly_upgrade_preserves_exact_source_0010_rows(monkeypatch):
         from pathlib import Path
         # Source lineage must execute certified pre-0012 code. New production
         # repositories intentionally do not read a schema missing research tables.
+        # Use matching certified test fixtures too; newer clock APIs are not
+        # part of that historical runtime generation.
         root=Path(__file__).resolve().parents[3]
         source_commit="1366f00ab80ecd08b07b300b41860eb56fdf7af7"
-        archive=await asyncio.to_thread(subprocess.run,['git','archive',source_commit,'src','scripts/trading_kernel','migrations/trading_kernel'],
+        archive=await asyncio.to_thread(subprocess.run,['git','archive',source_commit,'src','scripts/trading_kernel','migrations/trading_kernel','tests'],
             cwd=root,capture_output=True,check=True,timeout=20)
         with tempfile.TemporaryDirectory(prefix='brc-certified-0010-') as directory:
             with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as bundle:
