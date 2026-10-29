@@ -1,7 +1,7 @@
 """Readonly current-state evidence for the existing operational Entry promotion.
 
 This projection grants no authority and writes no rows. Owner Resume remains
-the sole policy-changing operation; historical bootstrap batches are not inputs.
+the sole ENTRY-enabling operation; risk edits preserve its exact lineage.
 """
 
 from __future__ import annotations
@@ -92,11 +92,19 @@ async def read_entry_restoration_state(
         .order_by(strategy_selection_control_current.c.strategy_group_id))).mappings().all()
     authorization = (await connection.execute(sa.text("""
         SELECT a.authorization_id,a.purpose,a.authentication_strength,
-               a.target_scope,a.authorized_at_ms,e.created_at_ms
-          FROM brc_owner_policy_events e
+               a.target_scope,a.authorized_at_ms,e.created_at_ms,
+               current_event.created_at_ms AS current_created_at_ms
+          FROM brc_owner_policy_events current_event
+          JOIN brc_owner_policy_events e ON e.owner_policy_id=current_event.owner_policy_id
+           AND e.policy_version=CASE WHEN current_event.operation='owner_control_risk_budget'
+             THEN (current_event.payload->>'resume_policy_version')::integer
+             ELSE current_event.policy_version END
           JOIN brc_owner_authorizations a
             ON a.authorization_id=e.payload->>'authorization_id'
-         WHERE e.owner_policy_id=:policy AND e.policy_version=:version
+         WHERE current_event.owner_policy_id=:policy AND current_event.policy_version=:version
+           AND (current_event.operation='owner_control_entry_resume' OR
+                (current_event.operation='owner_control_risk_budget' AND
+                 current_event.payload->>'resume_authorization_id'=a.authorization_id))
            AND e.operation='owner_control_entry_resume'
            AND e.payload->>'new_entry_submit_enabled'='true'
     """), {"policy": policy["owner_policy_id"], "version": policy["policy_version"]}
@@ -107,7 +115,8 @@ async def read_entry_restoration_state(
         and authorization["authentication_strength"] == "totp_step_up"
         and authorization["target_scope"] == {"owner_policy_id": policy["owner_policy_id"]}
         and 0 < authorization["authorized_at_ms"] == authorization["created_at_ms"]
-        == policy["updated_at_ms"] <= now_ms
+        <= policy["updated_at_ms"] <= now_ms
+        and authorization["current_created_at_ms"] == policy["updated_at_ms"]
         and policy["enabled"] and policy["new_entry_submit_enabled"]
     )
     event_ids = {str(row["event_spec_id"]) for row in rows}

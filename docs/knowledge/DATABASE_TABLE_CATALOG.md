@@ -4,7 +4,7 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 90 张业务表、1071 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 90 张业务表、1075 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
@@ -1629,7 +1629,7 @@
 
 **主键**：`rule_id`
 
-**字段清单**：`rule_id`, `rule_digest`, `limits`, `event_spec_ids`
+**字段清单**：`rule_id`, `rule_digest`, `limits`, `budget_contract`, `event_spec_ids`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1641,7 +1641,7 @@
 
 **主键**：`venue_id`, `account_id`
 
-**字段清单**：`venue_id`, `account_id`, `version`, `view`, `rule_id`, `rule_digest`, `effective_at_ms`, `pending_view`, `pending_request_id`, `requested_at_ms`
+**字段清单**：`venue_id`, `account_id`, `version`, `view`, `rule_id`, `rule_digest`, `effective_at_ms`, `pending_view`, `pending_baseline`, `pending_budget_request_id`, `pending_policy_version`, `pending_request_id`, `requested_at_ms`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 

@@ -29,11 +29,39 @@ async def recover_directional_transition_once(
 ) -> bool:
     async with uow_factory() as uow:
         command_id = await uow.directional_risk.next_resolved_send()
-        if command_id is None:
+        pending_budget = (
+            await uow.directional_risk.next_pending_budget()
+            if command_id is None
+            else None
+        )
+        if command_id is None and pending_budget is None:
             return False
-        command = await uow.exchange_commands.get(command_id)
-        expires = await uow.directional_risk.send_expiry(command_id)
-    if command is None or expires is None or command.venue_client_order_id is None:
+        command = (
+            None if command_id is None else await uow.exchange_commands.get(command_id)
+        )
+        expires = (
+            None
+            if command_id is None
+            else await uow.directional_risk.send_expiry(command_id)
+        )
+    if pending_budget is not None:
+        if not await runtime_writer_is_certified(
+            uow_factory,
+            worker_id=worker_id,
+            runtime_commit=runtime_commit,
+            schema_revision=schema_revision,
+            observed_at_ms=now_ms,
+        ):
+            return False
+        async with uow_factory() as uow:
+            control = await uow.directional_risk.progress(*pending_budget, now_ms)
+            return control is not None and control.pending_baseline is None
+    if (
+        command_id is None
+        or command is None
+        or expires is None
+        or command.venue_client_order_id is None
+    ):
         raise RuntimeError("resolved ENTRY send authority has no exact command")
     if not await runtime_writer_is_certified(
         uow_factory,

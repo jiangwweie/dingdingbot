@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.risk_budget import BUDGET_CONTRACT
 
 
 class DirectionalView(StrEnum):
@@ -18,13 +19,13 @@ class DirectionalView(StrEnum):
     BEARISH = "bearish"
 
 
-RULE_ID = "owner-directional-risk:v1"
+RULE_ID = "owner-directional-risk:v2"
 ENTRY_SEND_WINDOW_MS = 5_000
 RULE_LIMITS = {
-    "unset": ("0.04", "0.04"),
-    "bullish": ("0.04", "0.02"),
-    "neutral": ("0.04", "0.04"),
-    "bearish": ("0.02", "0.04"),
+    "unset": ("1", "1"),
+    "bullish": ("1", "0.5"),
+    "neutral": ("1", "1"),
+    "bearish": ("0.5", "1"),
 }
 SCOPED_EVENTS = frozenset(
     {
@@ -37,7 +38,12 @@ SCOPED_EVENTS = frozenset(
     }
 )
 RULE_DIGEST = canonical_digest(
-    {"rule_id": RULE_ID, "limits": RULE_LIMITS, "event_spec_ids": sorted(SCOPED_EVENTS)}
+    {
+        "rule_id": RULE_ID,
+        "limits": RULE_LIMITS,
+        "event_spec_ids": sorted(SCOPED_EVENTS),
+        "budget_contract": BUDGET_CONTRACT,
+    }
 )
 
 
@@ -54,6 +60,10 @@ class DirectionalControl(BaseModel):
     pending_request_id: str | None = None
     requested_at_ms: int | None = Field(default=None, gt=0)
 
+    pending_baseline: Decimal | None = None
+    pending_budget_request_id: str | None = None
+    pending_policy_version: int | None = None
+
     @model_validator(mode="after")
     def valid(self):
         if not self.venue_id.strip() or not self.account_id.strip():
@@ -66,6 +76,17 @@ class DirectionalControl(BaseModel):
             self.pending_view == DirectionalView.UNSET or not self.requested_at_ms
         ):
             raise ValueError("directional_pending_shape")
+        budget_fields = (
+            self.pending_baseline,
+            self.pending_budget_request_id,
+            self.pending_policy_version,
+        )
+        if any(v is not None for v in budget_fields):
+            from src.trading_kernel.domain.risk_budget import RiskBudget
+
+            if any(v is None for v in budget_fields) or self.pending_view is not None:
+                raise ValueError("risk_budget_pending_shape")
+            RiskBudget(baseline=self.pending_baseline)
         return self
 
 
@@ -95,6 +116,6 @@ def effective_directional_limit(
 ) -> Decimal:
     if control is None:
         raise ValueError("directional_control_missing")
-    if control.pending_view is not None:
+    if control.pending_view is not None or control.pending_baseline is not None:
         raise ValueError("directional_transition_pending")
-    return min(base, Decimal(RULE_LIMITS[control.view][0 if side == "long" else 1]))
+    return base * Decimal(RULE_LIMITS[control.view][0 if side == "long" else 1])

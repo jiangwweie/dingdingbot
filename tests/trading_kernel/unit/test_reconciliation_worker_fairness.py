@@ -154,7 +154,7 @@ class _AggregateRepository:
 class _UnitOfWork:
     def __init__(self, state):
         self.directional_risk = SimpleNamespace(
-            next_resolved_send=AsyncMock(return_value=None)
+            next_pending_budget=AsyncMock(return_value=None), next_resolved_send=AsyncMock(return_value=None)
         )
         self.exchange_commands = state.commands
         self.aggregates = state.aggregates

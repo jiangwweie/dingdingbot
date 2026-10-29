@@ -15,7 +15,8 @@ TradingKernelSchemaRevision = Literal[
     "0011_orb_session_1h_v1",
     "0012_generic_signal_path_v1",
     "0013_owner_directional_risk_v1",
+    "0014_dynamic_risk_budget_v1",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0013_owner_directional_risk_v1"
+    "0014_dynamic_risk_budget_v1"
 )

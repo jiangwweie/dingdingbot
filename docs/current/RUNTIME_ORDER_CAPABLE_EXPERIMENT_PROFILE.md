@@ -161,3 +161,23 @@ Exchange-command capability may be enabled only after:
 
 This profile never authorizes withdrawal, transfer, credential mutation,
 scope expansion, sizing-default expansion, or bypass of the official kernel.
+
+
+## Owner Dynamic Risk Budget V1 — approved implementation target
+
+The Owner approved dynamic risk controls with **initial baseline 2%**, not an
+initial production risk increase. The implementation target allows baseline r
+from 2.0% through 3.0% in 0.1 percentage-point steps. Single-Ticket risk=r,
+gross risk=3r, base directional risk=2r; the directional presets become
+bullish=(2r,r), neutral=(2r,2r), bearish=(r,2r). Explicit unset retains the base
+ceiling without inventing a neutral choice. Minimum materialization remains
+50%, so the minimum absolute risk budget is r/2 times action-time wallet balance.
+Count, Family, strategy-side, leverage, margin and exit semantics remain fixed.
+
+This section is the approved target, **not a deployment or activation claim**.
+The design is [DRB-01](../superpowers/specs/2026-10-29-owner-dynamic-risk-budget-v1-design.md)
+and the [execution plan](../superpowers/plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md)
+defines certification and preservation. Initial installation retains current
+Owner direction and ENTRY intent; subsequent changes require explicit Owner
+control submissions. Deployment requires the Owner's separate confirmation.
+Exact deployment posture remains exclusively in MAIN_CONTROL_ROADMAP.md.

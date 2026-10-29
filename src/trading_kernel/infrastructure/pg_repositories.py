@@ -2159,6 +2159,12 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
         reason: str,
         updated_at_ms: int,
     ) -> OwnerPolicySnapshot:
+        identities = (await self._connection.execute(sa.select(runtime_profiles.c.venue_id, runtime_profiles.c.account_id).distinct().order_by(runtime_profiles.c.venue_id, runtime_profiles.c.account_id))).all()
+        from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
+            PostgresDirectionalRiskRepository,
+        )
+        for venue_id, account_id in identities:
+            await PostgresDirectionalRiskRepository(self._connection).lock(venue_id, account_id)
         row = (
             (
                 await self._connection.execute(

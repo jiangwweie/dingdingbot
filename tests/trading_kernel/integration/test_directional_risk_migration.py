@@ -40,7 +40,7 @@ async def test_0012_to_0013_preserves_every_source_table_and_installs_only_unset
         async with engine.begin() as c:
             before = await _directional_source_preservation_manifest(c)
             assert before["table_count"] == 85 and before["row_count"] > 100
-        await asyncio.to_thread(run_alembic, url, "upgrade", "head")
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0013_owner_directional_risk_v1")
         async with engine.connect() as c:
             after = await _directional_source_preservation_manifest(c)
             assert before["digest"] == after["digest"]

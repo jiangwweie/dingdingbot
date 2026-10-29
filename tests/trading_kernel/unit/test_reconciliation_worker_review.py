@@ -151,7 +151,7 @@ class _Monitors:
 
 class _FakeUnitOfWork:
     def __init__(self, state: _WorkerState) -> None:
-        self.directional_risk = SimpleNamespace(next_resolved_send=AsyncMock(return_value=None))
+        self.directional_risk = SimpleNamespace(next_pending_budget=AsyncMock(return_value=None), next_resolved_send=AsyncMock(return_value=None))
         self.monitors = _Monitors()
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands

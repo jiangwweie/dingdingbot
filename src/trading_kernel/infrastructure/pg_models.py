@@ -26,6 +26,7 @@ directional_risk_rules = sa.Table(
     sa.Column("rule_id", ID, primary_key=True),
     sa.Column("rule_digest", ID, nullable=False),
     sa.Column("limits", JSONB, nullable=False),
+    sa.Column("budget_contract", JSONB, nullable=True),
     sa.Column("event_spec_ids", JSONB, nullable=False),
 )
 directional_risk_controls = sa.Table(
@@ -44,6 +45,9 @@ directional_risk_controls = sa.Table(
     sa.Column("rule_digest", ID, nullable=False),
     sa.Column("effective_at_ms", sa.BigInteger, nullable=False),
     sa.Column("pending_view", SHORT_TEXT),
+    sa.Column("pending_baseline", MONEY),
+    sa.Column("pending_budget_request_id", ID),
+    sa.Column("pending_policy_version", sa.Integer),
     sa.Column("pending_request_id", ID),
     sa.Column("requested_at_ms", sa.BigInteger),
     sa.CheckConstraint("version>0 AND effective_at_ms>0", name="positive"),
@@ -54,6 +58,10 @@ directional_risk_controls = sa.Table(
         "COALESCE((pending_view IS NULL AND pending_request_id IS NULL) OR (pending_view IN ('bullish','neutral','bearish') AND pending_request_id IS NOT NULL AND requested_at_ms>0),false)",
         name="pending_valid",
     ),
+)
+sa.CheckConstraint(
+    "COALESCE((pending_baseline IS NULL AND pending_budget_request_id IS NULL AND pending_policy_version IS NULL) OR (pending_baseline BETWEEN 0.02 AND 0.03 AND mod(pending_baseline,0.001)=0 AND pending_budget_request_id IS NOT NULL AND pending_policy_version>0 AND pending_view IS NULL),false)",
+    name="budget_pending_valid", table=directional_risk_controls,
 )
 directional_risk_events = sa.Table(
     "brc_directional_risk_events",
@@ -3134,4 +3142,9 @@ sa.Index(
     "ix_brc_owner_control_operations_actionable",
     owner_control_operations_current.c.state,
     owner_control_operations_current.c.updated_at_ms,
+)
+
+sa.CheckConstraint(
+    "max_ticket_stop_risk_fraction BETWEEN 0.02 AND 0.03 AND mod(max_ticket_stop_risk_fraction,0.001)=0 AND max_gross_stop_risk_fraction=3*max_ticket_stop_risk_fraction AND directional_stop_risk_limit_fraction=2*max_ticket_stop_risk_fraction AND min_materialization_ratio=0.5",
+    name="dynamic_risk_budget_valid", table=owner_policy_current,
 )

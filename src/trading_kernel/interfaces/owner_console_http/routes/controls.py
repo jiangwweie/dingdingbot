@@ -46,6 +46,7 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
     StrategyEntryState,
 )
+from src.trading_kernel.domain.risk_budget import RiskBudgetReceipt
 from src.trading_kernel.domain.selection_authority import (
     SelectionControl,
     SelectionMode,
@@ -187,14 +188,12 @@ async def get_directional_risk(request: Request) -> DirectionalRiskView:
             )
         ).first()
     limits = RULE_LIMITS[control.view]
-    long_limit = min(policy.directional_stop_risk_limit_fraction, Decimal(limits[0]))
-    short_limit = min(policy.directional_stop_risk_limit_fraction, Decimal(limits[1]))
+    long_limit = (policy.directional_stop_risk_limit_fraction * Decimal(limits[0])).normalize()
+    short_limit = (policy.directional_stop_risk_limit_fraction * Decimal(limits[1])).normalize()
     return DirectionalRiskView(
         control=control,
-        long_limit=min(policy.directional_stop_risk_limit_fraction, Decimal(limits[0])),
-        short_limit=min(
-            policy.directional_stop_risk_limit_fraction, Decimal(limits[1])
-        ),
+        long_limit=(policy.directional_stop_risk_limit_fraction * Decimal(limits[0])).normalize(),
+        short_limit=(policy.directional_stop_risk_limit_fraction * Decimal(limits[1])).normalize(),
         long_risk_at_stop=long_usage,
         short_risk_at_stop=short_usage,
         wallet_balance_at_last_admission=None if balance is None else balance[0],
@@ -1027,3 +1026,157 @@ def _validate_write_request(request: Request) -> None:
     content_type = request.headers.get("content-type", "").split(";", 1)[0]
     if request.method == "POST" and content_type != "application/json":
         raise ForbiddenOwnerRequest
+
+
+class RiskBudgetBody(ControlWriteBody):
+    baseline: str = Field(pattern=r"^0\.(?:02[0-9]?|030?)$")
+    expected_directional_version: int = Field(ge=1)
+
+
+class RiskBudgetPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    baseline: str = Field(pattern=r"^0\.(?:02[0-9]?|030?)$")
+
+
+class RiskBudgetView(BaseModel):
+    venue_id: str
+    account_id: str
+    policy_version: int
+    directional_version: int
+    baseline: Decimal
+    gross_limit: Decimal
+    directional_limit: Decimal
+    minimum_risk: Decimal
+    long_limit: Decimal
+    short_limit: Decimal
+    view: str
+    pending_baseline: Decimal | None
+    pending_directional_view: str | None
+    min_baseline: Decimal
+    max_baseline: Decimal
+    step: Decimal
+    entry_enabled: bool
+    updated_at_ms: int
+    wallet_balance_at_last_admission: Decimal | None
+    balance_captured_at_ms: int | None
+    long_risk_at_stop: Decimal
+    short_risk_at_stop: Decimal
+
+
+@router.get("/controls/risk-budget")
+async def get_risk_budget(request: Request) -> RiskBudgetView:
+    from src.trading_kernel.domain.risk_budget import (
+        BASELINE_STEP,
+        MAX_BASELINE,
+        MIN_BASELINE,
+        RiskBudget,
+    )
+
+    settings = get_settings(request)
+    async with owner_read_transaction(get_read_engine(request)) as c:
+        policy = await PostgresEntryAdmissionRepository(c).get_owner_policy(
+            settings.owner_policy_id
+        )
+        control = await PostgresDirectionalRiskRepository(c).get(
+            settings.venue_id, settings.account_id
+        )
+        if policy is None or control is None:
+            raise OwnerControlBlocked("risk_budget_authority_missing")
+        admission = PostgresEntryAdmissionRepository(c)
+        long_usage = await admission.sum_active_directional_stop_risk(venue_id=settings.venue_id, account_id=settings.account_id, position_side="long")
+        short_usage = await admission.sum_active_directional_stop_risk(venue_id=settings.venue_id, account_id=settings.account_id, position_side="short")
+        balance = (await c.execute(sa.select(capacity_claims.c.total_wallet_balance_at_claim, capacity_claims.c.created_at_ms).where(capacity_claims.c.venue_id == settings.venue_id, capacity_claims.c.account_id == settings.account_id).order_by(capacity_claims.c.created_at_ms.desc()).limit(1))).first()
+        budget = RiskBudget(baseline=policy.max_ticket_stop_risk_fraction)
+        if (
+            policy.max_gross_stop_risk_fraction != budget.gross
+            or policy.directional_stop_risk_limit_fraction != budget.directional
+        ):
+            raise OwnerControlBlocked("risk_budget_policy_inconsistent")
+        limits = RULE_LIMITS[control.view]
+        return RiskBudgetView(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            policy_version=policy.policy_version,
+            directional_version=control.version,
+            baseline=budget.baseline,
+            gross_limit=budget.gross,
+            directional_limit=budget.directional,
+            minimum_risk=budget.minimum,
+            long_limit=budget.directional * Decimal(limits[0]),
+            short_limit=budget.directional * Decimal(limits[1]),
+            view=control.view,
+            pending_baseline=control.pending_baseline,
+            pending_directional_view=control.pending_view,
+            min_baseline=MIN_BASELINE,
+            max_baseline=MAX_BASELINE,
+            step=BASELINE_STEP,
+            entry_enabled=policy.new_entry_submit_enabled,
+            updated_at_ms=control.effective_at_ms,
+            wallet_balance_at_last_admission=None if balance is None else balance[0],
+            balance_captured_at_ms=None if balance is None else balance[1],
+            long_risk_at_stop=long_usage,
+            short_risk_at_stop=short_usage,
+        )
+
+
+@router.post("/controls/risk-budget/preview")
+async def preview_risk_budget(
+    body: RiskBudgetPreviewBody, request: Request
+) -> RiskBudgetView:
+    from src.trading_kernel.domain.risk_budget import RiskBudget
+
+    _validate_write_request(request)
+    budget = RiskBudget(baseline=Decimal(body.baseline))
+    current = await get_risk_budget(request)
+    limits = RULE_LIMITS[current.view]
+    return current.model_copy(
+        update={
+            "baseline": budget.baseline,
+            "gross_limit": budget.gross,
+            "directional_limit": budget.directional,
+            "minimum_risk": budget.minimum,
+            "long_limit": budget.directional * Decimal(limits[0]),
+            "short_limit": budget.directional * Decimal(limits[1]),
+        }
+    )
+
+
+@router.post("/controls/risk-budget")
+async def change_risk_budget(
+    body: RiskBudgetBody, request: Request
+) -> RiskBudgetReceipt:
+    from src.trading_kernel.domain.risk_budget import RiskBudgetChangeRequest
+
+    _validate_write_request(request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    try:
+        mutation = RiskBudgetChangeRequest(
+            venue_id=settings.venue_id,
+            account_id=settings.account_id,
+            owner_policy_id=settings.owner_policy_id,
+            baseline=Decimal(body.baseline),
+            expected_policy_version=body.expected_version,
+            expected_directional_version=body.expected_directional_version,
+            owner_identity=settings.auth.username,
+            reason=body.reason,
+            idempotency_key=body.idempotency_key,
+            requested_at_ms=get_clock_ms(request),
+        )
+        async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+            result = await uow.directional_risk.request_budget_change(mutation)
+        return RiskBudgetReceipt.model_validate(result)
+    except ValueError as exc:
+        raise OwnerControlConflict(str(exc)) from exc
+
+
+@router.get("/controls/risk-budget/requests/{idempotency_key}")
+async def get_risk_budget_receipt(
+    idempotency_key: str, request: Request
+) -> RiskBudgetReceipt | None:
+    settings = get_settings(request)
+    async with owner_read_transaction(get_read_engine(request)) as c:
+        result = await PostgresDirectionalRiskRepository(c).budget_receipt(
+            settings.venue_id, settings.account_id, idempotency_key
+        )
+    return None if result is None else RiskBudgetReceipt.model_validate(result)

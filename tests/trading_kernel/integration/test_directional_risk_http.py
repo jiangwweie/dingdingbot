@@ -1,6 +1,7 @@
 """Real Session/TOTP and least-privilege SQL boundary on disposable PostgreSQL."""
 
 import re
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -108,8 +109,27 @@ async def test_directional_http_preview_step_up_receipt_and_real_control_role(
             readback = await client.get("/api/owner/v1/controls/directional-risk")
             assert (
                 readback.json()["long_limit"] == "0.02"
-                and readback.json()["short_limit"] == "0.040000000000000000"
+                and readback.json()["short_limit"] == "0.04"
             )
+            budget = await client.get("/api/owner/v1/controls/risk-budget")
+            assert budget.status_code == 200, budget.text
+            clock[0] += 30_000
+            budget_body = {
+                "expected_version": budget.json()["policy_version"],
+                "expected_directional_version": budget.json()["directional_version"],
+                "baseline": "0.030", "reason": "Owner raise risk", "idempotency_key": "http-budget",
+                "totp_code": pyotp.TOTP(TOTP_SEED).at(clock[0] // 1000),
+            }
+            preview_budget = await client.post("/api/owner/v1/controls/risk-budget/preview",headers={"origin":settings.public_origin},json={"baseline":"0.030"})
+            assert preview_budget.status_code == 200, preview_budget.text
+            assert Decimal(preview_budget.json()["gross_limit"]) == Decimal(".09")
+            assert (await client.get("/api/owner/v1/controls/risk-budget")).json()["policy_version"] == budget.json()["policy_version"]
+            changed_budget = await client.post("/api/owner/v1/controls/risk-budget",headers={"origin":settings.public_origin},json=budget_body)
+            assert changed_budget.status_code == 200, changed_budget.text
+            assert changed_budget.json()["status"] == "effective"
+            new_direction = (await client.get("/api/owner/v1/controls/directional-risk")).json()
+            assert Decimal(new_direction["long_limit"]) == Decimal(".03")
+            assert Decimal(new_direction["short_limit"]) == Decimal(".06")
             receipt = await client.get(
                 "/api/owner/v1/controls/directional-risk/requests/http-odr"
             )
@@ -132,7 +152,7 @@ async def test_directional_http_preview_step_up_receipt_and_real_control_role(
             )
             assert (
                 await c.scalar(
-                    sa.text("SELECT count(*) FROM brc_directional_risk_events")
+                    sa.text("SELECT count(*) FROM brc_directional_risk_events WHERE event_kind='requested'")
                 )
                 == 1
             )

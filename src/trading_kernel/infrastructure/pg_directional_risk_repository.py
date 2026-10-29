@@ -19,6 +19,12 @@ from src.trading_kernel.domain.directional_risk import (
     DirectionalView,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.risk_budget import (
+    BUDGET_CONTRACT,
+    RiskBudget,
+    RiskBudgetChangeRequest,
+    RiskBudgetReceipt,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     directional_risk_admissions,
     directional_risk_controls,
@@ -26,6 +32,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     directional_risk_rules,
     entry_send_authorizations,
     exchange_commands,
+    owner_policy_current,
+    owner_policy_events,
     trade_tickets,
 )
 
@@ -78,6 +86,7 @@ class PostgresDirectionalRiskRepository:
             or rule["rule_digest"] != RULE_DIGEST
             or rule["limits"] != {k: list(v) for k, v in RULE_LIMITS.items()}
             or rule["event_spec_ids"] != sorted(SCOPED_EVENTS)
+            or rule["budget_contract"] != BUDGET_CONTRACT
         ):
             raise ValueError("directional_rule_mismatch")
         row = (
@@ -123,7 +132,7 @@ class PostgresDirectionalRiskRepository:
             return DirectionalControl.model_validate(previous["result"])
         if current.version != request.expected_version:
             raise ValueError("directional_version_conflict")
-        if current.pending_view is not None:
+        if current.pending_view is not None or current.pending_baseline is not None:
             raise ValueError("directional_transition_pending")
         if request.requested_at_ms < current.effective_at_ms:
             raise ValueError("directional_clock_moved_backwards")
@@ -155,6 +164,224 @@ class PostgresDirectionalRiskRepository:
         )
         return updated
 
+    async def budget_receipt(
+        self, venue_id: str, account_id: str, idempotency_key: str
+    ) -> RiskBudgetReceipt | None:
+        event_id = (
+            "risk-budget:"
+            + canonical_digest([venue_id, account_id, idempotency_key])[7:]
+        )
+        for identity in (event_id + ":effective", event_id):
+            payload = await self._connection.scalar(
+                sa.select(directional_risk_events.c.payload).where(
+                    directional_risk_events.c.event_id == identity
+                )
+            )
+            if payload is not None:
+                return RiskBudgetReceipt.model_validate(payload["result"])
+        return None
+
+    async def request_budget_change(
+        self, request: RiskBudgetChangeRequest
+    ) -> RiskBudgetReceipt:
+        current = await self.get(request.venue_id, request.account_id, for_update=True)
+        if current is None:
+            raise ValueError("directional_control_missing")
+        event_id = (
+            "risk-budget:"
+            + canonical_digest(
+                [request.venue_id, request.account_id, request.idempotency_key]
+            )[7:]
+        )
+        fingerprint = canonical_digest(
+            request.model_dump(mode="json", exclude={"requested_at_ms"})
+        )
+        previous = await self._connection.scalar(
+            sa.select(directional_risk_events.c.payload).where(
+                directional_risk_events.c.event_id == event_id
+            )
+        )
+        if previous is not None:
+            if previous["fingerprint"] != fingerprint:
+                raise ValueError("risk_budget_idempotency_conflict")
+            receipt = await self.budget_receipt(
+                request.venue_id, request.account_id, request.idempotency_key
+            )
+            assert receipt is not None
+            return receipt
+        row = (
+            (
+                await self._connection.execute(
+                    sa.select(owner_policy_current)
+                    .where(
+                        owner_policy_current.c.owner_policy_id
+                        == request.owner_policy_id
+                    )
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one()
+        )
+        if (
+            row["policy_version"] != request.expected_policy_version
+            or current.version != request.expected_directional_version
+        ):
+            raise ValueError("risk_budget_version_conflict")
+        if current.pending_view is not None or current.pending_baseline is not None:
+            raise ValueError("risk_budget_transition_pending")
+        if request.requested_at_ms < max(row["updated_at_ms"], current.effective_at_ms):
+            raise ValueError("risk_budget_clock_moved_backwards")
+        budget = RiskBudget(baseline=row["max_ticket_stop_risk_fraction"])
+        if (
+            row["max_gross_stop_risk_fraction"] != budget.gross
+            or row["directional_stop_risk_limit_fraction"] != budget.directional
+            or row["min_materialization_ratio"] != Decimal(".5")
+        ):
+            raise ValueError("risk_budget_policy_inconsistent")
+        unchanged = budget.baseline == request.baseline
+        result = RiskBudgetReceipt(
+            request_id=event_id,
+            status="unchanged" if unchanged else "pending",
+            baseline=str(request.baseline),
+            requested_at_ms=request.requested_at_ms,
+        )
+        await self._event(
+            event_id,
+            current,
+            "budget_requested",
+            request.requested_at_ms,
+            {
+                "fingerprint": fingerprint,
+                "request": request.model_dump(mode="json"),
+                "result": result.model_dump(mode="json"),
+                "authentication_strength": "totp_step_up",
+            },
+        )
+        if unchanged:
+            return result
+        pending = current.model_copy(
+            update={
+                "version": current.version + 1,
+                "pending_baseline": request.baseline,
+                "pending_budget_request_id": event_id,
+                "pending_policy_version": request.expected_policy_version,
+                "requested_at_ms": request.requested_at_ms,
+            }
+        )
+        await self._save(pending)
+        if not await self.has_in_flight(request.venue_id, request.account_id):
+            return await self._apply_budget(pending, request.requested_at_ms)
+        return result
+
+    async def _apply_budget(self, current: DirectionalControl, now_ms: int):
+        payload = await self._connection.scalar(
+            sa.select(directional_risk_events.c.payload).where(
+                directional_risk_events.c.event_id == current.pending_budget_request_id
+            )
+        )
+        if payload is None:
+            raise ValueError("risk_budget_request_missing")
+        request = RiskBudgetChangeRequest.model_validate(payload["request"])
+        row = (
+            (
+                await self._connection.execute(
+                    sa.select(owner_policy_current)
+                    .where(
+                        owner_policy_current.c.owner_policy_id
+                        == request.owner_policy_id
+                    )
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one()
+        )
+        if current.pending_baseline is None:
+            raise ValueError("risk_budget_pending_missing")
+        budget = RiskBudget(baseline=current.pending_baseline)
+        version = row["policy_version"] + 1
+        effective_at = max(now_ms, row["updated_at_ms"], request.requested_at_ms)
+        result = RiskBudgetReceipt(
+            request_id=str(current.pending_budget_request_id),
+            status="effective",
+            baseline=str(budget.baseline),
+            policy_version=version,
+            effective_at_ms=effective_at,
+            requested_at_ms=request.requested_at_ms,
+        )
+        previous_event = (
+            (
+                await self._connection.execute(
+                    sa.select(owner_policy_events).where(
+                        owner_policy_events.c.owner_policy_id
+                        == request.owner_policy_id,
+                        owner_policy_events.c.policy_version == row["policy_version"],
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        resume_id = None
+        resume_version = None
+        if previous_event is not None and row["new_entry_submit_enabled"]:
+            if previous_event["operation"] == "owner_control_entry_resume":
+                resume_id = previous_event["payload"].get("authorization_id")
+                resume_version = previous_event["policy_version"]
+            elif previous_event["operation"] == "owner_control_risk_budget":
+                resume_id = previous_event["payload"].get("resume_authorization_id")
+                resume_version = previous_event["payload"].get("resume_policy_version")
+        await self._connection.execute(
+            sa.insert(owner_policy_events).values(
+                owner_policy_event_id=current.pending_budget_request_id,
+                owner_policy_id=request.owner_policy_id,
+                policy_version=version,
+                operation="owner_control_risk_budget",
+                payload={
+                    "request_id": current.pending_budget_request_id,
+                    "source_policy_version": row["policy_version"],
+                    "resume_authorization_id": resume_id,
+                    "resume_policy_version": resume_version,
+                    "baseline": str(budget.baseline),
+                    "owner_identity": request.owner_identity,
+                    "reason": request.reason,
+                    "rule_id": RULE_ID,
+                    "rule_digest": RULE_DIGEST,
+                },
+                created_at_ms=effective_at,
+            )
+        )
+        await self._connection.execute(
+            sa.update(owner_policy_current)
+            .where(owner_policy_current.c.owner_policy_id == request.owner_policy_id)
+            .values(
+                policy_version=version,
+                max_ticket_stop_risk_fraction=budget.baseline,
+                max_gross_stop_risk_fraction=budget.gross,
+                directional_stop_risk_limit_fraction=budget.directional,
+                updated_at_ms=effective_at,
+            )
+        )
+        updated = current.model_copy(
+            update={
+                "version": current.version + 1,
+                "pending_baseline": None,
+                "pending_budget_request_id": None,
+                "pending_policy_version": None,
+                "effective_at_ms": effective_at,
+            }
+        )
+        await self._save(updated)
+        await self._event(
+            str(current.pending_budget_request_id) + ":effective",
+            updated,
+            "budget_effective",
+            effective_at,
+            {"result": result.model_dump(mode="json")},
+        )
+        return result
+
     async def request_receipt(
         self, venue_id: str, account_id: str, idempotency_key: str
     ) -> DirectionalControl | None:
@@ -180,7 +407,6 @@ class PostgresDirectionalRiskRepository:
                     sa.exists().where(
                         entry_send_authorizations.c.venue_id == venue_id,
                         entry_send_authorizations.c.account_id == account_id,
-                        entry_send_authorizations.c.control.is_not(None),
                         entry_send_authorizations.c.completed_at_ms.is_(None),
                     )
                 )
@@ -191,11 +417,12 @@ class PostgresDirectionalRiskRepository:
         self, venue_id: str, account_id: str, now_ms: int
     ) -> DirectionalControl | None:
         current = await self.get(venue_id, account_id, for_update=True)
-        if (
-            current is None
-            or current.pending_view is None
-            or await self.has_in_flight(venue_id, account_id)
-        ):
+        if current is None or await self.has_in_flight(venue_id, account_id):
+            return current
+        if current.pending_baseline is not None:
+            await self._apply_budget(current, now_ms)
+            return await self.get(venue_id, account_id)
+        if current.pending_view is None:
             return current
         updated = DirectionalControl(
             venue_id=venue_id,
@@ -230,10 +457,13 @@ class PostgresDirectionalRiskRepository:
         control: DirectionalControl | None,
     ) -> int:
         await self.lock(venue_id, account_id)
-        if control is not None:
-            actual = await self.get(venue_id, account_id)
-            if actual != control or actual.pending_view is not None:
-                raise ValueError("directional_authority_changed")
+        actual = await self.get(venue_id, account_id)
+        if actual is None or actual.pending_baseline is not None:
+            raise ValueError("risk_budget_transition_pending")
+        if control is not None and (
+            actual != control or actual.pending_view is not None
+        ):
+            raise ValueError("directional_authority_changed")
         command = (
             (
                 await self._connection.execute(
@@ -252,6 +482,8 @@ class PostgresDirectionalRiskRepository:
                         trade_tickets.c.venue_id,
                         trade_tickets.c.account_id,
                         trade_tickets.c.event_spec_id,
+                        trade_tickets.c.owner_policy_id,
+                        trade_tickets.c.owner_policy_version,
                     ).where(trade_tickets.c.ticket_id == command["ticket_id"])
                 )
             )
@@ -265,6 +497,13 @@ class PostgresDirectionalRiskRepository:
             or command["deadline_at_ms"] != deadline_at_ms
         ):
             raise ValueError("entry_send_scope_mismatch")
+        policy_version = await self._connection.scalar(
+            sa.select(owner_policy_current.c.policy_version).where(
+                owner_policy_current.c.owner_policy_id == ticket["owner_policy_id"]
+            )
+        )
+        if policy_version != ticket["owner_policy_version"]:
+            raise ValueError("entry_send_policy_changed")
         if ticket["event_spec_id"] in SCOPED_EVENTS and control is None:
             raise ValueError("directional_control_missing")
         if (
@@ -282,7 +521,9 @@ class PostgresDirectionalRiskRepository:
                 account_id=account_id,
                 worker_id=worker_id,
                 authorized_at_ms=now_ms,
-                expires_at_ms=min(now_ms + ENTRY_SEND_WINDOW_MS, deadline_at_ms, valid_until_ms),
+                expires_at_ms=min(
+                    now_ms + ENTRY_SEND_WINDOW_MS, deadline_at_ms, valid_until_ms
+                ),
                 control=sa.null()
                 if control is None
                 else control.model_dump(mode="json"),
@@ -307,6 +548,20 @@ class PostgresDirectionalRiskRepository:
                 entry_send_authorizations.c.command_id == command_id
             )
         )
+
+    async def next_pending_budget(self) -> tuple[str, str] | None:
+        row = (
+            await self._connection.execute(
+                sa.select(
+                    directional_risk_controls.c.venue_id,
+                    directional_risk_controls.c.account_id,
+                )
+                .where(directional_risk_controls.c.pending_baseline.is_not(None))
+                .order_by(directional_risk_controls.c.requested_at_ms)
+                .limit(1)
+            )
+        ).first()
+        return None if row is None else (row[0], row[1])
 
     async def next_resolved_send(self) -> str | None:
         """A bounded cleanup selector for outcomes resolved by another safety path."""

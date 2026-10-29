@@ -100,11 +100,13 @@ async def issue_ticket(
 ) -> IssueTicketResult:
     claim = request.capacity_claim
     ticket = claim.to_ticket()
-    if ticket.identity.runtime.event_spec_id in SCOPED_EVENTS:
-        await uow.directional_risk.lock(
-            ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id,
-        )
+    await uow.directional_risk.lock(
+        ticket.identity.netting_domain.venue_id,
+        ticket.identity.netting_domain.account_id,
+    )
+    control = await uow.directional_risk.get(ticket.identity.netting_domain.venue_id, ticket.identity.netting_domain.account_id)
+    if control is None or control.pending_baseline is not None:
+        return IssueTicketResult(status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None)
     lane = await uow.entry_admission.lock_global_lane()
     if lane.status != "idle":
         return IssueTicketResult(

@@ -31,7 +31,7 @@ def test_directional_presets_only_tighten(view, long, short):
             limit
         )
         assert effective_directional_limit(control, side, Decimal("0.01")) == Decimal(
-            "0.01"
+            "0.01" if Decimal(limit) == Decimal("0.04") else "0.005"
         )
 
 

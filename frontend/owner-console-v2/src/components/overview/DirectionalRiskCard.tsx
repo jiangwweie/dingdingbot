@@ -53,7 +53,7 @@ export function DirectionalRiskCard() {
       }
     } finally { busyRef.current = false; setBusy(false); }
   };
-  const pending = Boolean(state?.control.pending_view);
+  const pending = Boolean(state?.control.pending_view || state?.control.pending_baseline);
   const verify = async () => {
     if (!frozen || busyRef.current) return;
     busyRef.current = true; setBusy(true);
@@ -74,7 +74,7 @@ export function DirectionalRiskCard() {
       <button type="button" className="text-xs text-brand" onClick={() => void query.refetch()}>刷新状态</button>
     </div>
     {query.isError ? <p role="alert" className="text-sm text-danger">无法读取方向风险控制，暂不能修改。</p> : !state ? <p className="text-sm text-text-muted">正在读取方向风险控制…</p> : <>
-      <p className="text-sm text-text-primary" role="status">{pending ? `切换中：${labels[state.control.pending_view!]}，当前仍为${labels[state.control.view]}` : `当前：${labels[state.control.view]}`}</p>
+      <p className="text-sm text-text-primary" role="status">{pending ? `切换中：${state.control.pending_view ? labels[state.control.pending_view] : '风险预算'}，当前仍为${labels[state.control.view]}` : `当前：${labels[state.control.view]}`}</p>
       <div className="flex flex-wrap gap-2" aria-label="选择市场立场">{(['bullish','neutral','bearish'] as const).map(view => <button type="button" key={view} aria-pressed={!pending && state.control.view === view} disabled={pending || busy || Boolean(frozen)} onClick={() => select(view)} className="rounded-md border border-border px-4 py-2 text-sm text-text-primary disabled:opacity-40 aria-pressed:bg-brand aria-pressed:text-white focus-visible:ring-2 focus-visible:ring-brand">{labels[view]}</button>)}</div>
       <dl className="grid grid-cols-2 gap-4 text-sm">
         <div><dt className="text-text-muted">多头风险上限</dt><dd className="font-semibold">{pct(state.long_limit)} · 已占用 {new Decimal(state.long_risk_at_stop).toFixed(2)} USDT</dd></div>
@@ -88,6 +88,6 @@ export function DirectionalRiskCard() {
     {message && <p role="status" className="text-xs text-text-secondary">{message}</p>}
     {error && !target && !frozen && <p role="alert" className="text-xs text-danger">{error}</p>}
     {frozen && <p className="text-xs text-status-amber">上次请求尚待确认。重试将核验同一请求，不创建新的变更。</p>}
-    <TotpActionModal open={Boolean(target || frozen)} onOpenChange={open => { if (!open && !frozen && !busyRef.current) setTarget(null); }} title={`确认${labels[frozen?.view ?? target ?? 'neutral']}风险偏好`} description={`新预设：多头上限 ${(frozen?.view ?? target) === 'bearish' ? '2%' : '4%'}，空头上限 ${(frozen?.view ?? target) === 'bullish' ? '2%' : '4%'}，基础风控更严格时取更低值。仅限制 Crypto 新开仓风险，不自动平仓，不解除维护暂停。逆向机会仍可交易；切换可能等待已授权交易处理完成。`} confirmLabel={frozen ? '核验并重试原请求' : '确认变更'} expectedVersion={frozen?.expected_version ?? baseline} requireTotp defaultReason={frozen?.reason ?? 'Owner 更新方向风险判断'} isReasonFrozen={Boolean(frozen)} isSubmitting={busy} onVerifyStatus={frozen ? verify : undefined} errorMessage={error} onConfirm={submit} />
+    <TotpActionModal open={Boolean(target || frozen)} onOpenChange={open => { if (!open && !frozen && !busyRef.current) setTarget(null); }} title={`确认${labels[frozen?.view ?? target ?? 'neutral']}风险偏好`} description={`新预设：多头上限 ${state ? pct(new Decimal(state.long_limit).div(state.control.view === 'bearish' ? 0.5 : 1).mul((frozen?.view ?? target) === 'bearish' ? 0.5 : 1).toString()) : '待核验'}，空头上限 ${state ? pct(new Decimal(state.short_limit).div(state.control.view === 'bullish' ? 0.5 : 1).mul((frozen?.view ?? target) === 'bullish' ? 0.5 : 1).toString()) : '待核验'}，基础风控更严格时取更低值。仅限制 Crypto 新开仓风险，不自动平仓，不解除维护暂停。逆向机会仍可交易；切换可能等待已授权交易处理完成。`} confirmLabel={frozen ? '核验并重试原请求' : '确认变更'} expectedVersion={frozen?.expected_version ?? baseline} requireTotp defaultReason={frozen?.reason ?? 'Owner 更新方向风险判断'} isReasonFrozen={Boolean(frozen)} isSubmitting={busy} onVerifyStatus={frozen ? verify : undefined} errorMessage={error} onConfirm={submit} />
   </section>;
 }

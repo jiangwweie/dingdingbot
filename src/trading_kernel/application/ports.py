@@ -145,6 +145,10 @@ from src.trading_kernel.domain.product import (
     ProductSessionSnapshot,
 )
 from src.trading_kernel.domain.reducer import Reduction
+from src.trading_kernel.domain.risk_budget import (
+    RiskBudgetChangeRequest,
+    RiskBudgetReceipt,
+)
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
     AuthorityGapScopeResult,
@@ -943,6 +947,9 @@ class MonitorRepository(Protocol):
 
 
 class DirectionalRiskRepository(Protocol):
+    async def next_pending_budget(self) -> tuple[str, str] | None: ...
+    async def request_budget_change(self, request: RiskBudgetChangeRequest) -> RiskBudgetReceipt: ...
+
     async def next_resolved_send(self) -> str | None: ...
     async def send_expiry(self, command_id: str) -> int | None: ...
     async def recover_resolved_sends(

@@ -337,6 +337,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/risk-budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Risk Budget */
+        get: operations["get_risk_budget_api_owner_v1_controls_risk_budget_get"];
+        put?: never;
+        /** Change Risk Budget */
+        post: operations["change_risk_budget_api_owner_v1_controls_risk_budget_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/risk-budget/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Risk Budget */
+        post: operations["preview_risk_budget_api_owner_v1_controls_risk_budget_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/risk-budget/requests/{idempotency_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Risk Budget Receipt */
+        get: operations["get_risk_budget_receipt_api_owner_v1_controls_risk_budget_requests__idempotency_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/strategies/{strategy_group_id}/events/{event_spec_id}/exit-profile": {
         parameters: {
             query?: never;
@@ -1189,6 +1241,12 @@ export interface components {
             account_id: string;
             /** Effective At Ms */
             effective_at_ms: number;
+            /** Pending Baseline */
+            pending_baseline?: string | null;
+            /** Pending Budget Request Id */
+            pending_budget_request_id?: string | null;
+            /** Pending Policy Version */
+            pending_policy_version?: number | null;
             /** Pending Request Id */
             pending_request_id?: string | null;
             pending_view?: components["schemas"]["DirectionalView"] | null;
@@ -1196,12 +1254,12 @@ export interface components {
             requested_at_ms?: number | null;
             /**
              * Rule Digest
-             * @default sha256:2379d5e3f0db356c026c214e9e2713cab7bf335d0026a903d12e82ec3902f23c
+             * @default sha256:54563b9f46a0370f2efda893fd6b4acc18ed6933f75961818ae7003b0f1a1406
              */
             rule_digest: string;
             /**
              * Rule Id
-             * @default owner-directional-risk:v1
+             * @default owner-directional-risk:v2
              */
             rule_id: string;
             /** Venue Id */
@@ -2411,6 +2469,91 @@ export interface components {
             template_id: "execution_complete" | "execution_recovered" | "execution_incomplete" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
             /** Text */
             text: string;
+        };
+        /** RiskBudgetBody */
+        RiskBudgetBody: {
+            /** Baseline */
+            baseline: string;
+            /** Expected Directional Version */
+            expected_directional_version: number;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** RiskBudgetPreviewBody */
+        RiskBudgetPreviewBody: {
+            /** Baseline */
+            baseline: string;
+        };
+        /** RiskBudgetReceipt */
+        RiskBudgetReceipt: {
+            /** Baseline */
+            baseline: string;
+            /** Effective At Ms */
+            effective_at_ms?: number | null;
+            /** Policy Version */
+            policy_version?: number | null;
+            /** Request Id */
+            request_id: string;
+            /** Requested At Ms */
+            requested_at_ms: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "effective" | "unchanged";
+        };
+        /** RiskBudgetView */
+        RiskBudgetView: {
+            /** Account Id */
+            account_id: string;
+            /** Balance Captured At Ms */
+            balance_captured_at_ms: number | null;
+            /** Baseline */
+            baseline: string;
+            /** Directional Limit */
+            directional_limit: string;
+            /** Directional Version */
+            directional_version: number;
+            /** Entry Enabled */
+            entry_enabled: boolean;
+            /** Gross Limit */
+            gross_limit: string;
+            /** Long Limit */
+            long_limit: string;
+            /** Long Risk At Stop */
+            long_risk_at_stop: string;
+            /** Max Baseline */
+            max_baseline: string;
+            /** Min Baseline */
+            min_baseline: string;
+            /** Minimum Risk */
+            minimum_risk: string;
+            /** Pending Baseline */
+            pending_baseline: string | null;
+            /** Pending Directional View */
+            pending_directional_view: string | null;
+            /** Policy Version */
+            policy_version: number;
+            /** Short Limit */
+            short_limit: string;
+            /** Short Risk At Stop */
+            short_risk_at_stop: string;
+            /** Step */
+            step: string;
+            /** Updated At Ms */
+            updated_at_ms: number;
+            /** Venue Id */
+            venue_id: string;
+            /** View */
+            view: string;
+            /** Wallet Balance At Last Admission */
+            wallet_balance_at_last_admission: string | null;
         };
         /** RollingExtremeAtrRunnerRule */
         RollingExtremeAtrRunnerRule: {
@@ -3959,6 +4102,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlattenPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_risk_budget_api_owner_v1_controls_risk_budget_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskBudgetView"];
+                };
+            };
+        };
+    };
+    change_risk_budget_api_owner_v1_controls_risk_budget_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskBudgetBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskBudgetReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_risk_budget_api_owner_v1_controls_risk_budget_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskBudgetPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskBudgetView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_risk_budget_receipt_api_owner_v1_controls_risk_budget_requests__idempotency_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskBudgetReceipt"] | null;
                 };
             };
             /** @description Validation Error */

@@ -24,6 +24,20 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
+## Owner Dynamic Risk Budget V1 — implementation in progress
+
+On 2026-10-29 the Owner approved the [design](../superpowers/specs/2026-10-29-owner-dynamic-risk-budget-v1-design.md)
+and [execution plan](../superpowers/plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md),
+with initial 2% and later Owner-controlled edits. The focused implementation
+includes a forward schema revision, linked Policy values, final-send coordination,
+Owner API and the V2 control-center card. Local focused, frontend, type, architecture and full-chain verification have passed;
+complete exact-candidate release certification is pending;
+this is **not a deployed capability or a production parameter change**.
+The Owner explicitly requires confirmation before deployment. Do not deploy,
+change production Policy, or operate production services under this task until
+that confirmation is received. The separate partial-TP1 defect is not repaired
+by this feature; preserve its independent evidence and status.
+
 ## Current Work Priority — Owner Decision 2026-10-29
 
 **The primary multi-strategy realized-return attribution first edition is delivered.**

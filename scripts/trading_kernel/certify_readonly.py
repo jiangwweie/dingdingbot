@@ -38,6 +38,7 @@ from src.trading_kernel.domain.orb_session_selection import (
     ORB_STATIC_MEMBERS,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
+from src.trading_kernel.domain.risk_budget import policy_budget_is_valid
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
@@ -891,6 +892,10 @@ async def _certify(
                     )
                 )
             ).mappings().one_or_none()
+            from src.trading_kernel.infrastructure.risk_budget_certification import (
+                risk_budget_authority_valid,
+            )
+            risk_budget_authority_pass = await risk_budget_authority_valid(connection, owner_policy_row)
             owner_policy_event_versions = tuple(
                 int(value)
                 for value in (
@@ -1298,10 +1303,7 @@ async def _certify(
             == DYNAMIC_POLICY.max_concurrent_tickets,
             _capacity_policy_contract_matches(max_same_strategy_side=owner_policy_row["max_same_strategy_side"],
                 family_ticket_limits=owner_policy_row["family_ticket_limits"]),
-            Decimal(str(owner_policy_row["max_ticket_stop_risk_fraction"]))
-            == DYNAMIC_POLICY.max_ticket_stop_risk_fraction,
-            Decimal(str(owner_policy_row["max_gross_stop_risk_fraction"]))
-            == DYNAMIC_POLICY.max_gross_stop_risk_fraction,
+            policy_budget_is_valid(owner_policy_row),
             Decimal(
                 str(owner_policy_row["max_ticket_initial_margin_fraction"])
             )
@@ -1310,10 +1312,7 @@ async def _certify(
                 str(owner_policy_row["max_gross_initial_margin_utilization"])
             )
             == DYNAMIC_POLICY.max_gross_initial_margin_utilization,
-            Decimal(
-                str(owner_policy_row["directional_stop_risk_limit_fraction"])
-            )
-            == DYNAMIC_POLICY.directional_stop_risk_limit_fraction,
+
             Decimal(str(owner_policy_row["min_materialization_ratio"]))
             == DYNAMIC_POLICY.min_materialization_ratio,
             int(owner_policy_row["max_leverage"]) == DYNAMIC_POLICY.max_leverage,
@@ -1357,6 +1356,7 @@ async def _certify(
         and strategy_universe["integrity_violation_count"] == 0
         and capabilities_are_current
         and policy_is_dynamic
+        and risk_budget_authority_pass
         and policy_lineage_pass
         and integrity_orphans == 0
         and legacy_execution_tables == 0
@@ -1667,6 +1667,7 @@ async def _certify(
         "capabilities": capabilities,
         "owner_policy": owner_policy,
         "owner_policy_lineage_pass": policy_lineage_pass,
+        "risk_budget_authority_pass": risk_budget_authority_pass,
         "release_counts": release_counts,
         "active_counts": active_counts,
         "dynamic_selection_runtime_counts": dynamic_selection_runtime_counts,

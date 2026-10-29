@@ -199,6 +199,13 @@ async def issue_ready_signal(
             request.now_ms,
         )
     profile = await uow.signals.get_runtime_profile(scope.runtime_profile_id)
+    if profile is not None:
+        try:
+            budget_control = await uow.directional_risk.progress(profile.venue_id, profile.account_id, request.now_ms)
+            if budget_control is None or budget_control.pending_baseline is not None:
+                return IssueTicketResult(status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None)
+        except ValueError:
+            return IssueTicketResult(status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None)
     policy = await uow.entry_admission.get_owner_policy(scope.owner_policy_id)
     product_profile = await uow.signals.get_product_profile(
         signal.exchange_instrument_id
