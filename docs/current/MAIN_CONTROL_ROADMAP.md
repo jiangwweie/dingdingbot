@@ -63,6 +63,24 @@ The recent frozen terminal window contains55 Tickets,50 known-net results and
 No gap was zero-filled, no canonical Review was rewritten, and no strategy,
 Selection, Capacity, research quota, service or exchange mutation occurred.
 
+### Attribution Follow-up: External Exits And Strategy Evidence
+
+The Owner-requested follow-up is complete as a bounded investigation, not a
+strategy change. Evidence and the Chinese report are under
+`/Users/jiangwei/Documents/final-strategy-research/analysis/2026-10-29-attribution-followup/`.
+
+| Work | Verified finding | Final boundary |
+| --- | --- | --- |
+| Three unavailable exits | Fresh PG lineage and exact-symbol exchange GETs prove external reduce-only MARKET orders at2026-10-27 12:39:42 Asia/Shanghai, outside the Tickets' registered Commands; ENTRY/EXIT quantities reconcile for INJ, BCH and SUI. BCH includes0.267 owned TP1 plus1.294 external closure. External-flat Reviews were recorded after the existing300-second grace | Actor identity is unproved. Recovered price-based gross/native fees are research evidence, not canonical net PnL. No normal Kernel-exit regression established; no production repair or historical rewrite performed |
+| BRF2 comparison | The same29 baseline recent terminal Tickets were compared by frozen stop distance, reference-to-fill deviation, signal-to-Ticket timing, exit group and available path evidence. Stop and Runner groups overlap; signal booleans do not distinguish strength | No validated stop/exit/Capacity change. Continuous detector strength fields were not frozen in these historical Signals; two bounded hypotheses remain unverified |
+| SOR-1H independent update | At2026-10-29 11:11:29 Asia/Shanghai, post-baseline evidence contains7 new short Signals,1 new DOGE short Ticket recorded position_protected and0 newly terminal Tickets | Incremental realized-profit validation is insufficient, not failed or proven. No forced trade, strategy control change or background monitor created |
+
+The existing external-flat Review regression slice passed4 tests. Follow-up
+analysis passed5 focused tests, Ruff, deterministic regeneration and evidence
+hash checks. This closes the requested investigation and comparison only;
+full external-order economic attribution and independent strategy advantage
+remain unclaimed. The previous frozen attribution result remains unchanged.
+
 ### Priority Boundaries
 
 | Priority | Work | Current boundary |
