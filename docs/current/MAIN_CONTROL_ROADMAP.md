@@ -26,7 +26,7 @@ continue concurrently across independent Netting Domains.
 
 ## Current Work Priority — Owner Decision 2026-10-29
 
-**Multi-strategy realized-return attribution is the primary planned task.**
+**The primary multi-strategy realized-return attribution first edition is delivered.**
 The Owner chose to understand existing results before starting the larger
 layered market-discovery and strategy-specific selection V2 project. This
 decision supersedes the earlier program sequencing below, not its delivered
@@ -45,18 +45,30 @@ analysis and verification do not require per-stage Owner confirmation.
 | Task | Status | Evidence / remaining work |
 | --- | --- | --- |
 | A0: readonly reconnaissance | Complete | `final-strategy-research/analysis/2026-10-29-attribution-recon/`: frozen PG research snapshot at 2026-10-29 09:01:04 Asia/Shanghai, deployed canonical income outputs, coverage audit and repeatable local checks; no exchange calls or runtime changes |
-| A1: input and cohort contract | Ready, not implemented | Freeze existing artifacts and explicit inclusion, lineage, missing-data and metric rules |
-| A2: strategy contribution and costs | Pending A1 | Full contribution, same-population cost decomposition and concentration analysis |
-| A3: Ticket explanations and gaps | Pending A2 | Auditable winners/losses, Owner exits, partial economics and supported TP1/Runner components |
-| A4: portfolio context | Pending A3 | Bounded overlap, direction, controls and opportunity-coverage interpretation |
-| A5: acceptance and report | Pending A4 | Reproducible analysis package, final report, verification and roadmap closure |
+| A1: input and cohort contract | Complete | Immutable input hashes, explicit terminal-window/cohort contract, normalized322 Tickets and per-metric coverage; original reconnaissance files unchanged |
+| A2: strategy contribution and costs | Complete | Both windows reconcile exactly to frozen deployed canonical totals, strategy groups and exit partitions; same-population costs, version/side breakdown and concentration delivered |
+| A3: Ticket explanations and gaps | Complete within first-edition scope |117 selected Tickets explained;279 Reviews with fill details independently recomputed.660 exact command identities supplemented readonly at2026-10-29 10:55:24 Asia/Shanghai solely for TP1/exit classification; baseline economics unchanged. Missing fills/funding remain explicit |
+| A4: portfolio context | Complete within available evidence | Recent54 reconstructed exposure intervals,3 missing endpoints and75 overlap pairs; control-state intervals and daily terminal contributions delivered. No tradable-hours ranking, account equity return or rejected-opportunity PnL inferred |
+| A5: acceptance and report | Complete |20 focused tests and Ruff PASS;16 deterministic artifacts byte-identical across two independent runs; source/output hashes and report references verified; final Chinese report and reproducible package delivered |
+
+The accepted offline delivery is
+`/Users/jiangwei/Documents/final-strategy-research/analysis/multi-strategy-attribution-v1/runs/v1-accepted/`.
+`acceptance.json`, `validation.json`, `analysis_manifest.json` and
+`checksums.sha256` own the reproducibility evidence; the parent directory holds
+the implementation, frozen inputs and `cohort_contract.md`. This records
+completed research delivery, not a fresh live trading qualification.
+
+The recent frozen terminal window contains55 Tickets,50 known-net results and
+5 explicit economic gaps (3 unavailable exits,2 unattributable funding).
+No gap was zero-filled, no canonical Review was rewritten, and no strategy,
+Selection, Capacity, research quota, service or exchange mutation occurred.
 
 ### Priority Boundaries
 
 | Priority | Work | Current boundary |
 | --- | --- | --- |
 | P0, as needed | Actual runtime defects affecting admission, protection, exit or reconciliation | Repair proven faults through existing gates; continue natural lifecycle evidence without forced trades. These obligations do not block readonly attribution |
-| P1, primary | Multi-strategy attribution of existing real trades | Establish a reproducible result and data-coverage baseline for CPM, MPG, MI, BRF2 and independent SOR-1H; no profitability conclusion is assumed |
+| P1, delivered first edition | Multi-strategy attribution of existing real trades | Reproducible result and data-coverage baseline delivered for CPM, MPG, MI, BRF2 and independent SOR-1H; no long-term profitability conclusion or strategy change is authorized by delivery |
 | Deferred | Layered market discovery and independent selection V2 | Retain the direction; do not start full implementation or a CPM pilot in this round. Candidate24 is a known coverage constraint, not a proven leading profit bottleneck |
 | Evidence-driven follow-up | Exit/Runner improvements and later selection investment | Use attribution findings to identify concrete problems; no tuning or implementation is included in this round |
 | Deferred | Capacity optimization, new strategies, automatic Regime and extreme performance tuning | No scope, budget, strategy or runtime-control changes through attribution |
@@ -112,8 +124,8 @@ backtest platform, new price-path persistence or the deferred offline
 MAE/MFE projector. It does not change Selection, exits, Capacity, Owner Regime,
 research quota, trading authorization, schema or production services.
 
-Reconnaissance is **complete**; the full attribution first edition is **not
-completed**. Complete live economics, long-run
+Reconnaissance and the bounded attribution first edition are **complete**.
+Complete live economics, long-run
 evidence, GS-13 and natural Ticket acceptance retain their separate gates;
 unknown economics may remain an explicit finding of the first edition.
 
@@ -341,10 +353,10 @@ and terminal lineage remain preserved.
    recovery and the next legal boundary; current complete activation gate is open.
 2. Follow naturally admitted Tickets through protection, exit, reconciliation,
    settlement and review without forced trades or risk expansion.
-3. Deliver the bounded multi-strategy attribution first edition under the
-   current Owner priority above. Long-run evidence, the offline projector and
-   complete live economics remain unclaimed; none is a prerequisite for this
-   descriptive first edition.
+3. The bounded multi-strategy attribution first edition is delivered under
+   the evidence above. Long-run evidence, the offline projector and complete
+   live economics remain unclaimed; unknown historical economics and separate
+   runtime acceptance are not closed by this descriptive research delivery.
 
 ## Prior Program Direction And Delivered Foundations
 
