@@ -504,3 +504,36 @@ async def test_budget_waits_during_actual_network_send_then_applies(
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_old_directional_receipt_cannot_reactivate_previous_rule(
+    head_template_engine,
+):
+    from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+    from src.trading_kernel.infrastructure.pg_models import directional_risk_events
+
+    await seed_policy(head_template_engine)
+    async with head_template_engine.begin() as c:
+        repo = PostgresDirectionalRiskRepository(c)
+        await repo.initialize(
+            venue_id="binance-usdm", account_id="experiment-1", now_ms=1000
+        )
+        key = "old-rule-request"
+        event_id = (
+            "directional:" + canonical_digest(["binance-usdm", "experiment-1", key])[7:]
+        )
+        await c.execute(
+            sa.insert(directional_risk_events).values(
+                event_id=event_id,
+                venue_id="binance-usdm",
+                account_id="experiment-1",
+                event_kind="requested",
+                occurred_at_ms=900,
+                payload={"result": {"rule_id": "owner-directional-risk:v1"}},
+            )
+        )
+        assert await repo.request_receipt("binance-usdm", "experiment-1", key) is None
+        assert (
+            await repo.get("binance-usdm", "experiment-1")
+        ).rule_id == "owner-directional-risk:v2"

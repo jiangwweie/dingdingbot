@@ -128,7 +128,9 @@ class PostgresDirectionalRiskRepository:
         if previous is not None:
             if previous["fingerprint"] != fingerprint:
                 raise ValueError("directional_idempotency_conflict")
-            # Return the original mutation result, never apply a stale request again.
+            # A completed request from an earlier rule cannot restore that rule.
+            if previous["result"].get("rule_id") != RULE_ID:
+                raise ValueError("directional_request_from_previous_rule")
             return DirectionalControl.model_validate(previous["result"])
         if current.version != request.expected_version:
             raise ValueError("directional_version_conflict")
@@ -396,7 +398,7 @@ class PostgresDirectionalRiskRepository:
         )
         return (
             None
-            if payload is None
+            if payload is None or payload["result"].get("rule_id") != RULE_ID
             else DirectionalControl.model_validate(payload["result"])
         )
 

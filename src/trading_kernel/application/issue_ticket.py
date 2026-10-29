@@ -104,9 +104,6 @@ async def issue_ticket(
         ticket.identity.netting_domain.venue_id,
         ticket.identity.netting_domain.account_id,
     )
-    control = await uow.directional_risk.get(ticket.identity.netting_domain.venue_id, ticket.identity.netting_domain.account_id)
-    if control is None or control.pending_baseline is not None:
-        return IssueTicketResult(status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None)
     lane = await uow.entry_admission.lock_global_lane()
     if lane.status != "idle":
         return IssueTicketResult(
@@ -132,6 +129,9 @@ async def issue_ticket(
             status=IssueTicketStatus.POLICY_MISSING_OR_STALE,
             ticket_id=None,
         )
+    control = await uow.directional_risk.get(ticket.identity.netting_domain.venue_id, ticket.identity.netting_domain.account_id)
+    if control is None or control.pending_baseline is not None:
+        return IssueTicketResult(status=IssueTicketStatus.DIRECTIONAL_CONTROL_BLOCKED, ticket_id=None)
     if not policy.enabled or not policy.new_entry_submit_enabled:
         return IssueTicketResult(
             status=IssueTicketStatus.POLICY_DISABLED,
