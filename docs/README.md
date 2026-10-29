@@ -56,8 +56,8 @@ release. It provides a minimal future R3/R4 reference checklist and prioritizes
 complete writer inventory and readonly preflight. It is a one-time experience
 record, not current runtime authority or a new engineering program; the
 [deployment contract](current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md) remains the
-procedure authority. Natural trading validation and ALPHA-02 remain the main
-program direction.
+procedure authority. Current work ordering belongs to the
+[main roadmap](current/MAIN_CONTROL_ROADMAP.md).
 
 ## Generic Selection Implementation And Evidence
 
@@ -76,20 +76,26 @@ documents do not extend the `docs/current` runtime-authority allowlist.
 
 ## Alpha Research Delivery And Planning
 
+[多策略真实收益归因 V1 工程推进方案](superpowers/plans/2026-10-29-multi-strategy-attribution-v1-implementation-plan.md)
+defines the bounded offline delivery sequence: frozen inputs, contribution and
+cost attribution, Ticket explanations, portfolio context and reproducible
+acceptance. Active progress belongs to the
+[main roadmap](current/MAIN_CONTROL_ROADMAP.md); research artifacts stay in the
+separate strategy-research workspace. The plan does not authorize runtime or
+strategy changes.
+
 [BRC-ALPHA delivery record and prospective research boundaries](superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md)
-records the Owner-reported offline ALPHA-01 delivery and the approved three-stage
+records the Owner-reported offline ALPHA-01 delivery and the earlier three-stage
 direction: SOR-1H release/natural evidence, generic ALPHA-02 path Observation,
-then evidence-driven iteration. ALPHA-02 design can proceed in parallel with
-natural evidence accumulation; implementation is not claimed.
-Repository receipt, independent reproduction and runtime integration are not
-claimed. Research does not authorize strategy changes; SOR-1H deployment uses
-the explicit Owner flatness-contingent authorization recorded in that plan,
-and does not close deferred engineering acceptance. Economic interpretation
-remains owned by the Strategy Experiment Evaluation Contract.
+then evidence-driven iteration. It is dated provenance, not current work
+ordering or a new deployment instruction. ALPHA-01 receipt and independent
+reproduction remain separate from later runtime capabilities; exact delivered
+state and remaining acceptance belong to the main roadmap. Economic
+interpretation remains owned by the Strategy Experiment Evaluation Contract.
 
 [Reconciliation Reliability Repair design](superpowers/specs/2026-10-14-reconciliation-reliability-repair-design.md)
-defines the Owner-required joint repair gate for SOR-1H release. Design is
-recorded; implementation and joint-candidate certification are not claimed.
+records the earlier Owner-required joint repair gate for SOR-1H release.
+Current implementation and certification evidence belongs to the main roadmap.
 
 [Tokyo resource and capacity assessment](superpowers/plans/2026-10-15-tokyo-resource-capacity-assessment.md)
 records the dated readonly baseline before ALPHA-02: host and worker resource

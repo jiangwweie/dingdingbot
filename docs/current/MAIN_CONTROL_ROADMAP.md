@@ -24,6 +24,99 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
+## Current Work Priority — Owner Decision 2026-10-29
+
+**Multi-strategy realized-return attribution is the primary planned task.**
+The Owner chose to understand existing results before starting the larger
+layered market-discovery and strategy-specific selection V2 project. This
+decision supersedes the earlier program sequencing below, not its delivered
+capabilities or outstanding acceptance evidence. This is a planning update;
+the priority decision itself did not refresh production facts. The later
+bounded research snapshot below is not a full runtime re-certification;
+`last_verified` remains unchanged.
+
+Detailed scope, dependencies, artifacts and acceptance belong to the
+[Multi-strategy Attribution V1 implementation plan](../superpowers/plans/2026-10-29-multi-strategy-attribution-v1-implementation-plan.md).
+The current task's primary agent owns sequential delivery; routine in-scope
+analysis and verification do not require per-stage Owner confirmation.
+
+### Attribution Delivery Status
+
+| Task | Status | Evidence / remaining work |
+| --- | --- | --- |
+| A0: readonly reconnaissance | Complete | `final-strategy-research/analysis/2026-10-29-attribution-recon/`: frozen PG research snapshot at 2026-10-29 09:01:04 Asia/Shanghai, deployed canonical income outputs, coverage audit and repeatable local checks; no exchange calls or runtime changes |
+| A1: input and cohort contract | Ready, not implemented | Freeze existing artifacts and explicit inclusion, lineage, missing-data and metric rules |
+| A2: strategy contribution and costs | Pending A1 | Full contribution, same-population cost decomposition and concentration analysis |
+| A3: Ticket explanations and gaps | Pending A2 | Auditable winners/losses, Owner exits, partial economics and supported TP1/Runner components |
+| A4: portfolio context | Pending A3 | Bounded overlap, direction, controls and opportunity-coverage interpretation |
+| A5: acceptance and report | Pending A4 | Reproducible analysis package, final report, verification and roadmap closure |
+
+### Priority Boundaries
+
+| Priority | Work | Current boundary |
+| --- | --- | --- |
+| P0, as needed | Actual runtime defects affecting admission, protection, exit or reconciliation | Repair proven faults through existing gates; continue natural lifecycle evidence without forced trades. These obligations do not block readonly attribution |
+| P1, primary | Multi-strategy attribution of existing real trades | Establish a reproducible result and data-coverage baseline for CPM, MPG, MI, BRF2 and independent SOR-1H; no profitability conclusion is assumed |
+| Deferred | Layered market discovery and independent selection V2 | Retain the direction; do not start full implementation or a CPM pilot in this round. Candidate24 is a known coverage constraint, not a proven leading profit bottleneck |
+| Evidence-driven follow-up | Exit/Runner improvements and later selection investment | Use attribution findings to identify concrete problems; no tuning or implementation is included in this round |
+| Deferred | Capacity optimization, new strategies, automatic Regime and extreme performance tuning | No scope, budget, strategy or runtime-control changes through attribution |
+| Separate infrastructure decision | Server upgrade and worker resource-envelope changes | Neither a prerequisite for attribution nor an operation authorized by this roadmap edit |
+
+### First-Round Scope And Sequence
+
+**Scope is descriptive attribution of existing real execution, not causal
+proof or a new research platform.** Follow the existing
+[Strategy Experiment Evaluation Contract](STRATEGY_EXPERIMENT_EVALUATION_CONTRACT.md).
+Historical retired SOR-001 trades, if present, remain separately labelled;
+they are never merged into SOR-1H or treated as permission to resume SOR-001.
+
+1. **Freeze sources and audit coverage.** Reuse the existing unified performance
+   and canonical Review semantics. Record the exact code commit, bounded data
+   snapshot/time window, effective Review revisions and inclusion rules. Check
+   the reported BRC-ALPHA-01 delivery for reusable evidence before duplicating
+   it; unverified delivery is not an accepted baseline. Missing inputs remain
+   explicit and do not require building a new collector to finish this round.
+2. **Attribute realized results.** Report by StrategyGroup/version and side:
+   Ticket population, economic coverage, gross PnL, fees, funding, known net
+   PnL and Net R with frozen risk denominators. Include winner/loss distribution
+   and largest-winner concentration. Separate open exposure from terminal
+   results and distinguish strategy exits, stop/TP1/Runner components where
+   supported, and Owner interventions without double-counting fills.
+3. **Explain context from existing lineage.** Break down instruments, birth
+   Static/Dynamic Selection, frozen ExitProfile and Policy where recorded.
+   Disclose enabled periods, maintenance/Owner pauses and sample imbalance;
+   current controls must not retrospectively classify historical Tickets.
+   Existing rejection reasons and Signal-owned Shadow paths may explain
+   opportunity admission, but remain separate from realized returns. Disclose
+   missing coverage and quota-limited sampling, including skipped_budget.
+4. **Deliver an auditable first edition.** Produce a strategy contribution
+   matrix, cost/exit breakdown, concentration analysis and explicit data gaps.
+   Separate observed facts, hypotheses and insufficient evidence. Reconcile
+   group totals to the same-window source population and provide reproducible
+   extraction/analysis steps with exact Ticket/Review lineage.
+
+### Acceptance And Safety Boundary
+
+**Done means a reproducible explanation of existing results, not proof that a
+strategy is profitable.** Each metric includes its denominator and missing
+coverage; known partial net sums are not presented as complete portfolio net
+returns. Missing funding/fills are never zero-filled, and realized slippage
+must not be deducted twice. Static/Dynamic differences are descriptive;
+rejected Signal excursions are not executable profit or simulated fills.
+
+Active Strategy Research & Semantic Intake artifacts remain in
+`/Users/jiangwei/Documents/final-strategy-research`; this roadmap remains the
+planning authority. Research output is display-only and does not create a
+second economic ledger. This round does not build a full-market scanner,
+backtest platform, new price-path persistence or the deferred offline
+MAE/MFE projector. It does not change Selection, exits, Capacity, Owner Regime,
+research quota, trading authorization, schema or production services.
+
+Reconnaissance is **complete**; the full attribution first edition is **not
+completed**. Complete live economics, long-run
+evidence, GS-13 and natural Ticket acceptance retain their separate gates;
+unknown economics may remain an explicit finding of the first edition.
+
 ## Current Verified State
 
 ### ENTRY action-time send-window repair deployed
@@ -248,16 +341,23 @@ and terminal lineage remain preserved.
    recovery and the next legal boundary; current complete activation gate is open.
 2. Follow naturally admitted Tickets through protection, exit, reconciliation,
    settlement and review without forced trades or risk expansion.
-3. Keep long-run evidence, offline projector and complete live economics deferred.
+3. Deliver the bounded multi-strategy attribution first edition under the
+   current Owner priority above. Long-run evidence, the offline projector and
+   complete live economics remain unclaimed; none is a prerequisite for this
+   descriptive first edition.
 
-## Three-Stage Program Direction
+## Prior Program Direction And Delivered Foundations
+
+The 2026-10-29 Owner decision above owns current task ordering. The earlier
+direction and dated delivery evidence below remain provenance, not a second
+active priority list or a fresh runtime verification.
 
 The Owner reports delivery of BRC-ALPHA-01's offline attribution first edition.
 Repository receipt and independent reproduction remain unverified; this does
 not close the deferred offline MAE/MFE projector, GS-13, long-run evidence or
 natural Ticket acceptance. See the
 [research delivery and planning record](../superpowers/plans/2026-10-14-brc-alpha-research-status-and-plan.md).
-The Owner-approved direction is SOR-1H release and natural lifecycle validation,
+The earlier Owner-approved direction was SOR-1H release and natural lifecycle validation,
 then generic ALPHA-02 path Observation, then evidence-driven strategy iteration.
 ALPHA-02 design may proceed alongside natural SOR-1H evidence accumulation;
 profitability is not a prerequisite to designing evidence collection. Prefer
@@ -286,7 +386,7 @@ The current verified snapshot above owns the completed release and remaining con
 
 No exchange write under wrong identity, stale/contradictory action-time facts,
 unknown outcome, same-domain occupancy, missing stop/budget, schema mismatch or
-old-writer overlap. Existing exposure retains its frozen lifecycle. Crypto SOR
+old-writer overlap. Existing exposure retains its frozen lifecycle. Crypto SOR-001
 must remain Entry-disabled. No manual repair of recovery/cursors to manufacture
 activation evidence.
 
