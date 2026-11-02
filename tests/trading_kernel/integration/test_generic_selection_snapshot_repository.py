@@ -1124,7 +1124,7 @@ async def test_actual_resident_changed_set_is_warmed_by_observation_not_fixture(
                     # The next future close is already the old membership's
                     # absolute stale deadline: no legal fallback may be granted.
                     for _ in range(3):
-                        await until(lambda r:r["component_id"]=="materialization" and r.get("reason_code")=="MATERIALIZATION_TIMEOUT")
+                        await until(lambda r:r["component_id"]=="materialization" and r.get("reason_code")=="Dynamic recovery source membership stale")
                     async with PostgresKernelUnitOfWork(database) as uow:
                         failed=await uow.instrument_selection.get_generic_materialization_generation(expected_generation)
                         abandoned=await uow.strategy_universes.get_generation_universe_targets(expected_generation)
@@ -12726,8 +12726,22 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         assert await conn.scalar(sa.text("SELECT lifecycle_state FROM brc_strategy_universe_versions WHERE universe_version_id=:uid"),{"uid":uid}) == "abandoned"
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_versions WHERE lifecycle_state IN ('warming','staged')")) == 0
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
-    repeated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+1)
-    assert repeated.disposition == MaterializationDisposition.BLOCKED and repeated.reason_code == reason
+    with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+1)):
+        repeated = await coordinate_selection_materialization_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:at+1)
+    assert repeated.disposition == MaterializationDisposition.BLOCKED
+    if control.selection_mode.value == "static_baseline" and control.pending_selection_mode is not None and control.pending_selection_mode.value == "dynamic_selection":
+        assert repeated.reason_code in {
+            "Static recovery previous not ready: CERTIFICATION_TEMPORARILY_UNAVAILABLE",
+            "Static recovery previous not ready: CERTIFICATION_MISSING",
+            "Static recovery previous not ready: CERTIFICATION_STALE",
+            "Static recovery previous not ready: CERTIFICATION_OWNER_ACTION_REQUIRED",
+        }, repeated
+    else:
+        assert repeated.reason_code==reason
+    async with PostgresKernelUnitOfWork(database) as uow:
+        unchanged_vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)
+        assert unchanged_vacuum==vacuum and unchanged_vacuum.first_blocker==reason
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) is None
     async with database.connect() as conn:
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_strategy_universe_materialization_events WHERE materialization_generation_id=:gid AND event_type='FAILED_CLOSED'"),{"gid":staged.materialization_generation_id}) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_scopes_current WHERE universe_version_id=:uid AND (entry_enabled OR observation_enabled)"),{"uid":uid}) == 0
@@ -14529,8 +14543,13 @@ async def test_efficiency_active_runtime_sql_and_authority_drift(database, monke
                 uow_factory=lambda: PostgresKernelUnitOfWork(database), audit_source=None,
                 request=current_runtime.SelectionRuntimeRequest(strategy_group_id=source.spec.strategy_group_id,
                     selection_spec_id=source.spec.selection_spec_id, worker_id='efficiency', now_ms=now+2), clock_ms=lambda:now+2)
-            assert paused.disposition is MaterializationDisposition.OWNER_PAUSED
-            assert paused.selection_authority_id != current.authority.selection_authority_id
+            assert paused.disposition is MaterializationDisposition.WAITING_VACUUM
+            assert paused.reason_code == "DRAIN_STARTED" and paused.selection_authority_id is None
+            async with PostgresKernelUnitOfWork(database) as uow:
+                assert (await uow.owner_controls.get_strategy_control(source.spec.strategy_group_id)).entry_state is StrategyEntryState.PAUSED
+                assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)==current
+                pending=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=source.spec.strategy_group_id,selection_spec_id=source.spec.selection_spec_id)
+                assert pending.blocks_new_entry and pending.state is StrategyEntryVacuumState.DRAINING_ENTRY
     finally:
         sa.event.remove(database.sync_engine, 'before_cursor_execute', capture)
 
