@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-10-26
+last_verified: 2026-11-02
 ---
 
 # Main Control Roadmap
@@ -24,37 +24,44 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
-## Owner Dynamic Risk Budget V1 — implementation in progress
+## Owner Dynamic Risk Budget V1 — deployed 2026-11-02
 
-On 2026-10-29 the Owner approved the [design](../superpowers/specs/2026-10-29-owner-dynamic-risk-budget-v1-design.md)
-and [execution plan](../superpowers/plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md),
-with initial 2% and later Owner-controlled edits. The focused implementation
-includes a forward schema revision, linked Policy values, final-send coordination,
-Owner API and the V2 control-center card. Local focused, frontend, type, architecture and full-chain verification have passed;
-complete exact-candidate release certification is pending;
-this is **not a deployed capability or a production parameter change**.
-The Owner explicitly requires confirmation before deployment. Do not deploy,
-change production Policy, or operate production services under this task until
-that confirmation is received. The separate partial-TP1 defect is not repaired
-by this feature; preserve its independent evidence and status.
+Owner explicitly authorized deployment after current gates pass. The combined
+Kernel, Owner API and V2 static release is now **`79119fc421ce252bd0ba7358b36325a4a9f4bb85`**,
+immutable tag **`tokyo-runtime-2026.11.02.1`**, schema **`0014_dynamic_risk_budget_v1`**.
+The candidate was fast-forwarded/pushed to dev and exact R4/API/static certified.
+R4 PASS:1798 Unit/Architecture,1790 Integration,70 Full-chain; Ruff, Mypy209,
+diff,961 Golden snapshots and23064 Core Parity member decisions.
 
-### 2026-11-02 authorized deployment preparation
+| Boundary | Direct deployment evidence |
+| --- | --- |
+| Source and migration | Source Kernel c7d02c2a/0013; current internal/external flatness, zero commands/Incidents/budget debt and quiescent Selection proved. All five writers stopped before exact history preservation and forward migration; official R4 deployment PASS in237956ms |
+| Preserved controls | Policy31 stays paused, baseline2%, gross6%, base direction4%, minimum materialization50%; existing Family and strategy controls preserved. Owner direction remains neutral; current directional version8 binds the new rule without inventing an Owner choice |
+| Frontend and API | Same exact release on `/opt/brc/owner-console-api/current` and `/opt/brc/owner-console/current`; official R2/R1 activation/smoke PASS; API Unix-socket health returns ok; deployed readonly risk-budget projection confirms2.0%–3.0% bounds and0.1 percentage-point step |
+| Operational completion | Official `promote_entry.py --prepare-owner-resume` returned `prepared_owner_paused`. Four persistent Kernel Workers and independent Owner API active; Kernel process commit/schema match79119fc4/0014, NRestarts0; operational write fence absent |
+| Final verification | At2026-11-02 13:43:58 Asia/Shanghai, database integrity, flatness, current Entry readiness and risk-budget authority checks PASS. At13:44:25 exchange positions and regular/conditional orders0; internal nonterminal Tickets/reservations0; commands/Incidents0 |
+| Trading intent | **Global ENTRY remains Owner-paused.** Software deployment and operational readiness do not mean new trading was enabled. Owner may adjust the dynamic budget in the control center; later Resume remains a separate Owner decision |
 
-Owner authorized deployment once current gates pass. Direct source checks found
-flat positions/orders/budgets and paused Policy31, but Generic materialization
-was still in progress. The existing source Kernel completed the exact CPM
-Owner-pause drain without changing controls or dispatching orders. The MPG and
-CPM attempts subsequently failed closed at their real deadlines.
+The deployment preflight exposed an existing CPM Owner-pause drain left open
+after Owner Resume. The exact source application drained it without changing
+controls or dispatching orders. Generic attempts closed at their real deadlines.
+The old quiescence check recognized only ENTRY_DRAINED, missing the equivalent
+OWNER_PAUSED completion. The deployment candidate adds a readonly recognition
+branch requiring true completion, matching original pause, authenticated TOTP
+Resume, exact scope/version/time evidence, terminal failed generation, abandoned
+targets, globally paused ENTRY and zero live debt. Positive and negative tests
+plus full recertification passed; no historical event was forged or rewritten.
 
-The migration quiescence verifier recognized only ENTRY_DRAINED lineage and
-rejected CPM's equivalent OWNER_PAUSED completion with real early-Resume proof.
-A focused fix recognizes that evidence only with matching pause/resume events,
-TOTP Resume authorization, scope, control versions and times, while preserving
-all terminal-generation, abandoned-target, paused-global-ENTRY and zero-debt
-gates. It grants no ENTRY or recovery authority and writes no production facts.
-The new candidate must obtain exact R4/API/static certificates before deployment.
-Original production services/schema remain unchanged; staged files are inactive.
-Evidence: `.local/dynamic-risk-budget-v1/deployment-20261102/`.
+Source CPM/MPG recovery-Authority problems and the previously diagnosed partial
+TP1 lifecycle gap are **not repaired by dynamic risk controls**. Negative fences
+are preserved. No natural ENTRY acceptance is claimed while global ENTRY is off.
+
+Design and scope remain in [DRB-01](../superpowers/specs/2026-10-29-owner-dynamic-risk-budget-v1-design.md)
+and its [execution plan](../superpowers/plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md).
+Evidence, exact stopped baseline, official logs, certifications, final exchange
+and service reads are under `.local/dynamic-risk-budget-v1/deployment-20261102/`.
+Generated evidence is display-only, never production authority. No credentials,
+leverage, Strategy direction, Selection mode, real test order or Feishu test was changed/sent.
 
 ## Current Work Priority — Owner Decision 2026-10-29
 

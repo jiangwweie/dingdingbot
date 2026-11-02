@@ -1,7 +1,7 @@
 # BRC-DRB-01：Owner 动态风险预算 V1 设计
 
 日期：**2026-10-29，Asia/Shanghai**。
-状态：**Owner 已复核通过；本地实现与验证中；部署前等待 Owner 单独确认；未修改生产参数**。
+状态：**已获 Owner 实施与部署授权；正式投产结果及当前状态见主路线图，本文件仅记录设计／执行边界**。
 配套：[执行计划](../plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md)。
 
 ## 1. 目标与决策来源

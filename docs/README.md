@@ -48,15 +48,15 @@ Universe membership, capital authority, implementation status, and deployment
 state continue to come from code, PostgreSQL, exchange facts, and
 `MAIN_CONTROL_ROADMAP.md`.
 
-## Owner Dynamic Risk Budget — Approved Design
+## Owner Dynamic Risk Budget
 
 [Owner 动态风险预算 V1 设计](superpowers/specs/2026-10-29-owner-dynamic-risk-budget-v1-design.md)
 and its [执行计划](superpowers/plans/2026-10-29-owner-dynamic-risk-budget-v1-implementation-plan.md)
-describe a proposed control-center risk baseline with linked total/directional
-limits. First installation retains 2%; later changes are explicit Owner actions.
-The Owner approved implementation; local work is in progress. Deployment requires
-separate Owner confirmation. These documents do not claim a deployed capability
-or a production policy change.
+define the Owner-controlled baseline and linked total/directional limits.
+First installation retains 2%; later changes are explicit Owner actions.
+The Owner authorized implementation and deployment. Exact production identity,
+release verification and current ENTRY posture belong only to
+[MAIN_CONTROL_ROADMAP.md](current/MAIN_CONTROL_ROADMAP.md).
 
 ## Release Experience Reference
 
