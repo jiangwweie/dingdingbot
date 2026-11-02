@@ -24,6 +24,37 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
+## CPM / MPG recovery lineage repair — local candidate, not deployed
+
+The Owner approved repair after the 2026-11-02 readonly RCA. This focused task
+stops before production deployment for Owner confirmation. The production
+identity remains the deployed release below; this local candidate targets
+`0015_generic_owner_recovery_v1` and changes recovery functions without changing
+stored source rows, Owner risk values or strategy/Selection permissions.
+
+The dated deployment snapshot below is not current Owner policy. Subsequent
+readonly RCA at16:15 Asia/Shanghai observed genuine Owner Resume and Policy33
+with baseline3%, gross9%, directional6% and minimum materialization50%. Three
+other-strategy protected positions were verified then; these are dated facts,
+not a current flatness assertion or permission to deploy.
+
+Local repair covers standalone Owner-pause drain scheduling, authenticated
+Resume continuity across a pre-existing Authority gap, failed-generation
+recovery/fallback and precise recovery blocker reporting. Original Authority,
+Owner events and Vacuum history remain immutable. Expired membership still
+requires a fresh target; recovery still installs pending checkpoints and waits
+for the legal future close. No repeated Owner Resume is required for the proven
+single pause/resume lineage. Multiple unconsumed pause/resume cycles remain
+fail-closed and are outside this repair's claimed acceptance.
+
+See the [repair scope and acceptance record](../superpowers/plans/2026-11-02-generic-owner-recovery-repair.md).
+Exact R4 and Owner API/static certification results belong to their candidate
+manifests; local logs are in `.local/cpm-mpg-recovery-repair-20261102/`.
+Deployment still requires Owner confirmation, fresh stopped/flat preservation
+gates and post-release recovery acceptance. The separate partial-TP1 defect
+is outside this change. No production write or exchange test order is part of
+this local repair.
+
 ## Owner Dynamic Risk Budget V1 — deployed 2026-11-02
 
 Owner explicitly authorized deployment after current gates pass. The combined

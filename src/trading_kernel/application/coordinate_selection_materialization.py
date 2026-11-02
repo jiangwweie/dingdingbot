@@ -2056,10 +2056,13 @@ async def _coordinate_generic_generation(*, uow_factory: UnitOfWorkFactory,
                 vacuum.source_generation_id==initial.materialization_generation_id):
                 try:
                     recovery_proof = await uow.instrument_selection.prepare_generic_recovery_grant_proof(initial.materialization_generation_id)
-                except SelectionPersistenceConflict:
-                    # Existing failed attempt remains fenced. Retry readiness
-                    # later; preparation writes no facts and cannot grant Entry.
-                    recovery_proof = None
+                except SelectionPersistenceConflict as exc:
+                    # Keep the original failure in the Vacuum, but expose the
+                    # current recovery blocker instead of repeating "timeout".
+                    return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.BLOCKED,
+                        materialization_generation_id=initial.materialization_generation_id,
+                        selection_snapshot_id=initial.selection_snapshot_id,entry_vacuum_id=vacuum.entry_vacuum_id,
+                        reason_code=str(exc))
                 if recovery_proof is not None:
                     recovered = await uow.instrument_selection.commit_generic_recovery(recovery_proof)
                     return CoordinateSelectionMaterializationResult(disposition=MaterializationDisposition.FALLBACK_PREVIOUS,

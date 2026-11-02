@@ -3183,16 +3183,17 @@ class PostgresInstrumentSelectionRepository:
             strategy_entry_vacuum_events.c.entry_vacuum_id==vacuum.entry_vacuum_id,
             strategy_entry_vacuum_events.c.event_type=="OPEN").limit(1))).scalar_one_or_none()
         current = await self.get_current_generic_authority(generation.selection_spec_id,for_update=True)
-        if paused_origin and (current is None or not await self._connection.scalar(sa.text(
+        resumed_source = current is not None and bool(await self._connection.scalar(sa.text(
             "SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
-            {"vid":entry_vacuum_id,"source":current.authority.selection_authority_id,"at":now})):
+            {"vid":entry_vacuum_id,"source":current.authority.selection_authority_id,"at":now}))
+        if paused_origin and not resumed_source:
             raise SelectionJobConflict("Generation-free Owner Pause resume proof missing")
         prior = generation.previous_events[0]
         if (origin is None or origin.get("intended_outcome")!=("OWNER_PAUSED" if paused_origin else "PRE_FENCE_CONTINUITY")
             or current is None or (not paused_origin and origin.get("source_selection_authority_id")!=current.authority.selection_authority_id)
             or current.authority.selection_epoch_id!=generation.selection_epoch_id
             or current.authority.selection_control_version!=control.control_version
-            or (not paused_origin and current.authority.owner_control_version!=owner["control_version"])
+            or (current.authority.owner_control_version!=owner["control_version"] and not resumed_source)
             or current.authority.event_binding.event_spec_id!=prior.event_spec_id
             or current.authority.event_binding.position_side!=prior.position_side
             or current.authority.event_binding.universe_version_id!=prior.universe_version_id
@@ -5663,9 +5664,12 @@ class PostgresInstrumentSelectionRepository:
             not static_recovery_is_first_activation_source(source_authority.authority,control,
                 owner_control_version=owner["control_version"]-2*int(paused_first),activation_authorization_id=control.pending_authorization_id)):
             raise SelectionJobConflict("Static recovery cannot replace an unrelated Authority")
+        resumed_source = dynamic and source_authority is not None and bool(await self._connection.scalar(
+            sa.text("SELECT brc_generic_vacuum_owner_resume_matches(:vid,:source,:at)"),
+            {"vid":vacuum.entry_vacuum_id,"source":source_authority.authority.selection_authority_id,"at":now}))
         if dynamic and (source_authority is None or source_authority.authority.selection_epoch_id!=generation.selection_epoch_id
             or source_authority.authority.selection_control_version!=control.control_version
-            or source_authority.authority.owner_control_version!=owner["control_version"]):
+            or (source_authority.authority.owner_control_version!=owner["control_version"] and not resumed_source)):
             raise SelectionJobConflict("Dynamic recovery source Authority changed")
         universes = PostgresStrategyUniverseRepository(self._connection)
         targets = await universes.get_generation_universe_targets(materialization_generation_id,for_update=True)

@@ -47,7 +47,7 @@ async def test_risk_budget_migration_preserves_source_history_and_owner_view():
                 )
             )
             before = await _risk_budget_source_preservation_manifest(c)
-        await asyncio.to_thread(run_alembic, url, "upgrade", "head")
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0014_dynamic_risk_budget_v1")
         async with engine.connect() as c:
             after = await _risk_budget_source_preservation_manifest(c)
             assert before["digest"] == after["digest"]

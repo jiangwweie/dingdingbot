@@ -77,7 +77,10 @@ def test_regular_plan_rejects_a_schema_change() -> None:
         )
 
 
-def test_dep_002_compatible_upgrade_accepts_only_exact_source_to_current_head() -> None:
+@pytest.mark.parametrize("source_revision", [SOURCE_SCHEMA_REVISION, "0014_dynamic_risk_budget_v1"])
+def test_dep_002_compatible_upgrade_accepts_only_exact_source_to_current_head(monkeypatch, source_revision) -> None:
+    import sys
+    monkeypatch.setattr(sys.modules[__name__], "SOURCE_SCHEMA_REVISION", source_revision)
     plan = DeploymentPlan(
         target_commit=TARGET_COMMIT,
         target_release=TARGET_RELEASE,

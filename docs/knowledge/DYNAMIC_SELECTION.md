@@ -26,7 +26,7 @@
 | MI | `MI_POSITIVE_IMPULSE_RECENCY_V0` | 16 / 16 | 1h | 13 bars |
 | BRF2 | `BRF2_RESIDUAL_EXTENSION_V0` | 16 / 16 | 4h | 73 bars |
 
-1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L247) 先检查安装、策略控制、模式、epoch 和当期是否到时。
+1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L248) 先检查安装、策略控制、模式、epoch 和当期是否到时。
 2. [run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106) 领取 Job，事务外读取来源，使用同一 cutoff 的完整窗口和资格事实。
 3. [generic_selection_core](../../src/trading_kernel/domain/generic_selection_core.py) 校验无缺口、无未来 candle、来源身份一致，按 Decimal 数学计算特征并排序。
 4. 合格且排名在 entry_rank 内可以新入；原成员在 retain_rank 内且仍合格可保留。完整成员决策和输入摘要随 Snapshot 持久化。
@@ -123,3 +123,25 @@ sequenceDiagram
 5. 最后查 Signal 与 Capacity，不能将策略 paused、账户不足等原因归结为选币失败。
 
 相关本地覆盖：[normal authority](../../tests/trading_kernel/unit/test_generic_normal_authority_contract.py)、[recovery proof](../../tests/trading_kernel/unit/test_generic_recovery_grant_proof.py)、[materialization](../../tests/trading_kernel/unit/test_generic_materialization.py)、[数据库原子权限](../../tests/trading_kernel/integration/test_selection_entry_authority_repository.py)。运行记录见[维护与验收](MAINTENANCE.md)。
+
+
+## Owner Resume 跨恢复围栏的连续性
+
+真实 Owner 暂停/恢复可能发生在既有 Authority Gap 或失败 Generation 之后。
+围栏的最初原因不是 Owner 暂停，不代表后续真实 Resume 无效。Generic 恢复
+统一验证原 Authority、当前 Owner 版本、连续 pause/resume 事件、TOTP 授权的
+精确 scope/time，以及未变的 Selection epoch/version。这个路径只支持相对源
+Authority 的一组连续暂停/恢复；更多未消费控制变更继续 fail-closed。
+
+无 Generation 的 Owner 暂停由常驻 materialization 调度完成 drain，即使 Owner
+已提前 Resume。Drain 不是 ENTRY 授权。新目标恢复、有效旧池回退及数据库原子
+提交都必须使用完整恢复证明；数据库 INSERT 和 deferred commit guards 继续
+分别验证切换前事实与切换后 Authority/Vacuum/Comparison/checkpoint/event 集合。
+
+旧池成员过期仍拒绝回退；恢复转用新鲜 Snapshot/目标。新的恢复 Authority
+保留未来合法收盘与 rebase 门槛，普通 episode armed 不能替代恢复 checkpoint
+ARMED。失败 Generation 的原始原因保留在历史中，对外同时返回本次真实恢复
+阻塞，避免把 Owner/成员问题隐藏成反复 MATERIALIZATION_TIMEOUT。
+
+当前实现和发布边界见 [恢复修复记录](../superpowers/plans/2026-11-02-generic-owner-recovery-repair.md)，
+生产状态仍以 [MAIN_CONTROL_ROADMAP](../current/MAIN_CONTROL_ROADMAP.md) 为准。

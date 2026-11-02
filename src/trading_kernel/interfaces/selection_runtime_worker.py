@@ -59,6 +59,7 @@ from src.trading_kernel.domain.selection_authority import (
     MaterializationGenerationState,
     SelectionMode,
 )
+from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuumState
 
 
 class SelectionRuntimeStatus(StrEnum):
@@ -526,6 +527,14 @@ async def _run_generic_materialization_runtime_once(
             strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id)
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(
             strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id)
+        if (vacuum is not None and vacuum.source_generation_id is None
+            and vacuum.first_blocker == "OWNER_PAUSED"
+            and vacuum.state in {StrategyEntryVacuumState.OPEN, StrategyEntryVacuumState.DRAINING_ENTRY}):
+            drain = await drain_strategy_entry_vacuum_once(uow,DrainStrategyEntryVacuumRequest(
+                strategy_group_id=request.strategy_group_id,selection_spec_id=request.selection_spec_id,now_ms=request.now_ms))
+            return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.WAITING,
+                period_anchor_ms=cutoff,disposition=MaterializationDisposition.WAITING_VACUUM,
+                entry_vacuum_id=vacuum.entry_vacuum_id,reason_code=drain.reason_code or drain.status.value)
         job=None
         first_pending_due=control.selection_mode is SelectionMode.STATIC_BASELINE and (
             control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION and control.pending_effective_period_anchor_ms is not None and control.pending_effective_period_anchor_ms<=cutoff)

@@ -267,6 +267,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
             }
             else None
         ),
@@ -297,6 +298,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
             }
         ),
     )
@@ -314,6 +316,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -341,6 +344,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
             }
             else None
         ),
@@ -508,7 +512,7 @@ async def seed_runtime_authority(
     )
 
     state = _policy_state(policy)
-    if request.schema_revision == "0014_dynamic_risk_budget_v1":
+    if request.schema_revision in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
         await uow.directional_risk.initialize(venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms)
     return RuntimeAuthoritySeedResult(
         **state.model_dump(mode="python"),
@@ -568,6 +572,7 @@ async def deploy_compatible_upgrade_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -589,6 +594,7 @@ async def deploy_compatible_upgrade_identity(
         "0011_orb_session_1h_v1",
         "0012_generic_signal_path_v1",
         "0013_owner_directional_risk_v1",
+        "0014_dynamic_risk_budget_v1",
     }:
         return await _deploy_capability_compatible_identity(
             uow,
@@ -677,7 +683,7 @@ async def deploy_compatible_upgrade_identity(
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
-            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001") if request.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1"} else ("SOR-US-EQ-PERP-001",),
+            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001") if request.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"} else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
         )
     if source_entry_enabled:
@@ -748,6 +754,7 @@ async def deploy_compatible_upgrade_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
             }
             else None
         ),
@@ -910,7 +917,7 @@ async def _deploy_capability_compatible_identity(
         allow_compatible_runtime_fence=True,
     )
     current_policy = dict(await _lock_policy(connection))
-    orb_upgrade=request.schema_revision in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1'} and source_schema_revision not in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1'}
+    orb_upgrade=request.schema_revision in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1'} and source_schema_revision not in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1'}
     target_contracts = _contracts_for_schema(request.schema_revision)
     target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
     source_contracts = _contracts_for_schema(source_schema_revision)
@@ -1045,6 +1052,7 @@ async def _deploy_capability_compatible_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
             }
             else None
         ),
@@ -1447,7 +1455,7 @@ def _contracts_for_schema(
     schema_revision: str,
 ) -> tuple[RegisteredStrategyContract, ...]:
     contracts = registered_strategy_contracts() if _schema_includes_tradfi(schema_revision) else _crypto_strategy_contracts()
-    return contracts if schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1"} else tuple(
+    return contracts if schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"} else tuple(
         c for c in contracts if c.strategy_group_id!="SOR-1H-001")
 
 
@@ -1463,6 +1471,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
+                "0015_generic_owner_recovery_v1",
     }
 
 
@@ -1632,7 +1641,7 @@ def _seed_identity(
     }
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
-    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1"}:
+    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,
             "long_continuation": 2,
