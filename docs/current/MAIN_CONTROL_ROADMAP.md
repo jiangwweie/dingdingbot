@@ -38,6 +38,24 @@ change production Policy, or operate production services under this task until
 that confirmation is received. The separate partial-TP1 defect is not repaired
 by this feature; preserve its independent evidence and status.
 
+### 2026-11-02 authorized deployment preparation
+
+Owner authorized deployment once current gates pass. Direct source checks found
+flat positions/orders/budgets and paused Policy31, but Generic materialization
+was still in progress. The existing source Kernel completed the exact CPM
+Owner-pause drain without changing controls or dispatching orders. The MPG and
+CPM attempts subsequently failed closed at their real deadlines.
+
+The migration quiescence verifier recognized only ENTRY_DRAINED lineage and
+rejected CPM's equivalent OWNER_PAUSED completion with real early-Resume proof.
+A focused fix recognizes that evidence only with matching pause/resume events,
+TOTP Resume authorization, scope, control versions and times, while preserving
+all terminal-generation, abandoned-target, paused-global-ENTRY and zero-debt
+gates. It grants no ENTRY or recovery authority and writes no production facts.
+The new candidate must obtain exact R4/API/static certificates before deployment.
+Original production services/schema remain unchanged; staged files are inactive.
+Evidence: `.local/dynamic-risk-budget-v1/deployment-20261102/`.
+
 ## Current Work Priority — Owner Decision 2026-10-29
 
 **The primary multi-strategy realized-return attribution first edition is delivered.**

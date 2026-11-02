@@ -14378,7 +14378,7 @@ async def test_recovered_target_and_certification_share_install_lock_before_row(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("defect",[None,"enabled","missing_failure_event","not_drained","wrong_generation","live_target"])
+@pytest.mark.parametrize("defect",[None,"enabled","missing_failure_event","not_drained","wrong_generation","live_target","owner_pause_drained","owner_pause_false","owner_pause_string","owner_pause_missing_resume","owner_pause_wrong_auth","owner_pause_wrong_origin"])
 async def test_paused_failed_selection_is_quiescent_without_recovery_or_entry(database,defect):
     from src.trading_kernel.application.owner_control import set_global_entry_state
     from src.trading_kernel.infrastructure.generic_selection_source_provenance import (
@@ -14396,6 +14396,31 @@ async def test_paused_failed_selection_is_quiescent_without_recovery_or_entry(da
     async with database.connect() as c:
         gid=await c.scalar(sa.text("SELECT source_generation_id FROM brc_strategy_entry_vacuums_current WHERE strategy_group_id='MI-001' AND resolved_at_ms IS NULL"))
         before=await c.scalar(sa.text("SELECT row_to_json(v)::text FROM brc_strategy_entry_vacuums_current v WHERE source_generation_id=:gid"),{"gid":gid})
+    if isinstance(defect,str) and defect.startswith("owner_pause_"):
+        from src.trading_kernel.application.owner_control import (
+            set_strategy_entry_state,
+        )
+        from src.trading_kernel.domain.owner_control import StrategyEntryState
+        async with database.connect() as c:
+            v=(await c.execute(sa.text("SELECT * FROM brc_strategy_entry_vacuums_current WHERE source_generation_id=:gid"),{"gid":gid})).mappings().one()
+        async with PostgresKernelUnitOfWork(database) as uow:
+            owner=await uow.owner_controls.get_strategy_control("MI-001")
+            paused=await set_strategy_entry_state(uow,strategy_group_id="MI-001",target_state=StrategyEntryState.PAUSED,
+                request=ControlMutationRequest(expected_version=owner.control_version,reason="recorded_pause",idempotency_key="recorded-pause",owner_identity="owner",now_ms=v["fenced_at_ms"]),authentication_strength="session")
+            resumed=await set_strategy_entry_state(uow,strategy_group_id="MI-001",target_state=StrategyEntryState.ENABLED,
+                request=ControlMutationRequest(expected_version=paused.control_version,reason="recorded_early_resume",idempotency_key="recorded-resume",owner_identity="owner",now_ms=v["drained_at_ms"]-1),authentication_strength="totp_step_up")
+        async with database.begin() as c:
+            auth=await c.scalar(sa.text("SELECT authorization_id FROM brc_strategy_entry_control_events WHERE strategy_entry_control_event_id=:id"),{"id":resumed.last_event_id})
+            # Disposable reconstruction of the production Owner-pause drain
+            # history; the verifier must accept proof, never mutate it.
+            await c.execute(sa.text("ALTER TABLE brc_strategy_entry_vacuum_events DISABLE TRIGGER USER"))
+            await c.execute(sa.text("UPDATE brc_strategy_entry_vacuum_events SET payload=jsonb_build_object('intended_outcome',CAST(:origin AS text)) WHERE entry_vacuum_id=:vid AND event_type='OPEN'"),{"vid":v["entry_vacuum_id"],"origin":"OWNER_PAUSED" if defect!="owner_pause_wrong_origin" else "OTHER"})
+            payload={"entry_drain_complete":False if defect=="owner_pause_false" else "true" if defect=="owner_pause_string" else True,
+                "resumed_before_drain":True,"owner_control_version":resumed.control_version,"owner_resume_authorization_id":auth if defect!="owner_pause_wrong_auth" else "forged"}
+            await c.execute(sa.text("UPDATE brc_strategy_entry_vacuum_events SET event_type='OWNER_PAUSED',payload=CAST(:payload AS jsonb) WHERE entry_vacuum_id=:vid AND event_type='ENTRY_DRAINED'"),{"vid":v["entry_vacuum_id"],"payload":json.dumps(payload)})
+            if defect=="owner_pause_missing_resume":
+                await c.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET last_event_id='absent-resume' WHERE strategy_group_id='MI-001'"))
+            await c.execute(sa.text("ALTER TABLE brc_strategy_entry_vacuum_events ENABLE TRIGGER USER"))
     async with database.begin() as c:
         if defect=="enabled":
             await c.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true"))
@@ -14413,8 +14438,8 @@ async def test_paused_failed_selection_is_quiescent_without_recovery_or_entry(da
             await c.execute(sa.text("UPDATE brc_strategy_universe_versions SET abandoned_at_ms=NULL,abandon_reason_code=NULL,lifecycle_state='staged' WHERE materialization_generation_id=:gid"),{"gid":gid})
     async with database.connect() as c:
         count=await c.run_sync(lambda bind:count_nonquiescent_source_vacuums(bind,allow_paused_failed_generic=True))
-        assert count==(0 if defect is None else 1)
-        if defect is None:
+        assert count==(0 if defect in (None,"owner_pause_drained") else 1)
+        if defect in (None,"owner_pause_drained"):
             assert await c.scalar(sa.text("SELECT row_to_json(v)::text FROM brc_strategy_entry_vacuums_current v WHERE source_generation_id=:gid"),{"gid":gid})==before
             assert await c.scalar(sa.text("SELECT new_entry_submit_enabled FROM brc_owner_policy_current")) is False
             assert await c.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0

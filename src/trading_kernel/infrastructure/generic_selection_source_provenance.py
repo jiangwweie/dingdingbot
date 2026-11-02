@@ -185,8 +185,49 @@ def count_nonquiescent_source_vacuums(connection: sa.Connection, *, allow_paused
             )
             AND EXISTS (
               SELECT 1 FROM brc_strategy_entry_vacuum_events drain
-              WHERE drain.entry_vacuum_id=v.entry_vacuum_id AND drain.event_type='ENTRY_DRAINED'
+              WHERE drain.entry_vacuum_id=v.entry_vacuum_id
                 AND drain.occurred_at_ms=v.drained_at_ms
+                AND (drain.event_type='ENTRY_DRAINED' OR (
+                  drain.event_type='OWNER_PAUSED'
+                  AND drain.payload->'entry_drain_complete'='true'::jsonb
+                  AND EXISTS (
+                    SELECT 1 FROM brc_strategy_entry_vacuum_events opened
+                    JOIN brc_strategy_entry_controls_current owner
+                      ON owner.strategy_group_id=v.strategy_group_id
+                    JOIN brc_strategy_entry_control_events resumed
+                      ON resumed.strategy_entry_control_event_id=owner.last_event_id
+                      AND resumed.strategy_group_id=owner.strategy_group_id
+                      AND resumed.control_version=owner.control_version
+                    JOIN brc_strategy_entry_control_events paused
+                      ON paused.strategy_group_id=owner.strategy_group_id
+                      AND paused.control_version=resumed.control_version-1
+                    JOIN brc_owner_authorizations resume_auth
+                      ON resume_auth.authorization_id=resumed.authorization_id
+                    JOIN brc_owner_authorizations pause_auth
+                      ON pause_auth.authorization_id=paused.authorization_id
+                    WHERE opened.entry_vacuum_id=v.entry_vacuum_id
+                      AND opened.event_type='OPEN' AND opened.event_sequence=1
+                      AND opened.occurred_at_ms=v.fenced_at_ms
+                      AND opened.payload->>'intended_outcome'='OWNER_PAUSED'
+                      AND owner.entry_state='enabled'
+                      AND resumed.operation='resume' AND resumed.target_state='enabled'
+                      AND resumed.created_at_ms=owner.updated_at_ms
+                      AND resumed.created_at_ms<=g.fenced_at_ms
+                      AND paused.operation='pause' AND paused.target_state='paused'
+                      AND paused.created_at_ms=v.fenced_at_ms
+                      AND resume_auth.purpose='strategy_resume'
+                      AND resume_auth.authentication_strength='totp_step_up'
+                      AND resume_auth.authorized_at_ms=resumed.created_at_ms
+                      AND resume_auth.target_scope=jsonb_build_object('strategy_group_id',v.strategy_group_id)
+                      AND pause_auth.purpose='strategy_pause'
+                      AND pause_auth.authorized_at_ms=paused.created_at_ms
+                      AND pause_auth.target_scope=jsonb_build_object('strategy_group_id',v.strategy_group_id)
+                      AND (resumed.created_at_ms>=v.drained_at_ms OR (
+                        drain.payload->'resumed_before_drain'='true'::jsonb
+                        AND drain.payload->>'owner_control_version'=resumed.control_version::text
+                        AND drain.payload->>'owner_resume_authorization_id'=resumed.authorization_id))
+                  )
+                ))
             )
             AND EXISTS (
               SELECT 1 FROM brc_strategy_universe_versions target
