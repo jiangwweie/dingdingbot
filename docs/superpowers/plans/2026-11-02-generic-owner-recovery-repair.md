@@ -2,7 +2,7 @@
 
 ## 范围与授权
 
-Owner 授权修复 CPM/MPG；本轮完成本地实现、验证和候选认证，部署前等待确认。
+Owner 先授权修复 CPM/MPG，并要求部署前确认；完成本地实现和认证后，Owner 明确授权空仓部署，已按正式流程完成。当前发布身份与核验结果由 MAIN_CONTROL_ROADMAP 管理。
 不修改资金参数、策略、Selection、旧 Authority、Owner 授权或交易历史。
 生产身份、当前运行状态只由 MAIN_CONTROL_ROADMAP 管理。
 

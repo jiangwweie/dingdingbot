@@ -24,41 +24,46 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
-## CPM / MPG recovery lineage repair — local candidate, not deployed
+## CPM / MPG recovery lineage repair — deployed 2026-11-02
 
-The Owner approved repair after the 2026-11-02 readonly RCA. This focused task
-stops before production deployment for Owner confirmation. The production
-identity remains the deployed release below; this local candidate targets
-`0015_generic_owner_recovery_v1` and changes recovery functions without changing
-stored source rows, Owner risk values or strategy/Selection permissions.
+Owner authorized deployment after reporting flatness. Kernel, Owner API and V2
+static now run **`e86b55278e2ac49be79d75909d6203c64a74d2b8`**, schema
+**`0015_generic_owner_recovery_v1`**, immutable tag **`tokyo-runtime-2026.11.02.2`**.
+Exact R4 PASS:1799 Unit/Architecture,1811 Integration,70 Full-chain; Ruff,
+Mypy209, diff,961 Golden snapshots and23064 Core Parity member decisions.
+Same-commit Owner API and static certification/deployment smoke passed.
 
-The dated deployment snapshot below is not current Owner policy. Subsequent
-readonly RCA at16:15 Asia/Shanghai observed genuine Owner Resume and Policy33
-with baseline3%, gross9%, directional6% and minimum materialization50%. Three
-other-strategy protected positions were verified then; these are dated facts,
-not a current flatness assertion or permission to deploy.
+| Boundary | Direct evidence |
+| --- | --- |
+| Source preparation | Genuine Owner ENTRY pause Policy34; fresh PG/exchange flatness and zero orders/commands/Incidents/debt. Three existing staged source Generations closed through the exact source coordinator after their real deadlines; no forged clock or SQL state repair |
+| Migration | All five writers stopped before final source proof. Official R4 compatible upgrade0014→0015 PASS in272308ms. Every source table/column/row preserved with digest sha256:d402a0e0551c8546c9805208f2b0c421ca83b5ee3826c63b3fa638b023891a97 |
+| Control preservation | Strategy, Selection, directional controls and complete Owner Policy compare exactly equal before/after. Baseline3%, gross9%, direction6%, minimum materialization50%; Policy34 remains paused |
+| Operational postflight | At2026-11-02 22:40:45 Asia/Shanghai, database integrity, flatness, entry recovery readiness and risk-budget authority PASS. Four Kernel Workers and independent Owner API active; Kernel commit/schema match, NRestarts0; exact API/static release smoke PASS |
+| Maintenance completion | Official promote_entry --prepare-owner-resume returned prepared_owner_paused. Operational write fence absent; final exchange positions/orders0 and internal active Tickets/positions/commands/Incidents0 |
+| Recovery boundary | MPG's original Owner Resume now matches its existing gap in the deployed SQL predicate. CPM had already reached Owner-control3 Authority before this cutover. Current exact-scope checks are blocked by genuine global Owner pause; fresh recovery Authority, legal close/rebase and natural accepted/protected order evidence remain separate acceptance |
 
-Local repair covers standalone Owner-pause drain scheduling, authenticated
-Resume continuity across a pre-existing Authority gap, failed-generation
-recovery/fallback and precise recovery blocker reporting. Original Authority,
-Owner events and Vacuum history remain immutable. Expired membership still
-requires a fresh target; recovery still installs pending checkpoints and waits
-for the legal future close. No repeated Owner Resume is required for the proven
-single pause/resume lineage. Multiple unconsumed pause/resume cycles remain
-fail-closed and are outside this repair's claimed acceptance.
+The local repair covers standalone Owner-pause drain scheduling, authenticated
+Resume continuity across pre-existing gaps and failed Generations, full-proof
+recovery commits and precise blocker reporting. Immutable source records and
+member/Comparison/future-close guards remain intact. Multiple unconsumed
+pause/resume cycles remain fail-closed; no claim of broader support is made.
 
-See the [repair scope and acceptance record](../superpowers/plans/2026-11-02-generic-owner-recovery-repair.md).
-Exact R4 and Owner API/static certification results belong to their candidate
-manifests; local logs are in `.local/cpm-mpg-recovery-repair-20261102/`.
-Deployment still requires Owner confirmation, fresh stopped/flat preservation
-gates and post-release recovery acceptance. The separate partial-TP1 defect
-is outside this change. No production write or exchange test order is part of
-this local repair.
+Software deployment and operational maintenance are complete. **Global ENTRY
+remains Owner-paused**; the Owner may Resume through the official Console/TOTP
+when intending new trades. Strategy MI, retired SOR-001 and TradFi pauses remain
+unchanged. A paused global policy is not an engineering failure. No real test
+order, risk expansion, credential change or extra Feishu message occurred.
+The independent partial-TP1 defect remains outside this repair.
 
-## Owner Dynamic Risk Budget V1 — deployed 2026-11-02
+Evidence: `.local/cpm-mpg-recovery-deploy-20261102/` and exact commit certification
+manifests. Scope is documented in the [repair record](../superpowers/plans/2026-11-02-generic-owner-recovery-repair.md).
+Generated evidence is display-only; action-time PG and exchange facts continue
+to own trading permission.
 
-Owner explicitly authorized deployment after current gates pass. The combined
-Kernel, Owner API and V2 static release is now **`79119fc421ce252bd0ba7358b36325a4a9f4bb85`**,
+## Prior Owner Dynamic Risk Budget V1 deployment — 2026-11-02
+
+Owner explicitly authorized deployment after current gates pass. The preceding combined
+Kernel, Owner API and V2 static release was **`79119fc421ce252bd0ba7358b36325a4a9f4bb85`**,
 immutable tag **`tokyo-runtime-2026.11.02.1`**, schema **`0014_dynamic_risk_budget_v1`**.
 The candidate was fast-forwarded/pushed to dev and exact R4/API/static certified.
 R4 PASS:1798 Unit/Architecture,1790 Integration,70 Full-chain; Ruff, Mypy209,
