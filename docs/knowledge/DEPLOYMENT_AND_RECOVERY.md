@@ -76,7 +76,7 @@ flowchart TB
 6. **先启动 Lifecycle/Reconciliation**：刷新认证、验证保留状态，再启动可执行 Selection 的 Observation。
 7. **running-target postflight**：重核当前 identity、controls、membership 与外部安全事实。ENTRY 通过独立 promotion 恢复，不由软件发布隐式打开。
 
-来源：[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L321)、[writer 检查测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2331)、[promote_entry](../../scripts/trading_kernel/promote_entry.py)。
+来源：[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L321)、[writer 检查测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2334)、[promote_entry](../../scripts/trading_kernel/promote_entry.py)。
 
 ### schema 前向升级
 
@@ -101,7 +101,7 @@ flowchart TD
     Post --> Promote[独立官方 ENTRY promotion]
 ```
 
-**回滚不是跨阶段统一动作**：R1/R2 可恢复其独立 symlink；Kernel identity/schema 已轮换后，不能因为界面“失败”就启动旧版本。来源、目标和未知三类事实决定恢复方向。（来源：[部署恢复实现](../../scripts/trading_kernel/deploy_tokyo_release.py)、[unknown identity 测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2342)、[目标 fix-forward 测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L565)）
+**回滚不是跨阶段统一动作**：R1/R2 可恢复其独立 symlink；Kernel identity/schema 已轮换后，不能因为界面“失败”就启动旧版本。来源、目标和未知三类事实决定恢复方向。（来源：[部署恢复实现](../../scripts/trading_kernel/deploy_tokyo_release.py)、[unknown identity 测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2345)、[目标 fix-forward 测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L568)）
 
 ## Worker 重启如何继续
 

@@ -70,7 +70,7 @@
 
 ### 5. 重启或发布失败怎样恢复
 
-**结论：持久化恢复必须先区分实际 identity/schema 的来源、目标或未知状态。**验证包括[未知 identity 不重启旧写者](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2342)、[已迁移目标走 fix-forward](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L565)、[信号安全关闭](../../tests/trading_kernel/unit/test_worker_process_shutdown.py)。
+**结论：持久化恢复必须先区分实际 identity/schema 的来源、目标或未知状态。**验证包括[未知 identity 不重启旧写者](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2345)、[已迁移目标走 fix-forward](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L568)、[信号安全关闭](../../tests/trading_kernel/unit/test_worker_process_shutdown.py)。
 
 ### 6. 方向偏好切换为何需要区分请求与生效
 
