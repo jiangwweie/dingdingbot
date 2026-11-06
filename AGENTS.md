@@ -3,6 +3,19 @@
 Last updated: 2026-10-12
 Scope: Tokyo Trading Kernel engineering and operation
 
+## Branch-local App Manual Takeover Scope
+
+On `codex/app-manual-takeover-v1`, the Owner-approved target is recorded in
+[App manual takeover V1 decisions](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md).
+This is a separate product/server/account, not a Tokyo behavior change. Preserve
+default automation until external intervention, then permanently hand over the
+whole trade; the new product forbids simultaneous opposite-side exposure in the
+same instrument. These are not implemented runtime facts yet. The inherited
+contracts below remain the existing baseline; do not mistake their default
+two-sided coexistence or automated lifecycle for this branch's approved target.
+Keep takeover-specific changes out of `dev`; port common fixes separately with
+independent verification. This task creates the branch and documentation only.
+
 ## Authority Order
 
 When sources disagree, use this order:

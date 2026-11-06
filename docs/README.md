@@ -2,6 +2,15 @@
 
 Status: current Trading Kernel authority index
 
+## Independent App Manual Takeover Product Line
+
+[App 人工接管 V1 沟通结论](superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)
+records Owner-approved requirements for the separate `codex/app-manual-takeover-v1`
+product branch and a new isolated server/account. Default TP1/Runner automation
+is retained; confirmed external intervention transfers the whole trade permanently
+to manual management. This is an agreed target, not implemented or deployed
+behavior, and does not change Tokyo or extend the current authority allowlist.
+
 ## Code-Based Learning Guide
 
 [项目知识地图](knowledge/README.md) provides a Chinese reading path through the
