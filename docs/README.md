@@ -11,6 +11,12 @@ is retained; confirmed external intervention transfers the whole trade permanent
 to manual management. This is an agreed target, not implemented or deployed
 behavior, and does not change Tokyo or extend the current authority allowlist.
 
+The [detailed design](superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
+defines management authority, external-order evidence, readonly manual lifecycle
+and account admission. The [implementation plan](superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
+maps these requirements to ordered tasks, failure tests, certification and new
+environment acceptance. Both are design proposals; implementation has not started.
+
 ## Code-Based Learning Guide
 
 [项目知识地图](knowledge/README.md) provides a Chinese reading path through the

@@ -5,6 +5,10 @@
 适用分支：**`codex/app-manual-takeover-v1`**。
 依据：本线程 Owner 的逐项决定及最终确认；后续明确决定可以修订本记录。
 
+配套：[详细设计](2026-11-06-app-manual-takeover-v1-detailed-design.md)、
+[实施计划](../plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)。
+配套文件中的技术选择为设计提案，不改变本记录已经确认的业务规则，也不代表已经实施。
+
 ## 1. 目标与最终方案
 
 Owner 的主要需求是**难以发现交易机会，希望程序发现机会并自动下单**。

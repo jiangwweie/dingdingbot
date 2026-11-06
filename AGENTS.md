@@ -15,6 +15,10 @@ contracts below remain the existing baseline; do not mistake their default
 two-sided coexistence or automated lifecycle for this branch's approved target.
 Keep takeover-specific changes out of `dev`; port common fixes separately with
 independent verification. This task creates the branch and documentation only.
+Read the [detailed design](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
+and [implementation plan](docs/superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
+before future implementation. Technical proposals are not completed capabilities
+or deployment authorization; the current request is documentation only.
 
 ## Authority Order
 
