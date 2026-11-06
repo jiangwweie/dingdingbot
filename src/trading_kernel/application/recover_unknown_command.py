@@ -42,6 +42,7 @@ from src.trading_kernel.domain.events import (
     ExitAccepted,
     InitialStopAbsenceConfirmed,
     InitialStopConfirmed,
+    ManagedCommandOutcomeObserved,
     ProtectionCancelAbsenceConfirmed,
     ProtectionReplacementAbsenceConfirmed,
     ProtectionReplacementConfirmed,
@@ -54,6 +55,7 @@ from src.trading_kernel.domain.incident_blocking import (
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.trade_management import ManagementMode
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryDecision,
     UnknownRecoveryStatus,
@@ -281,6 +283,12 @@ def _recovery_event(
     command: ExchangeCommand,
     decision: UnknownRecoveryDecision,
 ) -> TradeEvent:
+    if aggregate.management_mode is not ManagementMode.AUTO:
+        return ManagedCommandOutcomeObserved(
+            event_id=f"event:{aggregate.identity.ticket_id}:{aggregate.last_event_sequence+1}",
+            ticket_id=aggregate.identity.ticket_id,sequence=aggregate.last_event_sequence+1,
+            occurred_at_ms=decision.observed_at_ms,command_id=command.command_id,
+            outcome=decision.model_dump(mode="json"))
     sequence = aggregate.last_event_sequence + 1
     common: _EventFields = {
         "event_id": f"event:{aggregate.identity.ticket_id}:{sequence}",

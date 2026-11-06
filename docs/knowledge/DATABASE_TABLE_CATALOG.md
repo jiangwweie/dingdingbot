@@ -4,7 +4,7 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 90 张业务表、1075 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 90 张业务表、1080 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
@@ -1300,9 +1300,9 @@
 **维护与用途**：commit_reduction CAS 推进，Worker 调度读取；不是不可变合同。
 
 <details>
-<summary>完整字段（34 列）</summary>
+<summary>完整字段（39 列）</summary>
 
-**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
+**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
 </details>
 

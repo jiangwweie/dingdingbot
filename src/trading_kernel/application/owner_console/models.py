@@ -70,6 +70,7 @@ class OverviewEvidenceGap(FrozenModel):
 
 
 LifecycleStageKey = Literal[
+    "manual",
     "signal",
     "admission",
     "entry",

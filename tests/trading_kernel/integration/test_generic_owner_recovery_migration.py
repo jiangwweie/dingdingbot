@@ -67,7 +67,7 @@ async def test_generic_owner_recovery_migration_preserves_all_rows_and_owner_bud
         async with engine.connect() as c:
             before = await _generic_owner_recovery_preservation_manifest(c)
             assert before["row_count"] > 0
-        await asyncio.to_thread(run_alembic, url, "upgrade", "head")
+        await asyncio.to_thread(run_alembic, url, "upgrade", "0015_generic_owner_recovery_v1")
         async with engine.connect() as c:
             after = await _generic_owner_recovery_preservation_manifest(c)
             assert before == after

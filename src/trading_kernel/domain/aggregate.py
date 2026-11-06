@@ -14,9 +14,12 @@ from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskStatus,
 )
 from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class AggregateStatus(StrEnum):
+    MANUAL_OPEN = "manual_open"
+    MANUAL_FLAT_PENDING_ORDERS = "manual_flat_pending_orders"
     LEVERAGE_PENDING = "leverage_pending"
     LEVERAGE_CONFIRMED = "leverage_confirmed"
     LEVERAGE_REJECTED = "leverage_rejected"
@@ -45,9 +48,7 @@ class AggregateStatus(StrEnum):
     RUNNER_REPLACEMENT_OUTCOME_UNKNOWN = "runner_replacement_outcome_unknown"
     RUNNER_OLD_STOP_CANCEL_PENDING = "runner_old_stop_cancel_pending"
     RUNNER_OLD_STOP_CANCEL_REJECTED = "runner_old_stop_cancel_rejected"
-    RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN = (
-        "runner_old_stop_cancel_outcome_unknown"
-    )
+    RUNNER_OLD_STOP_CANCEL_OUTCOME_UNKNOWN = "runner_old_stop_cancel_outcome_unknown"
     RUNNER_PROTECTED = "runner_protected"
     EXIT_PENDING = "exit_pending"
     EXIT_ACCEPTED = "exit_accepted"
@@ -66,6 +67,8 @@ class AggregateStatus(StrEnum):
 
 
 RECONCILIATION_POSITION_STATUSES = (
+    AggregateStatus.MANUAL_OPEN,
+    AggregateStatus.MANUAL_FLAT_PENDING_ORDERS,
     AggregateStatus.ENTRY_ACCEPTED,
     AggregateStatus.ENTRY_VACUUM_CANCEL_PENDING,
     AggregateStatus.ENTRY_VACUUM_CANCEL_REJECTED,
@@ -110,6 +113,11 @@ class TradeAggregate(BaseModel):
     status: AggregateStatus
     version: int
     last_event_sequence: int
+    management_mode: ManagementMode = ManagementMode.AUTO
+    management_revision: int = 1
+    management_evidence_id: str | None = None
+    management_reason: str | None = None
+    manual_takeover_at_ms: int | None = None
     entry_lane_held: bool = True
     position_qty: Decimal = Decimal(0)
     average_fill_price: Decimal | None = None

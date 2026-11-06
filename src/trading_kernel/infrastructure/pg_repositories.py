@@ -94,6 +94,7 @@ from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeSpec,
 )
 from src.trading_kernel.domain.ticket import EntryOrderType, TicketStatus, TradeTicket
+from src.trading_kernel.domain.trade_management import ManagementMode
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     admission_decisions,
@@ -3420,6 +3421,11 @@ def _aggregate_values(
         "status": aggregate.status.value,
         "version": aggregate.version,
         "last_event_sequence": aggregate.last_event_sequence,
+        "management_mode":aggregate.management_mode.value,
+        "management_revision":aggregate.management_revision,
+        "management_evidence_id":aggregate.management_evidence_id,
+        "management_reason":aggregate.management_reason,
+        "manual_takeover_at_ms":aggregate.manual_takeover_at_ms,
         "entry_lane_held": aggregate.entry_lane_held,
         "position_qty": aggregate.position_qty,
         "average_fill_price": aggregate.average_fill_price,
@@ -3642,6 +3648,11 @@ def _aggregate_from_row(
         status=AggregateStatus(str(row["status"])),
         version=int(row["version"]),
         last_event_sequence=int(row["last_event_sequence"]),
+        management_mode=ManagementMode(row["management_mode"]),
+        management_revision=int(row["management_revision"]),
+        management_evidence_id=row["management_evidence_id"],
+        management_reason=row["management_reason"],
+        manual_takeover_at_ms=row["manual_takeover_at_ms"],
         entry_lane_held=bool(row["entry_lane_held"]),
         position_qty=Decimal(row["position_qty"]),
         average_fill_price=(

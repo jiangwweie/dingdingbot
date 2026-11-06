@@ -6,7 +6,7 @@ import re
 from decimal import Decimal
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressEvidence,
@@ -14,6 +14,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
 )
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.trade_management import OrderEvidence
 
 
 class _Event(BaseModel):
@@ -555,8 +556,36 @@ class ReviewRevised(_TicketEvent):
     supersedes_review_id: str
 
 
+class ManualTakeoverConfirmed(_TicketEvent):
+    observation: OrderEvidence | None = None
+    evidence_id: str
+    reason: str
+
+    @field_validator("evidence_id", "reason")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("takeover requires exact evidence and reason")
+        return value
+
+
+class ManagementReviewRequired(_TicketEvent):
+    observation: OrderEvidence | None = None
+    evidence_id: str
+    reason: str
+
+
+class ManagedCommandOutcomeObserved(_TicketEvent):
+    command_id: str
+    outcome: dict[str, JsonValue]
+
+
+
 TradeEvent = (
     TicketIssued
+    | ManualTakeoverConfirmed
+    | ManagementReviewRequired
+    | ManagedCommandOutcomeObserved
     | LeverageConfirmed
     | LeverageRejected
     | LeverageOutcomeUnknown

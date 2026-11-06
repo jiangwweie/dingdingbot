@@ -942,7 +942,7 @@ async def _verify_generic_selection_source(
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
             shape = await _verify_exact_metadata_shape(
-                connection, expected_columns=({t.name:tuple(t.c.keys()) for t in metadata.tables.values()} if source_revision=="0014_dynamic_risk_budget_v1" else _source_0013_table_columns() if source_revision=="0013_owner_directional_risk_v1" else _source_0012_table_columns() if source_revision=="0012_generic_signal_path_v1" else _source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
+                connection, expected_columns=(_without_app_management_columns({t.name:tuple(t.c.keys()) for t in metadata.tables.values()}) if source_revision=="0014_dynamic_risk_budget_v1" else _source_0013_table_columns() if source_revision=="0013_owner_directional_risk_v1" else _source_0012_table_columns() if source_revision=="0012_generic_signal_path_v1" else _source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
                     else _source_0010_table_columns() if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1"}
                     else _source_0007_table_columns()),
             )
@@ -1632,14 +1632,26 @@ async def _certified_0002_capabilities(
     }
 
 
+_APP_MANAGEMENT_SOURCE_COLUMNS = frozenset({
+    "management_mode", "management_revision", "management_evidence_id",
+    "management_reason", "manual_takeover_at_ms",
+})
+
+
+def _without_app_management_columns(tables: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    """Deployment-only exact inventory for pre-0016 source preservation."""
+    return {name: tuple(c for c in columns if name != "brc_trade_aggregates" or c not in _APP_MANAGEMENT_SOURCE_COLUMNS)
+            for name, columns in tables.items()}
+
+
 def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
-    return {
+    return _without_app_management_columns({
         table.name: (
             *tuple(table.c.keys()),
             *_SOURCE_0002_ADDED_COLUMNS.get(table.name, ()),
         )
         for table in v4_schema.metadata.sorted_tables
-    }
+    })
 
 
 _CAPACITY_V0_ADDED_COLUMNS = {
@@ -1649,14 +1661,14 @@ _CAPACITY_V0_ADDED_COLUMNS = {
 
 
 def _source_0008_table_columns() -> dict[str, tuple[str, ...]]:
-    return {table.name: tuple(column.name for column in table.c
+    return _without_app_management_columns({table.name: tuple(column.name for column in table.c
         if column.name not in _CAPACITY_V0_ADDED_COLUMNS.get(table.name, ()))
         for table in _source_tables_before_signal_path()
-        if table.name != "brc_orb_session_selection_specs_v1"}
+        if table.name != "brc_orb_session_selection_specs_v1"})
 
 
 def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
-    return {
+    return _without_app_management_columns({
         table.name: _source_columns_before_dynamic_selection(table)
         for table in _source_tables_before_signal_path()
         if table.name != "brc_orb_session_selection_specs_v1" and table.name
@@ -1665,11 +1677,11 @@ def _source_0003_table_columns() -> dict[str, tuple[str, ...]]:
         | _DYNAMIC_SELECTION_TABLES
         | _EXIT_PROFILE_TABLES
         | _GENERIC_SELECTION_TABLES
-    }
+    })
 
 
 def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
-    return {
+    return _without_app_management_columns({
         table.name: _source_columns_before_dynamic_selection(table)
         for table in _source_tables_before_signal_path()
         if table.name != "brc_orb_session_selection_specs_v1" and table.name
@@ -1677,11 +1689,11 @@ def _source_0004_table_columns() -> dict[str, tuple[str, ...]]:
         | _DYNAMIC_SELECTION_TABLES
         | _EXIT_PROFILE_TABLES
         | _GENERIC_SELECTION_TABLES
-    }
+    })
 
 
 def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
-    return {
+    return _without_app_management_columns({
         table.name: tuple(
             column.name
             for column in table.c
@@ -1692,7 +1704,7 @@ def _source_0005_table_columns() -> dict[str, tuple[str, ...]]:
         )
         for table in _source_tables_before_signal_path()
         if table.name != "brc_orb_session_selection_specs_v1" and table.name not in _DYNAMIC_SELECTION_TABLES | _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
-    }
+    })
 
 
 def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
@@ -1716,7 +1728,7 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
         "brc_selection_session_authorities": ("authorized_long_universe_version_id", "authorized_short_universe_version_id"),
     }
     renamed = {"period_anchor_ms": "session_start_ms", "pending_effective_period_anchor_ms": "pending_effective_session_start_ms"}
-    return {
+    return _without_app_management_columns({
         table.name: (*tuple(
             renamed.get(column.name, column.name)
             for column in table.c
@@ -1726,7 +1738,7 @@ def _source_0006_table_columns() -> dict[str, tuple[str, ...]]:
         ), *removed.get(table.name, ()))
         for table in _source_tables_before_signal_path()
         if table.name != "brc_orb_session_selection_specs_v1" and table.name not in _EXIT_PROFILE_TABLES | _GENERIC_SELECTION_TABLES
-    }
+    })
 
 
 def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
@@ -1774,7 +1786,7 @@ def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
         "period_anchor_ms": "session_start_ms",
         "pending_effective_period_anchor_ms": "pending_effective_session_start_ms",
     }
-    return {
+    return _without_app_management_columns({
         table.name: (
             *tuple(
                 renamed.get(column.name, column.name)
@@ -1786,7 +1798,7 @@ def _source_0007_table_columns() -> dict[str, tuple[str, ...]]:
         )
         for table in _source_tables_before_signal_path()
         if table.name != "brc_orb_session_selection_specs_v1" and table.name not in _GENERIC_SELECTION_TABLES
-    }
+    })
 
 
 def _source_columns_before_tradfi(table: sa.Table) -> tuple[str, ...]:
@@ -2884,11 +2896,11 @@ _DIRECTIONAL_NEW_TABLES = {
 
 
 def _source_0012_table_columns() -> dict[str, tuple[str, ...]]:
-    return {
+    return _without_app_management_columns({
         table.name: tuple(table.c.keys())
         for table in metadata.tables.values()
         if table.name not in _DIRECTIONAL_NEW_TABLES
-    }
+    })
 
 
 async def _directional_source_preservation_manifest(
@@ -2960,9 +2972,9 @@ def _source_tables_before_signal_path() -> tuple[sa.Table, ...]:
 
 
 def _source_0011_table_columns() -> dict[str, tuple[str, ...]]:
-    return {table.name:tuple(c.name for c in table.c if table.name!="brc_shadow_outcomes_current"
+    return _without_app_management_columns({table.name:tuple(c.name for c in table.c if table.name!="brc_shadow_outcomes_current"
         or c.name not in _SIGNAL_PATH_NEW_COLUMNS)
-        for table in metadata.tables.values() if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES)}
+        for table in metadata.tables.values() if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES)})
 
 
 async def _signal_path_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:
@@ -2983,7 +2995,7 @@ async def _signal_path_source_preservation_manifest(connection: AsyncConnection)
 
 
 def _source_0010_table_columns() -> dict[str,tuple[str,...]]:
-    return {name:columns for name,columns in _source_0011_table_columns().items() if name!='brc_orb_session_selection_specs_v1'}
+    return _without_app_management_columns({name:columns for name,columns in _source_0011_table_columns().items() if name!='brc_orb_session_selection_specs_v1'})
 
 
 def _registry_contracts_for_revision(revision: str):
@@ -3029,7 +3041,7 @@ async def _dynamic_intent_source_preservation_manifest(connection: AsyncConnecti
 # Exact stopped-upgrade evidence only; never used by runtime readers.
 def _source_0013_table_columns() -> dict[str, tuple[str, ...]]:
     additions = {"pending_baseline", "pending_budget_request_id", "pending_policy_version"}
-    return {t.name: tuple(c.name for c in t.c if (t.name != "brc_directional_risk_controls" or c.name not in additions) and (t.name != "brc_directional_risk_rules" or c.name != "budget_contract")) for t in metadata.tables.values()}
+    return _without_app_management_columns({t.name: tuple(c.name for c in t.c if (t.name != "brc_directional_risk_controls" or c.name not in additions) and (t.name != "brc_directional_risk_rules" or c.name != "budget_contract")) for t in metadata.tables.values()})
 
 
 async def _risk_budget_source_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
@@ -3067,13 +3079,13 @@ async def _risk_budget_source_preservation_manifest(connection: AsyncConnection)
 async def _generic_owner_recovery_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
     """Function-only 0014->0015 upgrade preserves every source table and row."""
     revision=await _alembic_revision(connection)
-    if revision not in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
+    if revision not in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1","0016_app_manual_takeover_v1"}:
         raise ValueError("Generic owner recovery requires exact source/target")
     tables=[]
     count=0
     for name,table in sorted(metadata.tables.items()):
-        columns=tuple(table.c.keys())
-        rows=[dict(r) for r in (await connection.execute(sa.select(table))).mappings()]
+        columns=_without_app_management_columns({name:tuple(table.c.keys())})[name]
+        rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
         canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))
         item={"table":name,"columns":list(columns),"rows":canonical,"row_count":len(rows)}
         tables.append({**item,"digest":_sha256_json(item)})

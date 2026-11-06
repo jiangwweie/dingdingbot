@@ -99,6 +99,7 @@ _REVIEW_STATUSES = frozenset(
 _STATUS_STAGES: tuple[
     tuple[frozenset[AggregateStatus], LifecycleStageKey], ...
 ] = (
+    (frozenset({AggregateStatus.MANUAL_OPEN,AggregateStatus.MANUAL_FLAT_PENDING_ORDERS}), "manual"),
     (_ENTRY_STATUSES, "entry"),
     (_PROTECTION_STATUSES, "protection"),
     (_TP_RUNNER_STATUSES, "tp_runner"),
@@ -113,6 +114,7 @@ if _MAPPED_STATUSES != frozenset(AggregateStatus):
     raise RuntimeError("Aggregate status lifecycle mapping is incomplete")
 
 _COMPLETED_BEFORE_STAGE: dict[LifecycleStageKey, int] = {
+    "manual": 3,
     "signal": 0,
     "admission": 1,
     "entry": 2,

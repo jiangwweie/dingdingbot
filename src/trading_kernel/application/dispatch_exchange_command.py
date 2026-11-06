@@ -76,6 +76,7 @@ from src.trading_kernel.domain.events import (
     LeverageConfirmed,
     LeverageOutcomeUnknown,
     LeverageRejected,
+    ManagedCommandOutcomeObserved,
     OwnedOrphanCancelConfirmed,
     ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
@@ -96,6 +97,7 @@ from src.trading_kernel.domain.product import (
     product_compatibility_for,
 )
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class _EventCommon(TypedDict):
@@ -259,6 +261,12 @@ async def dispatch_one_command(
             aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("claimed command has no Ticket aggregate")
+            if aggregate.management_mode is not ManagementMode.AUTO:
+                await uow.exchange_commands.mark_claimed_superseded(
+                    command_id=command.command_id,worker_id=request.worker_id,
+                    observed_at_ms=request.now_ms,
+                    reason=f"trade_management:{aggregate.management_mode.value}")
+                return DispatchCommandResult(status=DispatchCommandStatus.SUPERSEDED,command_id=command.command_id)
             if not _command_is_applicable(command, aggregate.status):
                 await uow.exchange_commands.mark_claimed_superseded(
                     command_id=command.command_id,
@@ -920,6 +928,12 @@ def _command_result_event(
     aggregate,
     result: ExchangeCommandResult | SetLeverageCommandResult,
 ):
+    if aggregate.management_mode is not ManagementMode.AUTO:
+        return ManagedCommandOutcomeObserved(
+            event_id=f"event:{aggregate.identity.ticket_id}:{aggregate.last_event_sequence+1}",
+            ticket_id=aggregate.identity.ticket_id,sequence=aggregate.last_event_sequence+1,
+            occurred_at_ms=result.leverage_verified_at_ms if isinstance(result,SetLeverageCommandResult) else result.observed_at_ms,
+            command_id=command.command_id,outcome=result.model_dump(mode="json"))
     kind = command.kind
     ticket_id = aggregate.identity.ticket_id
     next_sequence = aggregate.last_event_sequence + 1

@@ -15,7 +15,7 @@ The [detailed design](superpowers/specs/2026-11-06-app-manual-takeover-v1-detail
 defines management authority, external-order evidence, readonly manual lifecycle
 and account admission. The [implementation plan](superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
 maps these requirements to ordered tasks, failure tests, certification and new
-environment acceptance. Both are design proposals; implementation has not started.
+environment acceptance. The Owner has authorized local implementation. See the [M0 protocol and implementation evidence](superpowers/plans/2026-11-06-app-manual-takeover-v1-protocol-evidence.md) for completed checks and remaining work; no new server has been deployed.
 
 ## Code-Based Learning Guide
 

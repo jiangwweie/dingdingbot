@@ -64,7 +64,7 @@ stateDiagram-v2
     review_pending --> terminal: ReviewRecorded
 ```
 
-这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L19) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L124) 为准。
+这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L20) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L128) 为准。
 
 ### 冻结退出规则怎样使用
 
@@ -74,7 +74,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L124)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L117)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L128)。
 
 ## 成交后风险与部分成交
 
@@ -93,7 +93,7 @@ stateDiagram-v2
 | 故障 | 不应推断的事情 | 当前恢复路径 | 代码证据 |
 | --- | --- | --- | --- |
 | ENTRY authoritative reject | 不能自动另发一代 ENTRY | 终结拒绝，释放其资源 | [commands](../../src/trading_kernel/domain/commands.py)、[reducer](../../src/trading_kernel/domain/reducer.py) |
-| 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93) |
+| 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L95) |
 | 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) |
 | 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L738) |
 | Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15) |

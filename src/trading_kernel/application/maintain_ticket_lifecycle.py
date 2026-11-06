@@ -24,6 +24,7 @@ from src.trading_kernel.domain.exit_policy import (
     evaluate_profile_runner_exit,
 )
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class LifecycleMaintenanceStatus(StrEnum):
@@ -120,6 +121,8 @@ async def maintain_ticket_lifecycle(
     aggregate = await uow.aggregates.get(request.ticket_id)
     if aggregate is None:
         raise ValueError("lifecycle Ticket does not exist")
+    if aggregate.management_mode is not ManagementMode.AUTO:
+        return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
     profile_record = await uow.exit_profiles.get_profile(
         exit_profile_id=aggregate.ticket.exit_policy_id,
         semantic_hash=aggregate.ticket.exit_policy_semantic_hash,

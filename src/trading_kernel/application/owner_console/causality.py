@@ -147,6 +147,9 @@ _RECONCILIATION_EVENTS = {
 _REVIEW_EVENTS = {"ReviewRecorded", "ReviewRevised"}
 
 EVENT_STAGE: dict[str, LifecycleStageKey] = {
+    "ManualTakeoverConfirmed": "manual",
+    "ManagedCommandOutcomeObserved": "manual",
+    "ManagementReviewRequired": "manual",
     **{name: "entry" for name in _ENTRY_EVENTS},
     **{name: "protection" for name in _PROTECTION_EVENTS},
     **{name: "tp_runner" for name in _TP_RUNNER_EVENTS},

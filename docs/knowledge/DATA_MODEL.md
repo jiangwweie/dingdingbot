@@ -106,14 +106,14 @@ stateDiagram-v2
     outcome_unknown --> reconciled_absent: 权威不存在证明
 ```
 
-图描述常见路径，具体 kind 的恢复事件与可重试规则见 [commands](../../src/trading_kernel/domain/commands.py)和 [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py)。**Claimed 租约过期不是直接回到 prepared**，仓储会持久化未知结果。（来源：[record_expired_claim_unknown](../../src/trading_kernel/infrastructure/pg_repositories.py#L1090)）
+图描述常见路径，具体 kind 的恢复事件与可重试规则见 [commands](../../src/trading_kernel/domain/commands.py)和 [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py)。**Claimed 租约过期不是直接回到 prepared**，仓储会持久化未知结果。（来源：[record_expired_claim_unknown](../../src/trading_kernel/infrastructure/pg_repositories.py#L1091)）
 
 ### 防重与并发控制
 
 | 不变量 | 数据库或应用措施 | 证据 |
 | --- | --- | --- |
 | 一次机会最多一个 Signal/Ticket | Episode 唯一 Signal；Signal 唯一 Ticket；确定性身份 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)、[producer](../../src/trading_kernel/application/produce_strategy_signal.py) |
-| 同域最多一个活动 Ticket | active_netting_domain_key 唯一；闭合释放活动键 | [PostgresTicketRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L254) |
+| 同域最多一个活动 Ticket | active_netting_domain_key 唯一；闭合释放活动键 | [PostgresTicketRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L255) |
 | 新 ENTRY 串行、组合占用原子 | lane 与账户 exposure 锁；签发事务内重查 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) |
 | 聚合事件不能覆盖并发结果 | expected_version、连续 sequence、CAS | [commit_reduction](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L213) |
 | 命令不重复生成身份 | command/idempotency/client identity 唯一；ENTRY generation 限制 | [commands](../../src/trading_kernel/domain/commands.py)、[pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
@@ -141,7 +141,7 @@ sequenceDiagram
 
 ### 闭合不是删除历史
 
-**ReconciliationMatched** 在确认清理完成后释放资金与活动域，并进入 settlement_pending；**BudgetSettled** 推到 review_pending；**ReviewRecorded** 推到 terminal 并物化 Owner 状态。因此“资金已释放”“Ticket 已终态”“经济指标完整”是可分别观察的事实。（来源：[reduce_event](../../src/trading_kernel/domain/reducer.py#L124)、[settle_ticket](../../src/trading_kernel/application/settle_ticket.py)）
+**ReconciliationMatched** 在确认清理完成后释放资金与活动域，并进入 settlement_pending；**BudgetSettled** 推到 review_pending；**ReviewRecorded** 推到 terminal 并物化 Owner 状态。因此“资金已释放”“Ticket 已终态”“经济指标完整”是可分别观察的事实。（来源：[reduce_event](../../src/trading_kernel/domain/reducer.py#L128)、[settle_ticket](../../src/trading_kernel/application/settle_ticket.py)）
 
 ## 按身份读取的本地查询示例
 

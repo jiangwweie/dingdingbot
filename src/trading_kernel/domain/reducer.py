@@ -73,6 +73,9 @@ from src.trading_kernel.domain.events import (
     LeverageConfirmed,
     LeverageOutcomeUnknown,
     LeverageRejected,
+    ManagedCommandOutcomeObserved,
+    ManagementReviewRequired,
+    ManualTakeoverConfirmed,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
     OwnedOrphanOrderDetected,
@@ -104,6 +107,7 @@ from src.trading_kernel.domain.events import (
     VacuumPostAbsenceNoFillVerified,
 )
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
+from src.trading_kernel.domain.trade_management import ManagementMode
 from src.trading_kernel.domain.vacuum_late_fill import (
     vacuum_late_fill_proof_digest,
     vacuum_no_fill_proof_digest,
@@ -129,6 +133,56 @@ def reduce_event(
         return _issue_ticket(event)
 
     _require_event_identity_and_sequence(current, event)
+
+    if isinstance(event, ManagedCommandOutcomeObserved):
+        if current.management_mode is ManagementMode.AUTO:
+            raise InvalidLifecycleTransition("automatic command results require normal lifecycle reduction")
+        if not event.command_id.strip():
+            raise InvalidLifecycleTransition("managed command result identity missing")
+        return _transition(current,event,status=current.status)
+    if isinstance(event, ManualTakeoverConfirmed):
+        if current.management_mode is ManagementMode.MANUAL:
+            raise InvalidLifecycleTransition("manual takeover cannot be applied twice")
+        if current.initial_stop_exchange_order_id is None or current.position_qty <= 0:
+            raise InvalidLifecycleTransition(
+                "manual takeover requires confirmed initial protection"
+            )
+        if current.entry_lane_held:
+            raise InvalidLifecycleTransition(
+                "manual takeover requires entry lane truth settled"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.MANUAL_OPEN,
+            updates={
+                "management_mode": ManagementMode.MANUAL,
+                "management_revision": current.management_revision + 1,
+                "management_evidence_id": event.evidence_id,
+                "management_reason": event.reason,
+                "manual_takeover_at_ms": event.occurred_at_ms,
+            },
+        )
+    if isinstance(event, ManagementReviewRequired):
+        if current.management_mode is ManagementMode.MANUAL:
+            raise InvalidLifecycleTransition("manual ownership cannot revert to review")
+        if not event.evidence_id.strip() or not event.reason.strip():
+            raise InvalidLifecycleTransition("management review requires evidence")
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "management_mode": ManagementMode.REVIEW_REQUIRED,
+                "management_revision": current.management_revision + 1,
+                "management_evidence_id": event.evidence_id,
+                "management_reason": event.reason,
+            },
+        )
+    if current.management_mode is not ManagementMode.AUTO:
+        raise InvalidLifecycleTransition(
+            "manual or unresolved management forbids automatic lifecycle reduction"
+        )
 
     if isinstance(event, LeverageConfirmed):
         _require_status_in(

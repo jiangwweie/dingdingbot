@@ -98,7 +98,7 @@ flowchart LR
     Signal --> Shadow[只读 Shadow 路径研究]
 ```
 
-**Ticket 不随当前 Policy、Universe 或退出方案的切换而重写**。它冻结出生身份和执行边界，Aggregate 表达随后实际发生的状态。（来源：[TradeTicket](../../src/trading_kernel/domain/ticket.py#L38)、[TradeAggregate](../../src/trading_kernel/domain/aggregate.py#L105)）
+**Ticket 不随当前 Policy、Universe 或退出方案的切换而重写**。它冻结出生身份和执行边界，Aggregate 表达随后实际发生的状态。（来源：[TradeTicket](../../src/trading_kernel/domain/ticket.py#L38)、[TradeAggregate](../../src/trading_kernel/domain/aggregate.py#L108)）
 
 ## 为什么采用这些边界
 

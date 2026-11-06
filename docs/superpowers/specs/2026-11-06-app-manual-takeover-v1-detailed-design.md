@@ -1,7 +1,7 @@
 # AMT-01 App 人工接管 V1 详细设计
 
 日期：**2026-11-06，Asia/Shanghai**。
-状态：**业务规则已确认；本文技术方案待复核，尚未实现或部署。**
+状态：**业务规则已确认，Owner已授权本地实施；技术实现进行中，尚未部署。**
 分支：**`codex/app-manual-takeover-v1`**。
 依据：[Owner 沟通结论](2026-11-06-app-manual-takeover-v1-owner-decisions.md)。
 配套：[实施计划](../plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)。
@@ -399,7 +399,7 @@ Reservation及标的占用，写基础Review和Owner终态投影。完整终态�
 继承的Tokyo状态仅作历史参照，不能同时冒充新环境当前事实。Tokyo分支自己的主路线图
 不随此变更；不随意增加 `docs/current` authority文件。发布记录和产品标识必须相互对应。
 
-本设计不构成部署或实盘验收授权。当前任务只编写文档。
+本设计不构成部署或实盘验收授权。Owner后续已明确授权本分支本地实现与测试；进度及证据见实施计划。
 
 ## 13. 验收矩阵
 
