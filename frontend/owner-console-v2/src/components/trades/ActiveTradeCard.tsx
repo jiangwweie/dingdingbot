@@ -21,6 +21,7 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
   onSelectEpisode,
 }) => {
   const isLong = episode.side === 'long';
+  const management = episode.raw_item.management_mode ?? 'AUTO';
 
   return (
     <div
@@ -75,6 +76,23 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
           </div>
         </div>
 
+        {management !== 'AUTO' && (
+          <section className="mt-3 rounded border border-amber-500/30 p-3 text-sm" aria-label="交易管理方式">
+            <strong>{management === 'MANUAL' ? '整笔已转人工管理' : '接管待核实'}</strong>
+            <p>{management === 'MANUAL' ? '现有 TP1 和止损仍有效，请在交易所 App 管理；程序不再自动退出或修改保护。' : '订单事实待核实，程序已暂停该笔自动处置。'}</p>
+            {episode.raw_item.manual_risk_reason && <p>新增开仓受限：{episode.raw_item.manual_risk_reason}</p>}
+            <p>当前关联挂单：{episode.raw_item.management_orders?.length ?? 0} 笔；以交易所最新事实为准。</p>
+            <ul className="mt-2 space-y-1 font-mono text-xs">
+              {(episode.raw_item.management_orders ?? []).map((order, index) => {
+                const terms = (order.terms && typeof order.terms === 'object' ? order.terms : {}) as Record<string, unknown>;
+                return <li key={String(order.exchange_order_id ?? index)}>
+                  {String(terms.order_type ?? '订单')} · 数量 {String(order.remaining_quantity ?? terms.quantity ?? '按当前仓位')} · 价格 {String(terms.trigger_price ?? terms.price ?? '市价')} · {String(order.exchange_order_id ?? '')}
+                </li>;
+              })}
+            </ul>
+          </section>
+        )}
+        {management === 'AUTO' && (<>
         {/* Row 2: Lifecycle Stepper & Progress */}
         <div className="mt-3.5 space-y-2">
           <div className="flex items-center justify-between text-xs">
@@ -125,6 +143,8 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
             </span>
           </div>
         </div>
+
+        </>)}
 
         {/* Row 3: Economics & Timing Facts */}
         <div className="mt-3.5 grid grid-cols-2 gap-2 rounded border border-border bg-surface-subtle p-2.5 text-xs font-mono">

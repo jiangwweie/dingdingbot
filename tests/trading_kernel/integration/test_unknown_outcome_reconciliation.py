@@ -640,7 +640,7 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
 
 
 @pytest.mark.asyncio
-async def test_unknown_tp1_visible_and_absent_paths_are_both_exact(
+async def test_unknown_tp1_visible_and_absent_paths_are_both_exact_visible(
     dispatch_engine,
 ) -> None:
     visible_ticket, visible_command = await _make_unknown_tp1(
@@ -671,10 +671,16 @@ async def test_unknown_tp1_visible_and_absent_paths_are_both_exact(
     assert aggregate.status is AggregateStatus.POSITION_PROTECTED
     assert aggregate.tp1_exchange_order_id == "venue-take-profit-recovered"
 
+
+
+@pytest.mark.asyncio
+async def test_unknown_tp1_visible_and_absent_paths_are_both_exact_absent(
+    dispatch_engine,
+) -> None:
     absent_ticket, absent_command = await _make_unknown_tp1(
         dispatch_engine,
         position_side="short",
-        seed_policy=False,
+        seed_policy=True,
     )
     absent = await recover_unknown_command(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
@@ -713,7 +719,7 @@ async def test_unknown_tp1_visible_and_absent_paths_are_both_exact(
 
 
 @pytest.mark.asyncio
-async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop(
+async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop_visible(
     dispatch_engine,
 ) -> None:
     visible_ticket, visible_command = await _make_unknown_replacement(
@@ -748,10 +754,16 @@ async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop(
     assert aggregate.active_stop_exchange_order_id == "venue-runner-stop-recovered"
     assert any(item.kind is ExchangeCommandKind.CANCEL_ORDER for item in commands)
 
+
+
+@pytest.mark.asyncio
+async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop_absent(
+    dispatch_engine,
+) -> None:
     absent_ticket, absent_command = await _make_unknown_replacement(
         dispatch_engine,
         position_side="short",
-        seed_policy=False,
+        seed_policy=True,
     )
     absent = await recover_unknown_command(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),

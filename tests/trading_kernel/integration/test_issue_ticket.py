@@ -581,7 +581,7 @@ async def test_active_netting_domain_blocks_a_new_exposure_episode(
 
 
 @pytest.mark.asyncio
-async def test_long_and_short_are_independent_default_netting_domains(
+async def test_app_product_blocks_opposite_side_in_same_instrument(
     issue_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(issue_engine)
@@ -590,7 +590,10 @@ async def test_long_and_short_are_independent_default_netting_domains(
         "signal-2",
         "episode-2",
         position_side="short",
+        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
     )
+    short_ticket=short_ticket.model_copy(update={"runtime_scope_id":"scope-short-btc"})
+    await _seed_ticket_runtime_scope(issue_engine,short_ticket)
     await _issue_and_release_lane(issue_engine, long_ticket)
 
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
@@ -603,14 +606,14 @@ async def test_long_and_short_are_independent_default_netting_domains(
             ),
         )
 
-    assert result.status is IssueTicketStatus.ISSUED
+    assert result.status is IssueTicketStatus.ACTIVE_NETTING_DOMAIN
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         exposure = await uow.entry_admission.get_account_exposure(
             long_ticket.identity.netting_domain.venue_id,
             long_ticket.identity.netting_domain.account_id,
         )
     assert exposure is not None
-    assert exposure.active_ticket_count == 2
+    assert exposure.active_ticket_count == 1
 
 
 @pytest.mark.asyncio
@@ -1137,7 +1140,7 @@ async def _seed_policy(
                 event_spec_id="event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
                 runtime_profile_id=identity.runtime.runtime_profile_id,
                 owner_policy_id="policy-main",
-                exchange_instrument_id=(identity.netting_domain.exchange_instrument_id),
+                exchange_instrument_id="binance-usdm:BNBUSDT:perpetual",
                 position_side="short",
                 universe_version_id="universe:sor-short:4",
                 universe_semantic_digest=_ticket().universe_semantic_digest,
@@ -1228,6 +1231,7 @@ def _ticket_for_signal(
     exposure_episode_id: str,
     *,
     position_side: Literal["long", "short"],
+    exchange_instrument_id: str | None = None,
 ):
     original = _identity()
     runtime = (
@@ -1238,7 +1242,7 @@ def _ticket_for_signal(
     domain = NettingDomain(
         venue_id=original.netting_domain.venue_id,
         account_id=original.netting_domain.account_id,
-        exchange_instrument_id=original.netting_domain.exchange_instrument_id,
+        exchange_instrument_id=exchange_instrument_id or ("binance-usdm:BNBUSDT:perpetual" if position_side=="short" else original.netting_domain.exchange_instrument_id),
         position_side=position_side,
     )
     identity = TicketIdentity(

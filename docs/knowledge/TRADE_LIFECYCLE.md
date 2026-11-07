@@ -20,7 +20,7 @@
 | 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
 | 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
 | 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L207) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
-| 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
+| 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L135) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
 | 10. 生命周期维护 | [run_lifecycle_worker_once](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L117) | TP1、保本、Runner 或退出命令及状态 | 事实不新鲜、替换/撤单未知 |
 | 11. 核对及清理 | Reconciliation 读取外部持仓与自有余单 | 清理精确残单；满足外部 flat 与无余单后推进闭合 | orphan / unowned order、未知结果、未完成清理 |
 | 12. 结算与复盘 | [settle_ticket](../../src/trading_kernel/application/settle_ticket.py#L64)、[record_trade_review](../../src/trading_kernel/application/settle_ticket.py#L85) | BudgetSettled、ReviewRecorded、终态与 Owner 投影 | 经济数据仍不可得则按实现等待或显式 unknown |
@@ -63,7 +63,7 @@ sequenceDiagram
     R->>DB: 结算 复盘 终态 Owner 投影
 ```
 
-时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L128) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158)。
+时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L130) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158)。
 
 ## 未进入交易的分支
 
@@ -113,7 +113,7 @@ sequenceDiagram
 
 ### 部分成交与重启
 
-1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。另有专门的 Vacuum 撤单完成分支，可在风险与双腿退出条件满足后记录 `VacuumPartialRetained`；不能把这一分支泛化成普通部分成交可直接保留。契约差异见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L128)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L170)）
+1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。另有专门的 Vacuum 撤单完成分支，可在风险与双腿退出条件满足后记录 `VacuumPartialRetained`；不能把这一分支泛化成普通部分成交可直接保留。契约差异见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L130)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L171)）
 2. **持久化后、派发前重启**：恢复数据库中的 Command，由新租约领取，仍需身份和时效校验。
 3. **派发后、结果落库前重启**：不能凭租约到期认定请求未发；仓储领取与 unknown 恢复负责把不确定性保留下来。（来源：[PostgresExchangeCommandRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L741)、[派发集成测试](../../tests/trading_kernel/integration/test_command_dispatch.py)）
 4. **跨代码或 schema 重启**：先过 Runtime Fence；不匹配写者不能继续外部变更。（来源：[runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15)）

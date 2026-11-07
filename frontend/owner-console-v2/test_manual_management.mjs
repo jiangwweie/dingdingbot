@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { mapTradeListItemToEpisode } from './src/mapping/tradeEpisodeMapping.ts';
+const base={ticket_id:'manual',ticket_status:'issued',terminal_at_ms:null,issued_at_ms:1000,strategy_group_id:'CPM-RO-001',event_spec_id:'event',exchange_instrument_id:'binance-usdm:BTCUSDT:perpetual',position_side:'long',aggregate_status:'position_protected',lifecycle_stage:'protection',completed_stage_count:3,total_stage_count:8,net_pnl:{value:null,unit:'USDT'},net_r:{value:null,unit:'R'},gross_pnl:{value:null,unit:'USDT'},fees:{value:null,unit:'USDT'},funding:{value:null,unit:'USDT'},attention_items:[]};
+const manual=mapTradeListItemToEpisode({...base,management_mode:'MANUAL',manual_risk_reason:'manual_stop_coverage_incomplete'});
+assert.equal(manual.is_protected,false);
+assert.match(manual.protection_state,/人工管理.*待核实/);
+const review=mapTradeListItemToEpisode({...base,management_mode:'REVIEW_REQUIRED'});
+assert.equal(review.is_protected,false);assert.match(review.protection_state,/接管待核实/);
+const automatic=mapTradeListItemToEpisode({...base,management_mode:'AUTO'});
+assert.equal(automatic.is_protected,true);
+console.log('Manual/review ownership never inherits automatic protection badge: PASS');

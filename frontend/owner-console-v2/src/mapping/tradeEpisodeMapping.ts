@@ -19,6 +19,7 @@ export const STAGE_LABELS_ZH: Record<string, string> = {
   admission: '准入评估 (Admission)',
   entry: '入场下单 (Entry)',
   protection: '保护安装 (Protection)',
+  manual: '人工管理',
   tp_runner: '止盈 / Runner (TP/Runner)',
   exit: '退出执行 (Exit)',
   reconciliation: '账本对账 (Reconciliation)',
@@ -116,7 +117,7 @@ export function mapTradeListItemToEpisode(
   }
 
   // Protection state
-  const protection = protectionFact(item.aggregate_status);
+  const protection = item.management_mode === 'MANUAL' ? {confirmed:false,label:item.manual_risk_reason ? '人工管理 · 保护待核实' : '人工管理 · 以 App 当前订单为准'} : item.management_mode === 'REVIEW_REQUIRED' ? {confirmed:false,label:'接管待核实 · 自动处置暂停'} : protectionFact(item.aggregate_status);
   const isProtected = protection.confirmed;
   const protectionState = protection.label;
 

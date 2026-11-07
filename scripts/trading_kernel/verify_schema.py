@@ -1635,13 +1635,14 @@ async def _certified_0002_capabilities(
 _APP_MANAGEMENT_SOURCE_COLUMNS = frozenset({
     "management_mode", "management_revision", "management_evidence_id",
     "management_reason", "manual_takeover_at_ms",
+    "management_orders", "manual_risk_reason", "manual_risk_at_stop", "management_observed_at_ms",
 })
 
 
 def _without_app_management_columns(tables: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
     """Deployment-only exact inventory for pre-0016 source preservation."""
     return {name: tuple(c for c in columns if name != "brc_trade_aggregates" or c not in _APP_MANAGEMENT_SOURCE_COLUMNS)
-            for name, columns in tables.items()}
+            for name, columns in tables.items() if name not in {"brc_management_order_evidence","brc_management_observation_current"}}
 
 
 def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
@@ -3084,6 +3085,7 @@ async def _generic_owner_recovery_preservation_manifest(connection: AsyncConnect
     tables=[]
     count=0
     for name,table in sorted(metadata.tables.items()):
+        if name in {"brc_management_order_evidence","brc_management_observation_current"}:continue
         columns=_without_app_management_columns({name:tuple(table.c.keys())})[name]
         rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
         canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))

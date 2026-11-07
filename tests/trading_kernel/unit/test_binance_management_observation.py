@@ -135,7 +135,7 @@ def test_triggered_algo_is_not_manual_cancel():
     assert parse(m).action is OrderAction.TRIGGERED
 
 
-@pytest.mark.parametrize("field", ["ps", "R", "cp", "q", "S", "s"])
+@pytest.mark.parametrize("field", ["ps", "R", "q", "S", "s"])
 def test_missing_required_facts_are_not_defaulted(field):
     m = message()
     del m["o"][field]
@@ -263,3 +263,10 @@ def test_explicit_missing_algo_activation_is_not_guessed():
     }
     with pytest.raises(ValueError, match="activation discriminator"):
         parse(m)
+
+
+def test_regular_limit_event_may_omit_conditional_only_fields():
+    m=message()
+    for key in ('cp','pP'):m['o'].pop(key)
+    e=parse(m)
+    assert not e.terms.close_position and not e.terms.price_protect

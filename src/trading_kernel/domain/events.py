@@ -575,9 +575,32 @@ class ManagementReviewRequired(_TicketEvent):
     reason: str
 
 
+class ManagementReviewCleared(_TicketEvent):
+    coverage_from_ms: int
+    coverage_until_ms: int
+
+
 class ManagedCommandOutcomeObserved(_TicketEvent):
     command_id: str
     outcome: dict[str, JsonValue]
+
+
+
+class ManualPositionObserved(_TicketEvent):
+    risk_at_stop: Decimal | None = None
+    risk_reason: str | None = None
+    quantity: Decimal
+    protected_quantity: Decimal
+    orders: tuple[dict[str, JsonValue], ...]
+    facts_complete: bool
+    commands_resolved: bool
+
+    @model_validator(mode="after")
+    def valid_quantities(self):
+        if any(not x.is_finite() or x<0 for x in (self.quantity,self.protected_quantity)):
+            raise ValueError("manual quantities must be finite and nonnegative")
+        if self.protected_quantity>self.quantity:raise ValueError("protection exceeds position")
+        return self
 
 
 
@@ -585,6 +608,8 @@ TradeEvent = (
     TicketIssued
     | ManualTakeoverConfirmed
     | ManagementReviewRequired
+    | ManualPositionObserved
+    | ManagementReviewCleared
     | ManagedCommandOutcomeObserved
     | LeverageConfirmed
     | LeverageRejected

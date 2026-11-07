@@ -224,20 +224,24 @@ def classify_order_evidence(
     def result(decision: ManagementDecision, reason: str) -> ClassifiedOrderEvidence:
         return ClassifiedOrderEvidence(decision=decision, reason=reason)
 
-    if not evidence.coverage_complete or evidence.known_command_outcome_pending:
-        return result(
-            ManagementDecision.UNRESOLVED, "order_history_incomplete_or_command_unknown"
-        )
     matching = tuple(
         i for i in system_intents if i.terms.identity == evidence.terms.identity
     )
     exact = tuple(i for i in matching if i.terms == evidence.terms)
+    if matching and not exact and evidence.terms.reduces_position and not evidence.known_command_outcome_pending and evidence.action in {OrderAction.NEW,OrderAction.STATUS,OrderAction.TRADE,OrderAction.AMENDMENT,OrderAction.CANCEL}:
+        return result(ManagementDecision.EXTERNAL,"external_known_order_terms_changed")
+    if not evidence.coverage_complete or evidence.known_command_outcome_pending:
+        return result(
+            ManagementDecision.UNRESOLVED, "order_history_incomplete_or_command_unknown"
+        )
     if any(
         i.action == evidence.action
         and i.exchange_event_at_ms == evidence.exchange_event_at_ms
         for i in exact
     ):
         return result(ManagementDecision.SYSTEM, "exact_durable_command_result")
+    if evidence.action is OrderAction.NEW and exact and evidence.created_at_ms is not None and any(i.action is OrderAction.NEW and i.exchange_event_at_ms==evidence.created_at_ms for i in exact):
+        return result(ManagementDecision.NATURAL,"known_order_current_status")
     if evidence.action is OrderAction.MISSING:
         return result(
             ManagementDecision.UNRESOLVED, "order_absence_is_not_cancellation"

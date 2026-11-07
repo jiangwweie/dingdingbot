@@ -122,7 +122,7 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
     """Build the sole authenticated Binance USD-M venue mutation boundary."""
 
     settings = ProductionRuntimeSettings.from_environment()
-    exchange = ccxt_async.binanceusdm(
+    exchange = _management_exchange(
         {
             "apiKey": settings.api_key.get_secret_value(),
             "secret": settings.api_secret.get_secret_value(),
@@ -195,3 +195,10 @@ def _decimal_environment(values: Mapping[str, str], key: str) -> Decimal:
         return Decimal(raw)
     except InvalidOperation as exc:
         raise ValueError(f"{key} must be a decimal") from exc
+
+
+def _management_exchange(config):
+    from src.trading_kernel.infrastructure.binance_management_stream import (
+        ManagementBinanceUsdm,
+    )
+    return ManagementBinanceUsdm(config)

@@ -1832,6 +1832,9 @@ def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
             trade_tickets.c.created_at_ms.label("issued_at_ms"),
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
             trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.management_mode,trade_aggregates.c.management_reason,
+            trade_aggregates.c.manual_takeover_at_ms,trade_aggregates.c.management_observed_at_ms,
+            trade_aggregates.c.manual_risk_reason,trade_aggregates.c.management_orders,
             trade_aggregates.c.last_event_sequence,
             trade_aggregates.c.review_id.label("aggregate_review_id"),
             trade_aggregates.c.position_qty,
@@ -1966,6 +1969,8 @@ def _causality_aggregate_facts(
     return TradeCausalityAggregateFacts(
         ticket_id=str(row["aggregate_ticket_id"]),
         aggregate_status=str(row["aggregate_status"]),
+        management_mode=row["management_mode"],management_reason=row["management_reason"],manual_takeover_at_ms=row["manual_takeover_at_ms"],
+        management_observed_at_ms=row["management_observed_at_ms"],manual_risk_reason=row["manual_risk_reason"],management_orders=tuple(row["management_orders"]),
         last_event_sequence=int(row["last_event_sequence"]),
         review_id=(
             None
@@ -2126,6 +2131,8 @@ def _causality_trade_item_facts(
         position_side=cast(Literal["long", "short"], str(ticket_row["position_side"])),
         ticket_status=str(ticket_row["ticket_status"]),
         aggregate_status=str(ticket_row["aggregate_status"]),
+        management_mode=ticket_row["management_mode"],management_reason=ticket_row["management_reason"],manual_takeover_at_ms=ticket_row["manual_takeover_at_ms"],
+        management_observed_at_ms=ticket_row["management_observed_at_ms"],manual_risk_reason=ticket_row["manual_risk_reason"],management_orders=tuple(ticket_row["management_orders"]),
         issued_at_ms=int(ticket_row["issued_at_ms"]),
         terminal_at_ms=(
             None
@@ -2612,6 +2619,9 @@ def _ticket_facts_select(
             trade_tickets.c.terminal_at_ms,
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
             trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.management_mode,trade_aggregates.c.management_reason,
+            trade_aggregates.c.manual_takeover_at_ms,trade_aggregates.c.management_observed_at_ms,
+            trade_aggregates.c.manual_risk_reason,trade_aggregates.c.management_orders,
             trade_aggregates.c.review_id.label("aggregate_review_id"),
             trade_reviews.c.review_id,
             trade_reviews.c.ticket_id.label("review_ticket_id"),
@@ -2791,6 +2801,9 @@ def _review_center_ticket_query(
             trade_aggregates.c.actual_stop_risk,
             trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
             trade_aggregates.c.status.label("aggregate_status"),
+            trade_aggregates.c.management_mode,trade_aggregates.c.management_reason,
+            trade_aggregates.c.manual_takeover_at_ms,trade_aggregates.c.management_observed_at_ms,
+            trade_aggregates.c.manual_risk_reason,trade_aggregates.c.management_orders,
             trade_aggregates.c.review_id.label("aggregate_review_id"),
             trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
             trade_reviews.c.review_id,
@@ -2938,6 +2951,8 @@ def _trade_item_facts_from_row(row: RowMapping) -> TradeItemFacts:
         position_side=cast(Literal["long", "short"], str(row["position_side"])),
         ticket_status=str(row["ticket_status"]),
         aggregate_status=str(row["aggregate_status"]),
+        management_mode=row["management_mode"],management_reason=row["management_reason"],manual_takeover_at_ms=row["manual_takeover_at_ms"],
+        management_observed_at_ms=row["management_observed_at_ms"],manual_risk_reason=row["manual_risk_reason"],management_orders=tuple(row["management_orders"]),
         issued_at_ms=issued_at_ms,
         terminal_at_ms=(
             None if row["terminal_at_ms"] is None else int(row["terminal_at_ms"])

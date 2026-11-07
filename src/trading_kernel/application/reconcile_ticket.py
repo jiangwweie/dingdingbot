@@ -33,6 +33,7 @@ from src.trading_kernel.domain.events import (
     EntryPartiallyFilled,
     ExitRequested,
     ExternalFlatDetected,
+    ManualPositionObserved,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanOrderDetected,
     PositionFlatConfirmed,
@@ -51,6 +52,7 @@ from src.trading_kernel.domain.post_fill_risk import (
     assess_post_fill_risk,
 )
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class ReconcileTicketStatus(StrEnum):
@@ -68,6 +70,7 @@ class ReconcileTicketStatus(StrEnum):
 
 
 class ExitTicketStatus(StrEnum):
+    MANUAL_MANAGEMENT_SKIPPED = "manual_management_skipped"
     REQUESTED = "requested"
 
 
@@ -148,6 +151,10 @@ async def reconcile_ticket(
             return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
         await _record_late_fill_incident(uow, aggregate, snapshot)
         return ReconcileTicketResult(status=ReconcileTicketStatus.LATE_FILL_INCIDENT)
+    if aggregate.management_mode is ManagementMode.REVIEW_REQUIRED:
+        return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
+    if aggregate.management_mode is ManagementMode.MANUAL:
+        return await _reconcile_manual(uow,aggregate,snapshot)
     await uow.positions.upsert(ticket_id=request.ticket_id, snapshot=snapshot)
     await uow.monitors.save_if_changed(
         MonitorStateRecord(
@@ -439,6 +446,7 @@ async def reconcile_post_fill_stress(
     aggregate = await uow.aggregates.get_for_update(request.ticket_id)
     if (
         aggregate is None
+        or aggregate.management_mode is not ManagementMode.AUTO
         or aggregate.status is not AggregateStatus.POST_FILL_RISK_PENDING
     ):
         return PostFillStressReconcileResult(
@@ -616,6 +624,7 @@ async def record_post_fill_stress_retry(
     aggregate = await uow.aggregates.get_for_update(ticket_id)
     if (
         aggregate is None
+        or aggregate.management_mode is not ManagementMode.AUTO
         or aggregate.status is not AggregateStatus.POST_FILL_RISK_PENDING
     ):
         return
@@ -754,6 +763,8 @@ async def request_exit(
     aggregate = await uow.aggregates.get(request.ticket_id)
     if aggregate is None:
         raise ValueError("Ticket aggregate does not exist")
+    if aggregate.management_mode is not ManagementMode.AUTO:
+        return ExitTicketResult(status=ExitTicketStatus.MANUAL_MANAGEMENT_SKIPPED)
     event = ExitRequested(
         event_id=_event_id(aggregate),
         ticket_id=request.ticket_id,
@@ -805,3 +816,40 @@ def _next_known_cleanup_order_id(aggregate) -> str | None:
         if identity is not None and identity not in identities:
             identities.append(identity)
     return None if not identities else identities[0]
+
+
+async def _reconcile_manual(uow,aggregate,snapshot):
+    from src.trading_kernel.domain.commands import ExchangeCommandStatus
+    if snapshot.quantity>aggregate.position_qty:
+        await _record_late_fill_incident(uow,aggregate,snapshot)
+        return ReconcileTicketResult(status=ReconcileTicketStatus.LATE_FILL_INCIDENT)
+    prior=await uow.positions.get(snapshot.netting_domain.key())
+    if prior is not None and snapshot.observed_at_ms<prior.observed_at_ms:
+        return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
+    await uow.positions.upsert(ticket_id=aggregate.identity.ticket_id,snapshot=snapshot)
+    orders=tuple(order.model_dump(mode="json") for order in snapshot.open_orders)
+    commands=await uow.exchange_commands.list_for_ticket(aggregate.identity.ticket_id)
+    resolved=not any(c.status in {ExchangeCommandStatus.PREPARED,ExchangeCommandStatus.CLAIMED,ExchangeCommandStatus.OUTCOME_UNKNOWN} for c in commands)
+    # Without typed protective order terms, do not preserve a stale protected quantity.
+    from src.trading_kernel.domain.manual_position import assess_manual_exposure
+    assessment=assess_manual_exposure(quantity=snapshot.quantity,initial_quantity=aggregate.ticket.quantity,
+        initial_risk=aggregate.ticket.risk_at_stop,entry_price=aggregate.average_fill_price or aggregate.ticket.entry_reference_price,
+        position_side=aggregate.identity.netting_domain.position_side,
+        orders=tuple(o.terms.model_copy(update={'quantity':o.remaining_quantity}) if not o.terms.close_position and o.remaining_quantity is not None and o.remaining_quantity>0 else o.terms for o in snapshot.open_orders if o.terms is not None and o.remaining_quantity!=0),
+        facts_complete=snapshot.orders_complete)
+    protected=assessment.protected_quantity
+    event=ManualPositionObserved(event_id=_event_id(aggregate),ticket_id=aggregate.identity.ticket_id,
+        sequence=aggregate.last_event_sequence+1,occurred_at_ms=snapshot.observed_at_ms,
+        quantity=snapshot.quantity,protected_quantity=protected,orders=orders,
+        facts_complete=snapshot.orders_complete,commands_resolved=resolved,
+        risk_at_stop=assessment.risk_at_stop,risk_reason=assessment.reason)
+    if not snapshot.orders_complete:
+        await uow.management.refresh_manual_risk(aggregate.identity.ticket_id,observed_at_ms=snapshot.observed_at_ms,
+            risk=None,reason=assessment.reason,orders=list(aggregate.management_orders))
+        return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
+    desired=reduce_event(aggregate,event)
+    await uow.management.refresh_manual_risk(aggregate.identity.ticket_id,observed_at_ms=snapshot.observed_at_ms,
+        risk=assessment.risk_at_stop,reason=assessment.reason,orders=list(orders))
+    if desired.aggregate.status!=aggregate.status or snapshot.quantity!=aggregate.position_qty or protected!=aggregate.protected_qty or assessment.reason!=aggregate.manual_risk_reason or assessment.risk_at_stop!=aggregate.manual_risk_at_stop or orders!=aggregate.management_orders:
+        await uow.commit_reduction(event=event,reduction=desired,expected_version=aggregate.version)
+    return ReconcileTicketResult(status=ReconcileTicketStatus.POSITION_FLAT_RECORDED if snapshot.quantity==0 else ReconcileTicketStatus.NO_CHANGE)

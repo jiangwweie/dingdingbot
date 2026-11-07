@@ -53,6 +53,7 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuum,
     StrategyEntryVacuumState,
 )
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class OwnerControlConflict(RuntimeError):
@@ -899,7 +900,7 @@ async def consume_pending_flatten(
         classifications[ticket_id] = (
             ControlledExitClassification.TERMINAL
             if aggregate is None
-            else classify_controlled_exit_status(aggregate.status)
+            else ControlledExitClassification.BLOCKED if aggregate.management_mode is not ManagementMode.AUTO else classify_controlled_exit_status(aggregate.status)
         )
     blocked = tuple(
         ticket_id
@@ -908,7 +909,7 @@ async def consume_pending_flatten(
     )
     if blocked:
         target_state = ControlOperationState.BLOCKED
-        blocker = f"ticket_not_flattenable:{blocked[0]}"
+        blocker = f"ticket_not_flattenable_or_manual_management:{blocked[0]}"
     else:
         for ticket_id, classification in classifications.items():
             if classification is ControlledExitClassification.ELIGIBLE:

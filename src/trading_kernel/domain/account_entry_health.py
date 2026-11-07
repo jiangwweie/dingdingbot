@@ -18,6 +18,7 @@ from src.trading_kernel.domain.incident_blocking import (
 
 
 class AccountEntryHealthStatus(StrEnum):
+    MANAGEMENT_RISK_UNAVAILABLE = "manual_management_risk_unavailable"
     HEALTHY = "healthy"
     RUNTIME_FENCED = "runtime_fenced"
     ACCOUNT_INCIDENT = "account_incident"
@@ -42,6 +43,8 @@ def classify_account_entry_health(
 ) -> AccountEntryHealth:
     """Classify all account exposure without independently reading venue truth."""
 
+    if ownership.management_blocker is not None:
+        return _health(snapshot,AccountEntryHealthStatus.MANAGEMENT_RISK_UNAVAILABLE,EntryBlockScope.ACCOUNT_CAPACITY)
     if EntryBlockScope.RUNTIME in ownership.open_incident_scopes:
         return _health(snapshot, AccountEntryHealthStatus.RUNTIME_FENCED, EntryBlockScope.RUNTIME)
     if ownership.unknown_command_outcome_ticket_ids:

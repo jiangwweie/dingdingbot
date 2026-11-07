@@ -83,7 +83,7 @@ def test_late_position_from_terminal_ticket_blocks_new_entry_across_instruments(
     assert instrument.status is InstrumentEntryHealthStatus.HEALTHY_FLAT
 
 
-def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() -> None:
+def test_app_owned_opposite_side_position_blocks_new_instrument_entry() -> None:
     snapshot = _snapshot(
         positions=(
             AccountRiskPosition(
@@ -127,7 +127,7 @@ def test_owned_opposite_side_position_allows_shared_leverage_without_mutation() 
         requested_position_side="short",
     )
 
-    assert health.status is InstrumentEntryHealthStatus.HEALTHY_OPPOSITE_SIDE
+    assert health.status is InstrumentEntryHealthStatus.INSTRUMENT_OCCUPIED
     assert health.configured_leverage == 3
     assert health.leverage_change_allowed is False
     assert health.entry_block_scope is EntryBlockScope.NONE

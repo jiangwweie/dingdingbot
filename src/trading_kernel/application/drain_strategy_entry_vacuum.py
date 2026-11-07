@@ -57,6 +57,7 @@ from src.trading_kernel.domain.selection_authority import (
 from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuumState,
 )
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 
 class VacuumDrainStatus(StrEnum):
@@ -173,6 +174,8 @@ def plan_vacuum_ticket_drain(
     """Plan one reducer event without performing database or venue I/O."""
 
     aggregate = facts.aggregate
+    if aggregate.management_mode is not ManagementMode.AUTO:
+        return VacuumTicketDrainPlan(event=None,reason_code="manual_management_requires_owner")
     snapshot = facts.position_snapshot
     if snapshot is not None and snapshot.netting_domain != aggregate.identity.netting_domain:
         raise ValueError("Vacuum position snapshot Netting Domain mismatch")

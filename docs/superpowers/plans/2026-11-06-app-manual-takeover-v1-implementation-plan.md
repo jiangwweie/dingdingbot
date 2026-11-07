@@ -1,7 +1,7 @@
 # AMT-01 App 人工接管 V1 实施计划
 
 日期：**2026-11-06，Asia/Shanghai**。
-状态：**Owner于2026-11-06授权开始本地实施与测试；M0核实及M1/M2/M3基础实现进行中，不含部署。**
+状态：**Owner于2026-11-06授权开始本地实施与测试；前置程序接入与受影响验证已完成；等待进入完整验证与发布隔离的确认。**
 工作分支：**`codex/app-manual-takeover-v1`**。
 依据：[Owner 结论](../specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)、
 [详细设计](../specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)。
@@ -47,12 +47,12 @@ M3与M4、M5共享核心文件，必须顺序集成。默认负责人均为当�
 | 任务 | 交付物 | 主要允许边界 | 前置依赖 | 状态 |
 | --- | --- | --- | --- | --- |
 | M0 证据与接口能力 | App操作覆盖矩阵、现有行为基线、环境隔离方案 | 只读适配审阅、协议fixtures、计划记录 | Owner启动实施 | 进行中 |
-| M1 权威模型与迁移 | 管理权模型、事件、表/约束、唯一标的占用 | domain、pg_models、迁移、identity/seed | M0能力覆盖明确；不依赖账户验证的基础模型先行 | 进行中，未完成 |
-| M2 采集与归因 | 完整订单条款、事件/历史补采、游标和归因器 | venue adapter、ports、Reconciliation、相关仓储 | M1 | 基础协议已实现，采集未接入 |
-| M3 接管与写入限制 | 接管原子事务、所有写入口限制、持久化状态 | reducer/UoW/dispatch/lifecycle/controlled exit | M2 | 基础事务/写检查已实现，未完成 |
-| M4 人工只读生命周期 | 部分退出、残留订单、正常终结与基础账务 | reconcile、scheduler、仓储、结算/Review | M3 | 未开始 |
-| M5 风险和标的互斥 | 人工占用、未知风险阻断、禁止同标的双向 | admission、claim、ticket、preflight、预算仓储 | M4 | 未开始 |
-| M6 Owner展示与通知 | 管理状态、事实健康、现有挂单与通知去重 | Owner DTO/API/V2、monitor/notice | M4、M5 | 未开始 |
+| M1 权威模型与迁移 | 管理权模型、事件、表/约束、唯一标的占用 | domain、pg_models、迁移、identity/seed | M0能力覆盖明确；不依赖账户验证的基础模型先行 | 前置接入完成，整体待验 |
+| M2 采集与归因 | 完整订单条款、事件/历史补采、游标和归因器 | venue adapter、ports、Reconciliation、相关仓储 | M1 | 采集已接入，实账户覆盖待验 |
+| M3 接管与写入限制 | 接管原子事务、所有写入口限制、持久化状态 | reducer/UoW/dispatch/lifecycle/controlled exit | M2 | 前置接入及定向验证完成 |
+| M4 人工只读生命周期 | 部分退出、残留订单、正常终结与基础账务 | reconcile、scheduler、仓储、结算/Review | M3 | 前置实现及受影响验证完成 |
+| M5 风险和标的互斥 | 人工占用、未知风险阻断、禁止同标的双向 | admission、claim、ticket、preflight、预算仓储 | M4 | 前置实现及受影响验证完成 |
+| M6 Owner展示与通知 | 管理状态、事实健康、现有挂单与通知去重 | Owner DTO/API/V2、monitor/notice | M4、M5 | 前置实现及受影响验证完成 |
 | M7 集成与审查 | 验收矩阵、无干预对照、全部路径写入审计 | 受影响测试、分支合同 | M1–M6 | 未开始 |
 | M8 精确候选认证 | R4及配套API/Static证书、新环境安装演练 | 官方认证、发布与本地演练 | M7、候选冻结 | 未开始 |
 | M9 新环境部署验收 | 身份/配置/服务postflight、自然验收记录 | 明确的新目标服务器和账户 | 单独部署授权、M8 | 未开始 |
@@ -366,6 +366,10 @@ Owner明确授权新目标部署；独立服务器/子账户/凭据已通过正�
 无接管后系统新写入，终态残留清理/结算边界有对应验证。
 
 ## 15. 当前计划状态
+
+2026-11-07更新：[前置实现交付记录](2026-11-07-app-manual-takeover-prevalidation-handoff.md)。
+Owner要求在“完整验证与发布隔离”前等待确认；M7完整验收、M8、M9未执行。
+以下为前一批基础实现历史，不代表当前最新进度。
 
 已开始M0协议核实及首批纯模型/协议测试，见[M0证据记录](2026-11-06-app-manual-takeover-v1-protocol-evidence.md)。
 尚未完成数据库、Worker接入或完整交易链，更未进行服务器采购/配置或部署。

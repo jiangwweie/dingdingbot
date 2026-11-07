@@ -18,7 +18,8 @@ TradingKernelSchemaRevision = Literal[
     "0014_dynamic_risk_budget_v1",
     "0015_generic_owner_recovery_v1",
     "0016_app_manual_takeover_v1",
+    "0017_app_management_observation",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0016_app_manual_takeover_v1"
+    "0017_app_management_observation"
 )

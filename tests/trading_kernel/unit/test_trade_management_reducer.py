@@ -77,3 +77,8 @@ def test_takeover_rejected_before_initial_protection():
     a = protected().model_copy(update={"initial_stop_exchange_order_id": None})
     with pytest.raises(InvalidLifecycleTransition, match="initial protection"):
         reduce_event(a, takeover(a))
+
+
+def test_runner_takeover_uses_current_protection_not_cancelled_initial_order():
+    a=protected().model_copy(update={'status':AggregateStatus.RUNNER_PROTECTED,'initial_stop_exchange_order_id':None,'active_stop_exchange_order_id':'runner-stop','post_fill_stress_status':'passed'})
+    assert reduce_event(a,takeover(a)).aggregate.management_mode is ManagementMode.MANUAL

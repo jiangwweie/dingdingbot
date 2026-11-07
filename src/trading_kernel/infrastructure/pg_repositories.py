@@ -891,6 +891,9 @@ class PostgresExchangeCommandRepository:
             exchange_commands.c.status == ExchangeCommandStatus.PREPARED.value,
             exchange_commands.c.deadline_at_ms > now_ms,
         ]
+        conditions.append(~sa.exists(sa.select(trade_aggregates.c.ticket_id).where(
+            trade_aggregates.c.ticket_id==exchange_commands.c.ticket_id,
+            trade_aggregates.c.management_mode=='REVIEW_REQUIRED')))
         if ticket_id is not None:
             conditions.append(exchange_commands.c.ticket_id == ticket_id)
         if command_kinds:
@@ -2593,11 +2596,12 @@ class PostgresEntryAdmissionRepository:
         )
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool:
-        result = await self._connection.execute(
-            sa.select(trade_tickets.c.ticket_id)
-            .where(trade_tickets.c.active_netting_domain_key == netting_domain_key)
-            .limit(1)
-        )
+        # Identity encodes the side last; this product excludes both sides of
+        # the same exact account+instrument, retaining all original identities.
+        opposite=netting_domain_key.rsplit(":",1)[0]+(":short" if netting_domain_key.endswith(":long") else ":long")
+        result=await self._connection.execute(sa.select(trade_tickets.c.ticket_id).where(
+            trade_tickets.c.netting_domain_key.in_((netting_domain_key,opposite)),
+            sa.or_(trade_tickets.c.terminal_at_ms.is_(None),trade_tickets.c.active_netting_domain_key.is_not(None))).limit(1))
         return result.scalar_one_or_none() is not None
 
     async def has_ticket_for_signal(self, signal_event_id: str) -> bool:
@@ -2672,8 +2676,8 @@ class PostgresEntryAdmissionRepository:
     ) -> Decimal:
         result = await self._connection.execute(
             sa.select(
-                sa.func.coalesce(sa.func.sum(trade_tickets.c.risk_at_stop), 0)
-            ).where(
+                sa.func.coalesce(sa.func.sum(sa.case((sa.and_(trade_aggregates.c.management_mode=="MANUAL",trade_aggregates.c.manual_risk_at_stop.is_not(None)),trade_aggregates.c.manual_risk_at_stop),else_=trade_tickets.c.risk_at_stop)), 0)
+            ).join(trade_aggregates,trade_aggregates.c.ticket_id==trade_tickets.c.ticket_id).where(
                 trade_tickets.c.venue_id == venue_id,
                 trade_tickets.c.account_id == account_id,
                 trade_tickets.c.position_side == position_side,
@@ -2811,7 +2815,16 @@ class PostgresEntryAdmissionRepository:
                 key=lambda scope: scope.value,
             )
         )
+        from src.trading_kernel.infrastructure.pg_management_repository import (
+            PostgresManagementRepository,
+        )
+        now_ms=int(await self._connection.scalar(sa.text("SELECT extract(epoch from clock_timestamp())*1000")))
+        management_reason=await PostgresManagementRepository(self._connection).account_blocker(venue_id,account_id,now_ms)
+        external_rows=(await self._connection.execute(sa.select(trade_aggregates.c.management_orders).join(trade_tickets,trade_tickets.c.ticket_id==trade_aggregates.c.ticket_id).where(
+            trade_tickets.c.venue_id==venue_id,trade_tickets.c.account_id==account_id,trade_tickets.c.terminal_at_ms.is_(None),trade_tickets.c.active_netting_domain_key.is_not(None),trade_aggregates.c.management_mode=='MANUAL'))).scalars().all()
+        owned_exchange_order_ids=tuple(sorted(set(owned_exchange_order_ids)|{str(o['exchange_order_id']) for rows in external_rows for o in rows if o.get('exchange_order_id')}))
         return AdmissionOwnership(
+            management_blocker=management_reason,
             owned_position_domain_keys=owned_position_domain_keys,
             owned_position_projections=owned_position_projections,
             owned_exchange_order_ids=owned_exchange_order_ids,
@@ -2834,7 +2847,14 @@ class PostgresEntryAdmissionRepository:
             statement = statement.with_for_update(of=account_exposure_current)
         result = await self._connection.execute(statement)
         row = result.mappings().one_or_none()
-        return None if row is None else AccountExposureSnapshot.model_validate(row)
+        if row is None:return None
+        snapshot=AccountExposureSnapshot.model_validate(row)
+        extra=await self._connection.scalar(sa.select(sa.func.coalesce(sa.func.sum(
+            trade_aggregates.c.manual_risk_at_stop-trade_tickets.c.risk_at_stop),0)).join(trade_tickets,trade_tickets.c.ticket_id==trade_aggregates.c.ticket_id).where(
+            trade_tickets.c.venue_id==venue_id,trade_tickets.c.account_id==account_id,
+            trade_tickets.c.terminal_at_ms.is_(None),trade_tickets.c.active_netting_domain_key.is_not(None),trade_aggregates.c.management_mode=='MANUAL'))
+        return snapshot.model_copy(update={"gross_risk_at_stop":snapshot.gross_risk_at_stop+Decimal(extra or 0)})
+
 
     async def reserve_account_exposure(
         self,
@@ -2894,11 +2914,9 @@ class PostgresEntryAdmissionRepository:
         reserved_margin: Decimal,
         updated_at_ms: int,
     ) -> None:
-        current = await self.get_account_exposure(
-            venue_id,
-            account_id,
-            for_update=True,
-        )
+        ledger=(await self._connection.execute(sa.select(account_exposure_current).where(
+            account_exposure_current.c.venue_id==venue_id,account_exposure_current.c.account_id==account_id).with_for_update())).mappings().one_or_none()
+        current=None if ledger is None else AccountExposureSnapshot.model_validate(ledger)
         if current is None or current.active_ticket_count <= 0:
             raise AggregateVersionConflict("account exposure is missing during release")
         if (
@@ -2919,7 +2937,7 @@ class PostgresEntryAdmissionRepository:
             )
             .values(
                 gross_notional=current.gross_notional - notional,
-                gross_risk_at_stop=current.gross_risk_at_stop - risk_at_stop,
+                gross_risk_at_stop=account_exposure_current.c.gross_risk_at_stop - risk_at_stop,
                 current_reserved_margin=(
                     current.current_reserved_margin - reserved_margin
                 ),
@@ -3422,6 +3440,10 @@ def _aggregate_values(
         "version": aggregate.version,
         "last_event_sequence": aggregate.last_event_sequence,
         "management_mode":aggregate.management_mode.value,
+        "management_observed_at_ms":aggregate.management_observed_at_ms,
+        "manual_risk_at_stop":aggregate.manual_risk_at_stop,
+        "manual_risk_reason":aggregate.manual_risk_reason,
+        "management_orders":list(aggregate.management_orders),
         "management_revision":aggregate.management_revision,
         "management_evidence_id":aggregate.management_evidence_id,
         "management_reason":aggregate.management_reason,
@@ -3649,6 +3671,10 @@ def _aggregate_from_row(
         version=int(row["version"]),
         last_event_sequence=int(row["last_event_sequence"]),
         management_mode=ManagementMode(row["management_mode"]),
+        management_observed_at_ms=row["management_observed_at_ms"],
+        manual_risk_at_stop=row["manual_risk_at_stop"],
+        manual_risk_reason=row["manual_risk_reason"],
+        management_orders=tuple(row["management_orders"]),
         management_revision=int(row["management_revision"]),
         management_evidence_id=row["management_evidence_id"],
         management_reason=row["management_reason"],

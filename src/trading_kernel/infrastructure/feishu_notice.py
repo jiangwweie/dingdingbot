@@ -16,7 +16,10 @@ from zoneinfo import ZoneInfo
 from src.trading_kernel.domain.events import (
     EntryAccepted,
     ExternalFlatDetected,
+    ManualPositionObserved,
+    ManualTakeoverConfirmed,
     PositionFlatConfirmed,
+    PostFillStressAssessed,
     TakeProfitFilled,
 )
 from src.trading_kernel.domain.instrument_identity import (
@@ -91,7 +94,10 @@ def _text(
     event: EntryAccepted
     | TakeProfitFilled
     | PositionFlatConfirmed
-    | ExternalFlatDetected,
+    | ExternalFlatDetected
+    | ManualTakeoverConfirmed
+    | PostFillStressAssessed
+    | ManualPositionObserved,
     *,
     title: str,
     details: tuple[str, ...],
@@ -147,3 +153,27 @@ def _send(webhook: str, body: bytes) -> None:
                 raise ValueError("feishu_rejected_notice")
     except Exception:  # noqa: BLE001 - no retry and no sensitive exception output.
         _LOGGER.warning("feishu_notice_failed")
+
+
+def notify_manual_takeover(ticket: TradeTicket,event: ManualTakeoverConfirmed,*,remaining_qty: Decimal) -> None:
+    _schedule(lambda:_text(ticket,event,title="BRC｜整笔交易已转人工管理",details=(
+        f"剩余仓位：{remaining_qty}","现有 TP1 和止损继续有效，由你在 App 管理和撤销。",
+        "程序不再自动止盈、改止损或退出该笔交易。")))
+
+
+def notify_initial_protection(ticket: TradeTicket,event: PostFillStressAssessed) -> None:
+    _schedule(lambda:_text(ticket,event,title="BRC｜初始保护已确认",details=(
+        f"实际仓位：{event.filled_qty}",f"初始止损：{event.initial_stop_price}",
+        "默认继续自动 TP1 / Runner；你在 App 干预后整笔转人工管理。")))
+
+
+def notify_manual_risk_change(ticket: TradeTicket,event: ManualPositionObserved) -> None:
+    _schedule(lambda:_text(ticket,event,title="BRC｜人工仓风险状态变化",details=(
+        f"剩余数量：{event.quantity}",f"风险状态：{event.risk_reason or '保护事实已恢复'}",
+        "程序不会修改你的订单；新增开仓仍受账户风险检查约束。")))
+
+
+def notify_management_review(ticket: TradeTicket,event) -> None:
+    _schedule(lambda:_text(ticket,event,title="BRC｜订单状态待核实",details=(
+        "该笔自动处置已暂停，系统正在核对订单变化。",f"原因：{event.reason}",
+        "请以交易所 App 的当前持仓和挂单为准。")))

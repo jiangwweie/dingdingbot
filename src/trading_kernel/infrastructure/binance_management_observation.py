@@ -108,7 +108,8 @@ def parse_order_update(
         raise ValueError("independent position side required")
     event_time = _integer(message, "E")
     transaction_time = _integer(message, "T")
-    close = _boolean(row, "cp")
+    conditional_terms=algo or _string(row,"o") not in {"LIMIT","MARKET"}
+    close = _boolean(row, "cp") if conditional_terms or "cp" in row else False
     quantity = _price(row, "q")
     if close and quantity is not None:
         raise ValueError("close-all unexpectedly declares fixed quantity")
@@ -130,7 +131,7 @@ def parse_order_update(
             "reduce_only": _boolean(row, "R"),
             "time_in_force": _string(row, "f"),
             "working_type": _string(row, "wt"),
-            "price_protect": _boolean(row, "pP"),
+            "price_protect": _boolean(row, "pP") if conditional_terms or "pP" in row else False,
             "activation_price": _price(row, "AP", optional=True),
             "callback_rate": _price(row, "cr", optional=True),
             "price_match": _string(row, "pm"),
@@ -264,3 +265,30 @@ async def read_order_amendments(
         seen.add(item.amendment_id)
         rows.append(item)
     return AmendmentPage(rows=tuple(rows), possibly_truncated=len(rows) == limit)
+
+
+def parse_rest_order(row: Mapping[str,object],*,account_id: str,conditional: bool,received_at_ms: int,
+                     coverage_complete: bool) -> OrderEvidence:
+    """Normalize current/history REST rows without guessing absent trade facts."""
+    state=_string(row,'algoStatus' if conditional else 'status')
+    created=_integer(row,'createTime' if conditional else 'time');updated=_integer(row,'updateTime')
+    q=_string(row,'quantity' if conditional else 'origQty')
+    body={'s':row['symbol'],'S':row['side'],'ps':row['positionSide'],
+          'o':row['orderType'] if conditional else row['type'],'f':row['timeInForce'],
+          'q':q,'p':row['price'],'R':row['reduceOnly'],'cp':row['closePosition'],
+          'wt':row['workingType'],'pP':row['priceProtect'],'pm':row['priceMatch'],
+          'V':row['selfTradePreventionMode'],'gtd':row['goodTillDate'],'O':created,'X':state}
+    if conditional:
+        body.update({'aid':row['algoId'],'caid':row['clientAlgoId'],'tp':row['triggerPrice'],'ia':row.get('isActivated',False)})
+        if row.get('actualQty') is not None:body['aq']=row['actualQty']
+    else:
+        body.update({'i':row['orderId'],'c':row['clientOrderId'],'sp':row['stopPrice'],
+                     'x':'TRADE' if state in ('FILLED','PARTIALLY_FILLED') else 'EXPIRED' if state=='EXPIRED_IN_MATCH' else state,'z':row['executedQty']})
+    for raw,key in [('activatePrice','AP'),('callbackRate','cr')]:
+        if raw in row:body[key]=row[raw]
+    e=parse_order_update({'e':'ALGO_UPDATE' if conditional else 'ORDER_TRADE_UPDATE','E':updated,'T':updated,'o':body},
+        account_id=account_id,received_at_ms=received_at_ms,coverage_complete=coverage_complete)
+    # A REST NEW row is creation only when its update time equals creation.
+    # Same-ID changes are compared to stored terms and ordinary amend history.
+    if state=='NEW':e=e.model_copy(update={'action':OrderAction.NEW})
+    return e

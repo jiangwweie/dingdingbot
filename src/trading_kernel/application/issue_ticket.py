@@ -310,7 +310,7 @@ async def issue_ticket(
         account_id=ticket.identity.netting_domain.account_id,
         exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
     )
-    if ownership.open_incident_scopes:
+    if ownership.open_incident_scopes or ownership.management_blocker:
         return IssueTicketResult(
             status=IssueTicketStatus.ADMISSION_INCIDENT_OPEN,
             ticket_id=None,

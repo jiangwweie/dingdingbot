@@ -51,7 +51,7 @@ sequenceDiagram
 3. **授权事实**保留 Owner identity、purpose、认证强度、摘要与时间，不把密码或 TOTP 原值保存到业务授权。
 4. **TOTP step-up** 在 HTTP 层验证并防止重放；不能把 application 请求里的强度字符串当成外部认证证明。
 
-来源：[ControlMutationRequest](../../src/trading_kernel/application/owner_control.py#L66)、[set_strategy_entry_state](../../src/trading_kernel/application/owner_control.py#L150)、[set_global_entry_state](../../src/trading_kernel/application/owner_control.py#L244)、[OwnerAuthorization](../../src/trading_kernel/domain/owner_control.py#L56)、[OwnerAuthService](../../src/trading_kernel/interfaces/owner_console_http/auth.py#L156)。
+来源：[ControlMutationRequest](../../src/trading_kernel/application/owner_control.py#L67)、[set_strategy_entry_state](../../src/trading_kernel/application/owner_control.py#L151)、[set_global_entry_state](../../src/trading_kernel/application/owner_control.py#L245)、[OwnerAuthorization](../../src/trading_kernel/domain/owner_control.py#L56)、[OwnerAuthService](../../src/trading_kernel/interfaces/owner_console_http/auth.py#L156)。
 
 ## 为什么暂停后还有动作
 
@@ -73,11 +73,11 @@ flowchart LR
     Settle --> Complete[Operation completed]
 ```
 
-1. [preview_flatten_all](../../src/trading_kernel/application/owner_control.py#L713) 按账户跨 RuntimeProfile 列出快照。
-2. [begin_flatten_all](../../src/trading_kernel/application/owner_control.py#L763) 校验快照、处理幂等并关闭新 ENTRY；先建立 VALIDATING Operation。
-3. [freeze_flatten_targets](../../src/trading_kernel/application/owner_control.py#L836) 在后续事务冻结目标，避免单个长事务跨越执行周期。
-4. [consume_pending_flatten_once](../../src/trading_kernel/application/owner_control.py#L954) 由 Lifecycle 调用，生成正式退出请求。
-5. [advance_flatten_operation_once](../../src/trading_kernel/application/owner_control.py#L972) 依据目标实际进度推进；遇到问题可以 blocked / needs_intervention，不能把 HTTP 201 当作账户已 flat。
+1. [preview_flatten_all](../../src/trading_kernel/application/owner_control.py#L714) 按账户跨 RuntimeProfile 列出快照。
+2. [begin_flatten_all](../../src/trading_kernel/application/owner_control.py#L764) 校验快照、处理幂等并关闭新 ENTRY；先建立 VALIDATING Operation。
+3. [freeze_flatten_targets](../../src/trading_kernel/application/owner_control.py#L837) 在后续事务冻结目标，避免单个长事务跨越执行周期。
+4. [consume_pending_flatten_once](../../src/trading_kernel/application/owner_control.py#L955) 由 Lifecycle 调用，生成正式退出请求。
+5. [advance_flatten_operation_once](../../src/trading_kernel/application/owner_control.py#L973) 依据目标实际进度推进；遇到问题可以 blocked / needs_intervention，不能把 HTTP 201 当作账户已 flat。
 
 **分析：控制页需要呈现 Operation 的事实进度，而不是用前端倒计时推断平仓成功。**具体页面验证参考 [ControlledFlattenModal](../../frontend/owner-console-v2/src/components/ControlledFlattenModal.tsx) 与 [ControlsFlattenIntegration 测试](../../frontend/owner-console-v2/src/components/ControlsFlattenIntegration.test.tsx)。
 

@@ -112,6 +112,7 @@ class AdmissionOwnership(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    management_blocker: str | None = None
     owned_position_domain_keys: tuple[str, ...] = ()
     owned_position_projections: tuple[OwnedPositionProjection, ...] = ()
     owned_exchange_order_ids: tuple[str, ...] = ()

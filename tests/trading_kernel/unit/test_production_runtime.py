@@ -344,7 +344,7 @@ async def test_authenticated_factory_routes_registry_independent_rules_and_close
         created.append(exchange)
         return exchange
 
-    monkeypatch.setattr(production_runtime.ccxt_async, "binanceusdm", constructor)
+    monkeypatch.setattr(production_runtime, "_management_exchange", constructor)
 
     adapter = production_runtime.build_binance_usdm_venue_adapter()
     rules = await adapter.read_instrument_rules(

@@ -54,12 +54,13 @@ async def observe_trade_management(
         else None,
         takeover_detected_at_ms=aggregate.manual_takeover_at_ms,
     )
+    await uow.management.save_evidence(ticket_id,evidence)
     if state.mode is ManagementMode.MANUAL:
         return state
     commands = await uow.exchange_commands.list_for_ticket(ticket_id)
     # Never trust a caller's negative flag when the durable ledger has unknown
-    # or in-flight work. Own-order attribution is performed upstream; until its
-    # durable binding is implemented, own IDs remain explicitly unresolved.
+    # or in-flight work. Own orders are bound to scoped durable command results;
+    # an ID prefix alone cannot establish automatic ownership.
     pending = any(
         c.status
         in {ExchangeCommandStatus.CLAIMED, ExchangeCommandStatus.OUTCOME_UNKNOWN}
@@ -72,13 +73,13 @@ async def observe_trade_management(
             or pending,
         }
     )
+    from src.trading_kernel.application.management_intents import system_intents_for
+    intents=system_intents_for(verified,await uow.management.command_rows(ticket_id))
     after = transition_management(
         state,
         verified,
-        system_intents=(),
-        initial_protection_confirmed=aggregate.initial_stop_exchange_order_id
-        is not None
-        and not aggregate.entry_lane_held,
+        system_intents=intents,
+        initial_protection_confirmed=aggregate.active_stop_exchange_order_id is not None and aggregate.post_fill_stress_status=="passed",
     )
     if after == state:
         return state
@@ -102,7 +103,7 @@ async def observe_trade_management(
         expected_version=aggregate.version,
     )
     for command in commands:
-        if command.status is ExchangeCommandStatus.PREPARED:
+        if after.mode is ManagementMode.MANUAL and command.status is ExchangeCommandStatus.PREPARED:
             await uow.exchange_commands.mark_prepared_superseded(
                 command_id=command.command_id,
                 observed_at_ms=now_ms,

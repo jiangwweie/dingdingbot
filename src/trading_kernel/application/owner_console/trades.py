@@ -287,6 +287,11 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         if facts.aggregate_status == AggregateStatus.TERMINAL.value
         else _COMPLETED_BEFORE_STAGE[stage]
     )
+    if facts.management_mode != "AUTO" and active:
+        stage = "manual"
+        attention_items=tuple(dict.fromkeys((*attention_items,
+            "人工管理，现存订单由 Owner 在 App 处理" if facts.management_mode=="MANUAL" else "订单归属待核实，自动处置暂停",
+            *((facts.manual_risk_reason,) if facts.manual_risk_reason else ()))))
     return TradeListItem(
         ticket_id=facts.ticket_id,
         strategy_group_id=facts.strategy_group_id,
@@ -295,6 +300,9 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         position_side=facts.position_side,
         ticket_status=facts.ticket_status,
         aggregate_status=facts.aggregate_status,
+        management_mode=facts.management_mode,management_reason=facts.management_reason,
+        manual_takeover_at_ms=facts.manual_takeover_at_ms,management_observed_at_ms=facts.management_observed_at_ms,
+        manual_risk_reason=facts.manual_risk_reason,management_orders=facts.management_orders,
         lifecycle_stage=stage,
         issued_at_ms=facts.issued_at_ms,
         terminal_at_ms=facts.terminal_at_ms,

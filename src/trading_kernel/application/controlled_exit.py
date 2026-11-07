@@ -14,6 +14,7 @@ from src.trading_kernel.application.reconcile_ticket import (
     request_exit,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _AUTHORIZATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -196,4 +197,5 @@ async def _classification_for_ticket(uow, ticket_id: str) -> ControlledExitClass
     aggregate = await uow.aggregates.get(ticket_id)
     if aggregate is None:
         return ControlledExitClassification.TERMINAL
+    if aggregate.management_mode is not ManagementMode.AUTO:return ControlledExitClassification.BLOCKED
     return classify_controlled_exit_status(aggregate.status)

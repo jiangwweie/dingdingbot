@@ -449,12 +449,10 @@ def _netting_domain_is_flat_and_order_free(
     domain = ticket.identity.netting_domain
     return not any(
         position.exchange_instrument_id == domain.exchange_instrument_id
-        and position.position_side == domain.position_side
         and position.quantity > 0
         for position in snapshot.account_risk_snapshot.account_positions
     ) and not any(
         order.exchange_instrument_id == domain.exchange_instrument_id
-        and order.position_side == domain.position_side
         for order in snapshot.open_orders
     )
 

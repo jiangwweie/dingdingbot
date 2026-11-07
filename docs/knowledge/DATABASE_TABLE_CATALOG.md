@@ -4,14 +4,14 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 90 张业务表、1080 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 92 张业务表、1093 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **95 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
 | `public.brc_*` 业务表 | **90** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **93** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **95** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
 **范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。代码目标结构为 `0013_owner_directional_risk_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
@@ -45,6 +45,8 @@
 | **[迁移与切换运维](#catalog-operations)** | **3** | Alembic 版本及 cutover run/phase journal；独立于业务 metadata |
 
 <a id="catalog-registry"></a>
+
+| **App 管理权观察** | **2** | 外部订单证据和观察完整性，服务人工接管。 |
 
 ## 策略与事实语义
 
@@ -1300,9 +1302,9 @@
 **维护与用途**：commit_reduction CAS 推进，Worker 调度读取；不是不可变合同。
 
 <details>
-<summary>完整字段（39 列）</summary>
+<summary>完整字段（43 列）</summary>
 
-**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
+**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
 </details>
 
@@ -1725,3 +1727,23 @@ COMMIT;
 ```
 
 **持续检查**：[知识库架构测试](../../tests/trading_kernel/architecture/test_project_knowledge.py)逐一比对 85 张业务表的章节、主键、全部字段及顺序，发现新增/漏表/字段漂移时失败；不会为了保持旧数量阻止 schema 正常演进。新增结构时同步更新目录、分组数量、来源说明和该处数量摘要，当前实库事实另更新唯一 roadmap。
+
+### `brc_management_order_evidence`
+
+**职责**：App 人工接管的不可变外部订单观察证据。
+
+**维护与用途**：Reconciliation 有界采集、去重及事实完整性；不自行产生下单权限。
+
+**主键**：`evidence_id`
+
+**字段清单**：`evidence_id`、`ticket_id`、`payload`、`observed_at_ms`
+
+### `brc_management_observation_current`
+
+**职责**：App 人工接管的每笔观察覆盖水位与缺口状态。
+
+**维护与用途**：Reconciliation 有界采集、去重及事实完整性；不自行产生下单权限。
+
+**主键**：`ticket_id`
+
+**字段清单**：`ticket_id`、`covered_until_ms`、`facts_complete`、`reason`、`updated_at_ms`

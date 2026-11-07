@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from enum import StrEnum
 from hashlib import sha256
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -95,6 +96,7 @@ from src.trading_kernel.domain.events import (
     EntryFilled,
     EntryPartiallyFilled,
     ExternalFlatDetected,
+    ManualPositionObserved,
     PositionFlatConfirmed,
     TradeEvent,
 )
@@ -244,9 +246,20 @@ async def run_reconciliation_worker_once(
     fee_discount_capability_source: FeeDiscountCapabilitySource | None = None,
     instrument_certification_source: InstrumentCertificationSource | None = None,
     account_position_audit_source: AccountPositionAuditSource | None = None,
+    management_source=None,
 ) -> ReconciliationWorkerResult:
     """Advance one safety/housekeeping action each, plus bounded control progress."""
 
+    if management_source is not None:
+        from src.trading_kernel.interfaces.management_observation_worker import (
+            observe_management_once,
+        )
+        async with uow_factory() as uow:
+            observed = await uow.aggregates.get_next_for_statuses(
+                _POSITION_RECONCILIATION_STATUSES,work_kind="reconciliation",now_ms=request.now_ms)
+        if observed is not None and await _runtime_writer_is_certified(uow_factory,request):
+            await observe_management_once(uow_factory,management_source,ticket_id=observed.identity.ticket_id,
+                now_ms=request.now_ms,timeout_seconds=request.timeout_seconds)
     async with uow_factory() as uow:
         unknown = await uow.exchange_commands.get_one_unknown()
     safety: ReconciliationWorkerResult | None
@@ -1141,6 +1154,15 @@ async def _run_reconciliation_worker_once_core_impl(
         aggregate is not None
         and aggregate.status in _POSITION_RECONCILIATION_STATUSES
     ):
+        if aggregate.management_mode.value in ("MANUAL","REVIEW_REQUIRED") and callable(getattr(position_source,"read_management_scan",None)):
+            from src.trading_kernel.interfaces.management_observation_worker import (
+                ManagementObservationSource,
+                observe_management_once,
+            )
+            outcome=await observe_management_once(uow_factory,cast(ManagementObservationSource,position_source),ticket_id=aggregate.identity.ticket_id,now_ms=request.now_ms,timeout_seconds=request.timeout_seconds)
+            async with uow_factory() as uow:
+                await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
+            return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail=outcome)
         snapshot_request = PositionSnapshotRequest(
             ticket_id=aggregate.identity.ticket_id,
             netting_domain=aggregate.identity.netting_domain,
@@ -1490,7 +1512,7 @@ def _review_window(
     flat_events = [
         event
         for event in events
-        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected))
+        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected)) or (isinstance(event,ManualPositionObserved) and event.quantity==0 and not event.orders and event.facts_complete and event.commands_resolved)
     ]
     if len(entry_events) != 1 or not flat_events:
         return None
@@ -1506,7 +1528,7 @@ def _review_window(
         entry_time_ms=exposure_started_at_ms,
         exit_time_ms=exit_event.occurred_at_ms,
         executed_entry_quantity=entry.filled_qty,
-        external_flat=isinstance(exit_event, ExternalFlatDetected),
+        external_flat=isinstance(exit_event, (ExternalFlatDetected,ManualPositionObserved)),
     )
 
 

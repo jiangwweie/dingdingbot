@@ -23,6 +23,7 @@ from src.trading_kernel.application.ports import (
     ExitProfileAuthorityRepository,
     IncidentRepository,
     InstrumentSelectionRepository,
+    ManagementRepository,
     MonitorRepository,
     OwnerControlRepository,
     PositionRepository,
@@ -76,7 +77,11 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
     EntryAccepted,
     ExternalFlatDetected,
+    ManagementReviewRequired,
+    ManualPositionObserved,
+    ManualTakeoverConfirmed,
     PositionFlatConfirmed,
+    PostFillStressAssessed,
     TakeProfitFilled,
     TicketIssued,
     TradeEvent,
@@ -87,8 +92,13 @@ from src.trading_kernel.domain.incident_blocking import (
 )
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
+from src.trading_kernel.domain.trade_management import ManagementMode
 from src.trading_kernel.infrastructure.feishu_notice import (
     notify_entry_accepted,
+    notify_initial_protection,
+    notify_management_review,
+    notify_manual_risk_change,
+    notify_manual_takeover,
     notify_runner_exited,
     notify_tp1_filled,
 )
@@ -100,6 +110,9 @@ from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
 )
 from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
     PostgresInstrumentSelectionRepository,
+)
+from src.trading_kernel.infrastructure.pg_management_repository import (
+    PostgresManagementRepository,
 )
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAdmissionDecisionRepository,
@@ -131,6 +144,7 @@ __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
 
 
 class PostgresKernelUnitOfWork:
+    management: ManagementRepository
     directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository
@@ -163,6 +177,7 @@ class PostgresKernelUnitOfWork:
             raise RuntimeError("unit of work is already active")
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
+        self.management = PostgresManagementRepository(self._connection)
         self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
         self.aggregates = PostgresAggregateRepository(self._connection)
@@ -219,6 +234,10 @@ class PostgresKernelUnitOfWork:
     ) -> None:
         self._require_connection()
         aggregate = reduction.aggregate
+        if aggregate.management_mode is not ManagementMode.AUTO:
+            allowed=(ReleaseBudget,ReleaseCapitalAuthorities,ReleaseEntryLane,ProjectTerminalOwnerState,ResolveIncident,ResolveTicketIncidentsAtClosure)
+            if any(not isinstance(effect,allowed) for effect in reduction.effects):
+                raise UnsupportedKernelEffect("manual/review management forbids exchange effects")
         ticket_id = aggregate.identity.ticket_id
         current = await self.aggregates.get_for_update(ticket_id)
 
@@ -249,6 +268,14 @@ class PostgresKernelUnitOfWork:
             raise AggregateVersionConflict("event Ticket differs from reduction")
 
         await self.events.append(event)
+        if isinstance(event,PostFillStressAssessed) and event.status=='passed':
+            self._trade_notices.append(partial(notify_initial_protection,aggregate.ticket,event))
+        if isinstance(event,ManualPositionObserved) and current is not None and current.manual_risk_reason!=event.risk_reason:
+            self._trade_notices.append(partial(notify_manual_risk_change,aggregate.ticket,event))
+        if isinstance(event,ManagementReviewRequired) and current is not None and (current.management_mode is ManagementMode.AUTO or current.management_reason!=event.reason):
+            self._trade_notices.append(partial(notify_management_review,aggregate.ticket,event))
+        if isinstance(event,ManualTakeoverConfirmed):
+            self._trade_notices.append(partial(notify_manual_takeover,aggregate.ticket,event,remaining_qty=aggregate.position_qty))
         for effect in reduction.effects:
             if isinstance(effect, PrepareEntryCommand):
                 claim = await self._initial_command_claim(effect.ticket)

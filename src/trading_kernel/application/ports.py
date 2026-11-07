@@ -177,6 +177,7 @@ from src.trading_kernel.domain.strategy_registry import (
     RegistrySeedResult,
 )
 from src.trading_kernel.domain.ticket import TradeTicket
+from src.trading_kernel.domain.trade_management import OrderEvidence
 from src.trading_kernel.domain.venue_truth import VenueTruthSnapshot
 
 if TYPE_CHECKING:
@@ -2468,7 +2469,18 @@ class VenueTruthPort(Protocol):
 UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]
 
 
+class ManagementRepository(Protocol):
+    async def refresh_orders(self, ticket_id: str, orders: list) -> None: ...
+    async def get_coverage(self, ticket_id: str) -> dict | None: ...
+    async def save_evidence(self, ticket_id: str, item: OrderEvidence) -> bool: ...
+    async def save_coverage(self, ticket_id: str, *, through_ms: int, complete: bool, reason: str | None, observed_at_ms: int) -> None: ...
+    async def refresh_manual_risk(self, ticket_id: str, *, observed_at_ms: int, risk: Decimal | None, reason: str | None, orders: list) -> None: ...
+    async def command_rows(self, ticket_id: str) -> list[dict]: ...
+    async def account_blocker(self, venue_id: str, account_id: str, now_ms: int) -> str | None: ...
+
+
 class KernelUnitOfWork(Protocol):
+    management: ManagementRepository
     directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository

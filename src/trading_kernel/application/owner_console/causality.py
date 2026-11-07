@@ -148,8 +148,10 @@ _REVIEW_EVENTS = {"ReviewRecorded", "ReviewRevised"}
 
 EVENT_STAGE: dict[str, LifecycleStageKey] = {
     "ManualTakeoverConfirmed": "manual",
+    "ManualPositionObserved": "manual",
     "ManagedCommandOutcomeObserved": "manual",
     "ManagementReviewRequired": "manual",
+    "ManagementReviewCleared": "manual",
     **{name: "entry" for name in _ENTRY_EVENTS},
     **{name: "protection" for name in _PROTECTION_EVENTS},
     **{name: "tp_runner" for name in _TP_RUNNER_EVENTS},

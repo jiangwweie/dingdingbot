@@ -64,7 +64,7 @@ stateDiagram-v2
     review_pending --> terminal: ReviewRecorded
 ```
 
-这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L20) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L128) 为准。
+这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L20) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L130) 为准。
 
 ### 冻结退出规则怎样使用
 
@@ -74,7 +74,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L117)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L128)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L117)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L130)。
 
 ## 成交后风险与部分成交
 
@@ -84,7 +84,7 @@ stateDiagram-v2
 | 实际风险超过计划预算 | 仍在冻结容忍上限内是 TOLERATED_OVERRUN；超过上限是 HARD_OVERRUN | 容忍区间继续 NORMAL；硬超额先保护再 flatten；保护方向错误立即 flatten | [test_post_fill_risk](../../tests/trading_kernel/unit/test_post_fill_risk.py) |
 | Cross margin 压力不通过 | 当前整体账户及 instrument facts | 禁止继续正常暴露，进入受控处置 | [cross_margin_stress](../../src/trading_kernel/domain/cross_margin_stress.py)、[全链压力测试](../../tests/trading_kernel/full_chain/test_cross_margin_post_fill_stress.py) |
 | 普通部分 ENTRY 成交 | 请求数量未全部成交 | Incident、精确撤余量、确认后 flatten | [fault matrix](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120) |
-| Vacuum 撤单后部分成交 | 撤单已确认、风险 NORMAL 且可分双腿 | 专用 `VacuumPartialRetained` 分支；否则 flatten | [plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L170)、[D5 差异](SOURCE_AUTHORITY.md) |
+| Vacuum 撤单后部分成交 | 撤单已确认、风险 NORMAL 且可分双腿 | 专用 `VacuumPartialRetained` 分支；否则 flatten | [plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L171)、[D5 差异](SOURCE_AUTHORITY.md) |
 
 **最后一行是当前代码中的专门行为，不能用它解释所有部分成交。**广义契约与该特例是否应统一措辞，仍是明确记录的待裁定项。
 
@@ -94,7 +94,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | ENTRY authoritative reject | 不能自动另发一代 ENTRY | 终结拒绝，释放其资源 | [commands](../../src/trading_kernel/domain/commands.py)、[reducer](../../src/trading_kernel/domain/reducer.py) |
 | 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L95) |
-| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) |
+| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L135) |
 | 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L738) |
 | Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15) |
 | 退出事实过期或缺失 | 不能编造市场判定 | 记录健康/重试并保持现有事实边界 | [lifecycle_facts_health](../../src/trading_kernel/application/lifecycle_facts_health.py)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py) |

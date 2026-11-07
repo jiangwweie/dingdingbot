@@ -61,7 +61,10 @@ MANUAL保持不可逆；当前单个自然事件不能解除已有REVIEW_REQUIRE
 - 1858项Unit/Architecture通过；72项受影响Integration通过；历史迁移切片3项通过。
 - Ruff通过，Mypy212个源文件通过；未运行完整R4、API/Static或实盘认证。
 
-## 阶段审查和明确未完成项
+## 第一批阶段审查与当时未完成项
+
+后续已接入的程序路径与当前停止点见[2026-11-07交付记录](2026-11-07-app-manual-takeover-prevalidation-handoff.md)。
+以下清单保留为第一批提交时的历史边界。
 
 当前仅为基础实现，**不是发布候选**：
 

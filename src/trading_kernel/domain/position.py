@@ -8,11 +8,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.identities import NettingDomain
+from src.trading_kernel.domain.trade_management import OrderTerms
 
 
 class VenueOrderSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    terms: OrderTerms | None = None
+    remaining_quantity: Decimal | None = None
     exchange_order_id: str
     venue_client_order_id: str | None
     position_side: Literal["long", "short"]
@@ -41,6 +44,7 @@ class PositionSnapshot(BaseModel):
         "invalid",
     ] | None = None
     open_orders: tuple[VenueOrderSnapshot, ...] = ()
+    orders_complete: bool = True
     observed_at_ms: int
 
     @model_validator(mode="before")

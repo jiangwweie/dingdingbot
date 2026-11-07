@@ -642,6 +642,13 @@ class MetricCoverage(FrozenModel):
 
 
 class TradeListItem(FrozenModel):
+    management_mode: Literal["AUTO","REVIEW_REQUIRED","MANUAL"] = "AUTO"
+    management_reason: str | None = None
+    manual_takeover_at_ms: int | None = None
+    management_observed_at_ms: int | None = None
+    manual_risk_reason: str | None = None
+    management_orders: tuple[dict[str, JsonValue], ...] = ()
+
     ticket_id: str
     strategy_group_id: str
     event_spec_id: str
@@ -1318,6 +1325,13 @@ class SignalDetailFacts(FrozenModel):
 
 
 class TradeItemFacts(FrozenModel):
+    management_mode: Literal["AUTO","REVIEW_REQUIRED","MANUAL"] = "AUTO"
+    management_reason: str | None = None
+    manual_takeover_at_ms: int | None = None
+    management_observed_at_ms: int | None = None
+    manual_risk_reason: str | None = None
+    management_orders: tuple[dict[str, JsonValue], ...] = ()
+
     ticket_id: str
     strategy_group_id: str
     event_spec_id: str
@@ -1359,6 +1373,14 @@ class StrategyTicketPageFacts(FrozenModel):
 
 
 class TradeCausalityAggregateFacts(FrozenModel):
+    management_mode: Literal["AUTO","REVIEW_REQUIRED","MANUAL"] = "AUTO"
+    management_reason: str | None = None
+    manual_takeover_at_ms: int | None = None
+    management_observed_at_ms: int | None = None
+    manual_risk_reason: str | None = None
+    management_orders: tuple[dict[str, JsonValue], ...] = ()
+
+
     ticket_id: str
     aggregate_status: str
     last_event_sequence: int = Field(gt=0)

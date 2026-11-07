@@ -1976,7 +1976,7 @@ export interface components {
              * Key
              * @enum {string}
              */
-            key: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            key: "manual" | "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
             /** Label */
             label: string;
             /** Started At Ms */
@@ -2380,7 +2380,7 @@ export interface components {
              * Stage
              * @enum {string}
              */
-            stage: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            stage: "manual" | "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
             /** Ticket Id */
             ticket_id: string;
         };
@@ -3139,7 +3139,28 @@ export interface components {
              * Lifecycle Stage
              * @enum {string}
              */
-            lifecycle_stage: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            lifecycle_stage: "manual" | "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            /**
+             * Management Mode
+             * @default AUTO
+             * @enum {string}
+             */
+            management_mode: "AUTO" | "REVIEW_REQUIRED" | "MANUAL";
+            /** Management Observed At Ms */
+            management_observed_at_ms?: number | null;
+            /**
+             * Management Orders
+             * @default []
+             */
+            management_orders: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Management Reason */
+            management_reason?: string | null;
+            /** Manual Risk Reason */
+            manual_risk_reason?: string | null;
+            /** Manual Takeover At Ms */
+            manual_takeover_at_ms?: number | null;
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
             /**
@@ -3318,7 +3339,7 @@ export interface components {
              * Current Stage
              * @enum {string}
              */
-            current_stage: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            current_stage: "manual" | "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
             /** Current Stage Summary */
             current_stage_summary: string;
             /** Event Evidence */
@@ -3377,7 +3398,28 @@ export interface components {
              * Lifecycle Stage
              * @enum {string}
              */
-            lifecycle_stage: "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            lifecycle_stage: "manual" | "signal" | "admission" | "entry" | "protection" | "tp_runner" | "exit" | "reconciliation" | "review";
+            /**
+             * Management Mode
+             * @default AUTO
+             * @enum {string}
+             */
+            management_mode: "AUTO" | "REVIEW_REQUIRED" | "MANUAL";
+            /** Management Observed At Ms */
+            management_observed_at_ms?: number | null;
+            /**
+             * Management Orders
+             * @default []
+             */
+            management_orders: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Management Reason */
+            management_reason?: string | null;
+            /** Manual Risk Reason */
+            manual_risk_reason?: string | null;
+            /** Manual Takeover At Ms */
+            manual_takeover_at_ms?: number | null;
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
             /**

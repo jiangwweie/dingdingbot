@@ -19,6 +19,7 @@ from src.trading_kernel.domain.incident_blocking import (
 
 
 class InstrumentEntryHealthStatus(StrEnum):
+    INSTRUMENT_OCCUPIED = "instrument_occupied"
     HEALTHY_FLAT = "healthy_flat"
     HEALTHY_OPPOSITE_SIDE = "healthy_opposite_side"
     SAME_DIRECTION_OCCUPIED = "same_direction_occupied"
@@ -119,13 +120,13 @@ def classify_instrument_entry_health(
             exchange_instrument_id,
         )
     if any(
-        position.quantity > 0 and position.position_side == requested_position_side
+        position.quantity > 0
         for position in exact_positions
     ):
         return _health(
             snapshot,
             configured_leverage,
-            InstrumentEntryHealthStatus.SAME_DIRECTION_OCCUPIED,
+            InstrumentEntryHealthStatus.INSTRUMENT_OCCUPIED,
             False,
             EntryBlockScope.NONE,
             exchange_instrument_id,

@@ -19,6 +19,9 @@ Read the [detailed design](docs/superpowers/specs/2026-11-06-app-manual-takeover
 and [implementation plan](docs/superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
 before future implementation. Technical proposals are not completed capabilities
 or deployment authorization. Local coding/testing is authorized; no Tokyo mutation or new-server deployment is authorized by the implementation request.
+The latest Owner scope stops before comprehensive full-chain/R4 verification and
+release-isolation work. See the [prevalidation handoff](docs/superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md);
+wait for Owner confirmation before entering that next stage.
 
 ## Authority Order
 

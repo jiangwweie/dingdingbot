@@ -74,7 +74,9 @@ from src.trading_kernel.domain.events import (
     LeverageOutcomeUnknown,
     LeverageRejected,
     ManagedCommandOutcomeObserved,
+    ManagementReviewCleared,
     ManagementReviewRequired,
+    ManualPositionObserved,
     ManualTakeoverConfirmed,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
@@ -134,6 +136,37 @@ def reduce_event(
 
     _require_event_identity_and_sequence(current, event)
 
+    if isinstance(event, ManagementReviewCleared):
+        if current.management_mode is not ManagementMode.REVIEW_REQUIRED or current.management_reason not in {"collector_gap","order_history_incomplete_or_command_unknown","kernel_order_not_matched_to_command","known_order_creation_time_or_terms_drift"}:
+            raise InvalidLifecycleTransition("only a proven observation gap may clear review")
+        if not 0<event.coverage_from_ms<=current.ticket.created_at_ms or event.coverage_until_ms>event.occurred_at_ms:
+            raise InvalidLifecycleTransition("review clearance requires complete Ticket history")
+        return _transition(current,event,status=current.status,updates={"management_mode":ManagementMode.AUTO,
+            "management_revision":current.management_revision+1,"management_reason":None,"management_evidence_id":None})
+    if isinstance(event, ManualPositionObserved):
+        if current.management_mode is not ManagementMode.MANUAL:
+            raise InvalidLifecycleTransition("manual position requires manual management")
+        if event.quantity>current.position_qty:
+            raise InvalidLifecycleTransition("manual exposure increase is outside scope")
+        if not event.facts_complete:
+            return _transition(current,event,status=current.status)
+        manual_updates={"position_qty":event.quantity,"protected_qty":event.protected_quantity,
+            "management_observed_at_ms":event.occurred_at_ms,"manual_risk_at_stop":event.risk_at_stop,
+            "manual_risk_reason":event.risk_reason,"management_orders":event.orders}
+        if event.quantity>0:
+            return _transition(current,event,status=AggregateStatus.MANUAL_OPEN,updates=manual_updates)
+        if event.orders or not event.commands_resolved:
+            return _transition(current,event,status=AggregateStatus.MANUAL_FLAT_PENDING_ORDERS,updates=manual_updates)
+        domain=current.identity.netting_domain
+        return _transition(current,event,status=AggregateStatus.SETTLEMENT_PENDING,
+            updates={**manual_updates,"protected_qty":Decimal(0),"active_stop_exchange_order_id":None,
+                "initial_stop_exchange_order_id":None,"tp1_exchange_order_id":None,
+                "pending_cancel_exchange_order_id":None,"pending_replaced_stop_exchange_order_id":None},
+            effects=(ResolveTicketIncidentsAtClosure(ticket_id=current.identity.ticket_id),
+                ReleaseCapitalAuthorities(ticket_id=current.identity.ticket_id,
+                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",netting_domain_key=domain.key(),
+                    notional=current.ticket.notional,risk_at_stop=current.ticket.risk_at_stop,
+                    reserved_margin=current.ticket.reserved_margin,released_at_ms=event.occurred_at_ms)))
     if isinstance(event, ManagedCommandOutcomeObserved):
         if current.management_mode is ManagementMode.AUTO:
             raise InvalidLifecycleTransition("automatic command results require normal lifecycle reduction")
@@ -143,14 +176,12 @@ def reduce_event(
     if isinstance(event, ManualTakeoverConfirmed):
         if current.management_mode is ManagementMode.MANUAL:
             raise InvalidLifecycleTransition("manual takeover cannot be applied twice")
-        if current.initial_stop_exchange_order_id is None or current.position_qty <= 0:
+        if (current.initial_stop_exchange_order_id is None and not (current.post_fill_stress_status=="passed" and current.active_stop_exchange_order_id is not None)) or current.position_qty <= 0:
             raise InvalidLifecycleTransition(
                 "manual takeover requires confirmed initial protection"
             )
-        if current.entry_lane_held:
-            raise InvalidLifecycleTransition(
-                "manual takeover requires entry lane truth settled"
-            )
+        if current.entry_lane_held and current.post_fill_stress_status!="passed":
+            raise InvalidLifecycleTransition("manual takeover requires settled protected entry")
         return _transition(
             current,
             event,
@@ -161,7 +192,9 @@ def reduce_event(
                 "management_evidence_id": event.evidence_id,
                 "management_reason": event.reason,
                 "manual_takeover_at_ms": event.occurred_at_ms,
+                "entry_lane_held":False,
             },
+            effects=(ReleaseEntryLane(ticket_id=current.identity.ticket_id),) if current.entry_lane_held else (),
         )
     if isinstance(event, ManagementReviewRequired):
         if current.management_mode is ManagementMode.MANUAL:
@@ -179,7 +212,7 @@ def reduce_event(
                 "management_reason": event.reason,
             },
         )
-    if current.management_mode is not ManagementMode.AUTO:
+    if current.management_mode is not ManagementMode.AUTO and not (current.management_mode is ManagementMode.MANUAL and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised))):
         raise InvalidLifecycleTransition(
             "manual or unresolved management forbids automatic lifecycle reduction"
         )

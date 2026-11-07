@@ -373,3 +373,9 @@ def test_other_account_intent_never_claims_current_order():
 def test_evidence_with_another_before_identity_rejected():
     with pytest.raises(ValidationError):
         evidence(before_terms=terms(account_id="another"))
+
+
+def test_observed_external_terms_drift_is_decisive_even_with_history_gap():
+    e=evidence(coverage_complete=False,terms=terms(price='112'))
+    own=SystemOrderIntent(command_id='original',action=OrderAction.NEW,terms=terms(price='110'),exchange_event_at_ms=1000)
+    assert classify_order_evidence(e,system_intents=(own,)).decision is ManagementDecision.EXTERNAL

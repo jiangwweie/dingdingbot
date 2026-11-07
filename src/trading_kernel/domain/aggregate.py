@@ -6,7 +6,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.post_fill_risk import (
@@ -113,6 +113,10 @@ class TradeAggregate(BaseModel):
     status: AggregateStatus
     version: int
     last_event_sequence: int
+    management_observed_at_ms: int | None = None
+    manual_risk_at_stop: Decimal | None = None
+    manual_risk_reason: str | None = None
+    management_orders: tuple[dict[str, JsonValue], ...] = ()
     management_mode: ManagementMode = ManagementMode.AUTO
     management_revision: int = 1
     management_evidence_id: str | None = None

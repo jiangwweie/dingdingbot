@@ -45,7 +45,7 @@ async def test_prepared_runner_command_never_dispatched_after_takeover(head_temp
     venue.execute=AsyncMock(wraps=venue.execute)
     result=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(engine),venue,
         DispatchCommandRequest(worker_id='test',now_ms=7000,lease_until_ms=8000,timeout_seconds=1,ticket_id=t.identity.ticket_id))
-    assert result.status.value==('outcome_unknown' if expired_claim else 'superseded')
+    assert result.status.value==('outcome_unknown' if expired_claim else 'no_command' if review_only else 'superseded')
     venue.execute.assert_not_awaited()
 
 

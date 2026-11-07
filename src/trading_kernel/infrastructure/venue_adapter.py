@@ -736,6 +736,21 @@ class CcxtVenueAdapter:
             instrument_rules=rules,
         )
 
+    def start_management_observation(self):
+        for exchange in self._exchanges.values():
+            start=getattr(exchange,"start_management_stream",None)
+            if callable(start):start()
+
+    async def read_management_scan(self, request):
+        from src.trading_kernel.infrastructure.management_collector import (
+            collect_management_scan,
+        )
+        exchange,_=self._resolve_exchange_and_symbol(venue_id=request.domain.venue_id,
+            account_id=request.domain.account_id,exchange_instrument_id=request.domain.exchange_instrument_id)
+        position=await self.read_position_snapshot(PositionSnapshotRequest(ticket_id=request.ticket_id,
+            netting_domain=request.domain,observed_at_ms=request.now_ms))
+        return await collect_management_scan(exchange,request,position)
+
     async def read_position_snapshot(
         self,
         request: PositionSnapshotRequest,
@@ -798,6 +813,7 @@ class CcxtVenueAdapter:
                 liquidation_observation_status
             ),
             open_orders=open_orders,
+            orders_complete=len(_require_list(regular_orders,name="regular orders"))<100 and len(_require_list(conditional_orders,name="conditional orders"))<100,
             observed_at_ms=request.observed_at_ms,
         )
 

@@ -14,6 +14,7 @@ from src.trading_kernel.application.controlled_exit import (
     request_controlled_exits,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 TARGET_COMMIT = "a" * 40
 
@@ -290,7 +291,7 @@ class _FakeAggregateRepository:
             and ticket_id in self._factory.terminalize_after_orientation
         ):
             return None
-        return SimpleNamespace(status=self._factory.statuses[ticket_id])
+        return SimpleNamespace(status=self._factory.statuses[ticket_id],management_mode=ManagementMode.AUTO)
 
 
 class _FakeUnitOfWork:

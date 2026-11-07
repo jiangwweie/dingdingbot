@@ -61,7 +61,7 @@ flowchart TB
 | **BRF2-001** | Short / 1h | 反弹失败且空头未禁用；rally high | [brf2](../../src/trading_kernel/domain/detectors/brf2.py) |
 | **SOR-1H-001** | Long、Short / 1h 入场 | 独立开盘区间突破；已有 Crypto 15m 退出规则 | [sor_1h](../../src/trading_kernel/domain/detectors/sor_1h.py) |
 | **SOR-US-EQ-PERP-001** | Long、Short / 15m | TradFi 产品及 session 条件下的区间策略 | [us_equity_sor](../../src/trading_kernel/domain/detectors/us_equity_sor.py) |
-| **SOR-001** | 保留旧语义 | 永久禁止新 ENTRY，不能由同名前缀恢复 | [策略准入硬边界](../../src/trading_kernel/application/owner_control.py#L1094) |
+| **SOR-001** | 保留旧语义 | 永久禁止新 ENTRY，不能由同名前缀恢复 | [策略准入硬边界](../../src/trading_kernel/application/owner_control.py#L1095) |
 
 策略盈利性、参数优劣及实际启用状态不能由上述结构推出。
 
@@ -74,7 +74,7 @@ flowchart TB
 | **Lifecycle** | 已有安全命令、Owner Operation、受保护 Ticket | Initial Stop、止盈、Runner、退出、受控平仓 | 退出事实只读；非 ENTRY 安全命令写 |
 | **Reconciliation** | unknown、critical work、housekeeping due | 外部事实恢复、成交/保护确认、认证、结算与 Review | 只读真相获取；可持久化后续清理命令 |
 
-来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L110)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L235)。
+来源：[Observation](../../src/trading_kernel/interfaces/observation_worker.py#L88)、[Entry](../../src/trading_kernel/interfaces/entry_worker.py#L110)、[Lifecycle](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[Reconciliation](../../src/trading_kernel/interfaces/reconciliation_worker.py#L237)。
 
 **分析：这不是把一个函数拆成四段顺序调用。**Worker 通过数据库的持久化状态、精确键和租约协作；单个进程退出不会把已提交的 Ticket 或 Command 变成内存中的“丢失任务”。Recovery 仍需当前身份和外部事实验证。
 

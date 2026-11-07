@@ -169,3 +169,18 @@ async def test_takeover_supersedes_prepared_commands_in_same_transaction(
             c.status is ExchangeCommandStatus.PREPARED
             for c in await uow.exchange_commands.list_for_ticket(t.identity.ticket_id)
         )
+
+
+@pytest.mark.asyncio
+async def test_takeover_notice_is_after_commit_and_not_repeated(head_template_engine,monkeypatch):
+    import src.trading_kernel.infrastructure.pg_unit_of_work as pg_uow
+    calls=[]
+    monkeypatch.setattr(pg_uow,'notify_manual_takeover',lambda *args,**kwargs:calls.append((args,kwargs)))
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    async with PostgresKernelUnitOfWork(e) as u:
+        await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=app_evidence(t),now_ms=5100)
+        assert calls==[]
+    assert len(calls)==1
+    async with PostgresKernelUnitOfWork(e) as u:
+        await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=app_evidence(t),now_ms=5200)
+    assert len(calls)==1

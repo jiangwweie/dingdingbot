@@ -116,6 +116,9 @@ async def _run(args: argparse.Namespace) -> int:
     if not callable(getattr(adapter, "read_instrument_certification", None)):
         raise TypeError("venue factory must provide InstrumentCertificationSource")
 
+    start_management=getattr(adapter,"start_management_observation",None)
+    if callable(start_management):
+        start_management()
     engine = create_async_engine(database_url)
     try:
         async def tick():
@@ -143,6 +146,7 @@ async def _run(args: argparse.Namespace) -> int:
                         ),
                         entry_vacuum_scan_all=True,
                     ),
+                    management_source=adapter,
                     account_risk_source=cast(AccountRiskSnapshotSource, adapter),
                     instrument_rules_source=cast(InstrumentRulesSource, adapter),
                     review_economics_source=cast(ReviewEconomicsSource, adapter),
