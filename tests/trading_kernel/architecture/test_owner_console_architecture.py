@@ -56,6 +56,7 @@ def test_owner_console_runner_accepts_only_its_declared_environment_authority() 
     assert environment_names == {
         "CREDENTIALS_DIRECTORY",
         "OWNER_CONSOLE_MARKET_TIMEOUT_SECONDS",
+        "OWNER_CONSOLE_PUBLIC_ORIGIN",
     }
     for marker in (
         "TRADING_KERNEL_API_KEY",
