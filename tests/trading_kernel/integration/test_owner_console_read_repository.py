@@ -1142,10 +1142,10 @@ async def test_review_center_is_terminal_current_review_and_cursor_bounded(
         assert len(selects) == 4
         ticket_selects = [statement for statement in selects if "brc_trade_tickets" in statement]
         assert len(ticket_selects) == 2
-        assert "brc_trade_aggregates.status =" in ticket_selects[0]
+        assert "review_center_aggregate.status =" in ticket_selects[0]
         assert "brc_trade_tickets.terminal_at_ms >=" in ticket_selects[0]
         assert "brc_trade_tickets.terminal_at_ms <" in ticket_selects[0]
-        assert "brc_trade_reviews.review_id = brc_trade_aggregates.review_id" in (
+        assert "brc_trade_reviews.review_id = review_center_aggregate.review_id" in (
             ticket_selects[0]
         )
         assert "order by brc_trade_tickets.terminal_at_ms desc" in ticket_selects[0]
@@ -1502,7 +1502,7 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
         assert "brc_admission_decisions" in overview_selects[5]
         assert "brc_trade_reviews" in overview_selects[6]
         assert (
-            "brc_trade_reviews.review_id = brc_trade_aggregates.review_id"
+            "brc_trade_reviews.review_id = review_center_aggregate.review_id"
             in (overview_selects[6])
         )
         assert "brc_trade_tickets.terminal_at_ms >=" in overview_selects[6]
@@ -3430,5 +3430,34 @@ async def test_review_protection_fill_attribution_is_shared_with_trades(
             ref.kind == "command" and ref.identity == "command:y:stop"
             for ref in review.evidence
         )
+    finally:
+        await engine.dispose()
+
+
+async def test_review_candidate_lookup_is_linear_with_unanalyzed_terminal_rows(owner_read_dsn):
+    from sqlalchemy.dialects import postgresql
+
+    from src.trading_kernel.infrastructure.pg_owner_read_repository import (
+        _review_center_ticket_query,
+    )
+    # Bulk imports can precede autovacuum/analyze. Do not let a status-index
+    # selectivity estimate turn the bounded query into N repeated full scans.
+    for table in ('brc_trade_tickets', 'brc_trade_aggregates', 'brc_trade_events'):
+        await _execute_owner_console_admin(owner_read_dsn,
+            'ALTER TABLE ' + table + ' SET (autovacuum_enabled=false)')
+    await _seed_owner_console_trades(owner_read_dsn, sparse_candidate_count=5001,
+        sparse_complete_ordinals=(5000,))
+    query = _review_center_ticket_query(query=ReviewListQuery(from_ms=1800000000000,
+        to_ms=1800001000000, limit=1, review_status='complete', aggregate_status='terminal',
+        strategy_group_id='strategy-group:sparse'), cursor=None)
+    sql = str(query.compile(dialect=postgresql.dialect(), compile_kwargs={'literal_binds':True}))
+    engine = create_owner_read_engine(owner_read_dsn)
+    try:
+        async with owner_read_transaction(engine) as c:
+            plan = (await c.execute(sa.text('EXPLAIN (ANALYZE, FORMAT JSON) '+sql))).scalar_one()
+        def aggregate_visits(node):
+            own = node.get('Actual Rows',0) * node.get('Actual Loops',0) if node.get('Relation Name') == 'brc_trade_aggregates' else 0
+            return own + sum(aggregate_visits(child) for child in node.get('Plans',[]))
+        assert aggregate_visits(plan[0]['Plan']) <= 5001
     finally:
         await engine.dispose()

@@ -88,3 +88,10 @@ system_identifier、commit、schema。任一不匹配即拒绝。它不执行SSH
 调整测试源前提和对应Policy版本期望，保全快照仍覆盖迁移前后全部源行。
 第四项为5001候选的Owner复盘查询在八进程并发下触发既有statement_timeout，单独运行通过；
 后续认证改用四进程，保留全部测试范围、查询超时、候选上限及安全断言。
+
+第三次完整集成为1843 PASS、1 FAIL，剩余失败仍是大候选复盘查询。进一步执行EXPLAIN
+发现根因不是JIT，也不能靠降低并发解决：尚未ANALYZE的统计信息会选择终态status局部索引，
+对每张Ticket反复扫描Aggregate。最小回归直接测实际执行计划：原路径访问Aggregate约12527505行，
+新路径按Ticket主键有界LATERAL读取，最多5001行。相同本地数据测得2965ms→194ms，
+固定3秒statement_timeout、候选上限、全部事实校验和分页语义不变；测试模拟统计尚未刷新
+而非运行ANALYZE来掩盖问题。此变动在人工分支完成，未修改自动产品。

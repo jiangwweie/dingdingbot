@@ -2224,7 +2224,9 @@ def _signal_list_query(
     )
 
 
-def _profit_conditions(query: Any) -> list[sa.ColumnElement[bool]]:
+def _profit_conditions(
+    query: Any, *, aggregate_status_column: sa.ColumnElement[Any] = trade_aggregates.c.status,
+) -> list[sa.ColumnElement[bool]]:
     conditions = []
     for name in (
         "strategy_group_id",
@@ -2238,7 +2240,7 @@ def _profit_conditions(query: Any) -> list[sa.ColumnElement[bool]]:
         if value is not None:
             conditions.append(trade_tickets.c[name] == value)
     if getattr(query, "aggregate_status", None) is not None:
-        conditions.append(trade_aggregates.c.status == query.aggregate_status)
+        conditions.append(aggregate_status_column == query.aggregate_status)
     if getattr(query, "view", "all") == "current":
         conditions.append(
             sa.exists(
@@ -2691,14 +2693,22 @@ def _review_center_ticket_query(
     account_id: str | None = None,
     venue_id: str | None = None,
 ) -> sa.Select[Any]:
+    # LIMIT prevents the planner from replacing an exact PK lookup with a
+    # repeated scan of the terminal-status partial index under stale statistics.
+    aggregate_row = (
+        sa.select(trade_aggregates)
+        .where(trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id)
+        .limit(1)
+        .lateral("review_center_aggregate")
+    )
     terminal_at_ms = trade_tickets.c.terminal_at_ms
     conditions: list[sa.ColumnElement[bool]] = [
-        trade_aggregates.c.status == "terminal",
+        aggregate_row.c.status == "terminal",
         trade_tickets.c.status == "terminal",
         terminal_at_ms.is_not(None),
         terminal_at_ms >= query.from_ms,
         terminal_at_ms < query.to_ms,
-        *_profit_conditions(query),
+        *_profit_conditions(query, aggregate_status_column=aggregate_row.c.status),
     ]
     if account_id is not None:
         conditions.append(trade_tickets.c.account_id == account_id)
@@ -2771,13 +2781,10 @@ def _review_center_ticket_query(
         .lateral("review_center_settlement_event")
     )
     source = (
-        trade_tickets.join(
-            trade_aggregates,
-            trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
-        )
+        trade_tickets.join(aggregate_row, sa.true())
         .outerjoin(
             trade_reviews,
-            trade_reviews.c.review_id == trade_aggregates.c.review_id,
+            trade_reviews.c.review_id == aggregate_row.c.review_id,
         )
         .outerjoin(entry_event, sa.true())
         .outerjoin(protection_event, sa.true())
@@ -2798,14 +2805,14 @@ def _review_center_ticket_query(
             trade_tickets.c.created_at_ms.label("issued_at_ms"),
             terminal_at_ms,
             trade_tickets.c.risk_at_stop.label("frozen_initial_stop_risk"),
-            trade_aggregates.c.actual_stop_risk,
-            trade_aggregates.c.ticket_id.label("aggregate_ticket_id"),
-            trade_aggregates.c.status.label("aggregate_status"),
-            trade_aggregates.c.management_mode,trade_aggregates.c.management_reason,
-            trade_aggregates.c.manual_takeover_at_ms,trade_aggregates.c.management_observed_at_ms,
-            trade_aggregates.c.manual_risk_reason,trade_aggregates.c.management_orders,
-            trade_aggregates.c.review_id.label("aggregate_review_id"),
-            trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
+            aggregate_row.c.actual_stop_risk,
+            aggregate_row.c.ticket_id.label("aggregate_ticket_id"),
+            aggregate_row.c.status.label("aggregate_status"),
+            aggregate_row.c.management_mode,aggregate_row.c.management_reason,
+            aggregate_row.c.manual_takeover_at_ms,aggregate_row.c.management_observed_at_ms,
+            aggregate_row.c.manual_risk_reason,aggregate_row.c.management_orders,
+            aggregate_row.c.review_id.label("aggregate_review_id"),
+            aggregate_row.c.updated_at_ms.label("aggregate_updated_at_ms"),
             trade_reviews.c.review_id,
             trade_reviews.c.ticket_id.label("review_ticket_id"),
             trade_reviews.c.revision.label("review_revision"),
