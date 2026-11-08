@@ -140,3 +140,18 @@ def test_credential_setup_requires_private_interactive_terminal(monkeypatch):
                 "43.133.243.174",
             ]
         )
+
+
+def test_enrollment_password_hasher_matches_the_actual_console_validator():
+    from scripts.trading_kernel.manual_account_enrollment import owner_password_hasher
+    from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSettings
+
+    hasher = owner_password_hasher()
+    encoded = hasher.hash("owner-password-canary-long")
+    settings = OwnerAuthSettings(
+        username="owner",
+        password_hash=encoded,
+        totp_seed="JBSWY3DPEHPK3PXP",
+        session_signing_key="s" * 64,
+    )
+    assert hasher.verify(settings.password_hash, "owner-password-canary-long")

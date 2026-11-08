@@ -19,13 +19,21 @@ from src.trading_kernel.infrastructure.manual_account_setup import (
 )
 
 
+def owner_password_hasher():
+    """Use the Console's fixed Argon2id contract instead of library defaults."""
+    from argon2 import PasswordHasher
+
+    return PasswordHasher(
+        time_cost=3, memory_cost=65536, parallelism=1, hash_len=32, salt_len=16
+    )
+
+
 def setup_local_account(credentials: ManualAccountCredentials) -> dict:
     """Root-only setup; no trading process starts and no exchange writes exist."""
     import os
     from pathlib import Path
 
     import pyotp
-    from argon2 import PasswordHasher
     from argon2.exceptions import InvalidHashError, VerificationError
 
     from scripts.trading_kernel.manual_host_bootstrap import ROOT, write_private
@@ -74,7 +82,7 @@ def setup_local_account(credentials: ManualAccountCredentials) -> dict:
     directory = Path("/etc/brc/owner-console-credentials")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
-    hasher = PasswordHasher()
+    hasher = owner_password_hasher()
     existing = directory / "owner_password_hash"
     if existing.exists():
         try:

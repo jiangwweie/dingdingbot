@@ -61,3 +61,13 @@ Console通过显式`OWNER_CONSOLE_PUBLIC_ORIGIN`绑定首尔HTTPS域名，同时
 Nginx拒绝控制写请求，交易Worker不启动，ENTRY维护围栏和不可写能力保留。
 实际App协议覆盖、市场/规则/认证、Worker运行与Owner真实ENTRY授权仍是独立后续门槛。
 该阶段只交付可登录查看的安装状态，不宣称已经自动开仓或具备完整人工接管实盘证据。
+
+## Console密码哈希契约
+
+配置脚本必须使用Console固定的Argon2id参数，不能使用第三方库默认值：
+time_cost3、memory_cost65536、parallelism1、hash_len32、salt_len16。
+回归必须将配置入口生成的真实哈希传入实际`OwnerAuthSettings`校验器，
+而不是仅断言算法名称或使用另一个手写fixture。
+既有错误参数哈希只能在Owner私有终端核验原密码后重算；不恢复明文、不换密码或TOTP、
+不修改交易所凭据、不放宽Console校验。安装器返回成功不代表API健康，必须以Socket健康、
+HTTPS401及当前系统服务状态完成postflight后才能宣称控制台可用。

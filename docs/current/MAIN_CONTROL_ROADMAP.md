@@ -33,6 +33,44 @@ initialization with retired SOR-001 paused. It will install a read-only Console 
 trade Workers and exchange-write capability remain disabled pending the separate
 market, real App protocol and Owner ENTRY gates. Current account facts are refreshed
 at initialization rather than inferred from the enrollment receipt.
+
+### Seoul inactive account installation — 2026-11-08
+
+Kernel/API/static artifacts installed from exact **`ba6c23242160981c189d7d5ef4853d2c0ea7a076`**,
+schema **`0017_app_management_observation`**. Exact R4 PASS:1967 Unit/Architecture,
+1846 Integration,74 Full-chain; Ruff, Mypy228,961 Golden snapshots and23064 Core
+decisions PASS. Same-commit API and static certificates PASS. This is an inactive
+installation, not an enabled trading release.
+
+Direct binding: manual product, Seoul machine `f956f502ced4461e9d0fcc0ef637abd6`,
+independent account `binance-manual-1290716840`, PostgreSQL `brc_manual_kernel`,
+system identifier `7705780580898177062`. The official seed and existing strategy
+pause transition ran atomically. Global ENTRY is false, exchange_commands is
+false, SOR-001/TradFi/SOR-1H are paused, baseline2%/gross6%/materialization50% remain
+unchanged. No Ticket, Command, open Incident or trading Worker exists; no trading
+environment file has been installed. ENTRY maintenance fence remains present.
+
+HTTPS static200, root302 and control-write403 passed. API health and unauthenticated
+401 have **not passed**: the new enrollment script used argon2-cffi defaults
+parallelism4, while the existing Console requires parallelism1. The resulting
+hash is rejected at startup; the repeatedly failing API has been stopped. Source
+generation has been corrected and its actual Console-validation regression passes.
+Existing hash normalization must verify the original password in the Owner's
+private terminal; password/TOTP/exchange credentials must not be replaced, guessed
+or printed. The narrow enrollment-source repair is not a new R4 runtime release
+and no certificate is transferred to its later SHA. Installed artifacts stay at
+the exact certified commit above.
+
+Owner password normalization and API postflight are the immediate remaining gate.
+Market runtime certifications, real App operation coverage, trade Worker activation
+and genuine Owner ENTRY authorization remain separate. Current account read probes
+verified2500USDT available, initial seven members Cross/5x, official adapter rules
+and a connected private order-event subscription; zero orders were submitted.
+Subscription connection and local tests do not prove actual App actions.
+
+Evidence: `.local/manual-install-20261108/`, including exact certification logs,
+installation receipts, account preflights, `console-postflight.json` and the private
+original-password normalization command. Tokyo `dev` and runtime were not changed.
 Historical [local validation and preparation](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
 records a preceding stage, not a new deployment approval requirement.
 
