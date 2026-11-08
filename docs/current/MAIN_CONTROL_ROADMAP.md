@@ -50,18 +50,17 @@ false, SOR-001/TradFi/SOR-1H are paused, baseline2%/gross6%/materialization50% r
 unchanged. No Ticket, Command, open Incident or trading Worker exists; no trading
 environment file has been installed. ENTRY maintenance fence remains present.
 
-HTTPS static200, root302 and control-write403 passed. API health and unauthenticated
-401 have **not passed**: the new enrollment script used argon2-cffi defaults
-parallelism4, while the existing Console requires parallelism1. The resulting
-hash is rejected at startup; the repeatedly failing API has been stopped. Source
-generation has been corrected and its actual Console-validation regression passes.
-Existing hash normalization must verify the original password in the Owner's
-private terminal; password/TOTP/exchange credentials must not be replaced, guessed
-or printed. The narrow enrollment-source repair is not a new R4 runtime release
-and no certificate is transferred to its later SHA. Installed artifacts stay at
-the exact certified commit above.
+HTTPS static200, root302, unauthenticated401, control-write403 and Unix-socket
+API health **all PASS** in the final direct postflight. Owner API is active with
+NRestarts0; all four trade Workers are inactive/disabled. The enrollment script's
+argon2-cffi default parallelism4 mismatch with Console parallelism1 was diagnosed
+and corrected in source. Owner privately verified the original password and
+normalized its stored hash through the already installed canonical hasher; password,
+TOTP and exchange credentials are unchanged. The repair passed1968 Unit/Architecture
+tests plus Ruff/Mypy. No certificate is transferred to the later enrollment-only
+source repair SHA; installed artifacts remain at the exact certified commit above.
 
-Owner password normalization and API postflight are the immediate remaining gate.
+Independent account initialization and read-only Console installation are complete.
 Market runtime certifications, real App operation coverage, trade Worker activation
 and genuine Owner ENTRY authorization remain separate. Current account read probes
 verified2500USDT available, initial seven members Cross/5x, official adapter rules
@@ -69,8 +68,12 @@ and a connected private order-event subscription; zero orders were submitted.
 Subscription connection and local tests do not prove actual App actions.
 
 Evidence: `.local/manual-install-20261108/`, including exact certification logs,
-installation receipts, account preflights, `console-postflight.json` and the private
-original-password normalization command. Tokyo `dev` and runtime were not changed.
+installation receipts, account preflights, the failed initial `console-postflight.json`,
+successful `console-postflight-after-password.json` and private password-normalization
+receipt. Tokyo `dev` and runtime were not changed. Owner can authenticate at
+`https://manual.jiaoyingpan.cloud/trading/`; only read operations are published at
+this stage. This postflight does not claim a successful Owner browser login,
+actual App intervention acceptance or live trading capability.
 Historical [local validation and preparation](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
 records a preceding stage, not a new deployment approval requirement.
 
