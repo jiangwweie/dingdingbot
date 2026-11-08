@@ -606,7 +606,7 @@ async def test_0003_downgrade_to_0002_is_forbidden(
     result = _run_migration(_database_url(engine), "downgrade", SOURCE_REVISION)
 
     assert result.returncode != 0
-    assert "fix-forward" in result.stderr
+    assert "forward-only" in result.stderr
     async with engine.connect() as connection:
         assert (
             await connection.scalar(sa.text("SELECT version_num FROM alembic_version"))

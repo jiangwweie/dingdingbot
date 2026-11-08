@@ -222,7 +222,7 @@ async def test_flat_0003_upgrade_seeds_controls_and_pauses_entry() -> None:
             async with engine.begin() as connection:
                 await connection.execute(
                     sa.text(
-                        "UPDATE brc_owner_policy_current SET policy_version = 5 "
+                        "UPDATE brc_owner_policy_current SET policy_version = 5, new_entry_submit_enabled=false "
                         "WHERE owner_policy_id = 'policy-main'"
                     )
                 )

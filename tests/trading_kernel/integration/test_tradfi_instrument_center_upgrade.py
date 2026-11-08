@@ -90,7 +90,7 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
             await connection.execute(
                 sa.update(owner_policy_current)
                 .where(owner_policy_current.c.owner_policy_id == "policy-main")
-                .values(policy_version=9, updated_at_ms=1_800_000_000_120)
+                .values(policy_version=9, new_entry_submit_enabled=False, updated_at_ms=1_800_000_000_120)
             )
         await _install_source_crypto_universe(engine)
         await _install_source_portfolio_shadow(engine)
@@ -135,7 +135,9 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
             assert set(policies) == {"policy-main"}
             # This historical Product expansion is not the release-owned
             # 0007 -> 0009 Capacity B transition, certified separately.
-            assert policies["policy-main"]["policy_version"] == 11
+            # Source ENTRY is already paused for the manual schema gate; only
+            # the new hourly scope revision advances this source version.
+            assert policies["policy-main"]["policy_version"] == 10
             assert not policies["policy-main"]["new_entry_submit_enabled"]
             mappings = policies["policy-main"]["scope"][
                 "event_runtime_profiles"
