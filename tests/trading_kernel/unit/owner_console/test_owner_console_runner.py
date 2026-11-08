@@ -37,10 +37,56 @@ def test_runner_reads_only_exact_systemd_credentials(tmp_path: Path) -> None:
     assert settings.market_timeout_seconds == 5.0
 
 
-def test_runner_loads_optional_google_credential_and_hides_invalid_secret(tmp_path: Path) -> None:
+def test_runner_binds_explicit_manual_https_origin(tmp_path: Path) -> None:
+    _write_credentials(tmp_path)
+    settings = runner.load_settings(
+        {
+            "CREDENTIALS_DIRECTORY": str(tmp_path),
+            "OWNER_CONSOLE_PUBLIC_ORIGIN": "https://manual.jiaoyingpan.cloud",
+        }
+    )
+    assert settings.public_origin == "https://manual.jiaoyingpan.cloud"
+    assert settings.public_host == "manual.jiaoyingpan.cloud"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://manual.jiaoyingpan.cloud",
+        "https://manual.jiaoyingpan.cloud/path",
+        "https://user:secret@manual.jiaoyingpan.cloud",
+        "https://manual.jiaoyingpan.cloud?x=1",
+        "https://manual.jiaoyingpan.cloud#fragment",
+        "https://manual.jiaoyingpan.cloud/",
+        "https://manual.jiaoyingpan.cloud:8443",
+        "",
+    ],
+)
+def test_runner_refuses_malformed_public_origin(tmp_path: Path, origin: str) -> None:
+    _write_credentials(tmp_path)
+    with pytest.raises(ValueError, match="public origin"):
+        runner.load_settings(
+            {
+                "CREDENTIALS_DIRECTORY": str(tmp_path),
+                "OWNER_CONSOLE_PUBLIC_ORIGIN": origin,
+            }
+        )
+
+
+def test_runner_loads_optional_google_credential_and_hides_invalid_secret(
+    tmp_path: Path,
+) -> None:
     _write_credentials(tmp_path)
     google = tmp_path / "google_oidc"
-    google.write_text(json.dumps({"client_id":"test.apps.googleusercontent.com", "client_secret":"NEVER-PRINT-SECRET", "owner_email":"owner@example.com"}))
+    google.write_text(
+        json.dumps(
+            {
+                "client_id": "test.apps.googleusercontent.com",
+                "client_secret": "NEVER-PRINT-SECRET",
+                "owner_email": "owner@example.com",
+            }
+        )
+    )
     google.chmod(0o600)
     settings = runner.load_settings({"CREDENTIALS_DIRECTORY": str(tmp_path)})
     assert settings.google_oidc is not None
@@ -53,8 +99,21 @@ def test_runner_loads_optional_google_credential_and_hides_invalid_secret(tmp_pa
 
 
 def test_google_callback_access_logs_drop_authorization_query_values() -> None:
-    record = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %s",
-        ("127.0.0.1", "GET", "/api/owner/v1/auth/google/callback?code=SECRET&state=SECRET", "1.1", 303), None)
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        "%s %s %s %s %s",
+        (
+            "127.0.0.1",
+            "GET",
+            "/api/owner/v1/auth/google/callback?code=SECRET&state=SECRET",
+            "1.1",
+            303,
+        ),
+        None,
+    )
     assert runner.GoogleOAuthLogFilter().filter(record)
     assert "SECRET" not in record.getMessage()
 

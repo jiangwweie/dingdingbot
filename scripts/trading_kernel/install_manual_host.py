@@ -82,19 +82,21 @@ def install_manual_host(
     phase: str,
     artifacts: bytes | None,
 ) -> dict:
-    if phase not in ("inspect", "stage", "database"):
+    if phase not in ("inspect", "stage", "database", "initialize", "install-console"):
         raise ValueError("inactive installation phase required")
     facts = backend.inspect()
     check_host_identity(facts, target.model_dump())
     if phase == "inspect":
         return facts
-    if facts.get("runtime_present") or not facts.get("entry_fenced", False):
+    if (facts.get("runtime_present") and phase != "install-console") or not facts.get(
+        "entry_fenced", False
+    ):
         raise ValueError("fresh inactive host required")
     if phase == "stage":
         if artifacts is None:
             raise ValueError("exact certified artifacts required")
         return backend.upload(artifacts)
-    return backend.apply("database")
+    return backend.apply(phase)
 
 
 class SshManualInstallationBackend:
@@ -115,6 +117,17 @@ class SshManualInstallationBackend:
             cwd=self.repo_root,
             text=True,
         )
+        if phase in ("initialize", "install-console"):
+            source = """import json,os,pathlib,sys
+r=json.loads(pathlib.Path('/etc/brc/manual-install/staged-release.json').read_text())
+expected=sys.argv[sys.argv.index('--commit')+1]
+if r['commit']!=expected:raise ValueError('staged candidate differs')
+k=pathlib.Path(r['kernel_release'])
+if (k/'.brc-runtime-commit').read_text().strip()!=expected:raise ValueError('staged marker differs')
+os.chdir(k)
+p=str(k/'.venv/bin/python')
+os.execv(p,[p,str(k/'scripts/trading_kernel/manual_runtime_installation.py'),*sys.argv[1:]])
+"""
         args = [
             "sudo",
             "-n",
@@ -234,7 +247,9 @@ def main(argv=None):
     parser.add_argument("--public-ip", required=True)
     parser.add_argument("--machine-id", required=True)
     parser.add_argument(
-        "--phase", choices=("inspect", "stage", "database"), required=True
+        "--phase",
+        choices=("inspect", "stage", "database", "initialize", "install-console"),
+        required=True,
     )
     args = parser.parse_args(argv)
     target = ManualHostTarget(

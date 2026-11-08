@@ -171,3 +171,18 @@ def test_missing_fence_fact_does_not_authorize_database_phase():
     with pytest.raises(ValueError):
         install_manual_host(backend, target=target(), phase="database", artifacts=None)
     backend.apply.assert_not_called()
+
+
+@pytest.mark.parametrize("phase", ["initialize", "install-console"])
+def test_account_and_console_phases_are_exact_explicit_operations(phase):
+    backend = Mock()
+    backend.inspect.return_value = {
+        "machine_id": target().machine_id,
+        "product_id": "brc-app-manual-v1",
+        "public_ip": target().public_ip,
+        "runtime_present": False,
+        "entry_fenced": True,
+    }
+    install_manual_host(backend, target=target(), phase=phase, artifacts=None)
+    backend.apply.assert_called_once_with(phase)
+    backend.upload.assert_not_called()

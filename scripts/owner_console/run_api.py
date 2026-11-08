@@ -7,6 +7,7 @@ import copy
 import logging
 import math
 import os
+import re
 import stat
 import sys
 from collections.abc import Mapping
@@ -52,7 +53,9 @@ class GoogleOAuthLogFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple) and len(record.args) == 5:
             client, method, path, version, status = record.args
-            if isinstance(path, str) and path.startswith("/api/owner/v1/auth/google/callback"):
+            if isinstance(path, str) and path.startswith(
+                "/api/owner/v1/auth/google/callback"
+            ):
                 record.args = (client, method, path.split("?", 1)[0], version, status)
         return True
 
@@ -66,15 +69,28 @@ def load_settings(environ: Mapping[str, str]) -> OwnerConsoleSettings:
 
     credentials = _read_credentials(Path(credentials_directory))
     google_oidc = None
+    public_origin = environ.get(
+        "OWNER_CONSOLE_PUBLIC_ORIGIN", "https://jiaoyingpan.cloud"
+    )
+    if not re.fullmatch(
+        r"https://[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z]{2,63}", public_origin
+    ):
+        raise ValueError(
+            "Owner Console public origin must be an exact HTTPS DNS origin"
+        )
     if "google_oidc" in credentials:
         try:
-            google_oidc = GoogleOidcSettings.model_validate_json(credentials["google_oidc"])
+            google_oidc = GoogleOidcSettings.model_validate_json(
+                credentials["google_oidc"]
+            )
         except ValueError:
             raise ValueError("Google OIDC credential is invalid") from None
     return OwnerConsoleSettings(
         database_dsn=credentials["database_dsn"],
         control_database_dsn=credentials["control_database_dsn"],
         account_id=credentials["account_id"],
+        public_origin=public_origin,
+        public_host=public_origin.removeprefix("https://"),
         market_timeout_seconds=_market_timeout_seconds(environ),
         google_oidc=google_oidc,
         auth=OwnerAuthSettings(
@@ -121,12 +137,12 @@ def _read_credentials(directory: Path) -> dict[str, str]:
             credential_names = frozenset(os.listdir(directory_fd))
         except OSError as error:
             raise ValueError("credential directory cannot be enumerated") from error
-        if credential_names not in (_CREDENTIAL_NAMES, _CREDENTIAL_NAMES | {"google_oidc"}):
+        if credential_names not in (
+            _CREDENTIAL_NAMES,
+            _CREDENTIAL_NAMES | {"google_oidc"},
+        ):
             raise ValueError("credential directory names do not match the declared set")
-        return {
-            name: _read_credential(directory_fd, name)
-            for name in credential_names
-        }
+        return {name: _read_credential(directory_fd, name) for name in credential_names}
     finally:
         os.close(directory_fd)
 

@@ -23,6 +23,16 @@ The initial host had no runtime release, app database, exchange credentials or
 trade units. Inactive installation and fresh database preparation are now being
 completed under the [new-host installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 ENTRY stays fenced until account identity, current facts and App acceptance gates pass.
+Fresh private enrollment has now verified the independent Seoul subaccount UID,
+reading/futures/IP permissions, disabled withdrawal/transfer capabilities, hedge
+and single-asset mode, and zero positions/open orders. Protected exchange and Owner
+credentials exist with root-only0600 permissions; Owner confirmed authenticator enrollment.
+No trade Worker or Owner API was active in the direct pre-installation inspection.
+The next exact candidate adds explicit Console origin binding and atomic fresh-account
+initialization with retired SOR-001 paused. It will install a read-only Console first;
+trade Workers and exchange-write capability remain disabled pending the separate
+market, real App protocol and Owner ENTRY gates. Current account facts are refreshed
+at initialization rather than inferred from the enrollment receipt.
 Historical [local validation and preparation](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
 records a preceding stage, not a new deployment approval requirement.
 
