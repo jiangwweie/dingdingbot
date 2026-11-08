@@ -74,6 +74,7 @@ from src.trading_kernel.domain.orb_session_selection import (
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
 from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuum
+from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.domain.ticket import TradeTicket, build_ticket_id
 from src.trading_kernel.domain.venue_truth import (
     UnknownRecoveryStatus,
@@ -237,6 +238,11 @@ def _ticket_for_group(ticket: TradeTicket, group: str | None) -> TradeTicket:
             "ticket_id":build_ticket_id(signal_event_id=ticket.identity.signal_event_id,runtime=runtime,netting_domain=domain)})
         binding = next(b for b in registered_event_exit_bindings() if b.event_spec_id == spec.event_spec_id)
         ticket = TradeTicket.model_validate({**ticket.model_dump(),"identity":identity,
+            "universe_semantic_digest":build_strategy_universe(
+                universe_version_id=ticket.universe_version_id,strategy_group_id=spec.strategy_group_id,
+                event_spec_id=spec.event_spec_id,universe_version=1,
+                exchange_instrument_ids=(domain.exchange_instrument_id,),installed_at_ms=1000,
+            ).semantic_digest,
             "exposure_family":"rally_failure_short" if spec.position_side == "short" else "long_continuation","family_ticket_limit":1,
             "initial_stop_price":2*ticket.entry_reference_price-ticket.initial_stop_price if spec.position_side == "short" else ticket.initial_stop_price,
             "take_profit_prices":tuple(2*ticket.entry_reference_price-price for price in ticket.take_profit_prices) if spec.position_side == "short" else ticket.take_profit_prices,
