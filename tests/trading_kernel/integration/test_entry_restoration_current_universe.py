@@ -61,6 +61,26 @@ from tests.trading_kernel.support.promotion_rehearsal import (
 from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
 
 
+@pytest.mark.parametrize('target,ready',[('SOR-US-EQ-PERP-001',True),('CPM-RO-001',False)])
+def test_paused_strategy_without_current_universe_does_not_block_enabled_crypto(target,ready):
+    name='brc_kernel_test_'+uuid4().hex[:12];url=async_database_url(name)
+    asyncio.run(_seed_and_bootstrap(name,url))
+    async def check():
+        engine=create_async_engine(url)
+        try:
+            async with engine.begin() as c:
+                await c.execute(sa.text('DELETE FROM brc_strategy_universe_current WHERE event_spec_id IN (SELECT e.event_spec_id FROM brc_event_specs e JOIN brc_strategy_versions v USING(strategy_version_id) WHERE v.strategy_group_id=:group)'),{'group':target})
+            async with engine.connect() as c:
+                await c.execute(sa.text('SET TRANSACTION READ ONLY'))
+                state=await read_entry_restoration_state(c,now_ms=NOW_MS+10000)
+                assert state.ready is ready
+                if ready:
+                    assert not any(any(stock in member for stock in ('AAPL','MSFT','NVDA','TSLA','SNDK','GOOGL','META','AMZN')) for member in state.member_ids)
+        finally:await engine.dispose()
+    try:asyncio.run(check())
+    finally:asyncio.run(_cleanup(name))
+
+
 async def _replace_cpm_with_seven_distinct_members(url: str) -> None:
     engine = create_async_engine(url)
     try:
@@ -106,7 +126,7 @@ def test_current_22_member_restore_is_readonly_owner_scoped_and_fail_closed(faul
     try:
         asyncio.run(_replace_cpm_with_seven_distinct_members(url))
         before = asyncio.run(_certify(url,require_flat=True,now_ms=NOW_MS+10000))
-        assert len(before["entry_recovery_members"]) == 22
+        assert len(before["entry_recovery_members"]) == 14
         assert before["entry_recovery_ready"]
         assert not before["universe_bootstrap_pass"]
         assert not before["owner_entry_resume_authorized"]
@@ -191,7 +211,7 @@ def test_same_schema_deployment_preserves_actual_22_members_without_batch_or_pol
         asyncio.run(_replace_cpm_with_seven_distinct_members(url))
         source_identity=asyncio.run(_rotate_identity(url,"b"*40,NOW_MS+5000))
         before=asyncio.run(_certify(url,require_flat=True,now_ms=NOW_MS+10000))
-        assert len(before["entry_recovery_members"])==22
+        assert len(before["entry_recovery_members"])==14
         assert not before["certification_batch_pass"] and not before["universe_bootstrap_pass"]
         backend=ActualPgReleaseBackend(url,source_identity.runtime_seed_semantic_hash)
         result=deploy_tokyo_release(backend,DeploymentPlan(target_commit="a"*40,

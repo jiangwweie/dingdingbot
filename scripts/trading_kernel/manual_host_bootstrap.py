@@ -137,6 +137,50 @@ def require_inactive() -> None:
         raise ValueError("Owner API writer active")
 
 
+def require_stopped_upgrade(*, filesystem_root: Path = Path("/")) -> dict:
+    """A same-schema upgrade is explicit and stopped, never a fresh-host bypass."""
+    if not (filesystem_root / "etc/brc/trading-kernel.write-fenced").is_file():
+        raise ValueError("upgrade requires the ENTRY maintenance fence")
+    current = filesystem_root / "opt/brc/current"
+    if (
+        not current.is_symlink()
+        or not (filesystem_root / "etc/brc/trading-kernel.env").is_file()
+    ):
+        raise ValueError("upgrade requires an installed bound runtime")
+    for unit in [
+        f"brc-trading-kernel-{r}-worker.service"
+        for r in ("observation", "entry", "lifecycle", "reconciliation")
+    ] + ["brc-owner-console-api.service"]:
+        if (
+            subprocess.run(
+                ["systemctl", "is-active", unit],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            ).returncode
+            == 0
+        ):
+            raise ValueError("all runtime and Owner writers must be stopped")
+    identity = json.loads(
+        read_database("""SELECT json_build_object(
+        'commit',(SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='runtime_commit'),
+        'schema',(SELECT version_num FROM alembic_version),
+        'paused',NOT(SELECT new_entry_submit_enabled FROM brc_owner_policy_current WHERE owner_policy_id='policy-main'),
+        'tickets',EXISTS(SELECT 1 FROM brc_trade_tickets),
+        'commands',EXISTS(SELECT 1 FROM brc_exchange_commands),
+        'positions',EXISTS(SELECT 1 FROM brc_positions_current WHERE quantity<>0),
+        'incidents',EXISTS(SELECT 1 FROM brc_runtime_incidents WHERE status='open'))""")
+    )
+    if (
+        identity["commit"] != (current / ".brc-runtime-commit").read_text().strip()
+        or identity["schema"] != (current / ".brc-schema-revision").read_text().strip()
+        or not identity["paused"]
+        or any(identity[k] for k in ("tickets", "commands", "positions", "incidents"))
+    ):
+        raise ValueError("fresh-account stopped upgrade identity or flatness differs")
+    return identity
+
+
 def extract_plain_archive(source, destination: Path) -> None:
     """Release archives contain only plain files/directories, never links/devices."""
     with tarfile.open(fileobj=source, mode="r:*") as archive:
@@ -191,7 +235,7 @@ def validate_certificates(metadata: dict, commit: str) -> None:
         raise ValueError("surface schema identity differs")
 
 
-def receive_release(commit: str, digest: str, stream) -> dict:
+def receive_release(commit: str, digest: str, stream, *, expected_schema=None) -> dict:
     data = stream.read(MAX_ARCHIVE + 1)
     if len(data) > MAX_ARCHIVE or hashlib.sha256(data).hexdigest() != digest:
         raise ValueError("release transport digest/size differs")
@@ -208,6 +252,11 @@ def receive_release(commit: str, digest: str, stream) -> dict:
             raise ValueError("release envelope differs")
         metadata = json.loads((stage / "certifications.json").read_text())
         validate_certificates(metadata, commit)
+        if (
+            expected_schema is not None
+            and metadata["kernel"]["schema_revision"] != expected_schema
+        ):
+            raise ValueError("manual stopped upgrade forbids a schema change")
         kernel = Path("/opt/brc/releases/manual-kernel-" + commit)
         static = Path("/opt/brc/owner-console/releases/" + commit)
         api = Path("/opt/brc/owner-console-api/releases/" + commit)
@@ -511,7 +560,9 @@ def main(argv=None) -> int:
     parser.add_argument("--machine-id", required=True)
     parser.add_argument("--public-ip", required=True)
     parser.add_argument(
-        "--phase", choices=("inspect", "receive", "database"), required=True
+        "--phase",
+        choices=("inspect", "receive", "database", "receive-upgrade"),
+        required=True,
     )
     parser.add_argument("--commit")
     parser.add_argument("--digest")
@@ -523,16 +574,32 @@ def main(argv=None) -> int:
     if args.phase == "inspect":
         print(json.dumps(actual))
         return 0
-    require_inactive()
+    source = require_stopped_upgrade() if args.phase == "receive-upgrade" else None
+    if source is None:
+        require_inactive()
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     if ROOT.is_symlink() or ROOT.stat().st_uid != 0 or ROOT.stat().st_mode & 0o077:
         raise ValueError("unsafe protected installation directory")
     with open("/run/brc-manual-install.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.phase == "receive":
+        if args.phase in {"receive", "receive-upgrade"}:
             result = receive_release(
-                args.commit or "", args.digest or "", sys.stdin.buffer
+                args.commit or "",
+                args.digest or "",
+                sys.stdin.buffer,
+                expected_schema=None if source is None else source["schema"],
             )
+            if source is not None:
+                if result["schema_revision"] != source["schema"]:
+                    raise ValueError("manual stopped upgrade forbids a schema change")
+                write_private(
+                    ROOT / "upgrade-source.json",
+                    json.dumps(
+                        {"source": source, "target_commit": args.commit}, sort_keys=True
+                    )
+                    + "\n",
+                    overwrite=True,
+                )
         else:
             result = database_foundation(args.commit or "")
     print(json.dumps(result))

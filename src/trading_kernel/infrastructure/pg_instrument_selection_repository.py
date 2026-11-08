@@ -426,6 +426,7 @@ class PostgresInstrumentSelectionRepository:
         if existing is not None:
             if await self.get_generic_spec(spec.selection_spec_id) != spec:
                 raise ValueError("installed Generic Spec differs")
+            await self._initialize_current_static_comparison(spec)
             return
         for member in spec.candidate_ids:
             symbol = member.split(":")[1]
@@ -465,6 +466,44 @@ class PostgresInstrumentSelectionRepository:
             strategy_group_id=spec.strategy_group_id,selection_spec_id=spec.selection_spec_id,
             selection_mode="static_baseline",pending_selection_mode=None,pending_effective_period_anchor_ms=None,
             pending_authorization_id=None,control_version=1,rollback_baseline_id=None,updated_at_ms=installed_at_ms))
+        await self._initialize_current_static_comparison(spec)
+
+    async def _initialize_current_static_comparison(self, spec: GenericSelectionSpecV1) -> None:
+        """Bind a fresh installation to its exact existing Static source, never Candidate24."""
+        if spec.strategy_group_id not in {"MPG-001", "MI-001"}:
+            return
+        if await self.get_comparison_universe_binding(spec.event_spec_id) is not None:
+            return
+        control = await self.get_selection_control(spec.strategy_group_id, for_update=True)
+        current = (await self._connection.execute(sa.select(strategy_universe_current).where(
+            strategy_universe_current.c.event_spec_id == spec.event_spec_id,
+        ).with_for_update(of=strategy_universe_current).limit(1))).mappings().one_or_none()
+        if current is None:
+            return
+        if (control is None or control.selection_mode is not SelectionMode.STATIC_BASELINE
+            or control.selection_epoch_id is not None or control.control_version != 1
+            or control.pending_selection_mode is not None):
+            raise SelectionJobConflict("fresh comparison binding requires the original Static control")
+        universe = await self._read_static_baseline_universe(current["universe_version_id"], require_active=True)
+        if universe.semantic_digest != current["semantic_digest"] or universe.strategy_group_id != spec.strategy_group_id:
+            raise SelectionJobConflict("fresh Static comparison current identity differs")
+        members = universe.exchange_instrument_ids
+        digest = canonical_digest({"exchange_instrument_ids": members})
+        binding = ComparisonUniverseBinding(event_spec_id=spec.event_spec_id,
+            comparison_universe_id="comparison:"+digest[7:],member_set_digest=digest,
+            exchange_instrument_ids=members,comparison_transition_revision=0,
+            source_static_universe_version_id=universe.universe_version_id)
+        await self._connection.execute(pg_insert(comparison_universe_definitions).values(
+            comparison_universe_id=binding.comparison_universe_id,member_set_digest=digest,
+            member_count=len(members)).on_conflict_do_nothing())
+        await self._connection.execute(pg_insert(comparison_universe_members).values([
+            {"comparison_universe_id":binding.comparison_universe_id,"exchange_instrument_id":member}
+            for member in members]).on_conflict_do_nothing())
+        await self._connection.execute(sa.insert(comparison_binding_current).values(
+            event_spec_id=spec.event_spec_id,comparison_universe_id=binding.comparison_universe_id,
+            comparison_transition_revision=0,source_static_universe_version_id=universe.universe_version_id))
+        if await self.get_comparison_universe_binding(spec.event_spec_id) != binding:
+            raise SelectionJobConflict("fresh Static comparison persisted identity differs")
 
     @classmethod
     def lease_namespace(cls, lease_kind: LeaseKind) -> str:

@@ -8,6 +8,32 @@ last_verified: 2026-11-08
 
 ## App Product Workspace Status
 
+### Owner all-capability restoration — in progress2026-11-08
+
+Owner explicitly requested full capability restoration and approved actual App
+operation acceptance during natural trading, retaining all budgets and risk gates.
+Actual App evidence remains unverified; it is no longer a prerequisite before the
+controlled live trial. Owner confirmed browser login. Canonical Console control
+routes have replaced the temporary Nginx write deny; application authentication,
+Origin/Host, TOTP and business gates remain intact.
+
+Current source remains the exact installed commit recorded below. Independent
+Worker environment is root0600; Observation/Lifecycle/Reconciliation are active.
+Command capability was prepared through canonical arm+pause in one transaction,
+with committed global ENTRY false and no fabricated Owner Resume. Crypto initial
+six-Event Universe bootstrap and seven-member certifications completed; SOR-001
+remains paused. SOR-1H capability/bootstrap was installed without resuming its
+paused strategy. A paused TradFi warming target was abandoned through the Kernel,
+preserving its pause and history; no exchange order was submitted.
+
+The next candidate repairs fresh Static Comparison binding for MPG/MI and ensures
+ENTRY restoration uses only enabled Events/profiles, retaining every current
+control in the drift digest. It adds explicit stopped-flat, same-schema manual
+upgrade with per-table row preservation. Focused restoration/Comparison tests
+passed55 and Unit/Architecture1978; exact new-candidate certification is pending.
+Numeric source certification reran96 archives: all four Spec sets and common/SOR
+PASS, zero mismatches. Current ENTRY remains fenced/inactive; no trading claim.
+
 This branch is the **App manual-takeover product**, integrated on `manual-dev`
 in `/Users/jiangwei/Documents/final-manual`. Product identity is **`brc-app-manual-v1`**.
 **No trading runtime has been activated for this product.** Owner has confirmed

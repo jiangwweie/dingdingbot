@@ -87,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--now-ms", type=int)
     parser.add_argument("--validity-ms", type=int, default=5_000)
     scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--entry-recovery-scope", action="store_true")
     scope.add_argument(
         "--cutover-first-batch",
         action="store_true",
@@ -117,9 +118,7 @@ async def probe_production_runtime(
     if now_ms <= 0 or validity_ms <= 0:
         raise ValueError("probe time and validity must be positive")
 
-    instruments = _canonical_active_universe_instrument_ids(
-        exchange_instrument_ids
-    )
+    instruments = _canonical_active_universe_instrument_ids(exchange_instrument_ids)
     account_probe_instrument = instruments[0]
     admission_snapshot = await adapter.read_entry_admission_snapshot(
         EntryAdmissionSnapshotRequest(
@@ -165,9 +164,7 @@ async def probe_production_runtime(
                 min_quantity=rules.min_quantity,
                 min_notional=rules.min_notional,
                 exchange_max_leverage=rules.exchange_max_leverage,
-                configured_leverage=(
-                    leverage_truth.exchange_configured_leverage
-                ),
+                configured_leverage=(leverage_truth.exchange_configured_leverage),
                 valid_until_ms=rules.valid_until_ms,
             )
         )
@@ -212,9 +209,10 @@ async def load_database_probe_manifest(
     try:
         async with engine.connect() as connection:
             rows = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT exchange_instrument_id
                         FROM (
                             SELECT exchange_instrument_id
@@ -228,12 +226,34 @@ async def load_database_probe_manifest(
                         ORDER BY exchange_instrument_id
                         LIMIT 71
                         """
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
     finally:
         await engine.dispose()
     return _canonical_active_universe_instrument_ids(tuple(str(row) for row in rows))
+
+
+async def load_entry_recovery_probe_manifest(database_url: str) -> tuple[str, ...]:
+    """Use the same current enabled-Strategy scope as the operational promoter."""
+    from src.trading_kernel.infrastructure.entry_restoration_certification import (
+        read_entry_restoration_state,
+    )
+
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            await connection.execute(text("SET LOCAL statement_timeout='5s'"))
+            state = await read_entry_restoration_state(
+                connection, now_ms=int(time.time() * 1000)
+            )
+        return _canonical_active_universe_instrument_ids(state.member_ids)
+    finally:
+        await engine.dispose()
 
 
 async def load_dynamic_selection_candidate_probe_manifest(
@@ -253,19 +273,23 @@ async def load_dynamic_selection_candidate_probe_manifest(
             try:
                 await connection.execute(text("SET TRANSACTION READ ONLY"))
                 rows = (
-                    await connection.execute(
-                        text(
-                            """
+                    (
+                        await connection.execute(
+                            text(
+                                """
                             SELECT exchange_instrument_id
                             FROM brc_instrument_selection_spec_members
                             WHERE selection_spec_id = :selection_spec_id
                             ORDER BY exchange_instrument_id
                             LIMIT 25
                             """
-                        ),
-                        {"selection_spec_id": selection_spec_id},
+                            ),
+                            {"selection_spec_id": selection_spec_id},
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             finally:
                 await transaction.rollback()
     finally:
@@ -332,9 +356,11 @@ async def _run(args: argparse.Namespace) -> int:
                         os.getenv("TRADING_KERNEL_DATABASE_URL", "")
                     )
                     if args.dynamic_selection_candidates
-                    else await load_database_probe_manifest(
-                        os.getenv("TRADING_KERNEL_DATABASE_URL", "")
-                    )
+                    else await (
+                        load_entry_recovery_probe_manifest
+                        if args.entry_recovery_scope
+                        else load_database_probe_manifest
+                    )(os.getenv("TRADING_KERNEL_DATABASE_URL", ""))
                 )
             ),
         )

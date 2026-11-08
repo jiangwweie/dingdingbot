@@ -2,6 +2,10 @@
 
 ## 授权与目标
 
+2026-11-08后续决定：Owner要求恢复全部能力，并明确同意原预算及全部风控不变时先启用自然信号交易，
+由真实自然持仓上的App操作完成接管验收。因此真实App证据属于上线后的受控验收，不再先于ENTRY；
+不得宣称已通过，不制造测试订单。正式Owner Resume/TOTP、市场/规则/认证、身份及官方promoter门槛保留。
+
 Owner已确认子账户创建，并授权完成剩余工程和首尔安装；需要提供密钥时由Owner协助。
 此前“实施仅限本地”的阶段已结束，不再为同一独立环境安装重复索取许可。
 目标是将同一个Kernel部署到独立机器/数据库/账户，保持ENTRY关闭，完成身份和只读事实验收，
@@ -71,3 +75,17 @@ time_cost3、memory_cost65536、parallelism1、hash_len32、salt_len16。
 既有错误参数哈希只能在Owner私有终端核验原密码后重算；不恢复明文、不换密码或TOTP、
 不修改交易所凭据、不放宽Console校验。安装器返回成功不代表API健康，必须以Socket健康、
 HTTPS401及当前系统服务状态完成postflight后才能宣称控制台可用。
+
+## 全能力恢复与同schema升级
+
+- 已获Owner恢复授权后，采用同提交canonical Nginx配置恢复控制路由；保留登录、Origin/Host及TOTP。
+- 新账户的command capability通过既有arm与正式pause在单一PG事务准备，提交态ENTRY始终关闭，
+  不产生伪Owner Resume。三安全Worker可刷新规则、认证和观察，ENTRY Worker维持停用及文件围栏。
+- 初始币池由现有bootstrap及认证/暖机Worker建立。暂停TradFi不隐式恢复；其暖机不应成为启用Crypto的门槛。
+- ENTRY恢复证据和相应交易所probe只覆盖当前Owner启用事件；全部暂停控制仍纳入basis摘要，变动即失效。
+- 已认证Generic Spec安装在真实当前Static基线上时，为MPG/MI初始化相同成员及revision0的Comparison绑定。
+  不以Candidate24替代Static，不覆盖既有绑定，不改Episode，不制造Authority。Dynamic仍需正式Owner控制。
+- `stage-upgrade`仅允许所有五个写入者停止、ENTRY围栏、精确身份、同schema、空仓无Ticket/Command/Incident的
+  新账户同schema更新。切换前后除官方身份/能力两表外，逐表核验原始行摘要；Universe/历史及全部控制必须一致。
+- `activate-upgrade`复用官方`deploy_runtime_identity`，只旋转提交身份及release指针；不做SQL修复，不改变Policy。
+  启动三安全Worker与Owner API，ENTRY仍交由正式promote_entry流程。

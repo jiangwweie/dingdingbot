@@ -186,3 +186,76 @@ def test_account_and_console_phases_are_exact_explicit_operations(phase):
     install_manual_host(backend, target=target(), phase=phase, artifacts=None)
     backend.apply.assert_called_once_with(phase)
     backend.upload.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        None,
+        "commit",
+        "schema",
+        "paused",
+        "tickets",
+        "commands",
+        "positions",
+        "incidents",
+        "active_writer",
+    ],
+)
+def test_stopped_manual_upgrade_refuses_every_identity_or_activity_fault(
+    tmp_path, monkeypatch, fault
+):
+    import json
+    from types import SimpleNamespace
+
+    from scripts.trading_kernel import manual_host_bootstrap as module
+
+    etc = tmp_path / "etc/brc"
+    etc.mkdir(parents=True)
+    (etc / "trading-kernel.write-fenced").touch()
+    (etc / "trading-kernel.env").touch()
+    release = tmp_path / "release"
+    release.mkdir()
+    (release / ".brc-runtime-commit").write_text("a" * 40)
+    (release / ".brc-schema-revision").write_text("head")
+    current = tmp_path / "opt/brc/current"
+    current.parent.mkdir(parents=True)
+    current.symlink_to(release, target_is_directory=True)
+    state = {
+        "commit": "a" * 40,
+        "schema": "head",
+        "paused": True,
+        "tickets": False,
+        "commands": False,
+        "positions": False,
+        "incidents": False,
+    }
+    if fault in {"commit", "schema"}:
+        state[fault] = "wrong"
+    elif fault == "paused":
+        state[fault] = False
+    elif fault and fault != "active_writer":
+        state[fault] = True
+    monkeypatch.setattr(module, "read_database", lambda query: json.dumps(state))
+    monkeypatch.setattr(
+        module.subprocess,
+        "run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0 if fault == "active_writer" else 3
+        ),
+    )
+    if fault:
+        with pytest.raises(ValueError):
+            module.require_stopped_upgrade(filesystem_root=tmp_path)
+    else:
+        assert module.require_stopped_upgrade(filesystem_root=tmp_path) == state
+
+
+def test_stopped_upgrade_requires_fence_before_any_database_read(tmp_path, monkeypatch):
+    from scripts.trading_kernel import manual_host_bootstrap as module
+
+    read = Mock()
+    monkeypatch.setattr(module, "read_database", read)
+    with pytest.raises(ValueError):
+        module.require_stopped_upgrade(filesystem_root=tmp_path)
+    read.assert_not_called()

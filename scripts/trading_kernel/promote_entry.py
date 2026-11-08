@@ -167,7 +167,8 @@ class LocalEntryPromotionBackend:
         certification: Mapping[str, object],
     ) -> bool:
         probe = self._json_script("probe_production_runtime.py",
-                                  "--validity-ms", str(MAINTENANCE_PROBE_VALIDITY_MS))
+                                  "--validity-ms", str(MAINTENANCE_PROBE_VALIDITY_MS),
+                                  "--entry-recovery-scope")
         rules = probe.get("rules")
         manifest = probe.get("probe_manifest")
         members = certification.get("entry_recovery_members")

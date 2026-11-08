@@ -24,9 +24,15 @@ or deployment authorization. The active Owner decisions above supersede the orig
 The Owner has authorized comprehensive local validation and subsequently authorized
 independent Seoul installation and completion of the remaining engineering.
 The previously completed [validation stage](docs/superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
-is evidence, not a pending approval requirement. New-server installation remains
-inactive and ENTRY-fenced until exact account/host/database identity, current
-account facts and App protocol acceptance pass. The Owner will provide credentials
+is evidence, not a pending approval requirement. On2026-11-08 Owner explicitly
+requested restoring all capabilities and approved validating actual App intervention
+during naturally signalled trading, with the existing budget and every risk gate unchanged.
+This supersedes the earlier pre-ENTRY App-evidence sequence: actual App coverage remains
+unverified until observed, never fixture-proven or declared complete in advance.
+ENTRY remains fenced until exact account/host/database identity and current runtime
+readiness pass; real Owner Resume/TOTP and the official promoter remain required.
+No test order, forged Signal/Ticket, retired-SOR resume or risk expansion is authorized.
+The Owner will provide credentials
 through a private terminal when needed; never copy Tokyo credentials, ask for
 Secrets in chat, create test orders or bypass a failed gate. New order enablement
 still requires genuine Owner control authority. Tokyo mutations are outside this task.

@@ -73,6 +73,7 @@ class InstallationBackend(Protocol):
     def inspect(self) -> dict: ...
     def apply(self, phase: str) -> dict: ...
     def upload(self, artifacts: bytes) -> dict: ...
+    def apply_with_artifacts(self, phase: str, artifacts: bytes) -> dict: ...
 
 
 def install_manual_host(
@@ -82,20 +83,33 @@ def install_manual_host(
     phase: str,
     artifacts: bytes | None,
 ) -> dict:
-    if phase not in ("inspect", "stage", "database", "initialize", "install-console"):
+    if phase not in (
+        "inspect",
+        "stage",
+        "database",
+        "initialize",
+        "install-console",
+        "stage-upgrade",
+        "activate-upgrade",
+    ):
         raise ValueError("inactive installation phase required")
     facts = backend.inspect()
     check_host_identity(facts, target.model_dump())
     if phase == "inspect":
         return facts
-    if (facts.get("runtime_present") and phase != "install-console") or not facts.get(
-        "entry_fenced", False
-    ):
+    if (
+        facts.get("runtime_present")
+        and phase not in {"install-console", "stage-upgrade", "activate-upgrade"}
+    ) or not facts.get("entry_fenced", False):
         raise ValueError("fresh inactive host required")
-    if phase == "stage":
+    if phase in {"stage", "stage-upgrade"}:
         if artifacts is None:
             raise ValueError("exact certified artifacts required")
-        return backend.upload(artifacts)
+        return (
+            backend.upload(artifacts)
+            if phase == "stage"
+            else backend.apply_with_artifacts("receive-upgrade", artifacts)
+        )
     return backend.apply(phase)
 
 
@@ -117,7 +131,7 @@ class SshManualInstallationBackend:
             cwd=self.repo_root,
             text=True,
         )
-        if phase in ("initialize", "install-console"):
+        if phase in ("initialize", "install-console", "activate-upgrade"):
             source = """import json,os,pathlib,sys
 r=json.loads(pathlib.Path('/etc/brc/manual-install/staged-release.json').read_text())
 expected=sys.argv[sys.argv.index('--commit')+1]
@@ -126,7 +140,8 @@ k=pathlib.Path(r['kernel_release'])
 if (k/'.brc-runtime-commit').read_text().strip()!=expected:raise ValueError('staged marker differs')
 os.chdir(k)
 p=str(k/'.venv/bin/python')
-os.execv(p,[p,str(k/'scripts/trading_kernel/manual_runtime_installation.py'),*sys.argv[1:]])
+script='manual_same_schema_upgrade.py' if '--phase' in sys.argv and sys.argv[sys.argv.index('--phase')+1]=='activate-upgrade' else 'manual_runtime_installation.py'
+os.execv(p,[p,str(k/'scripts/trading_kernel'/script),*sys.argv[1:]])
 """
         args = [
             "sudo",
@@ -143,7 +158,7 @@ os.execv(p,[p,str(k/'scripts/trading_kernel/manual_runtime_installation.py'),*sy
             "--commit",
             self.commit,
         ]
-        if phase == "receive":
+        if phase in {"receive", "receive-upgrade"}:
             args += ["--digest", hashlib.sha256(data or b"").hexdigest()]
         cmd = (
             "ssh",
@@ -176,6 +191,9 @@ os.execv(p,[p,str(k/'scripts/trading_kernel/manual_runtime_installation.py'),*sy
 
     def upload(self, artifacts):
         return self._call("receive", artifacts)
+
+    def apply_with_artifacts(self, phase, artifacts):
+        return self._call(phase, artifacts)
 
 
 def build_artifacts(repo_root: Path, commit: str) -> bytes:
@@ -248,7 +266,15 @@ def main(argv=None):
     parser.add_argument("--machine-id", required=True)
     parser.add_argument(
         "--phase",
-        choices=("inspect", "stage", "database", "initialize", "install-console"),
+        choices=(
+            "inspect",
+            "stage",
+            "database",
+            "initialize",
+            "install-console",
+            "stage-upgrade",
+            "activate-upgrade",
+        ),
         required=True,
     )
     args = parser.parse_args(argv)
@@ -267,7 +293,11 @@ def main(argv=None):
         validate_owner_static_release_certification(REPO_ROOT, commit)
     backend = SshManualInstallationBackend(target, commit)
     check_host_identity(backend.inspect(), target.model_dump())
-    artifacts = build_artifacts(REPO_ROOT, commit) if args.phase == "stage" else None
+    artifacts = (
+        build_artifacts(REPO_ROOT, commit)
+        if args.phase in {"stage", "stage-upgrade"}
+        else None
+    )
     result = install_manual_host(
         backend, target=target, phase=args.phase, artifacts=artifacts
     )
