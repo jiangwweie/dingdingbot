@@ -3,6 +3,17 @@
 Last updated: 2026-10-12
 Scope: Tokyo Trading Kernel engineering and operation
 
+## Fixed Auto Product Workspace
+
+This checkout is the full-auto product: `/Users/jiangwei/Documents/final`.
+Its long-lived integration branch is `dev`; focused work uses `codex/auto-*`.
+The separate App takeover product belongs to `/Users/jiangwei/Documents/final-manual`
+and `manual-dev`. Do not develop its takeover semantics here or merge its whole
+branch into `dev`. Port applicable common fixes as isolated reviewed commits.
+Each product owns its database, credentials, local evidence and release identity.
+See [two-product workspace policy](docs/superpowers/plans/2026-11-08-two-product-workspaces.md).
+No server, account, credential or deployment change is authorized by workspace setup.
+
 ## Authority Order
 
 When sources disagree, use this order:

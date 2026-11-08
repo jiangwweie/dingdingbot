@@ -2,6 +2,10 @@
 
 Status: current Trading Kernel authority index
 
+## Product Workspaces
+
+[两条产品线的固定目录与分支](superpowers/plans/2026-11-08-two-product-workspaces.md) describes local project boundaries and selective common-fix sharing. Workspace setup is not production deployment.
+
 ## Code-Based Learning Guide
 
 [项目知识地图](knowledge/README.md) provides a Chinese reading path through the
