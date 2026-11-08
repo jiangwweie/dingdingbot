@@ -1,10 +1,23 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-02
+last_verified: 2026-11-08
 ---
 
 # Main Control Roadmap
+
+## App Product Workspace Status
+
+This branch is the **App manual-takeover product**, integrated on `manual-dev`
+in `/Users/jiangwei/Documents/final-manual`. **No server/account deployment is
+recorded for this product.** The local implementation is awaiting Owner confirmation
+before comprehensive validation and release isolation; see the
+[prevalidation handoff](../superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md).
+
+The Tokyo release snapshots retained below are inherited historical evidence,
+not current state or authority for this product and not a fresh Tokyo verification.
+The auto product's current roadmap remains in its separate `dev` workspace.
+The workspace update did not grant new trading permission or modify Tokyo.
 
 ## Final Target
 

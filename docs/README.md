@@ -17,6 +17,10 @@ and account admission. The [implementation plan](superpowers/plans/2026-11-06-ap
 maps these requirements to ordered tasks, failure tests, certification and new
 environment acceptance. The Owner has authorized local implementation. See the [M0 protocol and implementation evidence](superpowers/plans/2026-11-06-app-manual-takeover-v1-protocol-evidence.md) for the initial batch, and the [prevalidation handoff](superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md) for current code/checks and the Owner confirmation boundary. No new server has been deployed.
 
+## Product Workspaces
+
+[两条产品线的固定目录与分支](superpowers/plans/2026-11-08-two-product-workspaces.md) describes local project boundaries and selective common-fix sharing. Workspace setup is not production deployment.
+
 ## Code-Based Learning Guide
 
 [项目知识地图](knowledge/README.md) provides a Chinese reading path through the

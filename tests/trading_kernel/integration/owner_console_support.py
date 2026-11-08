@@ -18,7 +18,7 @@ from sqlalchemy.engine import make_url
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
+    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:55434/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_owner_console_test_[a-f0-9]{12}$")
 SAFE_ROLE = re.compile(r"^brc_owner_read_test_[a-f0-9]{12}$")
@@ -27,14 +27,14 @@ SAFE_SYSTEM_IDENTIFIER = re.compile(r"^[0-9]+$")
 SAFE_COMPOSE_CONFIG_HASH = re.compile(r"^[a-f0-9]{64}$")
 POSTGRES_CONTAINER_NAME = os.getenv(
     "BRC_TEST_POSTGRES_CONTAINER_NAME",
-    "dingdingbot-pg",
+    "brc-manual-pg",
 )
 DOCKER_TIMEOUT_SECONDS = 3
 EXPECTED_POSTGRES_IMAGE = "postgres:16-alpine"
 EXPECTED_COMPOSE_FILE = "docker-compose.pg.yml"
 EXPECTED_COMPOSE_LABELS = {
     "com.docker.compose.service": "postgres",
-    "com.docker.compose.project": "final",
+    "com.docker.compose.project": "brc-manual-local",
     "com.docker.compose.container-number": "1",
     "com.docker.compose.oneoff": "False",
     "com.docker.compose.depends_on": "",

@@ -40,7 +40,7 @@ CONFIGURE_SCRIPT = REPO_ROOT / "scripts/trading_kernel/configure_strategy_univer
 STATUS_SCRIPT = REPO_ROOT / "scripts/trading_kernel/read_strategy_universe_status.py"
 ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
+    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:55434/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 CANONICAL_EVENT_SPEC_ID = "event_spec:SOR-001:SOR-LONG:v4"

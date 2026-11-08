@@ -1,11 +1,13 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
 Last updated: 2026-10-12
-Scope: Tokyo Trading Kernel engineering and operation
+Scope: App manual-takeover product engineering; inherited Tokyo contracts are baseline references
 
 ## Branch-local App Manual Takeover Scope
 
-On `codex/app-manual-takeover-v1`, the Owner-approved target is recorded in
+This fixed worktree is `/Users/jiangwei/Documents/final-manual`; integration is
+`manual-dev`, focused work uses `codex/manual-*`. The initial
+`codex/app-manual-takeover-v1` remains preserved as history. The Owner-approved target is recorded in
 [App manual takeover V1 decisions](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md).
 This is a separate product/server/account, not a Tokyo behavior change. Preserve
 default automation until external intervention, then permanently hand over the
@@ -22,6 +24,15 @@ or deployment authorization. Local coding/testing is authorized; no Tokyo mutati
 The latest Owner scope stops before comprehensive full-chain/R4 verification and
 release-isolation work. See the [prevalidation handoff](docs/superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md);
 wait for Owner confirmation before entering that next stage.
+
+## Fixed Workspace Operations
+
+Read [two-product workspace policy](docs/superpowers/plans/2026-11-08-two-product-workspaces.md).
+Use this worktree's own `.venv` and `scripts/local/manual_pytest.sh`; its local PG
+is `brc-manual-pg` at 127.0.0.1:55434. Never reuse Tokyo/local-auto credentials,
+DB, test template, certification or `.env` from the sibling `final` workspace.
+The inherited deployment scripts are not yet certified for the new target and
+must not be invoked for production. Do not push manual commits into `dev`.
 
 ## Authority Order
 

@@ -19,7 +19,7 @@ from tests.trading_kernel.support.schema import EXPECTED_KERNEL_TABLES
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
+    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:55434/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 

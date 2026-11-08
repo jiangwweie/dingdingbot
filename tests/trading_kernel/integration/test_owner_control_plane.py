@@ -73,7 +73,7 @@ async def test_preservation_inventory_matches_exact_source_schema(revision, sour
 
 ADMIN_DSN = os.getenv(
     "BRC_TEST_POSTGRES_ADMIN_URL",
-    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:5432/postgres",
+    "postgresql://dingdingbot:dingdingbot_dev@127.0.0.1:55434/postgres",
 )
 SAFE_DATABASE = re.compile(r"^brc_kernel_test_[a-f0-9]{12}$")
 
