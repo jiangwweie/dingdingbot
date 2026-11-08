@@ -9,12 +9,22 @@ last_verified: 2026-11-08
 ## App Product Workspace Status
 
 This branch is the **App manual-takeover product**, integrated on `manual-dev`
-in `/Users/jiangwei/Documents/final-manual`. **No server/account deployment is
-recorded for this product.** Product identity is **`brc-app-manual-v1`**.
-Owner confirmation has been received: comprehensive local validation is authorized,
-including repairs and exact local certification. Deployment and live trading remain
-unapproved. Results and remaining environment gates are recorded in the
-[validation and release preparation record](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md).
+in `/Users/jiangwei/Documents/final-manual`. Product identity is **`brc-app-manual-v1`**.
+**No trading runtime has been activated for this product.** Owner has confirmed
+creation of an independent subaccount and authorized completion of independent
+Seoul installation; credentials will be provided through a private terminal when
+needed. The previous comprehensive local validation is authorized and complete
+for its exact candidate; later installation changes require their own exact evidence.
+
+Infrastructure directly verified on 2026-11-08: Seoul host `43.133.243.174`,
+root machine identity `f956f502ced4461e9d0fcc0ef637abd6`, independent Python,
+Docker, clock synchronization and `manual.jiaoyingpan.cloud` HTTPS maintenance.
+The initial host had no runtime release, app database, exchange credentials or
+trade units. Inactive installation and fresh database preparation are now being
+completed under the [new-host installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
+ENTRY stays fenced until account identity, current facts and App acceptance gates pass.
+Historical [local validation and preparation](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
+records a preceding stage, not a new deployment approval requirement.
 
 The Tokyo release snapshots retained below are inherited historical evidence,
 not current state or authority for this product and not a fresh Tokyo verification.

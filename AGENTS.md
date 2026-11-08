@@ -20,11 +20,17 @@ independent verification. The Owner has now authorized local implementation and 
 Read the [detailed design](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
 and [implementation plan](docs/superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
 before future implementation. Technical proposals are not completed capabilities
-or deployment authorization. Local coding/testing is authorized; no Tokyo mutation or new-server deployment is authorized by the implementation request.
-The Owner has authorized comprehensive local validation, repairs, exact candidate
-certification and release-isolation work. Actual deployment and live trading
-remain outside this turn. The prior [handoff](docs/superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md)
-records the preceding stage, not a remaining approval block.
+or deployment authorization. The active Owner decisions above supersede the original implementation-only stage; no Tokyo mutation is authorized.
+The Owner has authorized comprehensive local validation and subsequently authorized
+independent Seoul installation and completion of the remaining engineering.
+The previously completed [validation stage](docs/superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
+is evidence, not a pending approval requirement. New-server installation remains
+inactive and ENTRY-fenced until exact account/host/database identity, current
+account facts and App protocol acceptance pass. The Owner will provide credentials
+through a private terminal when needed; never copy Tokyo credentials, ask for
+Secrets in chat, create test orders or bypass a failed gate. New order enablement
+still requires genuine Owner control authority. Tokyo mutations are outside this task.
+
 
 ## Fixed Workspace Operations
 
