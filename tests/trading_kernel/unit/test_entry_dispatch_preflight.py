@@ -525,6 +525,7 @@ def _preflight_request(*, snapshot, max_same_strategy_side: int | None = None):
             status="active",
         ),
         runtime_capability=RuntimeCapabilitySnapshot(
+            certification={"product_id": "brc-app-manual-v1"},
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="commit-1",

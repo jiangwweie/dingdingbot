@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.domain.capacity import FamilyTicketLimits
 from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
@@ -362,6 +363,8 @@ async def seed_runtime_authority(
         "seed_identity": seed_identity,
         "position_mode": POSITION_MODE,
     }
+    if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation"}:
+        certification["product_id"] = PRODUCT_ID
     rows = [
         _ExactRow(
             runtime_profiles,
@@ -813,6 +816,8 @@ async def deploy_compatible_upgrade_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation"}:
+            certification["product_id"] = PRODUCT_ID
         certification.update(
             {
                 "deployment_commit": request.runtime_commit,
@@ -1059,6 +1064,8 @@ async def _deploy_capability_compatible_identity(
     )
     for capability in capabilities:
         certification = dict(capability["certification"])
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation"}:
+            certification["product_id"] = PRODUCT_ID
         certification.update(
             {
                 "deployment_commit": request.runtime_commit,
@@ -1289,6 +1296,8 @@ async def _deploy_runtime_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation"}:
+            certification["product_id"] = PRODUCT_ID
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
             sa.update(runtime_capabilities_current)
@@ -1639,6 +1648,8 @@ def _seed_identity(
         "position_mode": POSITION_MODE,
         "acceptance_policy": semantics,
     }
+    if schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation"}:
+        payload["product_id"] = PRODUCT_ID
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
     if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation"}:

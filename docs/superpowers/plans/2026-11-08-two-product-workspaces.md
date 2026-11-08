@@ -23,7 +23,7 @@
 6. 已核实当前认证工具通过 `git rev-parse --git-path` 解析证书位置：主目录使用
    `.git/brc-release-certifications`，人工worktree使用其独立Git管理子目录下的同名目录。
    不复制原证书；文件存在仍不是可用证明，必须核对产品、精确SHA、schema及命令集。
-   正式产品身份与错服务器拒绝留待发布隔离阶段实现。
+   后续产品身份和旧SSH入口拒绝的实现与证据见[发布准备记录](2026-11-08-manual-validation-release-preparation.md)。
 
 ## 环境隔离
 
@@ -64,6 +64,7 @@ docker compose -f docker-compose.pg.yml ps
 
 ## 当前授权边界
 
-本次只落实Git、固定目录、开发环境和文档归属。人工版仍停在完整验证与发布隔离之前；
+目录隔离阶段当时只落实Git、固定目录和开发环境。Owner现已授权完整本地验证与发布准备；
+实际安装仍未授权，详见[发布准备记录](2026-11-08-manual-validation-release-preparation.md)。
 任何“最新分支”“已同步远程”均不表示程序已认证、已部署或交易权限已开启。
 Tokyo生产状态只从其产品工作区的路线图与行动时事实核实。

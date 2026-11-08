@@ -30,6 +30,7 @@ from scripts.owner_console.certify_release_candidate import (
 from scripts.owner_console.certify_static_release_candidate import (
     validate_owner_static_release_certification,
 )
+from src.trading_kernel.domain.product_identity import refuse_inherited_tokyo_deployment
 
 STATIC_RELEASE_ROOT = "/opt/brc/owner-console/releases"
 STATIC_CURRENT_RELEASE = "/opt/brc/owner-console/current"
@@ -514,6 +515,7 @@ class SshOwnerConsoleReleaseBackend:
         return result
 
     def _ssh_base(self) -> tuple[str, ...]:
+        refuse_inherited_tokyo_deployment()
         return (
             "ssh",
             "-o",
@@ -629,6 +631,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    refuse_inherited_tokyo_deployment()
     kind = OwnerConsoleReleaseKind(args.kind)
     commit = _resolve_commit(args.commit)
     _require_clean_control_worktree()

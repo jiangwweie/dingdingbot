@@ -38,6 +38,7 @@ from src.trading_kernel.domain.orb_session_selection import (
     ORB_STATIC_MEMBERS,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.risk_budget import policy_budget_is_valid
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -865,6 +866,10 @@ async def _certify(
                     )
                 ).mappings()
             }
+            capability_products = tuple((await connection.execute(text(
+                "SELECT certification->>'product_id' FROM brc_runtime_capabilities_current "
+                "ORDER BY capability_key LIMIT 3"
+            ))).scalars())
             owner_policy_row = (
                 await connection.execute(
                     text(
@@ -1346,6 +1351,7 @@ async def _certify(
         set(capabilities) == {"exchange_commands", "strategy_signal_ingest"}
         and capabilities["strategy_signal_ingest"] is True
         and isinstance(capabilities["exchange_commands"], bool)
+        and capability_products == (PRODUCT_ID, PRODUCT_ID)
     )
     database_integrity_pass = (
         revision == EXPECTED_ALEMBIC_REVISION
@@ -1622,6 +1628,8 @@ async def _certify(
         "certified_at_ms": effective_now_ms,
         "alembic_revision": revision,
         "runtime_identity": runtime_identity,
+        "product_identity": {"product_id": PRODUCT_ID, "status": "pass"
+            if capability_products == (PRODUCT_ID, PRODUCT_ID) else "fail"},
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
         "strategy_universe": strategy_universe,

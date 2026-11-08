@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from scripts.trading_kernel.cutover_tokyo import CutoverPhase
 from scripts.trading_kernel.verify_flat_cutover import CutoverFacts, CutoverPlan
+from src.trading_kernel.domain.product_identity import refuse_inherited_tokyo_deployment
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     build_runtime_seed_identity,
@@ -380,6 +381,7 @@ class SshCommandRunner:
         check: bool = True,
         timeout_seconds: float | None = None,
     ) -> _RemoteResult:
+        refuse_inherited_tokyo_deployment()
         if not argv or any("\x00" in value for value in argv):
             raise ValueError("remote command arguments must be bounded strings")
         remote_command = shlex.join(argv)
@@ -440,6 +442,7 @@ class SshCommandRunner:
         commit: str,
         destination: PurePosixPath,
     ) -> None:
+        refuse_inherited_tokyo_deployment()
         archive = subprocess.Popen(
             ("git", "archive", "--format=tar", commit),
             cwd=repo_root,

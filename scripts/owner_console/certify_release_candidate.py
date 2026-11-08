@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.trading_kernel.verification_portfolios import R2_OWNER_API_COMMANDS
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -36,6 +37,7 @@ class OwnerApiReleaseCertificationManifest(BaseModel):
         alias="schema",
         serialization_alias="schema",
     )
+    product_id: Literal["brc-app-manual-v1"]
     status: Literal["pass"]
     release_commit: str
     schema_revision: str
@@ -62,6 +64,7 @@ def build_owner_api_certification_identity(commit: str) -> dict[str, object]:
     return {
         "schema": SCHEMA,
         "release_commit": commit,
+        "product_id": PRODUCT_ID,
         "schema_revision": CURRENT_SCHEMA_REVISION,
         "command_set_digest": _digest(OWNER_API_CERTIFICATION_COMMANDS),
     }

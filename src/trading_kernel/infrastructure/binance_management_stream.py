@@ -18,11 +18,48 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         self.management_gap = True
         self.management_lost_before_ms = None
         self._management_task = None
+        self._management_client = None
+        self._management_connected_ms = None
+
+    def _is_management_client(self, client):
+        key = self.options.get("future", {}).get("listenKey")
+        return bool(key and client.url == self.get_private_ws_url("future", key))
+
+    def on_connected(self, client, message=None):
+        if self._is_management_client(client):
+            self._management_client = client
+            self._management_connected_ms = self.milliseconds()
+            self.management_gap = False
+        return super().on_connected(client, message)
+
+    def _lose_management_connection(self, client):
+        if client is self._management_client:
+            self.management_gap = True
+            self._management_connected_ms = None
+
+    def on_error(self, client, error):
+        self._lose_management_connection(client)
+        return super().on_error(client, error)
+
+    def on_close(self, client, error):
+        self._lose_management_connection(client)
+        return super().on_close(client, error)
+
+    def management_covers(self, *, start_ms, end_ms):
+        client = self._management_client
+        return bool(
+            client is not None
+            and not client.closed()
+            and not self.management_gap
+            and self._management_connected_ms is not None
+            and self._management_connected_ms <= start_ms <= end_ms
+            and (self.management_lost_before_ms is None
+                 or self.management_lost_before_ms < start_ms)
+        )
 
     def handle_order_update(self, client, message):
         if message.get("e") in ("ORDER_TRADE_UPDATE", "ALGO_UPDATE"):
             if len(self.management_messages) == self.management_messages.maxlen:
-                self.management_gap = True
                 self.management_lost_before_ms = self.management_messages[0][0]
             self.management_messages.append((int(time.time() * 1000), deepcopy(message)))
         return super().handle_order_update(client, message)
@@ -35,6 +72,7 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
                 raise
             except Exception:  # noqa: BLE001 - stream failure marks a gap and reconnects.
                 self.management_gap = True
+                self._management_connected_ms = None
                 await asyncio.sleep(2)
 
     def start_management_stream(self):

@@ -7,6 +7,7 @@ from src.trading_kernel.application.ports import (
     UnitOfWorkFactory,
 )
 from src.trading_kernel.domain.incident_blocking import EntryBlockScope
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 
 _RUNTIME_FENCE_INCIDENT_ID = "incident:runtime-fence"
 _RUNTIME_FENCE_INCIDENT_KIND = "runtime_identity_mismatch"
@@ -26,6 +27,7 @@ async def runtime_writer_is_certified(
         capability = await uow.signals.get_runtime_capability("exchange_commands")
         identity_matches = bool(
             capability
+            and capability.certification.get("product_id") == PRODUCT_ID
             and capability.certified_commit == runtime_commit
             and capability.schema_revision == schema_revision
         )

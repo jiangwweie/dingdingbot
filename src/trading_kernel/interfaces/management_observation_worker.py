@@ -85,6 +85,22 @@ async def observe_management_once(
         batch = await asyncio.wait_for(
             source.read_management_scan(req), timeout=timeout_seconds
         )
+        if (
+            batch.ticket_id != ticket_id
+            or batch.snapshot.netting_domain != req.domain
+            or not since <= batch.covered_until_ms <= now_ms
+            or batch.snapshot.observed_at_ms > now_ms
+            or (batch.complete and batch.covered_until_ms != now_ms)
+            or any(
+                item.terms.identity[:4] != (
+                    req.domain.venue_id, req.domain.account_id,
+                    req.domain.exchange_instrument_id, req.domain.position_side,
+                )
+                or not item.exchange_event_at_ms <= item.received_at_ms <= now_ms
+                for item in batch.evidence
+            )
+        ):
+            raise ValueError("management batch identity/time mismatch")
     except Exception as exc:  # noqa: BLE001 - observation failures must fence facts, not trade.
         async with uow_factory() as u:
             await u.management.save_coverage(
@@ -112,12 +128,6 @@ async def observe_management_once(
                     event=ev, reduction=reduce_event(a, ev), expected_version=a.version
                 )
         return "management_facts_unavailable"
-    if (
-        batch.ticket_id != ticket_id
-        or batch.snapshot.netting_domain != req.domain
-        or batch.covered_until_ms > now_ms
-    ):
-        raise ValueError("management batch identity/time mismatch")
     async with uow_factory() as u:
         current = await u.aggregates.get_for_update(ticket_id)
         if current is None:
@@ -129,7 +139,7 @@ async def observe_management_once(
                 u,
                 ticket_id=ticket_id,
                 evidence=item,
-                now_ms=max(now_ms, item.received_at_ms),
+                now_ms=now_ms,
             )
         current = await u.aggregates.get_for_update(ticket_id)
         assert current is not None
@@ -148,6 +158,14 @@ async def observe_management_once(
             for item in batch.evidence
             if item.exchange_event_at_ms >= current.ticket.created_at_ms
         )
+        # An empty/partial history is not affirmative coverage of our orders.
+        required_orders = {
+            str((row["result_payload"] or {}).get("exchange_order_id"))
+            for row in await u.management.command_rows(ticket_id)
+            if row["status"] in ("accepted", "reconciled_accepted")
+            and (row["result_payload"] or {}).get("exchange_order_id") is not None
+        }
+        observed_orders = {item.terms.exchange_order_id for item in batch.evidence}
         if (
             current.management_mode is ManagementMode.REVIEW_REQUIRED
             and current.management_reason
@@ -159,6 +177,8 @@ async def observe_management_once(
             )
             and batch.complete
             and decisive
+            and bool(required_orders)
+            and required_orders <= observed_orders
             and req.since_ms == current.ticket.created_at_ms
         ):
             cleared_event = ManagementReviewCleared(

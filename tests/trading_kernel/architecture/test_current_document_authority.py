@@ -576,3 +576,13 @@ def test_current_deployment_contract_requires_each_capability_source_verifier() 
         "compatible identity transition",
     ):
         assert marker in source
+
+
+def test_manual_branch_records_distinct_runtime_and_release_boundary() -> None:
+    roadmap = (CURRENT_DOCS_ROOT / 'MAIN_CONTROL_ROADMAP.md').read_text()
+    assert 'brc-app-manual-v1' in roadmap
+    assert 'comprehensive local validation is authorized' in roadmap
+    assert 'No server/account deployment is recorded' in ' '.join(roadmap.split())
+    deployment = (CURRENT_DOCS_ROOT / 'TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md').read_text()
+    assert 'refuse_inherited_tokyo_deployment' in deployment
+    assert 'real App protocol acceptance' in deployment

@@ -27,7 +27,7 @@ async def test_seeded_clones_equal_fresh_setup_and_remain_isolated(excluded: str
             expected=await _all_current_rows_digest(conn)
         async with fast.connect() as conn:
             actual=await _all_current_rows_digest(conn)
-            assert actual == expected
+            assert actual == expected, await _different_current_tables(fresh, conn)
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_specs WHERE selection_kind='generic_dynamic_v1'")) == (4 if excluded is None else 3)
         async with fast.begin() as conn:
             await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=true"))
@@ -51,3 +51,19 @@ async def _all_current_rows_digest(connection) -> str:
         rows = (await connection.execute(sa.select(table))).mappings().all()
         tables[table.name] = sorted(_row_manifest(tuple(table.c.keys()),dict(row))["digest"] for row in rows)
     return _sha256_json(tables)
+
+
+async def _different_current_tables(fresh, actual_connection):
+    from scripts.trading_kernel.verify_schema import _row_manifest
+    from src.trading_kernel.infrastructure.pg_models import metadata
+    differences = {}
+    async with fresh.connect() as expected_connection:
+        for table in sorted(metadata.tables.values(), key=lambda t: t.name):
+            async def rows(connection, table=table):
+                values = (await connection.execute(sa.select(table))).mappings().all()
+                return sorted((_row_manifest(tuple(table.c.keys()), dict(row)) for row in values), key=str)
+            expected = await rows(expected_connection)
+            actual = await rows(actual_connection)
+            if expected != actual:
+                differences[table.name] = {'expected': expected, 'actual': actual}
+    return differences

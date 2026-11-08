@@ -10,9 +10,11 @@ last_verified: 2026-11-08
 
 This branch is the **App manual-takeover product**, integrated on `manual-dev`
 in `/Users/jiangwei/Documents/final-manual`. **No server/account deployment is
-recorded for this product.** The local implementation is awaiting Owner confirmation
-before comprehensive validation and release isolation; see the
-[prevalidation handoff](../superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md).
+recorded for this product.** Product identity is **`brc-app-manual-v1`**.
+Owner confirmation has been received: comprehensive local validation is authorized,
+including repairs and exact local certification. Deployment and live trading remain
+unapproved. Results and remaining environment gates are recorded in the
+[validation and release preparation record](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md).
 
 The Tokyo release snapshots retained below are inherited historical evidence,
 not current state or authority for this product and not a fresh Tokyo verification.

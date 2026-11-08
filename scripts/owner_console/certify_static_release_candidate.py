@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.trading_kernel.verification_portfolios import R1_STATIC_COMMANDS
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 
 SCHEMA = "brc.owner_console.static_release_certification.v1"
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
@@ -31,6 +32,7 @@ class OwnerStaticReleaseCertificationManifest(BaseModel):
     manifest_schema: Literal[
         "brc.owner_console.static_release_certification.v1"
     ] = Field(alias="schema", serialization_alias="schema")
+    product_id: Literal["brc-app-manual-v1"]
     status: Literal["pass"]
     release_commit: str
     command_set_digest: str
@@ -56,6 +58,7 @@ def build_owner_static_certification_identity(commit: str) -> dict[str, str]:
     return {
         "schema": SCHEMA,
         "release_commit": commit,
+        "product_id": PRODUCT_ID,
         "command_set_digest": _digest(STATIC_CERTIFICATION_COMMANDS),
     }
 

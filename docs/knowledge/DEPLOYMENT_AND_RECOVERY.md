@@ -2,6 +2,17 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。本页解释受版本管理的配置及流程；机器现状、部署 SHA、标签和验收结果只查 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)，执行操作前仍需刷新直接事实。
 
+## 人工接管产品的发布边界
+
+本分支属于 **App人工接管产品**，与Tokyo全自动产品分开演进、账户和数据库独立。
+Kernel、API和静态证书均绑定编译产品身份；运行环境还必须声明相同产品身份。
+旧Tokyo SSH发布后端在构造任何远程命令前拒绝执行，不能通过改SSH别名绕过。
+`prepare_manual_release.py`只校验本地精确证书和可选目标身份比较，不发SSH、不安装、
+不启用ENTRY。新机采购、账户/API配置、真实App协议覆盖及上线验收仍是外部条件。
+（来源：[产品身份](../../src/trading_kernel/domain/product_identity.py)、
+[准备入口](../../scripts/trading_kernel/prepare_manual_release.py)、
+[当前状态](../current/MAIN_CONTROL_ROADMAP.md)）
+
 ## 拓扑：进程与逻辑角色分别看
 
 ```mermaid
@@ -62,7 +73,7 @@ flowchart TB
 | **R3** | 同 schema Kernel 行为 | Kernel regular release | flat、当前事实、认证与运行身份；按失败阶段 fence / fix-forward |
 | **R4** | Schema / Registry / Policy / authority | preservation-gated compatible upgrade | 停写、flat、精确来源、保留证明、前向迁移与目标恢复 |
 
-来源：[classify_changed_paths](../../scripts/classify_release.py#L84)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)、[Owner 发布实现](../../scripts/owner_console/deploy_release.py#L111)。混合改动按最高级别，不能仅因有文档文件便归为 R0。
+来源：[classify_changed_paths](../../scripts/classify_release.py#L84)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)、[Owner 发布实现](../../scripts/owner_console/deploy_release.py#L112)。混合改动按最高级别，不能仅因有文档文件便归为 R0。
 
 ## Kernel 正式发布顺序
 
@@ -76,13 +87,13 @@ flowchart TB
 6. **先启动 Lifecycle/Reconciliation**：刷新认证、验证保留状态，再启动可执行 Selection 的 Observation。
 7. **running-target postflight**：重核当前 identity、controls、membership 与外部安全事实。ENTRY 通过独立 promotion 恢复，不由软件发布隐式打开。
 
-来源：[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L321)、[writer 检查测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2334)、[promote_entry](../../scripts/trading_kernel/promote_entry.py)。
+来源：[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L322)、[writer 检查测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2334)、[promote_entry](../../scripts/trading_kernel/promote_entry.py)。
 
 ### schema 前向升级
 
 **只能在停止写者、flat、来源精确且保留证明通过后执行**。本系统不支持携带活动仓位跨 schema、双写、旧 schema reader 或 downgrade。初次无备份重建是历史授权，不是未来升级模板。（现行契约：[迁移规则](../../AGENTS.md)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)）
 
-源码入口：[兼容升级](../../scripts/trading_kernel/deploy_tokyo_release.py#L538)、[bootstrap_schema](../../scripts/trading_kernel/bootstrap_schema.py)、[migration env](../../migrations/trading_kernel/env.py)。各 revision 的来源与保留谓词不同，不能把 `upgrade head` 当作独立完整生产操作手册。
+源码入口：[兼容升级](../../scripts/trading_kernel/deploy_tokyo_release.py#L539)、[bootstrap_schema](../../scripts/trading_kernel/bootstrap_schema.py)、[migration env](../../migrations/trading_kernel/env.py)。各 revision 的来源与保留谓词不同，不能把 `upgrade head` 当作独立完整生产操作手册。
 
 ## 失败阶段决定恢复方向
 

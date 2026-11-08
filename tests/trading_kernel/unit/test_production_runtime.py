@@ -247,6 +247,7 @@ def test_entry_service_action_fact_validity_alias_sets_admission_snapshot_window
 def _set_valid_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     values = {
         "TRADING_KERNEL_ENVIRONMENT": "live",
+        "TRADING_KERNEL_PRODUCT_ID": "brc-app-manual-v1",
         "TRADING_KERNEL_VENUE_ID": "binance-usdm",
         "TRADING_KERNEL_ACCOUNT_ID": "subaccount-main",
         "TRADING_KERNEL_ACCOUNT_POSITION_MODE": "independent_sides",

@@ -2600,6 +2600,12 @@ class PostgresEntryAdmissionRepository:
         # the same exact account+instrument, retaining all original identities.
         opposite=netting_domain_key.rsplit(":",1)[0]+(":short" if netting_domain_key.endswith(":long") else ":long")
         result=await self._connection.execute(sa.select(trade_tickets.c.ticket_id).where(
+            trade_tickets.c.active_netting_domain_key.in_((netting_domain_key,opposite))).limit(1))
+        return result.scalar_one_or_none() is not None
+
+    async def has_instrument_hold(self, netting_domain_key: str) -> bool:
+        opposite=netting_domain_key.rsplit(":",1)[0]+(":short" if netting_domain_key.endswith(":long") else ":long")
+        result=await self._connection.execute(sa.select(trade_tickets.c.ticket_id).where(
             trade_tickets.c.netting_domain_key.in_((netting_domain_key,opposite)),
             sa.or_(trade_tickets.c.terminal_at_ms.is_(None),trade_tickets.c.active_netting_domain_key.is_not(None))).limit(1))
         return result.scalar_one_or_none() is not None
@@ -2677,7 +2683,7 @@ class PostgresEntryAdmissionRepository:
         result = await self._connection.execute(
             sa.select(
                 sa.func.coalesce(sa.func.sum(sa.case((sa.and_(trade_aggregates.c.management_mode=="MANUAL",trade_aggregates.c.manual_risk_at_stop.is_not(None)),trade_aggregates.c.manual_risk_at_stop),else_=trade_tickets.c.risk_at_stop)), 0)
-            ).join(trade_aggregates,trade_aggregates.c.ticket_id==trade_tickets.c.ticket_id).where(
+            ).select_from(trade_tickets.outerjoin(trade_aggregates,trade_aggregates.c.ticket_id==trade_tickets.c.ticket_id)).where(
                 trade_tickets.c.venue_id == venue_id,
                 trade_tickets.c.account_id == account_id,
                 trade_tickets.c.position_side == position_side,

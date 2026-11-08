@@ -12,6 +12,7 @@ from typing import Literal
 import ccxt.async_support as ccxt_async  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.infrastructure.binance_public_market_source import (
     CcxtBinancePublicMarketSource,
 )
@@ -150,6 +151,8 @@ def _read_exact_identity(
     *,
     require_account: bool,
 ) -> _ProductionIdentity:
+    if values.get("TRADING_KERNEL_PRODUCT_ID") != PRODUCT_ID:
+        raise ValueError("production product identity must be brc-app-manual-v1")
     environment = _required(values, "TRADING_KERNEL_ENVIRONMENT")
     if environment != LIVE_ENVIRONMENT:
         raise ValueError("production environment identity must be live")

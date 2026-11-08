@@ -65,3 +65,6 @@ frontend/owner-console/*.tsbuildinfo
 
 # Local isolated implementation worktrees
 .worktrees/
+
+# Local type-check cache
+.mypy_cache/

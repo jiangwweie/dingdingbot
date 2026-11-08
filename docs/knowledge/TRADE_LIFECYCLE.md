@@ -2,6 +2,16 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。以下是当前代码路径讲解，不是某笔生产交易的复盘；生产证据见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 人工接管分支的生命周期
+
+未干预时沿原TP1和Runner管理；成功的外部订单动作即永久接管整笔，不等成交。
+观察缺口进入待核实，空历史不能证明缺口已补齐。MANUAL期间程序不修正保护、
+不撤残单、不补量；仓位为零仍有残单时保留占用，Owner清理并核实后才结算。
+缺少可精确归属的退出成交明细时显式记录unavailable，不伪造零收益。
+（来源：[接管设计](../superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)、
+[管理观察](../../src/trading_kernel/interfaces/management_observation_worker.py)、
+[只读收尾](../../src/trading_kernel/application/reconcile_ticket.py)）
+
 ## 标准链路与阅读对象
 
 **Observation → StrategySignal → Readiness/Authority → CapacityClaim → immutable Ticket → durable Exchange Command → protected lifecycle → reconciliation → settlement → review**。
@@ -63,7 +73,7 @@ sequenceDiagram
     R->>DB: 结算 复盘 终态 Owner 投影
 ```
 
-时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L130) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158)。
+时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L130) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L157)。
 
 ## 未进入交易的分支
 
@@ -116,7 +126,7 @@ sequenceDiagram
 1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。另有专门的 Vacuum 撤单完成分支，可在风险与双腿退出条件满足后记录 `VacuumPartialRetained`；不能把这一分支泛化成普通部分成交可直接保留。契约差异见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L130)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L171)）
 2. **持久化后、派发前重启**：恢复数据库中的 Command，由新租约领取，仍需身份和时效校验。
 3. **派发后、结果落库前重启**：不能凭租约到期认定请求未发；仓储领取与 unknown 恢复负责把不确定性保留下来。（来源：[PostgresExchangeCommandRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L741)、[派发集成测试](../../tests/trading_kernel/integration/test_command_dispatch.py)）
-4. **跨代码或 schema 重启**：先过 Runtime Fence；不匹配写者不能继续外部变更。（来源：[runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15)）
+4. **跨代码或 schema 重启**：先过 Runtime Fence；不匹配写者不能继续外部变更。（来源：[runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L16)）
 
 ## 示例：如何解释“有信号但没下单”
 

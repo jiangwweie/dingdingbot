@@ -316,7 +316,7 @@ async def issue_ticket(
             ticket_id=None,
         )
 
-    if await uow.entry_admission.has_active_ticket_in_domain(
+    if await uow.entry_admission.has_instrument_hold(
         ticket.identity.netting_domain.key()
     ):
         return IssueTicketResult(

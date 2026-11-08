@@ -1154,15 +1154,21 @@ async def _run_reconciliation_worker_once_core_impl(
         aggregate is not None
         and aggregate.status in _POSITION_RECONCILIATION_STATUSES
     ):
-        if aggregate.management_mode.value in ("MANUAL","REVIEW_REQUIRED") and callable(getattr(position_source,"read_management_scan",None)):
+        if callable(getattr(position_source,"read_management_scan",None)):
             from src.trading_kernel.interfaces.management_observation_worker import (
                 ManagementObservationSource,
                 observe_management_once,
             )
+            if not await _runtime_writer_is_certified(uow_factory, request):
+                return _runtime_fenced_result(ticket_id=aggregate.identity.ticket_id)
             outcome=await observe_management_once(uow_factory,cast(ManagementObservationSource,position_source),ticket_id=aggregate.identity.ticket_id,now_ms=request.now_ms,timeout_seconds=request.timeout_seconds)
             async with uow_factory() as uow:
-                await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
-            return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail=outcome)
+                current = await uow.aggregates.get(aggregate.identity.ticket_id)
+            if outcome not in ("AUTO", "initial_handover_pending") or current is None:
+                async with uow_factory() as uow:
+                    await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
+                return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail=outcome)
+            aggregate = current
         snapshot_request = PositionSnapshotRequest(
             ticket_id=aggregate.identity.ticket_id,
             netting_domain=aggregate.identity.netting_domain,

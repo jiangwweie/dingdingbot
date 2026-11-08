@@ -848,8 +848,9 @@ async def _reconcile_manual(uow,aggregate,snapshot):
             risk=None,reason=assessment.reason,orders=list(aggregate.management_orders))
         return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
     desired=reduce_event(aggregate,event)
-    await uow.management.refresh_manual_risk(aggregate.identity.ticket_id,observed_at_ms=snapshot.observed_at_ms,
-        risk=assessment.risk_at_stop,reason=assessment.reason,orders=list(orders))
     if desired.aggregate.status!=aggregate.status or snapshot.quantity!=aggregate.position_qty or protected!=aggregate.protected_qty or assessment.reason!=aggregate.manual_risk_reason or assessment.risk_at_stop!=aggregate.manual_risk_at_stop or orders!=aggregate.management_orders:
         await uow.commit_reduction(event=event,reduction=desired,expected_version=aggregate.version)
+    else:
+        await uow.management.refresh_manual_risk(aggregate.identity.ticket_id,observed_at_ms=snapshot.observed_at_ms,
+            risk=assessment.risk_at_stop,reason=assessment.reason,orders=list(orders))
     return ReconcileTicketResult(status=ReconcileTicketStatus.POSITION_FLAT_RECORDED if snapshot.quantity==0 else ReconcileTicketStatus.NO_CHANGE)

@@ -47,6 +47,7 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealthStatus,
 )
 from src.trading_kernel.domain.product import ProductEntryDecision
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -415,6 +416,7 @@ def _runtime_is_certified(
         capability
         and capability.capability_key == "exchange_commands"
         and capability.enabled
+        and capability.certification.get("product_id") == PRODUCT_ID
         and capability.certified_commit == runtime_commit
         and capability.schema_revision == schema_revision
     )

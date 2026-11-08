@@ -124,6 +124,7 @@ class _SignalRepository:
     async def get_runtime_capability(self, capability_key):
         assert capability_key == "exchange_commands"
         return RuntimeCapabilitySnapshot(
+            certification={"product_id": "brc-app-manual-v1"},
             capability_key="exchange_commands",
             enabled=True,
             certified_commit="kernel-test-head",

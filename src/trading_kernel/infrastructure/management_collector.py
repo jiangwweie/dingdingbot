@@ -20,6 +20,7 @@ from src.trading_kernel.domain.trade_management import (
     OrderTerms,
 )
 from src.trading_kernel.infrastructure.binance_management_observation import (
+    OrderAmendment,
     parse_order_update,
     parse_rest_order,
     read_order_amendments,
@@ -94,6 +95,14 @@ async def collect_management_scan(
             rows[ns].append(row)
     complete = page_complete
     reason = None if page_complete else "management_history_page_full"
+    conditional_present = bool(rows[1]) or any(
+        order.order_namespace == "conditional" for order in request.known_orders
+    )
+    covers = getattr(exchange, "management_covers", None)
+    stream_complete = callable(covers) and covers(start_ms=start, end_ms=now) is True
+    if conditional_present and not stream_complete:
+        complete = False
+        reason = "conditional_stream_coverage_unproven"
     events = []
     open_terms = []
     amendment_reads = 0
@@ -180,17 +189,20 @@ async def collect_management_scan(
                     reason = "management_amendment_budget_exhausted"
                     continue
                 amendment_reads += 1
-                amendments = await read_order_amendments(
-                    exchange,
-                    symbol=symbol,
-                    order_id=e.terms.exchange_order_id,
-                    start_ms=start,
-                    end_ms=now,
-                )
-                if amendments.possibly_truncated:
-                    complete = False
-                    reason = "management_amendment_page_full"
-                for change in amendments.rows:
+                changes: list[OrderAmendment] = []
+                window_start = start
+                while window_start <= now:
+                    window_end = min(now, window_start + 86400000)
+                    amendments = await read_order_amendments(
+                        exchange, symbol=symbol, order_id=e.terms.exchange_order_id,
+                        start_ms=window_start, end_ms=window_end,
+                    )
+                    if amendments.possibly_truncated:
+                        complete = False
+                        reason = "management_amendment_page_full"
+                    changes.extend(amendments.rows)
+                    window_start = window_end + 1
+                for change in changes:
                     old = OrderTerms.model_validate(
                         {
                             **e.terms.model_dump(),

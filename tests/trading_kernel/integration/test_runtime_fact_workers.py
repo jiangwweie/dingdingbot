@@ -355,7 +355,7 @@ async def _enable_exchange_commands(engine) -> None:
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=1_000,
             )
         )
@@ -373,7 +373,7 @@ async def test_expected_readonly_command_fence_resolves_prior_identity_incident(
                 enabled=False,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=1_000,
             )
         )

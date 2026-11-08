@@ -503,7 +503,7 @@ async def issue_ready_signal(
         exit_binding=exit_binding,
         exit_profile=exit_profile,
         netting_domain_occupied=(
-            await uow.entry_admission.has_active_ticket_in_domain(domain.key())
+            await uow.entry_admission.has_instrument_hold(domain.key())
         ),
         now_ms=request.now_ms,
     )

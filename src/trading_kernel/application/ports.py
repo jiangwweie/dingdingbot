@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal, Protocol, Self
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     JsonValue,
     field_validator,
     model_validator,
@@ -616,6 +617,7 @@ class InstrumentRulesSnapshot(BaseModel):
 class RuntimeCapabilitySnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    certification: dict[str, JsonValue] = Field(default_factory=dict)
     capability_key: str
     enabled: bool
     certified_commit: str
@@ -1107,6 +1109,8 @@ class EntryAdmissionRepository(Protocol):
     ) -> OwnerPolicySnapshot | None: ...
 
     async def has_active_ticket_in_domain(self, netting_domain_key: str) -> bool: ...
+
+    async def has_instrument_hold(self, netting_domain_key: str) -> bool: ...
 
     async def has_ticket_for_signal(self, signal_event_id: str) -> bool: ...
 

@@ -539,7 +539,8 @@ async def test_0007_fallback_generation_and_gap_audit_survive_0008(
         assert fallback["authority_outcome"] == "FALLBACK_PREVIOUS"
         assert fallback["gap_audit_count"] >= 1
         assert fallback["generation_count"] >= 1
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false"))
             source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()
@@ -592,7 +593,8 @@ async def test_0007_terminal_ticket_lineage_survives_0008_logical_preservation(
         assert terminal["aggregate_status"] == "terminal"
         assert terminal["command_count"] >= 4
         assert terminal["review_count"] >= 1
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false"))
             source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()
@@ -902,7 +904,8 @@ async def test_static_sor_baseline_has_exact_pair_and_hash_reconstruction_after_
                 assert await conn.scalar(sa.text("SELECT version_num FROM alembic_version")) == "0007_exit_profile_authority_v1"
                 assert await conn.scalar(sa.text("SELECT to_regclass('brc_materialization_generation_event_baselines')")) is None
             return
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false"))
             source_manifest = await _generic_source_preservation_manifest(conn)
         await asyncio.to_thread(run_alembic, url, "upgrade", TARGET_REVISION)
         await engine.dispose()
@@ -1150,7 +1153,8 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
             await conn.execute(sa.text(
                 "UPDATE brc_instruments SET status='active' WHERE exchange_instrument_id=:instrument"
             ), {"instrument":ETH})
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false"))
             source_manifest = await _generic_source_preservation_manifest(conn)
         await engine.dispose()
         target_name = f"brc_kernel_test_{uuid4().hex[:12]}"
@@ -1167,8 +1171,11 @@ async def test_0007_static_comparison_source_requires_exact_contemporaneous_evid
         assert [item["status"] for item in reference["results"]] == [
             "no_signal", "signal_created",
         ], reference["results"]
-        await asyncio.to_thread(run_alembic, target_url, "upgrade", TARGET_REVISION)
         target_engine = create_async_engine(target_url)
+        async with target_engine.begin() as conn:
+            await conn.execute(sa.text("UPDATE brc_owner_policy_current SET new_entry_submit_enabled=false"))
+            source_manifest = await _generic_source_preservation_manifest(conn)
+        await asyncio.to_thread(run_alembic, target_url, "upgrade", TARGET_REVISION)
         async with target_engine.connect() as conn:
             preserved_cache = (await conn.execute(sa.text(
                 "SELECT * FROM brc_comparative_projection_current"

@@ -1306,7 +1306,7 @@ async def _seed_sor_scope(engine: AsyncEngine) -> None:
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision="0002_sor_v3_strategy_group_capacity",
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=NOW_MS - 1,
             )
         )
@@ -1404,7 +1404,7 @@ async def _seed_tradfi_scope(
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=NOW_MS - 1,
             )
         )
@@ -1521,7 +1521,7 @@ async def _seed_six_scopes(engine: AsyncEngine) -> None:
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision="0002_sor_v3_strategy_group_capacity",
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=NOW_MS - 1,
             )
         )

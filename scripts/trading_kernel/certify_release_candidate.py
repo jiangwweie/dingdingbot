@@ -31,6 +31,7 @@ from src.trading_kernel.application.runtime import (
     RuntimeCompatibilityClassification,
     RuntimeReleaseCompatibilityFact,
 )
+from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
@@ -74,6 +75,7 @@ class ReleaseCertificationManifest(BaseModel):
         alias="schema",
         serialization_alias="schema",
     )
+    product_id: Literal["brc-app-manual-v1"]
     status: Literal["pass"]
     release_commit: str
     release_level: ReleaseCertificationLevel
@@ -163,6 +165,7 @@ def build_certification_identity(
     return {
         "schema": SCHEMA,
         "release_commit": commit,
+        "product_id": PRODUCT_ID,
         "release_level": release_level.value,
         "schema_revision": CURRENT_SCHEMA_REVISION,
         "registry_semantic_hash": registry_hash,

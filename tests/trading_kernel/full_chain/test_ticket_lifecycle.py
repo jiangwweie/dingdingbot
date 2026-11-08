@@ -54,7 +54,6 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandResult,
     ExchangeCommandStatus,
-    OrderCommandPayload,
     SetLeverageCommandResult,
 )
 from src.trading_kernel.domain.identities import TicketIdentity
@@ -863,84 +862,23 @@ async def test_protection_residue_blocks_match_without_duplicate_cancel(
 
 
 @pytest.mark.asyncio
-async def test_same_instrument_long_and_short_tickets_are_isolated(
-    lifecycle_engine: AsyncEngine,
-) -> None:
+async def test_manual_product_refuses_same_instrument_opposite_side(lifecycle_engine):
     long_ticket = _ticket()
-    short_ticket = _ticket_for_side(
-        long_ticket,
-        side="short",
-        signal_event_id="signal-short-1",
-        exposure_episode_id="episode-short-1",
-    )
+    short_ticket = _ticket_for_side(long_ticket, side="short",
+        signal_event_id="signal-short-1", exposure_episode_id="episode-short-1")
     venue = LifecycleVenue()
     await _seed_policy(lifecycle_engine)
-
-    await _protect_ticket(
-        lifecycle_engine,
-        venue,
-        long_ticket,
-        worker_prefix="long",
-        dispatch_at_ms=1_100,
-        observed_at_ms=2_100,
-    )
-    await _protect_ticket(
-        lifecycle_engine,
-        venue,
-        short_ticket,
-        worker_prefix="short",
-        dispatch_at_ms=2_300,
-        observed_at_ms=2_400,
-    )
-
+    await _protect_ticket(lifecycle_engine, venue, long_ticket,
+        worker_prefix="long", dispatch_at_ms=1100, observed_at_ms=2100)
+    await _seed_ticket_runtime_scope(lifecycle_engine, short_ticket)
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
-        long_aggregate = await uow.aggregates.get(long_ticket.identity.ticket_id)
-        short_aggregate = await uow.aggregates.get(short_ticket.identity.ticket_id)
-        long_position = await uow.positions.get(
-            long_ticket.identity.netting_domain.key()
-        )
-        short_position = await uow.positions.get(
-            short_ticket.identity.netting_domain.key()
-        )
-        long_commands = await uow.exchange_commands.list_for_ticket(
-            long_ticket.identity.ticket_id
-        )
-        short_commands = await uow.exchange_commands.list_for_ticket(
-            short_ticket.identity.ticket_id
-        )
-        exposure = await uow.entry_admission.get_account_exposure(
+        result = await issue_ticket(uow, _issue_request(ticket=short_ticket, now_ms=2500, claim_owner="short-refused"))
+        assert result.status is IssueTicketStatus.ACTIVE_NETTING_DOMAIN
+        assert await uow.aggregates.get(short_ticket.identity.ticket_id) is None
+        assert await uow.exchange_commands.list_for_ticket(short_ticket.identity.ticket_id) == []
+        assert (await uow.entry_admission.get_account_exposure(
             long_ticket.identity.netting_domain.venue_id,
-            long_ticket.identity.netting_domain.account_id,
-        )
-
-    assert long_aggregate is not None
-    assert long_aggregate.status is AggregateStatus.POSITION_PROTECTED
-    assert short_aggregate is not None
-    assert short_aggregate.status is AggregateStatus.POSITION_PROTECTED
-    assert long_position is not None and long_position.quantity == long_ticket.quantity
-    assert (
-        short_position is not None and short_position.quantity == short_ticket.quantity
-    )
-    assert exposure is not None and exposure.active_ticket_count == 2
-
-    long_entry, long_stop, long_tp1 = long_commands
-    short_entry, short_stop, short_tp1 = short_commands
-    assert isinstance(long_entry.payload, OrderCommandPayload)
-    assert isinstance(long_stop.payload, OrderCommandPayload)
-    assert isinstance(long_tp1.payload, OrderCommandPayload)
-    assert isinstance(short_entry.payload, OrderCommandPayload)
-    assert isinstance(short_stop.payload, OrderCommandPayload)
-    assert isinstance(short_tp1.payload, OrderCommandPayload)
-    assert (
-        long_entry.payload.side,
-        long_stop.payload.side,
-        long_tp1.payload.side,
-    ) == ("buy", "sell", "sell")
-    assert (
-        short_entry.payload.side,
-        short_stop.payload.side,
-        short_tp1.payload.side,
-    ) == ("sell", "buy", "buy")
+            long_ticket.identity.netting_domain.account_id)).active_ticket_count == 1
 
 
 async def _seed_policy(engine: AsyncEngine) -> None:
@@ -1186,7 +1124,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=1_000,
             )
             .on_conflict_do_update(
@@ -1195,7 +1133,7 @@ async def _issue(engine: AsyncEngine, ticket) -> None:
                     "enabled": True,
                     "certified_commit": "kernel-test-head",
                     "schema_revision": CURRENT_SCHEMA_REVISION,
-                    "certification": {},
+                    "certification": {"product_id": "brc-app-manual-v1"},
                     "updated_at_ms": 1_000,
                 },
             )

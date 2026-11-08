@@ -1542,7 +1542,7 @@ async def test_account_position_audit_healthy_and_source_retry_are_bounded(
         await conn.execute(sa.text(
             "INSERT INTO brc_runtime_capabilities_current "
             "(capability_key,enabled,certified_commit,schema_revision,certification,updated_at_ms) "
-            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{}'::jsonb,1000)"
+            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{\"product_id\":\"brc-app-manual-v1\"}'::jsonb,1000)"
         ), {"schema": CURRENT_SCHEMA_REVISION})
 
     class Source:
@@ -1606,7 +1606,7 @@ async def test_concurrent_account_audits_create_one_open_incident(dispatch_engin
         await conn.execute(sa.text(
             "INSERT INTO brc_runtime_capabilities_current "
             "(capability_key,enabled,certified_commit,schema_revision,certification,updated_at_ms) "
-            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{}'::jsonb,1000)"
+            "VALUES ('exchange_commands',true,'kernel-test-head',:schema,'{\"product_id\":\"brc-app-manual-v1\"}'::jsonb,1000)"
         ), {"schema": CURRENT_SCHEMA_REVISION})
 
     class Source:

@@ -446,7 +446,7 @@ async def seed_runtime_authority(engine: AsyncEngine, *, hourly: bool = False) -
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=1_000,
             )
         )

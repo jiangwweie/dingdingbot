@@ -4,7 +4,7 @@
 
 ## 风险分布在哪些边界
 
-**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L152)）
+**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)）
 
 | 边界 | 输入 | 关键判断 | 拒绝或后续处理 |
 | --- | --- | --- | --- |
@@ -95,8 +95,8 @@ stateDiagram-v2
 | ENTRY authoritative reject | 不能自动另发一代 ENTRY | 终结拒绝，释放其资源 | [commands](../../src/trading_kernel/domain/commands.py)、[reducer](../../src/trading_kernel/domain/reducer.py) |
 | 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L95) |
 | 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L135) |
-| 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L738) |
-| Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15) |
+| 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L737) |
+| Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L16) |
 | 退出事实过期或缺失 | 不能编造市场判定 | 记录健康/重试并保持现有事实边界 | [lifecycle_facts_health](../../src/trading_kernel/application/lifecycle_facts_health.py)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py) |
 
 ## 可读性分析与证据限制

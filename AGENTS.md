@@ -12,7 +12,7 @@ This fixed worktree is `/Users/jiangwei/Documents/final-manual`; integration is
 This is a separate product/server/account, not a Tokyo behavior change. Preserve
 default automation until external intervention, then permanently hand over the
 whole trade; the new product forbids simultaneous opposite-side exposure in the
-same instrument. These are not implemented runtime facts yet. The inherited
+same instrument. These are the branch target and locally implemented paths, not live deployment facts. The inherited
 contracts below remain the existing baseline; do not mistake their default
 two-sided coexistence or automated lifecycle for this branch's approved target.
 Keep takeover-specific changes out of `dev`; port common fixes separately with
@@ -21,9 +21,10 @@ Read the [detailed design](docs/superpowers/specs/2026-11-06-app-manual-takeover
 and [implementation plan](docs/superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
 before future implementation. Technical proposals are not completed capabilities
 or deployment authorization. Local coding/testing is authorized; no Tokyo mutation or new-server deployment is authorized by the implementation request.
-The latest Owner scope stops before comprehensive full-chain/R4 verification and
-release-isolation work. See the [prevalidation handoff](docs/superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md);
-wait for Owner confirmation before entering that next stage.
+The Owner has authorized comprehensive local validation, repairs, exact candidate
+certification and release-isolation work. Actual deployment and live trading
+remain outside this turn. The prior [handoff](docs/superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md)
+records the preceding stage, not a remaining approval block.
 
 ## Fixed Workspace Operations
 
@@ -31,8 +32,8 @@ Read [two-product workspace policy](docs/superpowers/plans/2026-11-08-two-produc
 Use this worktree's own `.venv` and `scripts/local/manual_pytest.sh`; its local PG
 is `brc-manual-pg` at 127.0.0.1:55434. Never reuse Tokyo/local-auto credentials,
 DB, test template, certification or `.env` from the sibling `final` workspace.
-The inherited deployment scripts are not yet certified for the new target and
-must not be invoked for production. Do not push manual commits into `dev`.
+The inherited SSH deployment scripts are explicitly disabled for this product;
+local release preparation never authorizes production installation. Do not push manual commits into `dev`.
 
 ## Authority Order
 

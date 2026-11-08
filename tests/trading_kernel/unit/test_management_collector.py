@@ -56,6 +56,7 @@ def request():
 async def test_new_unfilled_order_is_collected_without_mutation():
     x = AsyncMock()
     x.management_started_ms = None
+    x.management_covers = lambda **kw: False
     x.fapiPrivateGetAllOrders.return_value = [raw()]
     x.fapiPrivateGetAllAlgoOrders.return_value = []
     x.fapiPrivateGetOrderAmendment.return_value = []
@@ -77,6 +78,7 @@ async def test_new_unfilled_order_is_collected_without_mutation():
 async def test_same_id_modified_back_retains_both_amendments():
     x = AsyncMock()
     x.management_started_ms = None
+    x.management_covers = lambda **kw: False
     x.fapiPrivateGetAllOrders.return_value = [raw(clientOrderId="brc-old")]
     x.fapiPrivateGetAllAlgoOrders.return_value = []
     x.fapiPrivateGetOrderAmendment.return_value = [
@@ -121,6 +123,7 @@ async def test_same_id_modified_back_retains_both_amendments():
 async def test_expired_history_window_is_not_complete():
     x = AsyncMock()
     x.management_started_ms = None
+    x.management_covers = lambda **kw: False
     x.fapiPrivateGetAllOrders.return_value = []
     x.fapiPrivateGetAllAlgoOrders.return_value = []
     req = request().model_copy(update={"now_ms": 4 * 86400000})
@@ -143,6 +146,7 @@ async def test_order_created_before_window_is_still_queried_when_open():
 
     x = AsyncMock()
     x.management_started_ms = None
+    x.management_covers = lambda **kw: False
     x.fapiPrivateGetAllOrders.return_value = []
     x.fapiPrivateGetAllAlgoOrders.return_value = []
     x.fapiPrivateGetOrder.return_value = raw(time=500, updateTime=1500, price="111")
@@ -174,6 +178,7 @@ async def test_order_created_before_window_is_still_queried_when_open():
 async def test_triggered_algo_child_is_not_an_external_manual_order():
     x = AsyncMock()
     x.management_started_ms = None
+    x.management_covers = lambda **kw: False
     x.fapiPrivateGetAllOrders.return_value = [
         raw(
             orderId=99,
@@ -229,7 +234,7 @@ async def test_triggered_algo_child_is_not_an_external_manual_order():
 
 @pytest.mark.asyncio
 async def test_full_history_page_is_followed_by_exact_id_cursor():
- x=AsyncMock();x.management_started_ms=None
+ x=AsyncMock();x.management_started_ms=None;x.management_covers=lambda **kw: False
  first=[raw(orderId=i,clientOrderId=f'app-{i}',status='CANCELED') for i in range(1,101)]
  x.fapiPrivateGetAllOrders.side_effect=[first,[]];x.fapiPrivateGetAllAlgoOrders.return_value=[];x.fapiPrivateGetOrderAmendment.return_value=[]
  req=request();b=await collect_management_scan(x,req,PositionSnapshot(netting_domain=req.domain,quantity=Decimal(1),average_entry_price=Decimal(100),observed_at_ms=2000))
@@ -240,7 +245,50 @@ async def test_full_history_page_is_followed_by_exact_id_cursor():
 
 @pytest.mark.asyncio
 async def test_stream_buffer_loss_does_not_claim_complete_history():
- x=AsyncMock();x.management_started_ms=None;x.management_lost_before_ms=1700
+ x=AsyncMock();x.management_started_ms=None;x.management_covers=lambda **kw: False;x.management_lost_before_ms=1700
  x.fapiPrivateGetAllOrders.return_value=[];x.fapiPrivateGetAllAlgoOrders.return_value=[]
  req=request();b=await collect_management_scan(x,req,PositionSnapshot(netting_domain=req.domain,quantity=Decimal(1),average_entry_price=Decimal(100),observed_at_ms=2000))
  assert not b.complete and b.reason=='management_stream_buffer_gap'
+
+
+@pytest.mark.asyncio
+async def test_conditional_snapshot_cannot_prove_missing_stream_interval():
+    x = AsyncMock()
+    x.management_started_ms = 1500
+    x.management_covers = lambda **kw: False
+    x.fapiPrivateGetAllOrders.return_value = []
+    x.fapiPrivateGetAllAlgoOrders.return_value = [{
+        "symbol": "BTCUSDT", "algoId": 12, "clientAlgoId": "brc-stop",
+        "side": "SELL", "positionSide": "LONG", "orderType": "STOP_MARKET",
+        "quantity": "1", "price": "0", "triggerPrice": "95", "algoStatus": "NEW",
+        "reduceOnly": False, "closePosition": False, "timeInForce": "GTC",
+        "workingType": "CONTRACT_PRICE", "priceProtect": False, "priceMatch": "NONE",
+        "selfTradePreventionMode": "NONE", "goodTillDate": 0,
+        "createTime": 1200, "updateTime": 1200,
+    }]
+    x.management_events = lambda **kw: ()
+    req = request()
+    b = await collect_management_scan(x, req, PositionSnapshot(
+        netting_domain=req.domain, quantity=Decimal(1),
+        average_entry_price=Decimal(100), observed_at_ms=2000))
+    assert not b.complete
+    assert b.reason == "conditional_stream_coverage_unproven"
+
+
+@pytest.mark.asyncio
+async def test_two_day_regular_history_uses_bounded_amendment_windows():
+    x = AsyncMock()
+    x.management_started_ms = None
+    x.management_covers = lambda **kw: False
+    x.fapiPrivateGetAllOrders.return_value = [raw(clientOrderId="brc-old")]
+    x.fapiPrivateGetAllAlgoOrders.return_value = []
+    x.fapiPrivateGetOrderAmendment.return_value = []
+    req = request().model_copy(update={"now_ms": 2 * 86400000})
+    b = await collect_management_scan(x, req, PositionSnapshot(
+        netting_domain=req.domain, quantity=Decimal(1),
+        average_entry_price=Decimal(100), observed_at_ms=req.now_ms))
+    assert b.complete
+    assert x.fapiPrivateGetOrderAmendment.await_count == 2
+    for call in x.fapiPrivateGetOrderAmendment.await_args_list:
+        query = call.args[0]
+        assert query["endTime"] - query["startTime"] <= 86400000

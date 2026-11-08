@@ -4,6 +4,7 @@ import asyncio
 import importlib
 from collections.abc import AsyncGenerator
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import asyncpg
@@ -63,10 +64,16 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
+from src.trading_kernel.domain.management_observation import ManagementScan
 from src.trading_kernel.domain.market import ClosedCandle
 from src.trading_kernel.domain.owner_control import StrategyEntryState
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
+from src.trading_kernel.domain.trade_management import (
+    ManagementMode,
+    OrderEvidence,
+    OrderTerms,
+)
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     admission_decisions,
@@ -103,6 +110,9 @@ from src.trading_kernel.interfaces.lifecycle_worker import (
     LifecycleWorkerRequest,
     LifecycleWorkerStatus,
     run_lifecycle_worker_once,
+)
+from src.trading_kernel.interfaces.management_observation_worker import (
+    observe_management_once,
 )
 from src.trading_kernel.interfaces.reconciliation_worker import (
     ReconciliationWorkerRequest,
@@ -1571,3 +1581,82 @@ async def _refresh_instrument_certification(
     raise AssertionError(
         f"certification did not refresh {exchange_instrument_id} by {now_ms}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('action', ['new', 'amendment', 'cancel', 'trade'])
+async def test_observation_to_manual_partial_flat_residual_and_terminal(replay_engine, action):
+    engine = replay_engine
+    market = RecordingReplayMarketSource()
+    await _seed_replay_runtime(engine, market)
+    venue = CertifiedVenue()
+    result = await _observe_and_admit(engine, market, venue,
+        runtime_scope_id=await _active_scope_id(engine, BNB), offset_ms=0)
+    tid = result[5]
+    assert tid is not None
+    await _release_entry_lane(engine, venue, ticket_id=tid, now_ms=NOW_MS+2000)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        before = await u.aggregates.get(tid)
+        commands = await u.exchange_commands.list_for_ticket(tid)
+    assert before.status is AggregateStatus.POSITION_PROTECTED
+    assert {c.kind.value for c in commands} == {'entry', 'initial_stop', 'take_profit'}
+    t = before.ticket
+    d = t.identity.netting_domain
+    at = NOW_MS + 20000
+    terms = OrderTerms(venue_id=d.venue_id, account_id=d.account_id,
+        exchange_instrument_id=d.exchange_instrument_id, position_side=d.position_side,
+        order_namespace='regular', exchange_order_id='123456', client_order_id='app-exit',
+        side='sell', order_type='LIMIT', quantity=t.quantity/2, price=t.entry_reference_price*Decimal('1.1'),
+        trigger_price=None, close_position=False, reduce_only=False, time_in_force='GTC',
+        working_type='CONTRACT_PRICE', price_protect=False, activation_price=None, callback_rate=None,
+        price_match='NONE', self_trade_prevention_mode='NONE', good_till_date_ms=0)
+    evidence = OrderEvidence(evidence_id='app-operation', terms=terms, action=action,
+        exchange_event_at_ms=at, received_at_ms=at, created_at_ms=at,
+        executed_quantity=t.quantity/2 if action == 'trade' else Decimal(0),
+        coverage_complete=True, known_command_outcome_pending=False,
+        before_terms=terms.model_copy(update={'price': terms.price+1}) if action == 'amendment' else None)
+    residual = VenueOrderSnapshot(exchange_order_id='123456', venue_client_order_id='app-exit',
+        position_side=d.position_side, reduce_only=False, order_namespace='regular', terms=terms,
+        remaining_quantity=t.quantity/2)
+    source = AsyncMock()
+    def scan(q, orders, now, events=()):
+        return ManagementScan(ticket_id=tid, snapshot=PositionSnapshot(netting_domain=d,
+            quantity=q, average_entry_price=before.average_fill_price if q else None,
+            open_orders=orders, observed_at_ms=now), orders=tuple(o.terms for o in orders),
+            evidence=events, complete=True, covered_until_ms=now)
+    source.read_management_scan.return_value = scan(t.quantity, (residual,), at, (evidence,))
+    assert await observe_management_once(lambda:PostgresKernelUnitOfWork(engine), source,
+        ticket_id=tid, now_ms=at) == 'MANUAL'
+    async with PostgresKernelUnitOfWork(engine) as u:
+        after = await u.aggregates.get(tid)
+        assert after.initial_stop_exchange_order_id == before.initial_stop_exchange_order_id
+        assert after.tp1_exchange_order_id == before.tp1_exchange_order_id
+        assert after.management_mode is ManagementMode.MANUAL
+        assert await u.exchange_commands.list_for_ticket(tid) == commands
+        skipped = await request_exit(u, ExitTicketRequest(ticket_id=tid, reason='owner-flatten', requested_at_ms=at+1))
+        assert skipped.status.value == 'manual_management_skipped'
+    call_count = len(venue.calls)
+    await dispatch_one_command(lambda:PostgresKernelUnitOfWork(engine), venue,
+        DispatchCommandRequest(worker_id='post-takeover', now_ms=at+2, lease_until_ms=at+5002,
+            timeout_seconds=1, ticket_id=tid))
+    assert len(venue.calls) == call_count
+    for offset, q, orders in [(1000, t.quantity/2, (residual,)), (2000, Decimal(0), (residual,))]:
+        source.read_management_scan.return_value = scan(q, orders, at+offset)
+        await observe_management_once(lambda:PostgresKernelUnitOfWork(engine), source, ticket_id=tid, now_ms=at+offset)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        assert (await u.aggregates.get(tid)).status is AggregateStatus.MANUAL_FLAT_PENDING_ORDERS
+        assert await u.entry_admission.has_instrument_hold(d.key())
+    source.read_management_scan.return_value = scan(Decimal(0), (), at+3000)
+    await observe_management_once(lambda:PostgresKernelUnitOfWork(engine), source, ticket_id=tid, now_ms=at+3000)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        assert (await u.aggregates.get(tid)).status is AggregateStatus.SETTLEMENT_PENDING
+        await settle_ticket(u, SettleTicketRequest(ticket_id=tid, settled_at_ms=at+4000))
+        await record_trade_review(u, RecordTradeReviewRequest(ticket_id=tid, review_id='manual-review', outcome='flat',
+            metrics={'economics_completeness':'external_exit_unavailable'},
+            decision_impact={'management':'MANUAL'}, recorded_at_ms=at+5000))
+        terminal = await u.aggregates.get(tid)
+        assert terminal.status is AggregateStatus.TERMINAL and terminal.management_mode is ManagementMode.MANUAL
+        assert not await u.entry_admission.has_instrument_hold(d.key())
+        assert await u.exchange_commands.list_for_ticket(tid) == commands
+        exposure = await u.entry_admission.get_account_exposure(d.venue_id, d.account_id)
+        assert exposure.gross_risk_at_stop == 0 and exposure.active_ticket_count == 0

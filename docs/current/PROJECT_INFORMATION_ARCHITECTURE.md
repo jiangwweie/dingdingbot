@@ -6,6 +6,26 @@ last_verified: 2026-10-12
 
 # Project Information Architecture
 
+
+## Manual product scope on this branch
+
+This worktree owns the independent App manual-takeover product. The approved
+[Owner decisions](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)
+and [detailed design](../superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
+override inherited automatic-product coexistence and exit rules. One account and
+instrument may own only one nonterminal Ticket across both sides. Independent
+hedge-mode sides are still required at the exchange. Successful external App
+intervention permanently hands over the whole Ticket; only readonly observation,
+accounting and closure remain. Unknown intervention freezes automatic action.
+
+Certificates bind the compiled product identity, exact commit and schema. The
+inherited Tokyo deployment backends call `refuse_inherited_tokyo_deployment`
+before any SSH action, including uploads and legacy drain bridges. A matching
+local binding comparison is preparation only: real App protocol acceptance,
+independent target/account/database verification and Owner deployment confirmation
+are still required. This branch is not authority to operate the Tokyo product.
+
+
 ## Authority
 
 ```text

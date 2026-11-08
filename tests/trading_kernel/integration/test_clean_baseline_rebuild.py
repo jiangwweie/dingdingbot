@@ -69,7 +69,7 @@ async def test_empty_postgres_upgrades_from_frozen_v4_baseline_to_head() -> None
 
         result = _run_alembic(database_url, "downgrade", "base")
         assert result.returncode != 0
-        assert "fix-forward" in result.stderr
+        assert "forward-only" in result.stderr
     finally:
         await _drop_database(admin, database_name)
         await admin.close()

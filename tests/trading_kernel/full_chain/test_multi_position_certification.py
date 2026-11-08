@@ -117,7 +117,7 @@ class MultiPositionVenue:
 
 
 @pytest.mark.asyncio
-async def test_two_serial_entries_become_concurrent_protected_long_short_positions(
+async def test_two_serial_entries_protect_distinct_instruments_on_both_sides(
     certification_engine: AsyncEngine,
 ) -> None:
     await _seed_policy(certification_engine)
@@ -127,7 +127,7 @@ async def test_two_serial_entries_become_concurrent_protected_long_short_positio
         long_ticket,
         signal_event_id="signal-2",
         exposure_episode_id="episode-2",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        exchange_instrument_id="binance-usdm:BNBUSDT:perpetual",
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
         runtime=long_ticket.identity.runtime.model_copy(
@@ -234,7 +234,7 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
         btc_long,
         signal_event_id="signal-btc-short",
         exposure_episode_id="episode-btc-short",
-        exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",
+        exchange_instrument_id="binance-usdm:BNBUSDT:perpetual",
         position_side="short",
         runtime_scope_id="scope-sor-btc-short",
         runtime=btc_long.identity.runtime.model_copy(
@@ -300,9 +300,9 @@ async def test_three_serial_tickets_protect_independent_domains_and_fence_refusa
     )
     fourth_ticket = _ticket_for_domain(
         eth_long,
-        signal_event_id="signal-eth-short",
-        exposure_episode_id="episode-eth-short",
-        exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",
+        signal_event_id="signal-xrp-short",
+        exposure_episode_id="episode-xrp-short",
+        exchange_instrument_id="binance-usdm:XRPUSDT:perpetual",
         position_side="short",
         runtime_scope_id="scope-brf-eth-short",
         runtime=brf_runtime,
@@ -387,7 +387,7 @@ async def test_dynamic_budget_three_mixed_entries_each_use_three_percent(certifi
         result=await repo.request_budget_change(RiskBudgetChangeRequest(venue_id="binance-usdm",account_id="experiment-1",owner_policy_id="policy-main",expected_policy_version=7,expected_directional_version=1,baseline=Decimal(".03"),owner_identity="owner",reason="full chain risk",idempotency_key="three-percent",requested_at_ms=1100))
         assert result.status=="effective"
     first=_ticket().model_copy(update={"owner_policy_version":8,"quantity":Decimal(".003"),"notional":Decimal(180),"reserved_margin":Decimal(36),"risk_at_stop":Decimal(9),"planned_stop_risk_budget":Decimal(9),"post_fill_stop_risk_limit":Decimal("9.9"),"initial_stop_price":Decimal(57000),"take_profit_quantities":(Decimal(".0015"),),"directional_stop_risk_limit_fraction":Decimal(".06"),"minimum_stop_risk_budget":Decimal("4.5")})
-    second=_ticket_for_domain(first,signal_event_id="risk-short",exposure_episode_id="risk-short",exchange_instrument_id="binance-usdm:BTCUSDT:perpetual",position_side="short",runtime_scope_id="risk-short",runtime=first.identity.runtime.model_copy(update={"event_spec_id":"event_spec:SOR-1H-001:SOR-1H-SHORT:v1"})).model_copy(update={"initial_stop_price":Decimal(63000)})
+    second=_ticket_for_domain(first,signal_event_id="risk-short",exposure_episode_id="risk-short",exchange_instrument_id="binance-usdm:BNBUSDT:perpetual",position_side="short",runtime_scope_id="risk-short",runtime=first.identity.runtime.model_copy(update={"event_spec_id":"event_spec:SOR-1H-001:SOR-1H-SHORT:v1"})).model_copy(update={"initial_stop_price":Decimal(63000)})
     third=_ticket_for_domain(first,signal_event_id="risk-cpm",exposure_episode_id="risk-cpm",exchange_instrument_id="binance-usdm:ETHUSDT:perpetual",position_side="long",runtime_scope_id="risk-cpm",runtime=first.identity.runtime.model_copy(update={"strategy_group_id":"CPM-RO-001","strategy_version_id":"sgv:CPM-RO-001:v3","event_spec_id":"event_spec:CPM-RO-001:CPM-LONG:v3"}))
     venue=MultiPositionVenue()
     for index,t in enumerate((first,second,third)):
@@ -623,7 +623,7 @@ async def _seed_policy(engine: AsyncEngine) -> None:
                 enabled=True,
                 certified_commit="kernel-test-head",
                 schema_revision=CURRENT_SCHEMA_REVISION,
-                certification={},
+                certification={"product_id": "brc-app-manual-v1"},
                 updated_at_ms=1_000,
             )
         )

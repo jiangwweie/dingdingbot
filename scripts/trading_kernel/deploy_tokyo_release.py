@@ -44,6 +44,7 @@ from src.trading_kernel.domain.exit_policy import (
     registered_event_exit_bindings,
     registered_exit_profiles,
 )
+from src.trading_kernel.domain.product_identity import refuse_inherited_tokyo_deployment
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
 )
@@ -2154,6 +2155,7 @@ class SshTokyoReleaseBackend:
         return result
 
     def _ssh_base(self) -> tuple[str, ...]:
+        refuse_inherited_tokyo_deployment()
         return (
             "ssh",
             "-o",
@@ -2252,6 +2254,7 @@ def main(argv: list[str] | None = None) -> int:
         else "R3"
     )
     try:
+        refuse_inherited_tokyo_deployment()
         commit = _resolve_commit(args.commit)
         certification_manifest = load_release_certification_manifest(
             REPO_ROOT,
