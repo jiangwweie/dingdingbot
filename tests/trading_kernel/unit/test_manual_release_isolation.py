@@ -109,3 +109,16 @@ async def test_legacy_cutover_runner_refuses_remote_command_and_archive(monkeypa
         await runner.upload_git_archive(repo_root=Path('.'), commit='a' * 40, destination=PurePosixPath('/opt/brc'))
     start.assert_not_awaited()
     archive.assert_not_called()
+
+
+def test_required_order_coverage_keeps_regular_and_conditional_namespaces():
+    from src.trading_kernel.application.management_intents import (
+        accepted_order_identities,
+    )
+    rows = [
+        {'status': 'accepted', 'command_kind': 'take_profit', 'result_payload': {'exchange_order_id': '123'},
+         'request_payload': {'order_type': 'limit'}},
+        {'status': 'accepted', 'command_kind': 'initial_stop', 'result_payload': {'exchange_order_id': '123'},
+         'request_payload': {'order_type': 'stop_market'}},
+    ]
+    assert accepted_order_identities(rows) == frozenset({('regular', '123'), ('conditional', '123')})

@@ -109,17 +109,19 @@ class HeadTemplateCloneHarness:
             HEAD_TEMPLATE_DATABASE,
         )
         if exists:
-            template = await asyncpg.connect(_head_template_admin_dsn())
+            template = None
             try:
+                template = await asyncpg.connect(_head_template_admin_dsn())
                 revision = await template.fetchval(
                     "SELECT version_num FROM alembic_version"
                 )
-            except asyncpg.UndefinedTableError:
+            except (asyncpg.UndefinedTableError, asyncpg.ObjectNotInPrerequisiteStateError):
                 # A failed transactional migration may leave an empty disposable
                 # template. Rebuild it instead of wedging subsequent test runs.
                 revision = None
             finally:
-                await template.close()
+                if template is not None:
+                    await template.close()
             fingerprint = await admin.fetchval(
                 "SELECT shobj_description(oid,'pg_database') FROM pg_database WHERE datname=$1",
                 HEAD_TEMPLATE_DATABASE,

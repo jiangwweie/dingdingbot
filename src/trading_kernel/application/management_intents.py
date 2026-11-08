@@ -12,6 +12,23 @@ from src.trading_kernel.domain.trade_management import (
 )
 
 
+def accepted_order_identities(rows: list[dict]) -> frozenset[tuple[str, str]]:
+    """Order IDs are unique only within a venue namespace."""
+    identities = set()
+    for row in rows:
+        order_id = (row["result_payload"] or {}).get("exchange_order_id")
+        if row["status"] not in ("accepted", "reconciled_accepted") or order_id is None:
+            continue
+        payload = row["request_payload"]
+        namespace = payload.get("order_namespace") if row["command_kind"] == "cancel_order" else (
+            "conditional" if payload.get("order_type") in ("stop_market", "take_profit_market") else "regular"
+        )
+        if namespace not in ("regular", "conditional"):
+            raise ValueError("accepted order namespace missing")
+        identities.add((str(namespace), str(order_id)))
+    return frozenset(identities)
+
+
 def system_intents_for(
     evidence: OrderEvidence, rows: list[dict]
 ) -> tuple[SystemOrderIntent, ...]:

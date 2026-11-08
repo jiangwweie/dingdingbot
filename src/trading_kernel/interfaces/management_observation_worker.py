@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Protocol
 
-from src.trading_kernel.application.management_intents import system_intents_for
+from src.trading_kernel.application.management_intents import (
+    accepted_order_identities,
+    system_intents_for,
+)
 from src.trading_kernel.application.observe_trade_management import (
     observe_trade_management,
 )
@@ -159,13 +162,8 @@ async def observe_management_once(
             if item.exchange_event_at_ms >= current.ticket.created_at_ms
         )
         # An empty/partial history is not affirmative coverage of our orders.
-        required_orders = {
-            str((row["result_payload"] or {}).get("exchange_order_id"))
-            for row in await u.management.command_rows(ticket_id)
-            if row["status"] in ("accepted", "reconciled_accepted")
-            and (row["result_payload"] or {}).get("exchange_order_id") is not None
-        }
-        observed_orders = {item.terms.exchange_order_id for item in batch.evidence}
+        required_orders = accepted_order_identities(await u.management.command_rows(ticket_id))
+        observed_orders = {(item.terms.order_namespace, item.terms.exchange_order_id) for item in batch.evidence}
         if (
             current.management_mode is ManagementMode.REVIEW_REQUIRED
             and current.management_reason
