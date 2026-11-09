@@ -146,7 +146,7 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
         facts = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
         assert facts['status'] == 'pass'
         assert facts['hourly_pair_preparation']['status'] == 'pass'
-        assert facts['entry_recovery_ready'] is False
+        assert facts['entry_recovery_ready'] is True
         assert facts['exit_profile_authority']['current_binding_count'] == 10
         assert facts['exit_profile_authority']['binding_fact_count'] == 11
         _require_dynamic_selection_postflight(facts, seed_identity=facts['runtime_identity']['seed_identity'],
@@ -157,6 +157,7 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
                 await c.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id='SOR-1H-001'"))
             unpaused = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
             assert unpaused['hourly_pair_preparation']['status'] == 'fail'
+            assert unpaused['entry_recovery_ready'] is False
             with pytest.raises(DeploymentBlocked):
                 _require_dynamic_selection_postflight(unpaused, seed_identity=facts['runtime_identity']['seed_identity'],
                     preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
