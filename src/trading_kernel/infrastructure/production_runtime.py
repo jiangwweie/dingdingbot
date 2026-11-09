@@ -136,6 +136,11 @@ def build_binance_usdm_venue_adapter() -> CcxtVenueAdapter:
             },
         }
     )
+    from src.trading_kernel.infrastructure.entry_read_telemetry import (
+        instrument_entry_reads,
+    )
+
+    instrument_entry_reads(exchange)
     return CcxtVenueAdapter(
         exchanges={(settings.venue_id, settings.account_id): exchange},
         settlement_assets={},

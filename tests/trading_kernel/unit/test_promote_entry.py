@@ -9,6 +9,20 @@ from scripts.trading_kernel.promote_entry import (
 )
 
 
+@pytest.mark.parametrize("timeout,validity,expected", [("10","30000",True),("5","5000",False),("10","5000",False)])
+def test_promoter_checks_actual_entry_process_timing(monkeypatch, timeout, validity, expected):
+    from types import SimpleNamespace
+    backend=LocalEntryPromotionBackend(python="python",database_url="unused")
+    def run(*args,**kwargs):
+        if "is-active" in args:
+            return SimpleNamespace(returncode=0)
+        if "show" in args:
+            return SimpleNamespace(stdout="123\n",returncode=0)
+        return SimpleNamespace(stdout=f"TRADING_KERNEL_TIMEOUT_SECONDS={timeout}\0TRADING_KERNEL_ACTION_FACT_VALIDITY_MS={validity}\0UNRELATED_SECRET=never-print\0",returncode=0)
+    monkeypatch.setattr(backend,"_run",run)
+    assert backend._active("brc-trading-kernel-entry-worker.service") is expected
+
+
 class FakePromotionBackend:
     def __init__(
         self,

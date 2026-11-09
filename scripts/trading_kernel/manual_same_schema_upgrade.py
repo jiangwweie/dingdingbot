@@ -250,6 +250,11 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         dropin.write_text(
             "[Service]\nEnvironmentFile=-/etc/brc/notification-credentials/feishu.env\n"
         )
+    from scripts.trading_kernel.manual_runtime_installation import (
+        install_entry_runtime_config,
+    )
+
+    install_entry_runtime_config(REPO_ROOT)
     run(["systemctl", "daemon-reload"])
     run(
         [

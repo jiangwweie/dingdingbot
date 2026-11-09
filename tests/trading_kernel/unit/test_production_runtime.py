@@ -467,7 +467,7 @@ async def test_command_worker_long_running_mode_reuses_factory_resource(
             now_ms=None,
             lease_ms=30_000,
             timeout_seconds=10.0,
-            admission_snapshot_validity_ms=5_000,
+            admission_snapshot_validity_ms=30_000,
             idle_poll_interval_ms=2_000,
             run_forever=True,
             poll_interval_ms=2_000,

@@ -4380,60 +4380,34 @@ def _overview_freshness(
         freshness = Freshness.CONTRADICTORY if contradictory else Freshness.UNAVAILABLE
         return freshness, "owner_policy:configured", now_ms
     account_identity = f"account:{authority['venue_id']}:{authority['account_id']}"
-    required = [
-        (
-            account_identity,
-            (
-                None
-                if authority["exposure_updated_at_ms"] is None
-                else int(authority["exposure_updated_at_ms"])
-            ),
-        ),
-    ]
-    if monitor_rows:
-        latest_monitor = max(
-            monitor_rows,
-            key=lambda row: (int(row["updated_at_ms"]), str(row["monitor_key"])),
-        )
-        required.append(
-            (
-                str(latest_monitor["monitor_key"]),
-                int(latest_monitor["updated_at_ms"]),
-            )
-        )
-    else:
-        required.append(("monitor:current", None))
-
-    classified = [
-        (*_classify_freshness(timestamp, now_ms=now_ms), identity)
-        for identity, timestamp in required
-    ]
+    # The single configured account is audited by Reconciliation. Ledger
+    # timestamps describe capital mutations, not the age of external facts.
+    audit = next((row for row in monitor_rows
+        if row["monitor_key"] == f"account:{authority['venue_id']}:position-audit"), None)
     if contradictory:
         return Freshness.CONTRADICTORY, account_identity, now_ms
-    precedence = {
-        Freshness.FRESH: 0,
-        Freshness.STALE: 1,
-        Freshness.UNAVAILABLE: 2,
-        Freshness.CONTRADICTORY: 3,
-    }
-    freshness, occurred_at_ms, identity = max(
-        classified,
-        key=lambda item: (precedence[item[0]], -item[1]),
-    )
-    return freshness, identity, occurred_at_ms
+    if audit is None:
+        return Freshness.UNAVAILABLE, account_identity, now_ms
+    timestamp = int(audit["updated_at_ms"])
+    if audit["owner_status"] != "running":
+        return Freshness.UNAVAILABLE, account_identity, timestamp
+    freshness, occurred_at_ms = _classify_freshness(timestamp, now_ms=now_ms,
+        fresh_age_ms=120_000)
+    return freshness, account_identity, occurred_at_ms
 
 
 def _classify_freshness(
     timestamp_ms: int | None,
     *,
     now_ms: int,
+    fresh_age_ms: int = _FRESH_AGE_MS,
 ) -> tuple[Freshness, int]:
     if timestamp_ms is None:
         return Freshness.UNAVAILABLE, now_ms
     if timestamp_ms > now_ms:
         return Freshness.CONTRADICTORY, timestamp_ms
     age_ms = now_ms - timestamp_ms
-    if age_ms <= _FRESH_AGE_MS:
+    if age_ms <= fresh_age_ms:
         return Freshness.FRESH, timestamp_ms
     if age_ms <= _STALE_MAX_AGE_MS:
         return Freshness.STALE, timestamp_ms

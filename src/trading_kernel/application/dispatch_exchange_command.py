@@ -11,6 +11,10 @@ from typing import TypedDict
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.application.entry_fact_collection import (
+    collect_entry_facts,
+    record_entry_fact_health,
+)
 from src.trading_kernel.application.ingest_signal import (
     resolve_selection_entry_authority,
 )
@@ -554,23 +558,20 @@ async def _preflight_new_entry_mutation(
             domain.exchange_instrument_id
         )
     try:
-        snapshot, rules, product_session = await asyncio.wait_for(
-            asyncio.gather(
-                entry_facts_source.read_entry_admission_snapshot(snapshot_request),
-                entry_facts_source.read_instrument_rules(rules_request),
-                (
-                    _read_product_session(
-                        entry_facts_source,
-                        product_request,
-                    )
-                    if product_compatibility.product_family == "tradfi_equity_perpetual"
-                    else _no_product_session()
-                ),
-            ),
-            timeout=request.timeout_seconds,
+        facts = await collect_entry_facts(
+            entry_facts_source, snapshot_request=snapshot_request, rules_request=rules_request,
+            product_request=(product_request if product_compatibility.product_family == "tradfi_equity_perpetual" else None),
+            timeout_seconds=request.timeout_seconds, phase="dispatch", identity=command.command_id,
         )
+        snapshot, rules, product_session = facts.snapshot, facts.rules, facts.product
     except Exception:  # noqa: BLE001 - unreadable admission facts must fence Entry.
+        async with uow_factory() as uow:
+            await record_entry_fact_health(uow, venue_id=domain.venue_id,
+                account_id=domain.account_id, failed=True, now_ms=clock_ms())
         return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+    async with uow_factory() as uow:
+        await record_entry_fact_health(uow, venue_id=domain.venue_id,
+            account_id=domain.account_id, failed=False, now_ms=clock_ms())
     source_product_decision = evaluate_event_product_entry(
         compatibility=product_compatibility,
         profile=product_profile,
@@ -792,17 +793,6 @@ async def _preflight_new_entry_mutation(
             valid_until_ms,
         ),
     )
-
-
-async def _no_product_session():
-    return None
-
-
-async def _read_product_session(entry_facts_source, request):
-    reader = getattr(entry_facts_source, "read_product_session", None)
-    if not callable(reader):
-        raise TypeError("TradFi dispatch Product source is unavailable")
-    return await reader(request)
 
 
 async def _record_preflight_refusal(

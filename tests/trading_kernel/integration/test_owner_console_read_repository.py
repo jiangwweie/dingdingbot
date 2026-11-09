@@ -1531,7 +1531,7 @@ async def test_overview_reads_eight_bounded_selects_in_supplied_transaction(
         await engine.dispose()
 
 
-async def test_overview_freshness_uses_stalest_required_projection(
+async def test_overview_freshness_ignores_unchanged_capital_ledger(
     owner_read_dsn: str,
 ) -> None:
     now_ms = 1_800_000_010_000
@@ -1551,11 +1551,11 @@ async def test_overview_freshness_uses_stalest_required_projection(
                 now_ms=now_ms,
             )
 
-        assert facts.runtime_freshness.value == "stale"
+        assert facts.runtime_freshness.value == "fresh"
         assert facts.freshness_evidence_identity == (
             "account:binance-usdm:owner-console-account"
         )
-        assert facts.freshness_evidence_at_ms == exposure_updated_at_ms
+        assert facts.freshness_evidence_at_ms == now_ms - 10_000
     finally:
         await engine.dispose()
 
@@ -1942,7 +1942,7 @@ async def _seed_overview_authority(
                     ticket_id, incident_id, updated_at_ms, projection_version
                 ) VALUES ($1, $2, $3, $4, NULL, NULL, $5, 1)
                 """,
-                "monitor:owner-console",
+                "account:binance-usdm:position-audit",
                 "running",
                 "runtime healthy",
                 "no action",

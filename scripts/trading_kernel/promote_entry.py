@@ -242,7 +242,32 @@ class LocalEntryPromotionBackend:
         return payload
 
     def _active(self, service: str) -> bool:
-        return self._run("sudo", "systemctl", "is-active", "--quiet", service, check=False).returncode == 0
+        if self._run("sudo", "systemctl", "is-active", "--quiet", service, check=False).returncode != 0:
+            return False
+        if service != ENTRY_SERVICE:
+            return True
+        from src.trading_kernel.infrastructure.entry_runtime_contract import (
+            require_entry_runtime_contract,
+        )
+
+        try:
+            pid=int(self._run("sudo","systemctl","show",service,"--property=MainPID","--value").stdout.strip())
+            if pid <= 0:
+                return False
+            # Filter inside the privileged reader; no credentials leave the child.
+            program=("from pathlib import Path; "
+                f"rows=Path('/proc/{pid}/environ').read_bytes().split(b'\\0'); "
+                "allowed={b'TRADING_KERNEL_TIMEOUT_SECONDS',b'TRADING_KERNEL_ACTION_FACT_VALIDITY_MS'}; "
+                "print('\\0'.join(x.decode() for x in rows if x.split(b'=',1)[0] in allowed),end='')")
+            result=self._run("sudo","python3","-c",program,check=False)
+            if result.returncode != 0:
+                return False
+            values=dict(row.split("=",1) for row in result.stdout.split("\0") if "=" in row)
+            require_entry_runtime_contract(timeout_seconds=float(values.get("TRADING_KERNEL_TIMEOUT_SECONDS","0")),
+                validity_ms=int(values.get("TRADING_KERNEL_ACTION_FACT_VALIDITY_MS","0")))
+        except (ValueError, subprocess.SubprocessError):
+            return False
+        return True
 
     def _enabled(self, service: str) -> bool:
         return self._run("sudo", "systemctl", "is-enabled", "--quiet", service, check=False).returncode == 0

@@ -46,10 +46,35 @@ def check_installation_binding(expected: dict, actual: dict) -> None:
         raise ValueError("manual installation binding differs")
 
 
+def install_entry_runtime_config(release: Path, *, etc: Path = Path("/etc")) -> None:
+    from src.trading_kernel.infrastructure.entry_runtime_contract import (
+        require_entry_runtime_contract,
+    )
+
+    contents = (release / "deploy/runtime/entry.env").read_text()
+    values = dict(line.split("=", 1) for line in contents.splitlines())
+    if set(values) != {"TRADING_KERNEL_TIMEOUT_SECONDS", "TRADING_KERNEL_ACTION_FACT_VALIDITY_MS"}:
+        raise ValueError("Entry runtime configuration keys differ")
+    require_entry_runtime_contract(
+        timeout_seconds=float(values["TRADING_KERNEL_TIMEOUT_SECONDS"]),
+        validity_ms=int(values["TRADING_KERNEL_ACTION_FACT_VALIDITY_MS"]),
+    )
+    destination = etc / "brc/trading-kernel-entry.env"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(contents)
+    destination.chmod(0o600)
+    dropin = etc / "systemd/system/brc-trading-kernel-entry-worker.service.d"
+    dropin.mkdir(parents=True, exist_ok=True)
+    (dropin / "entry-runtime.conf").write_text(
+        "[Service]\nEnvironmentFile=/etc/brc/trading-kernel-entry.env\n"
+    )
+
+
 def install_console_files(release: Path, *, etc: Path = Path("/etc")) -> None:
     """Install certified canonical units; no service is enabled or started here."""
     units = etc / "systemd/system"
     units.mkdir(parents=True, exist_ok=True)
+    install_entry_runtime_config(release, etc=etc)
     for source in (release / "deploy/systemd").glob("*"):
         shutil.copyfile(source, units / source.name)
     for source in (release / "deploy/owner-console/systemd").glob("*.service"):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Callable
 from decimal import Decimal
 from enum import StrEnum
@@ -14,6 +13,10 @@ from src.trading_kernel.application.dispatch_exchange_command import (
     DispatchCommandStatus,
     action_clock_ms,
     dispatch_one_command,
+)
+from src.trading_kernel.application.entry_fact_collection import (
+    collect_entry_facts,
+    record_entry_fact_health,
 )
 from src.trading_kernel.application.issue_ready_signal import (
     IssueReadySignalRequest,
@@ -211,23 +214,16 @@ async def run_entry_worker_once(
     )
     try:
         product_compatibility = product_compatibility_for(signal.event_spec_id)
-        admission_snapshot, instrument_rules, product_session = await asyncio.wait_for(
-            asyncio.gather(
-                facts_source.read_entry_admission_snapshot(snapshot_request),
-                facts_source.read_instrument_rules(rules_request),
-                (
-                    _read_product_session(
-                        facts_source,
-                        product_session_request,
-                    )
-                    if product_compatibility.product_family == "tradfi_equity_perpetual"
-                    else _no_product_session()
-                ),
-            ),
-            timeout=request.timeout_seconds,
+        facts = await collect_entry_facts(
+            facts_source, snapshot_request=snapshot_request, rules_request=rules_request,
+            product_request=(product_session_request if product_compatibility.product_family == "tradfi_equity_perpetual" else None),
+            timeout_seconds=request.timeout_seconds, phase="admission", identity=signal.signal_event_id,
         )
+        admission_snapshot, instrument_rules, product_session = facts.snapshot, facts.rules, facts.product
     except Exception as exc:  # noqa: BLE001 - action facts failure blocks new Entry.
         async with uow_factory() as uow:
+            await record_entry_fact_health(uow, venue_id=profile.venue_id,
+                account_id=profile.account_id, failed=True, now_ms=clock_ms())
             await _record_action_facts_unavailable(
                 uow,
                 signal_event_id=signal.signal_event_id,
@@ -236,6 +232,9 @@ async def run_entry_worker_once(
             )
         return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
 
+    async with uow_factory() as uow:
+        await record_entry_fact_health(uow, venue_id=profile.venue_id,
+            account_id=profile.account_id, failed=False, now_ms=clock_ms())
     admission_at_ms = clock_ms()
     action_time_product_decision = (
         evaluate_event_product_entry(
@@ -311,17 +310,6 @@ async def run_entry_worker_once(
         issue_status=issued.status,
         dispatch_status=dispatched.status,
     )
-
-
-async def _no_product_session():
-    return None
-
-
-async def _read_product_session(facts_source, request):
-    reader = getattr(facts_source, "read_product_session", None)
-    if not callable(reader):
-        raise TypeError("TradFi action-time Product source is unavailable")
-    return await reader(request)
 
 
 async def _record_action_facts_unavailable(

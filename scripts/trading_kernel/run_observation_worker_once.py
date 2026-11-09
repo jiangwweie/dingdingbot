@@ -216,18 +216,6 @@ async def _run(args: argparse.Namespace) -> int:
             (
                 *generic_loops,
                 WorkerProcessLoop(
-                    component_id=selection_worker_id,
-                    tick=selection_tick,
-                    poll_interval_ms=args.selection_poll_interval_ms,
-                    idle_statuses=frozenset({"not_due", "already_ready"}),
-                ),
-                WorkerProcessLoop(
-                    component_id=materialization_worker_id,
-                    tick=materialization_tick,
-                    poll_interval_ms=args.materialization_poll_interval_ms,
-                    idle_statuses=frozenset({"not_due", "waiting", "unchanged"}),
-                ),
-                WorkerProcessLoop(
                     component_id=args.worker_id,
                     tick=observation_tick,
                     poll_interval_ms=args.poll_interval_ms,

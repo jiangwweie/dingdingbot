@@ -102,6 +102,20 @@ async def _run(args: argparse.Namespace) -> int:
         raise ValueError("fixed now-ms is incompatible with run-forever")
     if args.lease_ms <= 0:
         raise ValueError("lease-ms must be positive")
+    if args.worker_role == "entry" and args.run_forever:
+        from src.trading_kernel.infrastructure.entry_runtime_contract import (
+            require_entry_runtime_contract,
+        )
+
+        require_entry_runtime_contract(
+            timeout_seconds=args.timeout_seconds,
+            validity_ms=args.admission_snapshot_validity_ms,
+        )
+        if args.venue_factory == "src.trading_kernel.infrastructure.production_runtime:build_binance_usdm_venue_adapter":
+            require_entry_runtime_contract(
+                timeout_seconds=float(os.environ.get("TRADING_KERNEL_TIMEOUT_SECONDS", "0")),
+                validity_ms=int(os.environ.get("TRADING_KERNEL_ACTION_FACT_VALIDITY_MS", "0")),
+            )
 
     adapter = _load_factory(args.venue_factory)()
     if inspect.isawaitable(adapter):

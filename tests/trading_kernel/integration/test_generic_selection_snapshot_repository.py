@@ -662,7 +662,7 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
     import sys
 
     script=Path(__file__).resolve().parents[3]/"scripts/trading_kernel/run_observation_worker_once.py"
-    expected={"resident" ,"resident:selection","resident:materialization"}
+    expected={"resident"}
     for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
         expected.update(f"resident:{plane}:{group}" for plane in ("selection","materialization","facts"))
     expected.update(f"resident:{plane}:SOR-1H-001" for plane in ("selection", "materialization", "facts"))
@@ -689,9 +689,8 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
                     line=await process.stdout.readline()
                     assert line,"Resident process exited before all components ticked"
                     result=json.loads(line)
-                    if result["component_id"]=="resident:selection" and result["status"]=="blocked":
-                        assert result["reason_code"]=="SELECTION_CONTROL_MISSING_OR_DRIFTED",result
-                    elif result["component_id"] == "resident:selection:SOR-1H-001":
+                    assert result["component_id"] not in {"resident:selection","resident:materialization"},result
+                    if result["component_id"] == "resident:selection:SOR-1H-001":
                         assert (result["status"], result["reason_code"]) == (orb_status, orb_reason), result
                     else:
                         assert result["status"] in {"not_due","no_work"},result

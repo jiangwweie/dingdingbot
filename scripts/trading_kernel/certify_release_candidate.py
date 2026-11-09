@@ -36,6 +36,10 @@ from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
     registered_strategy_contracts,
 )
+from src.trading_kernel.infrastructure.entry_runtime_contract import (
+    ENTRY_ACTION_FACT_VALIDITY_MS,
+    ENTRY_TIMEOUT_SECONDS,
+)
 from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
@@ -160,6 +164,7 @@ def build_certification_identity(
             "runtime_profile_id": RUNTIME_PROFILE_ID,
             "venue_id": VENUE_ID,
             "position_mode": POSITION_MODE,
+            "entry_timing": {"timeout_seconds": ENTRY_TIMEOUT_SECONDS, "fact_validity_ms": ENTRY_ACTION_FACT_VALIDITY_MS},
         }
     )
     return {

@@ -71,6 +71,9 @@ def test_any_changed_binding_refuses_installation(field):
 
 def test_console_install_keeps_all_four_trade_workers_disabled(tmp_path):
     release = tmp_path / "release"
+    runtime = release / "deploy/runtime"
+    runtime.mkdir(parents=True)
+    (runtime / "entry.env").write_text("TRADING_KERNEL_TIMEOUT_SECONDS=10\nTRADING_KERNEL_ACTION_FACT_VALIDITY_MS=30000\n")
     kernel_units = release / "deploy/systemd"
     kernel_units.mkdir(parents=True)
     for role in ("observation", "entry", "lifecycle", "reconciliation"):
