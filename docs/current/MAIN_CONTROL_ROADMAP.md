@@ -66,17 +66,42 @@ acceptance, Initial Stop protection and actual App takeover remain separate
 unclaimed evidence. The installation procedure and approved sequence belong to
 the [installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 
-### Seoul notification V1 — local candidate, release verification pending2026-11-09
+### Seoul notification V1 — deployed, ENTRY remains Owner-paused2026-11-09
 
-Owner approved compact strategy-aware notices, frozen final facts, transactional
-Outbox, bounded retries and an independent Seoul Feishu robot. The independent
-credential has been saved through the private terminal without sending a message.
-Local implementation replaces the old daemon-thread sender, adds the exact
-0017→0018 forward migration and exposes display-only delivery status in Overview.
-ENTRY remains Owner-paused. No new production release or natural-event delivery
-is claimed by this implementation entry; exact certification and postflight are
-still required before promotion. Tokyo code/account/services are outside scope.
-Implementation and acceptance boundaries belong to the
+The independent Seoul product now runs Kernel/API/static exact commit
+**`c93c7b98dd28d74808ffd33e526ad537c3633ce2`**, schema
+**`0018_notice_outbox_v1`**, immutable tag **`manual-runtime-2026.11.09.2`**.
+`manual-dev` and the release tag are pushed. This supersedes the installed0017
+identity in the earlier restoration record; historical restoration evidence stays
+intact. Owner global ENTRY remains **Policy3/false**. Tokyo was not changed.
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Certification | Exact R4 PASS:2000 Unit/Architecture,1867 Integration,74 Full-chain; Ruff, Mypy234,961 Golden snapshots/23064 Core decisions; same-SHA Owner API/static PASS |
+| Source gate | Fresh source identity/certificate and internal flat/zero Ticket/Command/Incident/active Reservation; maintenance fence, Entry disabled/stopped and all five writers stopped |
+| Forward migration | Official manual stage/activate0017→0018 PASS; fresh signed readonly account verification; every nonidentity source table digest, Universe, Policy, strategy/Selection controls preserved; no SQL repair or credential rotation |
+| Runtime | Final readonly postflight2026-11-09 13:10:36 Asia/Shanghai PASS; four real Python Workers and Owner API active/NRestarts0; current commit/schema match; official promoter `prepared_owner_paused`; operational fence absent |
+| Independent route | Seoul-only robot route loaded exclusively in Reconciliation startup environment; root0600 credential; no Tokyo webhook fallback; runtime can enqueue/lease, Owner read role SELECT-only |
+| Notification delivery | Frozen final facts/payload plus persisted first-dispatch body, bounded lease/CAS/five-attempt retry, supersession and isolated async loop; pending0/dead0/accepted0; no test message was sent |
+| Browser | Existing Google binding authenticated successfully after release; live Overview shows independent robot configured, pending0/failed0 and no platform acceptance; ENTRY remains paused |
+| Preservation | Independent password/TOTP/session/Google credential files and Owner API drop-ins match pre-cutover hashes; budget defaults and all current Owner controls preserved |
+
+The original source already has Owner-enabled SOR-1H; it was retained exactly,
+not resumed by this release. SOR-001 remains permanently paused/retired and TradFi
+remains paused. Baseline2%, gross6%, direction4%, minimum materialization50%
+and the three-Ticket ceiling are unchanged. The source has no natural Ticket or
+Command; actual App takeover and natural-event Feishu acceptance/phone receipt
+remain unverified. Platform acceptance does not prove Owner read; unknown network
+outcomes may duplicate a notice. No forged Signal/Ticket/order or Feishu test was
+created. The Overview currently reports unavailable general evidence while the
+notification summary is available; notification heartbeat is intentionally
+excluded from trading freshness and cannot certify the trade chain.
+
+Evidence: `.local/manual-notification-20261109/` certification logs/manifests,
+source-stopped, official stage/activate, entry-promotion, postflight,
+owner-overview-readonly and review-record. The failed first candidate and exact
+failure tail remain under `failed-candidate-7dd2b2ef/`; its certificate is not
+reused. Implementation/acceptance rules are recorded in the
 [notification plan](../superpowers/plans/2026-11-09-manual-notification-templates-v1.md).
 
 ### Seoul Google login — configured and browser-verified2026-11-09

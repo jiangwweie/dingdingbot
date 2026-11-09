@@ -43,3 +43,8 @@ Owner已批准模板化、冻结事实快照、统一数字/策略语义、独�
 - 首尔独立机器人采用root0600独立EnvironmentFile，仅Reconciliation在启动时加载；运行cadence不读凭据文件，无Tokyo路由fallback。私密输入不发消息，不通过聊天交换Webhook。
 - 0017→0018是唯一新获准前向路径；要求维护ENTRY围栏、全部五写入者停、Owner ENTRY关闭、内部/交易所空仓、无命令/Incident/风险占用，保全每张源表。源seed/commit/capability/产品/账户漂移拒绝。继承Tokyo入口仍拒绝该人工产品，不调用该入口部署。
 - 正式R4、同SHA API/static及首尔postflight分别执行，真实自然事件投递仍须在后续业务事件出现后验证，不能用fixture或配置成功代替。
+
+
+## 交付记录
+
+本地实现、精确最终候选R4/API/static认证、官方首尔forward部署、Owner暂停保全及服务/PG/路由postflight已完成。正式版本/标签/当前状态统一见[路线图](../../current/MAIN_CONTROL_ROADMAP.md)。未发测试消息，真实自然通知的平台接受与手机收到仍未验收。通知状态不参与通用交易健康/新鲜度判断；一般概览证据缺失时不得以通知loop心跳掩盖。业务链与真实App接管仍按原自然交易验收边界处理。
