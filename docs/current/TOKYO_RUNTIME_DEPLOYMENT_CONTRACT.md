@@ -18,13 +18,12 @@ hedge-mode sides are still required at the exchange. Successful external App
 intervention permanently hands over the whole Ticket; only readonly observation,
 accounting and closure remain. Unknown intervention freezes automatic action.
 
-Certificates bind the compiled product identity, exact commit and schema. The
-inherited Tokyo deployment backends call `refuse_inherited_tokyo_deployment`
-before any SSH action, including uploads and legacy drain bridges. A matching
-local binding comparison is preparation only: real App protocol acceptance,
-independent target/account/database verification and Owner deployment confirmation
-are still required. This branch is not authority to operate the Tokyo product.
+**本文件在人工分支是继承的发布安全基线，不是操作Tokyo的授权。**同一时刻只有一个精确产品/账户/数据库写入者；空仓、停写、身份、保全、认证和Owner意图的硬门槛保留。
+首尔的实际安装/升级入口为[install_manual_host](../../scripts/trading_kernel/install_manual_host.py)、[host绑定](../../scripts/trading_kernel/manual_host_bootstrap.py)及[人工升级](../../scripts/trading_kernel/manual_same_schema_upgrade.py)，支持范围以代码为准；旧后端由 `refuse_inherited_tokyo_deployment` 在构造远程操作前拒绝；不能通过修改SSH别名调用。
+**real App protocol acceptance**仍须直接证据。Owner已同意自然交易中验证真实App干预，这不等于提前通过实盘验收，也不允许为验收下测试订单。
 
+**MANUAL不能因发布或恢复回AUTO**。人工仓和残单仍须满足正式空仓部署门槛，不能擅自强平、自动撤单或搬迁活动仓；独立Owner API也纳入停写与凭据/控制保全。
+当前发布身份和Owner状态只见[MAIN_CONTROL_ROADMAP.md](MAIN_CONTROL_ROADMAP.md)；下文继承流程的Tokyo名称用于解释安全机制，不能作为首尔直接执行指令。
 
 ## Current-Universe Entry Restoration
 

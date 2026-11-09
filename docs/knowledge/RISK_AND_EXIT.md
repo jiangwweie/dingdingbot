@@ -2,6 +2,22 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。数值政策由[实验 Profile](../current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md)负责，生产生效值与状态见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 人工接管后的退出与风险
+
+**以下自动退出状态图只适用于 AUTO**。MANUAL 接管整笔，不再自动挂/改/撤止损、TP1、Runner，不自动平仓或补仓；原交易所订单由 Owner 管理。
+原 TP1 自然成交并不把人工余仓交回自动保本管理。缺止损或风险未知时限制新增 ENTRY，不能以保护安全为由擅自修正人工仓。
+
+| 已核实变化 | 风险/占用处理 | 退出权限 |
+| --- | --- | --- |
+| 未成交人工退出挂单或改单 | 整笔接管，保留实际余仓与风险 | Owner 管理全部余仓和退出订单 |
+| 部分减仓或拉远止损 | 用实际数量及当前保护保守核算；不把保本当零风险 | 不自动补回或收紧 Owner 止损 |
+| 多档止损/条款不足或观察缺失 | 无法证明分配和覆盖时明确 unknown，限制新增 | 不虚构全仓保护，不盲撤改单 |
+| 全平但有残单或未知结果 | 保留需核实的标的/资金占用 | Owner 清理，系统只读确认 |
+| 仓位、订单及命令均可证明结束 | 按账本推进释放、结算、Review | 后续新机会仍需 rearm 和完整准入 |
+
+**禁止人工加仓、重开和反手；禁止同账户同标的双向同时持仓**。超范围变化不能悄悄并入旧 Ticket，也不能盲目平掉。
+（来源：[人工风险模型](../../src/trading_kernel/domain/manual_position.py)、[对账](../../src/trading_kernel/application/reconcile_ticket.py)、[持久化约束](../../src/trading_kernel/infrastructure/pg_models.py)。）
+
 ## 风险分布在哪些边界
 
 **风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)）

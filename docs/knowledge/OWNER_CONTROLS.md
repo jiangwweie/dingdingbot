@@ -2,6 +2,21 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。不记录当前 Owner 开关值；当前生产状态见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## App 单笔干预与控制台政策的区别
+
+**币安 App 干预单笔交易，控制台管理账户政策**。在 App 新增/修改/撤销有效退出订单或减仓，程序核实后整笔永久 **MANUAL**，不需要先在控制台逐笔点击“接管”。
+只有初始止损确认后的正常交付才可按约定干预；观察缺口或未知命令须先查明，不能凭 App 画面猜程序已经确认接管。
+
+| 操作 | 对新 ENTRY 的作用 | 对已有 AUTO 的作用 | 对已有 MANUAL 的作用 |
+| --- | --- | --- | --- |
+| 全局 ENTRY 暂停/恢复 | 关闭或按全部门槛恢复 | 保留原自动保护与退出 | 不恢复自动管理 |
+| 方向/预算调整 | 约束以后准入，余额行动时刷新 | 不自动加仓或按新数值强平 | 继续保守核算，不修正人工订单 |
+| App 有效退出操作 | 不直接修改全局 ENTRY | 经核实转为整笔 MANUAL | Owner 继续管理整笔及挂单 |
+| **受控全平** | 依正式控制路径暂停新 ENTRY | 按当前授权与目标执行退出 | 不绕过 MANUAL 写门；人工仓由 Owner 在 App 收尾 |
+
+**原 TP1 和止损仍在交易所，由 Owner 决定保留、修改、撤销**。接管后即使原 TP1 成交，程序也不自动移止损；归零后残单未清不能声称占用已释放。
+（来源：[Owner 控制](../../src/trading_kernel/application/owner_control.py)、[干预识别](../../src/trading_kernel/application/observe_trade_management.py)、[派发](../../src/trading_kernel/application/dispatch_exchange_command.py)。）
+
 ## 控制职责与前端入口
 
 **Owner 决定政策范围，系统完成正常运行。**Owner 无需逐单拼装事实或审批每笔范围内交易。（现行契约：[Owner operating model](../current/OWNER_RUNTIME_OPERATING_MODEL.md)）
@@ -55,11 +70,11 @@ sequenceDiagram
 
 ## 为什么暂停后还有动作
 
-**`new_entry_submit_enabled` 只控制新 ENTRY**。保护、退出、对账、结算与 Review 依赖已暴露 Ticket 冻结的安全权限继续执行；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
+**`new_entry_submit_enabled` 只控制新 ENTRY**。AUTO 的保护与退出、各管理模式允许的对账/结算/Review 继续执行；MANUAL 不会恢复自动写权限；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
 
 在数据库中，“配置允许”与“此时有效允许”也不同：Policy 开启之后仍可能被 runtime fence、策略暂停、Vacuum、Authority 到期、账户或容量门槛阻断。读取控制页时要看具体 blocker，而非只看按钮状态。（来源：[read_controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py#L420)、[entry_scope](../../src/trading_kernel/application/owner_console/entry_scope.py)）
 
-## flatten-all 是异步受控操作
+## flatten-all 是受管理权约束的异步操作
 
 ```mermaid
 flowchart LR
@@ -72,6 +87,8 @@ flowchart LR
     Reconcile --> Settle[结算与 Review]
     Settle --> Complete[Operation completed]
 ```
+
+**以下描述 AUTO 目标的正式执行路径；发现 MANUAL 或 REVIEW_REQUIRED 时按当前实现拒绝/挂起，不能把账户范围操作理解为人工仓也会自动平掉。**
 
 1. [preview_flatten_all](../../src/trading_kernel/application/owner_control.py#L714) 按账户跨 RuntimeProfile 列出快照。
 2. [begin_flatten_all](../../src/trading_kernel/application/owner_control.py#L764) 校验快照、处理幂等并关闭新 ENTRY；先建立 VALIDATING Operation。

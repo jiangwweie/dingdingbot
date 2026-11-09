@@ -12,13 +12,26 @@
 [管理观察](../../src/trading_kernel/interfaces/management_observation_worker.py)、
 [只读收尾](../../src/trading_kernel/application/reconcile_ticket.py)）
 
+### 三种管理权与收尾
+
+| 管理权 | 后续自动写入 | 事实和账务 | 恢复规则 |
+| --- | --- | --- | --- |
+| **AUTO** | 原保护、TP1、Runner、guards/TimeStop | 正常对账、结算和复盘 | 识别外部干预或未知归属后切换 |
+| **REVIEW_REQUIRED** | 暂停该笔新的自动处置 | 补齐历史、归属与未知请求真相 | 仅实现允许的完整证据可解除；不是人工确认 |
+| **MANUAL** | 禁止自动改单、撤单、退出、补仓 | 跟踪真实余量、保护、风险、残单与结算 | 不回 AUTO；新独立 Ticket 才重新默认 AUTO |
+
+人工操作的“发生”以交易所可核实的有效事实为准，不能识别 App 中未提交的编辑。
+原 TP1 在交易所仍可能成交，但不再触发程序给人工余仓移动保本止损。
+**MANUAL_FLAT_PENDING_ORDERS**表示仓位已归零但退出挂单或命令结果尚未核实清楚；不能据此宣布标的可重入。
+（来源：[管理事件与归约](../../src/trading_kernel/domain/reducer.py)、[手工仓对账](../../src/trading_kernel/application/reconcile_ticket.py)。）
+
 ## 标准链路与阅读对象
 
 **Observation → StrategySignal → Readiness/Authority → CapacityClaim → immutable Ticket → durable Exchange Command → protected lifecycle → reconciliation → settlement → review**。
 
 贯穿全链需要保留 **`runtime_scope_id`、`signal_event_id`、`exposure_episode_id`、`ticket_id`、`command_id`**。发生外部订单后，还要匹配冻结命令的 client order identity、币种、方向和订单命名空间。（来源：[identities](../../src/trading_kernel/domain/identities.py)、[commands](../../src/trading_kernel/domain/commands.py)、[venue_adapter](../../src/trading_kernel/infrastructure/venue_adapter.py)）
 
-## 正常路径：从收盘到终态
+## AUTO 路径：从收盘到终态
 
 | 步骤 | 实际入口与判断 | 读取 / 写入结果 | 在此停止的典型原因 |
 | --- | --- | --- | --- |
@@ -91,6 +104,8 @@ flowchart TD
     Admission -->|否| Reject[拒绝 Decision 与 blocker]
     Admission -->|是| Ticket[原子签发 Ticket 与 Command]
 ```
+
+**下表和时序中的自动保护、退出和清理仅适用于 AUTO**；MANUAL 不沿用自动撤单/平仓权限。
 
 **Shadow 路径与准入是不同维度**：合格组合拒绝或特定观察可产生研究记录；它不能为被拒绝 Signal 补建 Ticket，也不把未来价格路径当成交收益。（来源：[project_shadow_outcome](../../src/trading_kernel/application/project_shadow_outcome.py)、[shadow_outcome](../../src/trading_kernel/domain/shadow_outcome.py)）
 

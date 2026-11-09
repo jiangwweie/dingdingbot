@@ -2,6 +2,19 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。代码基准和标签定义见入口；本页的本地测试不证明生产状态，当前生产验收见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 人工干预专属阅读入口
+
+| 边界 | 生产实现 | 保护的验证语义 |
+| --- | --- | --- |
+| **整笔永久接管** | [trade_management](../../src/trading_kernel/domain/trade_management.py)、[observe_trade_management](../../src/trading_kernel/application/observe_trade_management.py) | [未成交干预/去重](../../tests/trading_kernel/integration/test_observe_trade_management.py)、[状态转移](../../tests/trading_kernel/unit/test_trade_management.py) |
+| **账户事件与覆盖** | [management_observation_worker](../../src/trading_kernel/interfaces/management_observation_worker.py)、[pg_management_repository](../../src/trading_kernel/infrastructure/pg_management_repository.py) | [观察调度](../../tests/trading_kernel/integration/test_management_worker.py)、[原始协议](../../tests/trading_kernel/unit/test_binance_management_observation.py) |
+| **MANUAL写入禁令** | [dispatch](../../src/trading_kernel/application/dispatch_exchange_command.py)、[reducer](../../src/trading_kernel/domain/reducer.py) | [多路径写门](../../tests/trading_kernel/integration/test_trade_management_write_fence.py)、[持久化不可逆](../../tests/trading_kernel/integration/test_trade_management_persistence.py) |
+| **只读收尾与风险占用** | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py)、[manual_position](../../src/trading_kernel/domain/manual_position.py) | [人工仓对账](../../tests/trading_kernel/integration/test_manual_position_reconciliation.py)、[风险预算](../../tests/trading_kernel/integration/test_management_risk_budget.py) |
+| **同标的跨方向禁入** | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)、[admission](../../src/trading_kernel/application/issue_ready_signal.py) | [账户标的唯一占用](../../tests/trading_kernel/integration/test_app_instrument_exclusion.py) |
+| **冻结通知与可靠投递** | [notice_policy](../../src/trading_kernel/application/notice_policy.py)、[notice_delivery](../../src/trading_kernel/infrastructure/notice_delivery.py) | [最终快照/回滚](../../tests/trading_kernel/integration/test_notice_outbox.py)、[租约重试/过时](../../tests/trading_kernel/integration/test_notice_delivery.py) |
+
+表格描述代码和测试覆盖，不把fixture当实盘接管或消息送达证据；当前事实仍归[路线图](../current/MAIN_CONTROL_ROADMAP.md)。
+
 ## 如何使用证据索引
 
 **先找业务问题，再按入口 → 模型/事务 → 测试阅读。**链接中的 Python 行号指向基准实现的定义行，可由文档架构检查发现被移动的定义。测试文件存在表示覆盖可查；只有[本轮验收记录](MAINTENANCE.md)列出的命令才表示本轮实际执行。

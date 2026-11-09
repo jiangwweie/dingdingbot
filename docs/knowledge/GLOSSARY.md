@@ -2,6 +2,19 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。当前生产状态见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 人工接管核心术语
+
+| 术语 | 含义 | 不能混同 |
+| --- | --- | --- |
+| **AUTO** | 原自动保护、TP1、Runner与退出模式 | ENTRY关闭不意味着旧仓停止管理 |
+| **REVIEW_REQUIRED** | 订单归属或观察覆盖不足，冻结该笔新的自动处置 | 不等于已确认人工接管，也不允许盲重发 |
+| **MANUAL** | 已核实有效外部干预，整笔永久人工管理 | 不是部分订单接管，不能自动回AUTO |
+| **人工干预** | 交易所确认的外部退出挂单、改单、撤单或减仓 | 不含未提交编辑、失败请求、系统自己命令或自然成交 |
+| **残单** | 余仓归零后仍需Owner清理/系统核实的相关订单 | 归零不等于终态、释放额度或允许同标的重入 |
+| **通知平台接受** | 出口返回接受，Outbox落库记录 | 不等于Owner已读，未知结果重试可能重复 |
+
+（来源：[管理权](../../src/trading_kernel/domain/trade_management.py)、[对账](../../src/trading_kernel/application/reconcile_ticket.py)、[通知投递](../../src/trading_kernel/infrastructure/notice_delivery.py)；当前实盘证据见[路线图](../current/MAIN_CONTROL_ROADMAP.md)。）
+
 ## 业务、身份与准入
 
 **本表的含义来自当前模型与实现**，不表示任何指定策略当前获得资金权限。

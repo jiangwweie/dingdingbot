@@ -75,7 +75,7 @@ SCHEMA_MIGRATION_AUTHORITY_DOCUMENTS = (
     "docs/current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md",
 )
 
-CURRENT_ACCEPTANCE_STAGE = "ExitProfile postflight"
+CURRENT_ACCEPTANCE_STAGE = "natural App takeover"
 RETIRED_ACCEPTANCE_TICKET = "ticket:c1ebc24a178a3ae4d87978e2fa1204ae"
 RESIDENT_WORKER_NAMES = (
     "Observation",
@@ -245,12 +245,13 @@ def test_retired_capacity_semantics_are_absent_from_current_execution(
 
 def test_runtime_state_document_matches_the_deployed_kernel() -> None:
     source = (REPO_ROOT / CURRENT_RUNTIME_STATE_DOCUMENT).read_text(encoding="utf-8")
+    source = source.split("## Final Target",1)[0]
     commit_match = re.search(
         r"\| Production commit \| `([0-9a-f]{40})` \|",
         source,
     )
     tag_match = re.search(
-        r"\| Production tag \| `(tokyo-runtime-\d{4}\.\d{2}\.\d{2}\.\d+)`",
+        r"\| Production tag \| `(manual-runtime-\d{4}\.\d{2}\.\d{2}\.\d+)`",
         source,
     )
     certification_match = re.search(
@@ -285,8 +286,10 @@ def test_runtime_state_document_matches_the_deployed_kernel() -> None:
     assert "765 passed" not in source
     assert "no Tokyo mutation claimed" not in source
     assert RETIRED_ACCEPTANCE_TICKET not in source
-    assert "| Integration branch | `dev` |" in source
-    assert "codex/sor-v3-strategy-capacity-migration-20260731" not in source
+    assert "| Integration branch | `manual-dev` |" in source
+    assert "MANUAL" in source and "REVIEW_REQUIRED" in source
+    assert "brc-app-manual-v1" in source
+    assert "This branch is the Seoul" in source
 
 
 def test_current_authority_distinguishes_data_migration_from_runtime_compatibility() -> None:
@@ -586,3 +589,24 @@ def test_manual_branch_records_distinct_runtime_and_release_boundary() -> None:
     deployment = (CURRENT_DOCS_ROOT / 'TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md').read_text()
     assert 'refuse_inherited_tokyo_deployment' in deployment
     assert 'real App protocol acceptance' in deployment
+
+
+def test_manual_product_entry_docs_explain_permanent_app_handover():
+    requirements = {
+        "README.md": ("manual-dev", "App", "MANUAL", "REVIEW_REQUIRED", "TP1", "Runner"),
+        "docs/README.md": ("manual-dev", "人工接管", "MAIN_CONTROL_ROADMAP.md"),
+        "docs/current/OWNER_RUNTIME_OPERATING_MODEL.md": ("AUTO", "REVIEW_REQUIRED", "MANUAL", "整笔", "残单", "Transactional Outbox"),
+        "docs/knowledge/SYSTEM_OVERVIEW.md": ("人工干预", "MANUAL", "同标的"),
+        "docs/knowledge/OWNER_CONTROLS.md": ("App", "MANUAL", "受控全平"),
+        "docs/knowledge/RISK_AND_EXIT.md": ("MANUAL", "残单", "不自动"),
+        "docs/knowledge/DEPLOYMENT_AND_RECOVERY.md": ("manual-dev", "首尔", "install_manual_host.py"),
+    }
+    for relative_path, markers in requirements.items():
+        text=(REPO_ROOT/relative_path).read_text()
+        assert all(marker in text for marker in markers), relative_path
+    owner=(CURRENT_DOCS_ROOT/'OWNER_RUNTIME_OPERATING_MODEL.md').read_text()
+    assert "Sending runs in a daemon thread" not in owner
+    assert "may coexist by default" not in owner
+    index=(REPO_ROOT/'docs/README.md').read_text()
+    assert "No new server has been deployed" not in index
+    assert "This is an agreed target, not implemented or deployed" not in index

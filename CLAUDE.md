@@ -1,6 +1,18 @@
 # CLAUDE.md - BRC Trading Kernel Worker Guide
 
-Last updated: 2026-07-24
+Last updated: 2026-11-09
+
+## Branch-local product boundary
+
+This worktree is the Seoul App manual-takeover product on `manual-dev`, separate
+from Tokyo `dev`. Follow [Owner decisions](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md).
+Default AUTO retains Initial Stop/TP1/Runner; confirmed external App intervention
+permanently makes the entire Ticket MANUAL, including unfilled exit-order changes.
+REVIEW_REQUIRED is unresolved evidence, not manual confirmation. MANUAL permits
+readonly observation/accounting/closure only; no automatic order edit, cancel,
+exit or top-up, including through global flatten, restart or upgrade. One
+account/instrument cannot own opposite-side nonterminal Tickets. Current live
+posture and outstanding natural evidence belong only to the roadmap.
 
 ## Role
 
@@ -56,7 +68,7 @@ preserving readonly diagnosis.
 Capital, capacity, and leverage values belong to
 `docs/current/RUNTIME_ORDER_CAPABLE_EXPERIMENT_PROFILE.md`.
 `new_entry_submit_enabled` gates only new ENTRY; it does not revoke protection
-or recovery authority from existing exposure.
+or recovery authority from existing AUTO exposure. It never overrides MANUAL.
 
 ## Implementation Rules
 

@@ -2,6 +2,17 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。本页解释 tracked schema，不是生产数据导出；当前生产 schema 和运行快照见 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
 
+## 单笔管理权与人工事实
+
+**Ticket冻结出生时的准入和退出方案，Aggregate持久化后来管理权**，两者职责不同。MANUAL不是重写Ticket或生成第二笔交易。
+`management_mode`、revision、evidence和接管时间记录整笔不可逆交付；订单观察证据append-only，覆盖current说明历史是否完整。
+`management_orders`、当前实际数量、保护数量及人工风险用于只读核算，不能借旧自动订单ID声称当前保护有效。
+仓位零但残单未清或命令未决时保持待核实状态；只有闭合事实允许释放并结算。
+（来源：[聚合](../../src/trading_kernel/domain/aggregate.py)、[管理仓储](../../src/trading_kernel/infrastructure/pg_management_repository.py)、[Reducer](../../src/trading_kernel/domain/reducer.py)。）
+
+**管理权与全局Policy是独立轴**：ENTRY恢复不把MANUAL改回AUTO；REVIEW_REQUIRED只有允许的完整证据可解除。通知Outbox只是冻结展示/投递记录，不是新的交易authority。
+当前部署和实际App覆盖见[路线图](../current/MAIN_CONTROL_ROADMAP.md)，业务字段见[全表目录](DATABASE_TABLE_CATALOG.md)。
+
 ## 全表数量与目录入口
 
 **代码模型包含 85 张业务表、1035 个字段**；迁移版本表与独立切换运维表另计。每张表的职责、内容、主键、完整字段及维护入口见 [数据库全表职责与内容目录](DATABASE_TABLE_CATALOG.md)。生产即时盘点与差异统一记录在 roadmap，本页继续负责关系、状态和事务解释。

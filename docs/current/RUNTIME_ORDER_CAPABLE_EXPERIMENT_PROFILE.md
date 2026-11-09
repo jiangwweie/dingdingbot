@@ -15,10 +15,24 @@ stop-loss exposure, duplicate execution, unprotected exposure, unknown exchange
 outcomes, and unauditable state while preserving the path for a small number of
 large winners to cover a larger number of bounded small losses.
 
-The Tokyo subaccount contains capital the Owner has already classified as
+The independent manual-product subaccount contains capital the Owner has already classified as
 limited and loss-capable. Runtime controls therefore protect the approved
 experiment boundary and prevent runaway loss; they must not silently convert
 the system into a low-volatility asset-preservation product.
+
+## 人工干预与风险预算
+
+**本分支以机会发现和自动入场支持 Owner，并保留未干预交易的完整自动退出。**
+人工接管后系统不再管理该笔的 TP1/Runner、止损调整或退出，不承诺实现原策略的盈利路径。
+首次入场仍必须由程序完成并核实初始保护；只要交易所确认有效的外部退出操作，整笔永久 MANUAL，不等成交。
+原 TP1 和止损由 Owner 接管；风险未知时限制新增自动 ENTRY，不擅自处置人工仓。
+（来源：[Owner 决策](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)、[人工风险](../../src/trading_kernel/domain/manual_position.py)。）
+
+**资本分母来自行动时真实账户，不固定账户余额或名义仓位。**控制台预算和方向偏好共同约束未来准入；
+减资不需要重新部署，不能让旧快照继续作为定量权威。初始风险额度是计划止损风险，不是保证最大实亏。
+人工仓减量、保护改变与风险占用必须按当前已核实事实保守核算；名义保本不等于释放所有风险。
+同标的多空禁入、无加仓、原信号不重用和新机会 rearm 保留，不新增每日亏损熔断。
+（来源：[定量](../../src/trading_kernel/application/build_capacity_claim.py)、[账户读取](../../src/trading_kernel/infrastructure/venue_adapter.py)、[风险基线](../../src/trading_kernel/domain/risk_budget.py)。）
 
 ## Economic Semantics
 

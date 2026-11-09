@@ -2,6 +2,22 @@
 
 > **定位：解释性知识库** · [知识地图](README.md)。本页记录文档交付证据，不取代生产验收；当前生产事实仍由 [MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)负责。
 
+## 人工接管产品的资料维护边界
+
+**本分支是首尔 `manual-dev`，不是Tokyo `dev`的运行镜像。**更新入口、运行模型、生命周期、风险、部署说明时，必须同时核对AUTO/REVIEW_REQUIRED/MANUAL；不能只在历史设计里写接管、正文仍默认系统永远管理退出。
+接管触发、整笔不可逆、原TP1/止损归Owner、全平残单、风险未知限制新ENTRY、同标的双向禁入与新Ticket默认AUTO应保持一致。
+（来源：[Owner决策](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)、[AGENTS](../../AGENTS.md)。）
+
+### 文档更新与生产状态
+
+- **解释性更新不部署**：不重启Worker、改策略/余额/方向、不重新认证未改动的运行软件；运行身份仍以路线图对应的精确候选为准。
+- **历史阶段保留**：起始“未部署/待确认”须明确日期和后来证据入口，不用旧记录恢复已撤销的确认要求。
+- **验收不可混用**：实现与测试、发布认证、自然接单和保护、真实App操作、飞书平台接受与Owner收到分别取证。
+- **当前状态只入路线图**：不在多个稳定入口复制实时余额、ENTRY、方向、SHA和证书结果；不把用户报告当作自动验证通过。
+- **验证适配改动**：文档链接/锚点、现行authority集合、退役语义及人工产品入口检查必须通过；生成物留忽略目录。
+
+当前直接证据和剩余验收统一见[MAIN_CONTROL_ROADMAP.md](../current/MAIN_CONTROL_ROADMAP.md)。
+
 ## 全表目录增补记录
 
 **新增 [DATABASE_TABLE_CATALOG](DATABASE_TABLE_CATALOG.md)**，逐表解释全部业务结构及独立运维表。正文说明职责、主要内容、主键、维护用途，折叠区保留完整字段；知识库现为 **13 份材料**。

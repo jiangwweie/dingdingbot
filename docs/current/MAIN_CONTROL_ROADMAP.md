@@ -8,6 +8,34 @@ last_verified: 2026-11-09
 
 ## App Product Workspace Status
 
+### Manual product identity and evidence boundary
+
+**This branch is the Seoul App manual-takeover product**: default AUTO retains
+Initial Stop/TP1/Runner; confirmed external App intervention permanently transfers
+the whole Ticket to MANUAL. REVIEW_REQUIRED means unproven attribution, not
+confirmed takeover. MANUAL permits readonly observation/accounting/closure only;
+its residual orders remain Owner-managed and opposite-side instrument reuse is
+blocked until closure. Full business rules live in the
+[Owner model](OWNER_RUNTIME_OPERATING_MODEL.md) and
+[decisions](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md).
+
+| Current production reference | Last directly verified value |
+| --- | --- |
+| Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
+| Production commit | `c93c7b98dd28d74808ffd33e526ad537c3633ce2` |
+| Production tag | `manual-runtime-2026.11.09.2` |
+| Production schema | `0018_notice_outbox_v1` |
+| Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
+| Integration branch | `manual-dev` |
+| Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
+| Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
+| Remaining acceptance | natural App takeover; natural order/protection and real Feishu acceptance/phone receipt need independent direct evidence |
+
+The latest dated Seoul snapshot below owns recorded posture; action-time PG and
+exchange reads still decide permission. Older Seoul restoration/pause entries
+and inherited Tokyo records are historical evidence, not competing current state.
+A documentation commit does not re-certify, redeploy or change trading policy.
+
 ### Seoul current Owner posture — ENTRY enabled, bearish2026-11-09
 
 At **2026-11-09 14:04:07 Asia/Shanghai**, fresh installed readonly certification,
@@ -42,13 +70,13 @@ service or credential mutation. User balance reduction was reported by Owner
 and verified as current account truth; this record does not attribute or execute
 the external transfer.
 
-### Seoul engineering restoration complete — Owner ENTRY paused2026-11-09
+### Seoul engineering restoration — historical Owner-paused cutover2026-11-09
 
 This is the independent **`brc-app-manual-v1`** product in
 `/Users/jiangwei/Documents/final-manual`, integrated/pushed on `manual-dev`.
 Owner comprehensive local validation is authorized and has completed for the exact
 release recorded here; independent Seoul installation and restoration are authorized.
-Kernel, Owner API and static are installed from exact
+At this restoration cutover, Kernel, Owner API and static were installed from exact
 **`d82825de820ee784b3711e94492daf554d55d95b`**, schema
 **`0017_app_management_observation`**, immutable tag
 **`manual-runtime-2026.11.09.1`**. Later documentation-only commits do not change
@@ -58,8 +86,8 @@ Owner requested restoring all capabilities and approved validating real App
 intervention during naturally signalled trading, retaining the existing budget
 and every risk gate. Actual App actions and natural trade acceptance remain
 unverified until observed. After engineering postflight passed, Owner explicitly
-selected **temporarily keeping global ENTRY closed**. This current instruction
-is the sole live posture: no new-entry authorization is inferred from deployment,
+selected **temporarily keeping global ENTRY closed**. At that time, this instruction
+owned the paused posture: no new-entry authorization is inferred from deployment,
 service activity, chat approval or the absence of an operational fence.
 
 | Boundary | Direct evidence |
@@ -100,14 +128,14 @@ acceptance, Initial Stop protection and actual App takeover remain separate
 unclaimed evidence. The installation procedure and approved sequence belong to
 the [installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 
-### Seoul notification V1 — deployed, ENTRY remains Owner-paused2026-11-09
+### Seoul notification V1 — release record, Owner paused at cutover2026-11-09
 
-The independent Seoul product now runs Kernel/API/static exact commit
+The notification release installed independent Seoul Kernel/API/static exact commit
 **`c93c7b98dd28d74808ffd33e526ad537c3633ce2`**, schema
 **`0018_notice_outbox_v1`**, immutable tag **`manual-runtime-2026.11.09.2`**.
 `manual-dev` and the release tag are pushed. This supersedes the installed0017
 identity in the earlier restoration record; historical restoration evidence stays
-intact. Owner global ENTRY remains **Policy3/false**. Tokyo was not changed.
+intact. At that cutover, Owner global ENTRY remained **Policy3/false**; the newer Owner snapshot above supersedes that pause. Tokyo was not changed.
 
 | Boundary | Direct evidence |
 | --- | --- |
@@ -188,6 +216,12 @@ Observation
 
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
+
+## Inherited Tokyo release history — not Seoul current state
+
+The following sections preserve the automatic product's historical evidence.
+Their accounts, current-state tables, ENTRY settings and release tags must not
+be used as this manual branch's current production authority.
 
 ## CPM / MPG recovery lineage repair — deployed 2026-11-02
 

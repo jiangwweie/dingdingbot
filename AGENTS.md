@@ -1,7 +1,7 @@
 # AGENTS.md - BRC Trading Kernel Operating Guide
 
-Last updated: 2026-10-12
-Scope: App manual-takeover product engineering; inherited Tokyo contracts are baseline references
+Last updated: 2026-11-09
+Scope: Seoul App manual-takeover product engineering; inherited Tokyo contracts are baseline references
 
 ## Branch-local App Manual Takeover Scope
 
@@ -12,9 +12,9 @@ This fixed worktree is `/Users/jiangwei/Documents/final-manual`; integration is
 This is a separate product/server/account, not a Tokyo behavior change. Preserve
 default automation until external intervention, then permanently hand over the
 whole trade; the new product forbids simultaneous opposite-side exposure in the
-same instrument. These are the branch target and locally implemented paths, not live deployment facts. The inherited
-contracts below remain the existing baseline; do not mistake their default
-two-sided coexistence or automated lifecycle for this branch's approved target.
+same instrument. These are branch-local business semantics. Exact implementation, installation,
+Owner activation and natural App evidence are separate and belong to the roadmap;
+inherited automatic-product rules below apply only where compatible with MANUAL.
 Keep takeover-specific changes out of `dev`; port common fixes separately with
 independent verification. The Owner has now authorized local implementation and testing on this branch.
 Read the [detailed design](docs/superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
@@ -29,8 +29,9 @@ requested restoring all capabilities and approved validating actual App interven
 during naturally signalled trading, with the existing budget and every risk gate unchanged.
 This supersedes the earlier pre-ENTRY App-evidence sequence: actual App coverage remains
 unverified until observed, never fixture-proven or declared complete in advance.
-ENTRY remains fenced until exact account/host/database identity and current runtime
-readiness pass; real Owner Resume/TOTP and the official promoter remain required.
+Before restoring ENTRY, exact account/host/database identity and current runtime
+readiness must pass; real Owner Resume/TOTP and the official promoter remain required.
+This is an action-time rule, not a claim that ENTRY is currently fenced or paused.
 No test order, forged Signal/Ticket, retired-SOR resume or risk expansion is authorized.
 The Owner will provide credentials
 through a private terminal when needed; never copy Tokyo credentials, ask for
@@ -45,7 +46,9 @@ Use this worktree's own `.venv` and `scripts/local/manual_pytest.sh`; its local 
 is `brc-manual-pg` at 127.0.0.1:55434. Never reuse Tokyo/local-auto credentials,
 DB, test template, certification or `.env` from the sibling `final` workspace.
 The inherited SSH deployment scripts are explicitly disabled for this product;
-local release preparation never authorizes production installation. Do not push manual commits into `dev`.
+local release preparation alone never authorizes production installation.
+Authorized independent installation/upgrades use `install_manual_host.py`;
+current status and completed authorization stages are in the roadmap. Do not push manual commits into `dev`.
 
 ## Authority Order
 
@@ -121,10 +124,13 @@ systemd, and exchange facts rather than infer state from documentation.
 - Adding to an existing position is forbidden.
 - One Ticket may produce only one ENTRY command generation.
 - New ENTRY admission is globally serialized.
-- Existing Tickets may protect, exit, reconcile, settle, and review concurrently.
+- Existing AUTO Tickets may protect and exit concurrently. MANUAL Tickets are
+  readonly at the venue while observation, accounting, settlement and review continue.
 - One active Ticket is allowed per Netting Domain:
   `venue + account + instrument + position_side`.
-- Long and short are independent Netting Domains and may coexist by default.
+- Long and short remain independent Netting Domains at the exchange, but this
+  product forbids opposite-side exposure and multiple nonterminal Tickets in
+  the same account/instrument.
 - Supported accounts must expose independent long/short position sides.
 - Multi-position capability is architectural; a fixed two-position ceiling is
   not part of the model. Current budget policy may still impose a configured
@@ -132,8 +138,16 @@ systemd, and exchange facts rather than infer state from documentation.
 - The experiment profile owns concurrent capacity, stop-risk, margin
   utilization, leverage, and margin-mode values; current account facts
   determine each Claim's size.
-- `new_entry_submit_enabled` governs only new ENTRY. Frozen authority continues
-  protection, exit, reconciliation, Settlement, and Review after exposure.
+- `new_entry_submit_enabled` governs only new ENTRY. Frozen AUTO authority
+  continues protection and exit after exposure; it never overrides MANUAL.
+- Confirmed external App intervention, including unfilled exit orders or order
+  amendments/cancellations, permanently hands over the whole Ticket. Unknown
+  attribution enters REVIEW_REQUIRED; it is not proof of Owner action.
+- MANUAL forbids automatic stop/TP1/Runner changes, exit, cancellation and
+  top-up. Owner owns existing venue exits and residual orders. Restart, upgrade,
+  natural TP1 fill or restoring ENTRY cannot return MANUAL to AUTO.
+- Zero quantity with residual orders or unknown results is not closed. Keep
+  conservative risk/instrument occupation until readonly closure is proven.
 - A worker whose commit or schema differs from certified runtime identity must
   record/follow the Runtime Fence and perform no exchange mutation.
 - Authoritative ENTRY rejection is terminal and is not retried.
@@ -199,7 +213,7 @@ Standing Owner authorization for this program permits:
 
 - focused `codex/*` branches and local commits;
 - destructive local/disposable PostgreSQL operations;
-- reviewed Tokyo database cutover operations;
+- reviewed independent manual-product database cutover operations;
 - server service, release, and deployment operations;
 - readonly exchange/account/position/order verification;
 - controlled in-scope real-funds acceptance after all current hard gates pass.

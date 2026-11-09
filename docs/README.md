@@ -2,24 +2,36 @@
 
 Status: current Trading Kernel authority index
 
-## Independent App Manual Takeover Product Line
+## 首尔 App 人工接管产品线
 
-[App 人工接管 V1 沟通结论](superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)
-records Owner-approved requirements for the separate `codex/app-manual-takeover-v1`
-product branch and a new isolated server/account. Default TP1/Runner automation
-is retained; confirmed external intervention transfers the whole trade permanently
-to manual management. This is an agreed target, not implemented or deployed
-behavior, and does not change Tokyo or extend the current authority allowlist.
+本目录属于 **`manual-dev` / `final-manual`** 的首尔独立产品。
+**默认自动执行初始止损、TP1、Runner；识别到有效 App 人工干预后，整笔 Ticket 永久接管**。
+接管后保留交易所已有订单，程序只读对账、核算风险和完成账务，不能自动纠正人工退出。
+同标的跨多空仅允许一个非终态 Ticket；Tokyo `dev` 的产品语义不随本分支改变。
 
-The [detailed design](superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md)
-defines management authority, external-order evidence, readonly manual lifecycle
-and account admission. The [implementation plan](superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
-maps these requirements to ordered tasks, failure tests, certification and new
-environment acceptance. The Owner has authorized local implementation. See the [M0 protocol and implementation evidence](superpowers/plans/2026-11-06-app-manual-takeover-v1-protocol-evidence.md) for the initial batch, and the [prevalidation handoff](superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md) for current code/checks and the Owner confirmation boundary. No new server has been deployed.
+### 需求、实现与当前证据
 
-## Product Workspaces
+| 入口 | 文档职责 | 证据边界 |
+| --- | --- | --- |
+| [Owner 决策](superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md) | 冻结已同意的人工干预、残单、风险和隔离规则 | 不是当前生产授权或部署证书 |
+| [详细设计](superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md) | 状态与证据、统一写门、人工只读生命周期 | 起始缺口属于设计时基线，不是当前缺陷清单 |
+| [实施计划](superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md) | 任务拆分、失败测试与验证步骤 | 历史阶段不恢复为新的审批要求 |
+| [运行模型](current/OWNER_RUNTIME_OPERATING_MODEL.md) | Owner 控制台与币安 App 的不同职责 | 不把全局 ENTRY 暂停当成单笔接管 |
+| [正式路线图](current/MAIN_CONTROL_ROADMAP.md) | 当前生产身份、Owner 状态和验收进展 | 本分支当前状态的唯一文档入口 |
 
-[两条产品线的固定目录与分支](superpowers/plans/2026-11-08-two-product-workspaces.md) describes local project boundaries and selective common-fix sharing. Workspace setup is not production deployment.
+代码已包含管理观察、干预识别、人工仓只读收尾、风险占用、跨方向禁入及通知路径。
+软件认证与首尔安装记录、当前启用状态统一见路线图。真实 App 行为与自然投递仍依赖直接业务证据，不能用模拟测试宣称完成。
+[M0记录](superpowers/plans/2026-11-06-app-manual-takeover-v1-protocol-evidence.md)及
+[前置交付](superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md)是历史阶段记录。
+[通知方案](superpowers/plans/2026-11-09-manual-notification-templates-v1.md)说明最终快照和可靠投递边界。
+
+## 两条产品线与正式发布
+
+[固定工作区规则](superpowers/plans/2026-11-08-two-product-workspaces.md)定义人工 `manual-dev` 与自动 `dev` 的隔离。
+通用修复经独立审查后选择性移植，不整分支自动合并；数据库、活动 Ticket、授权、账户和证书不能互相复制。
+[首尔安装方案](superpowers/plans/2026-11-08-manual-new-host-installation.md)与
+[验证准备记录](superpowers/plans/2026-11-08-manual-validation-release-preparation.md)给出对应工具与阶段证据。
+继承的 `TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md` 提供共用发布安全基线，不授权对 Tokyo 操作；人工环境使用正式独立安装入口。
 
 ## Code-Based Learning Guide
 

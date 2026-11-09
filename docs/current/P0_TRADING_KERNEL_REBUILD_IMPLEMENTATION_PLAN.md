@@ -11,7 +11,26 @@ last_verified: 2026-10-12
 
 Deliver one readable multi-StrategyGroup, multi-position trading system from
 natural market Observation through terminal Review, with one clean PostgreSQL
-authority and one Tokyo runtime.
+authority and one independent Seoul manual-product runtime.
+
+## App manual-takeover implementation boundary
+
+The branch adds persisted AUTO / REVIEW_REQUIRED / MANUAL management, external
+order evidence/coverage, readonly manual closure, conservative risk occupancy,
+account/instrument exclusion across both sides, write guards and compact durable
+notifications to the existing Kernel chain. These are implemented code paths,
+not a claim that actual App actions have been accepted in live trading.
+Default automatic Initial Stop, TP1 and Runner remain. MANUAL permanently removes
+automatic exit/cancel/amend authority for the entire Ticket, including Owner
+flatten and recovery paths. A new independent Ticket starts AUTO.
+
+The [Owner decisions](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md),
+[design](../superpowers/specs/2026-11-06-app-manual-takeover-v1-detailed-design.md) and
+[implementation tasks](../superpowers/plans/2026-11-06-app-manual-takeover-v1-implementation-plan.md)
+explain the branch work. Exact released state and remaining natural entry,
+protection, App intervention and notification acceptance belong only to
+[MAIN_CONTROL_ROADMAP.md](MAIN_CONTROL_ROADMAP.md). Owner-approved natural App
+acceptance must not be turned back into an unapproved test-order requirement.
 
 ## Completed Operability Baseline
 
@@ -38,8 +57,8 @@ Observation
 -> review
 ```
 
-New ENTRY is globally serialized. Existing Tickets protect, exit, reconcile,
-settle, and review concurrently.
+New ENTRY is globally serialized. Existing AUTO Tickets protect and exit concurrently; MANUAL continues readonly
+observation, accounting, closure and review.
 
 ## Global Constraints
 

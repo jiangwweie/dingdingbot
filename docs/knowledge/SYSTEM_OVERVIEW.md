@@ -8,6 +8,16 @@
 
 **代码已验证：只有一条 Signal→Ticket→Command 执行链。**研究投影、Owner 查询和选币都复用相关对象边界，不能自行建立第二条交易路径。（来源：[issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L110)、[project_shadow_outcome](../../src/trading_kernel/application/project_shadow_outcome.py)、[owner_control](../../src/trading_kernel/application/owner_control.py)）
 
+## 首尔产品：机会发现与人工干预
+
+**人工干预是本产品的正式生命周期分支**。初始开仓必须由程序完成；未干预时原自动 TP1/Runner 保留。
+外部有效减仓或相关退出订单的新增、修改、撤销被核实后，整笔变为 **MANUAL**；未成交也可接管。
+**REVIEW_REQUIRED**只表示归属待核实，不证明 Owner 已接管；系统自身命令及原订单自然成交不算人工操作。
+
+程序此后只读跟踪、核算风险和完成账务，Owner 在币安 App 管理整笔余仓及原止盈止损。重启、升级、原 TP1 成交都不返回 AUTO；下一个独立 Ticket 默认 AUTO。
+首版不允许人工加仓、重新开仓和反手；**同标的**跨多空只允许一个非终态 Ticket，账户仍须独立多空模式。
+（来源：[管理权模型](../../src/trading_kernel/domain/trade_management.py)、[观察编排](../../src/trading_kernel/interfaces/management_observation_worker.py)、[只读收尾](../../src/trading_kernel/application/reconcile_ticket.py)。）
+
 ## 系统上下文
 
 ```mermaid
@@ -19,6 +29,8 @@ flowchart LR
     Market[公开行情源] -->|已收盘行情与市场规则| Kernel
     Kernel -->|持久化 Command 后派发| Venue[交易所]
     Venue -->|订单 成交 持仓 账户事实| Kernel
+    Owner -->|App 减仓或修改退出订单| Venue
+    Kernel -->|识别干预后整笔 MANUAL，仅只读核算| PG
     Code[Registry 与部署工具] -->|受控 seed 和发布| PG
     Docs[文档与知识库] -.仅供阅读.-> Owner
 ```
@@ -44,10 +56,10 @@ flowchart TB
 | **Application** | 事务内业务编排与跨事务外部读取 | [ports](../../src/trading_kernel/application/ports.py)、[issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py)、[dispatch](../../src/trading_kernel/application/dispatch_exchange_command.py) | 依赖类型化端口，不把原始交易所字典传进领域 |
 | **Infrastructure** | 数据持久化、事件副作用物化、市场与交易所适配 | [pg_unit_of_work](../../src/trading_kernel/infrastructure/pg_unit_of_work.py)、[venue_adapter](../../src/trading_kernel/infrastructure/venue_adapter.py) | 用精确身份映射外部事实 |
 | **Interfaces** | 一次有界工作、HTTP 适配、常驻循环 | [entry_worker](../../src/trading_kernel/interfaces/entry_worker.py)、[worker_process](../../src/trading_kernel/interfaces/worker_process.py) | “一次 tick”不代表冷启动进程 |
-| **装配与交付** | 加载工厂、环境参数、启动进程、发布与认证 | [Observation 启动](../../scripts/trading_kernel/run_observation_worker_once.py)、[部署](../../scripts/trading_kernel/deploy_tokyo_release.py) | 运行配置与当前控制事实分别拥有来源 |
+| **装配与交付** | 加载工厂、环境参数、启动进程、发布与认证 | [Observation 启动](../../scripts/trading_kernel/run_observation_worker_once.py)、[人工产品部署](../../scripts/trading_kernel/install_manual_host.py) | 运行配置与当前控制事实分别拥有来源 |
 | **Owner 前端** | 查询呈现、控制预览、认证交互 | [App](../../frontend/owner-console-v2/src/App.tsx)、[controlsApi](../../frontend/owner-console-v2/src/api/controlsApi.ts) | UI 操作不直接写交易所 |
 
-依赖方向由[架构测试](../../tests/trading_kernel/architecture/test_no_retired_execution.py)和[文件 I/O 审计](../../tests/trading_kernel/architecture/test_runtime_file_io_audit.py)保护；具体本轮执行状态见[验收记录](MAINTENANCE.md)。
+依赖方向由[架构测试](../../tests/trading_kernel/architecture/test_no_retired_execution.py)和[文件 I/O 审计](../../tests/trading_kernel/architecture/test_runtime_file_io_audit.py)保护；资料维护边界见[验收记录](MAINTENANCE.md)，当前生产事实仅见路线图。
 
 ## 策略族怎样接入共同内核
 
@@ -98,7 +110,7 @@ flowchart LR
     Signal --> Shadow[只读 Shadow 路径研究]
 ```
 
-**Ticket 不随当前 Policy、Universe 或退出方案的切换而重写**。它冻结出生身份和执行边界，Aggregate 表达随后实际发生的状态。（来源：[TradeTicket](../../src/trading_kernel/domain/ticket.py#L38)、[TradeAggregate](../../src/trading_kernel/domain/aggregate.py#L108)）
+**Ticket 不随当前 Policy、Universe 或退出方案的切换而重写**；冻结 ExitProfile 不越过 MANUAL 写权限边界。它冻结出生身份和执行边界，Aggregate 表达随后实际发生的状态。（来源：[TradeTicket](../../src/trading_kernel/domain/ticket.py#L38)、[TradeAggregate](../../src/trading_kernel/domain/aggregate.py#L108)）
 
 ## 为什么采用这些边界
 

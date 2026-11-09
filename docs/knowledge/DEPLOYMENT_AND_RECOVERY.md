@@ -4,21 +4,31 @@
 
 ## 人工接管产品的发布边界
 
-本分支属于 **App人工接管产品**，与Tokyo全自动产品分开演进、账户和数据库独立。
+本分支属于 **首尔 App人工接管产品**，集成分支 `manual-dev`，与Tokyo全自动产品分开演进、账户和数据库独立。
 Kernel、API和静态证书均绑定编译产品身份；运行环境还必须声明相同产品身份。
 旧Tokyo SSH发布后端在构造任何远程命令前拒绝执行，不能通过改SSH别名绕过。
 `prepare_manual_release.py`只校验本地精确证书和可选目标身份比较，不发SSH、不安装、
-不启用ENTRY。新机采购、账户/API配置、真实App协议覆盖及上线验收仍是外部条件。
+不启用ENTRY。正式安装/升级使用 `install_manual_host.py` 的产品绑定路径；前向schema迁移、Owner控制和历史保全仍须通过当前硬门槛。
+软件发布、真实 Owner ENTRY、自然接单/保护、App 接管与通知送达分别核验；Owner已批准自然交易中验收App，不为验收制造订单。
 （来源：[产品身份](../../src/trading_kernel/domain/product_identity.py)、
 [准备入口](../../scripts/trading_kernel/prepare_manual_release.py)、
 [当前状态](../current/MAIN_CONTROL_ROADMAP.md)）
+
+## 接管状态跨重启与发布保留
+
+**MANUAL 是持久化、不可逆的整笔管理权**，不是进程内标志。重启、升级、清理任务或 Owner 全局恢复都不能回 AUTO，也不能重发已终态拒绝的 ENTRY。
+恢复先核对身份、覆盖历史与未知结果，再按当前管理权运行；MANUAL 只读，REVIEW_REQUIRED 继续核实，AUTO 才能走原自动生命周期。
+
+发布仍要求正式空仓停写窗口，不能以人工接管为理由迁移活动仓、强平、撤残单或绕过全部写入者互斥。
+独立 Owner API 也是停写清单的一部分；原密码/TOTP/Google、Owner配置及通知出口不得被 Tokyo 配置替代。
+（来源：[管理权约束](../../src/trading_kernel/domain/trade_management.py)、[人工安装](../../scripts/trading_kernel/install_manual_host.py)、[官方升级](../../scripts/trading_kernel/manual_same_schema_upgrade.py)、[当前状态](../current/MAIN_CONTROL_ROADMAP.md)。）
 
 ## 拓扑：进程与逻辑角色分别看
 
 ```mermaid
 flowchart TB
     Browser[Owner 浏览器] --> Nginx[Nginx HTTPS]
-    subgraph Tokyo[Tokyo 逻辑部署视图]
+    subgraph Seoul[首尔人工接管产品部署视图]
         Nginx --> Static[独立 V2 静态 release]
         Nginx -->|Unix socket| API[独立 Owner API service]
         subgraph Kernel[Kernel systemd slice]
@@ -45,7 +55,7 @@ flowchart TB
     Exchange --> RL
     EL -->|ENTRY 写| Exchange
     LL -->|安全命令写| Exchange
-    Local[本地发布控制] -->|SSH 与正式脚本| Tokyo
+    Local[本地人工产品发布控制] -->|SSH 与人工产品正式脚本| Seoul
 ```
 
 **这张图表达仓库声明的逻辑部署关系，没有声称本轮核对了机器上的进程、数据库安装方式或网络端点。**共同数据库的具体服务位置以机器配置为准。（来源：[systemd Observation](../../deploy/systemd/brc-trading-kernel-observation-worker.service)、[API service](../../deploy/owner-console/systemd/brc-owner-console-api.service)、[Nginx](../../deploy/owner-console/nginx/owner-console.locations.conf)、[启动装配](../../scripts/trading_kernel/run_observation_worker_once.py#L97)）
@@ -57,7 +67,7 @@ flowchart TB
 | **Observation** | [service](../../deploy/systemd/brc-trading-kernel-observation-worker.service)、[脚本](../../scripts/trading_kernel/run_observation_worker_once.py) | 常驻运行；scope/Job/Generation 有独立租约；进程内部多个 loop |
 | **Entry** | [service](../../deploy/systemd/brc-trading-kernel-entry-worker.service)、[脚本](../../scripts/trading_kernel/run_command_worker_once.py) | 命令与 lane 持久化；当前运行身份和账户事实仍需校验 |
 | **Lifecycle** | [service](../../deploy/systemd/brc-trading-kernel-lifecycle-worker.service)、[use case](../../src/trading_kernel/interfaces/lifecycle_worker.py) | 既有安全工作；不能用暂停新 ENTRY 替代生命周期运行 |
-| **Reconciliation** | [service](../../deploy/systemd/brc-trading-kernel-reconciliation-worker.service)、[脚本](../../scripts/trading_kernel/run_reconciliation_worker_once.py) | unknown / critical / housekeeping 与 due 调度 |
+| **Reconciliation** | [service](../../deploy/systemd/brc-trading-kernel-reconciliation-worker.service)、[脚本](../../scripts/trading_kernel/run_reconciliation_worker_once.py) | unknown/critical/housekeeping；管理观察和通知隔离loop复用该进程 |
 | **Owner API** | [service](../../deploy/owner-console/systemd/brc-owner-console-api.service)、[run_api](../../scripts/owner_console/run_api.py) | 独立目录、venv、socket、read/control DB role；认证凭据由 systemd credential 载入 |
 | **V2 静态站** | [发布脚本](../../scripts/owner_console/deploy_release.py)、[frontend package](../../frontend/owner-console-v2/package.json) | 独立 dist release 与 symlink，不随意重启 Kernel |
 
@@ -75,25 +85,23 @@ flowchart TB
 
 来源：[classify_changed_paths](../../scripts/classify_release.py#L84)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)、[Owner 发布实现](../../scripts/owner_console/deploy_release.py#L112)。混合改动按最高级别，不能仅因有文档文件便归为 R0。
 
-## Kernel 正式发布顺序
+## 人工产品正式发布顺序
 
-### 同 schema 发布
+### 同 schema 或获准的精确前向升级
 
-1. **冻结候选及精确认证**：认证绑定 commit、schema、Registry、Policy 和命令集；代码或身份改变使旧认证不能复用。
-2. **刷新 preflight**：当前数据库与交易所 flat/无残单、当前币池、账户模式、杠杆、现有 writer 清单；不能用本地旧报告替代。
-3. **停止写者并 fence**：验证服务确实停止、数据库写者已隔离；按代码盘点包括需要停的 Owner API 写者。
-4. **停写后再次读取来源**：保存需要保留的当前状态，校验来源身份没有漂移。
-5. **正式轮换 runtime identity 与 release**：未知提交结果不能直接启动旧写者。
-6. **先启动 Lifecycle/Reconciliation**：刷新认证、验证保留状态，再启动可执行 Selection 的 Observation。
-7. **running-target postflight**：重核当前 identity、controls、membership 与外部安全事实。ENTRY 通过独立 promotion 恢复，不由软件发布隐式打开。
+1. **冻结候选及精确认证**：按最高受影响等级执行 Kernel、API/static 检查；每个证书绑定产品、commit、schema，不能复用另一个分支或SHA。
+2. **刷新行动时事实**：独立host/account/database身份、真实Owner政策、内部/交易所空仓、残单/unknown/Incident、风险占用和当前scope；旧报告不代替当前核验。
+3. **围栏并停止全部写者**：包括四个Worker与Owner API，验证真实进程停止；不得以MANUAL绕过活动仓发布硬门槛。
+4. **正式stage**：`install_manual_host.py --phase stage-upgrade`校验独立机器、产品、精确证书和支持的schema路径后接收归档。
+5. **正式activate**：`install_manual_host.py --phase activate-upgrade`经`manual_same_schema_upgrade.py`再次核对停止条件和交易所事实，保存并比较源表及Owner控制，再按允许路径更新运行身份、Kernel/API/static。
+6. **当前目标postflight**：确认服务、实际PG/schema、账户、Universe/控制保全及独立认证/通知配置；任何未知提交先只读确认，不直接回退旧写者。
+7. **官方promote_entry**：只解除已证明安全的维护围栏、恢复服务就绪。Owner暂停意图保留；真实ENTRY恢复仍由控制台记录Owner/TOTP授权，软件安装不代替它。
 
-来源：[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L322)、[writer 检查测试](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py#L2334)、[promote_entry](../../scripts/trading_kernel/promote_entry.py)。
+**不是任意schema都能升级**。正式人工工具只支持其显式列出的同schema或精确前向迁移；未支持的来源须先设计、测试和审查，不能直接`upgrade head`。
+不携带活动仓跨schema、不双写、不用旧schema reader、不downgrade。初始Tokyo无备份重建仅为历史授权。
+（来源：[人工安装入口](../../scripts/trading_kernel/install_manual_host.py)、[host边界](../../scripts/trading_kernel/manual_host_bootstrap.py)、[升级](../../scripts/trading_kernel/manual_same_schema_upgrade.py)、[promoter](../../scripts/trading_kernel/promote_entry.py)、[安装测试](../../tests/trading_kernel/unit/test_manual_host_installation.py)。）
 
-### schema 前向升级
-
-**只能在停止写者、flat、来源精确且保留证明通过后执行**。本系统不支持携带活动仓位跨 schema、双写、旧 schema reader 或 downgrade。初次无备份重建是历史授权，不是未来升级模板。（现行契约：[迁移规则](../../AGENTS.md)、[部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)）
-
-源码入口：[兼容升级](../../scripts/trading_kernel/deploy_tokyo_release.py#L539)、[bootstrap_schema](../../scripts/trading_kernel/bootstrap_schema.py)、[migration env](../../migrations/trading_kernel/env.py)。各 revision 的来源与保留谓词不同，不能把 `upgrade head` 当作独立完整生产操作手册。
+继承[Tokyo部署契约](../current/TOKYO_RUNTIME_DEPLOYMENT_CONTRACT.md)与旧部署测试保留共同的安全和历史参考；其SSH后端拒绝本产品，不可当作首尔发布命令。
 
 ## 失败阶段决定恢复方向
 

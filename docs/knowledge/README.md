@@ -4,7 +4,14 @@
 
 ## 阅读基准与证据边界
 
-**代码基准：`9245a4c1f0eb54ca655c57d5db7706ecb798ac18`**，于 **2026-10-22** 通过远端 `refs/heads/dev` 核对；这是本轮阅读基准，不是生产部署声明。知识库在其后独立维护，提交历史可以追踪资料变化。
+**阅读基准：本工作区 `manual-dev` 的首尔 App 人工接管产品代码**。Tokyo `dev` 的旧阅读基准仅为历史来源；后续行为以本分支代码和现行契约为准。当前发布、Owner 状态和实际验收只见路线图。
+
+### 先理解人工干预
+
+**默认 AUTO 保留初始止损、TP1、Runner；有效 App 干预后整笔永久 MANUAL**。
+归属不明是 REVIEW_REQUIRED，程序暂停该笔新的自动处置并核实。人工仓继续占用额度，Owner 管理已有止盈止损和残单，程序不自动修正或强平。
+首先阅读[运行模型](../current/OWNER_RUNTIME_OPERATING_MODEL.md)、[生命周期](TRADE_LIFECYCLE.md)和[Owner 控制](OWNER_CONTROLS.md)，再深入自动路径。
+（来源：[Owner 决策](../superpowers/specs/2026-11-06-app-manual-takeover-v1-owner-decisions.md)、[管理权模型](../../src/trading_kernel/domain/trade_management.py)。）
 
 1. **代码已验证**：已读取相应实现，结论指向代码入口；代码链接使用仓库相对路径和 Python 定义行号。
 2. **现行契约规定**：规范要求，指向 `docs/current` 的责任文档；不据此声称行为已在生产发生。

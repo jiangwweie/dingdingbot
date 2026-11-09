@@ -1,5 +1,7 @@
 # AMT-01 App 人工接管 V1 详细设计
 
+> **阅读说明**：本文保留设计/实施时的决策、缺口、分支与阶段证据。起始功能分支 `codex/app-manual-takeover-v1` 已作为历史保留，人工产品集成分支为 `manual-dev`。文中的“未部署”“待确认”属于当时阶段，不能覆盖后续Owner授权或当作当前未完成清单。当前代码、生产身份、Owner状态与自然App验收统一见[正式路线图](../../current/MAIN_CONTROL_ROADMAP.md)；Owner允许在自然交易中完成真实App验收，不能据旧阶段重新要求测试订单。
+
 日期：**2026-11-06，Asia/Shanghai**。
 状态：**业务规则已确认，Owner已授权本地实施；技术实现进行中，尚未部署。**
 分支：**`codex/app-manual-takeover-v1`**。

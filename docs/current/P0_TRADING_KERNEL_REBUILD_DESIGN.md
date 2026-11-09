@@ -22,14 +22,16 @@ accounting and closure remain. Unknown intervention freezes automatic action.
 Certificates bind the compiled product identity, exact commit and schema. The
 inherited Tokyo deployment backends call `refuse_inherited_tokyo_deployment`
 before any SSH action, including uploads and legacy drain bridges. A matching
-local binding comparison is preparation only: real App protocol acceptance,
-independent target/account/database verification and Owner deployment confirmation
-are still required. This branch is not authority to operate the Tokyo product.
+local binding comparison is preparation only. Actual deployment needs independent
+target/account/database proof, exact certification and current Owner authority.
+Owner approved actual App acceptance during natural trading; preserve that
+remaining evidence explicitly instead of reinstating a pre-ENTRY App test gate.
+This branch is not authority to operate the Tokyo product.
 
 
 ## Decision
 
-The repository and Tokyo runtime use one multi-position Trading Kernel and one
+This product uses one multi-position Trading Kernel and one
 unbranched PostgreSQL revision chain. A flat, exact, forward-only migration may
 preserve terminal history between certified revisions. There is no active-
 position schema handover, dual write, old-schema reader, fallback, or alternate
@@ -59,10 +61,13 @@ create a Ticket, write to the exchange, or mutate lifecycle state.
 2. Adding to an existing position is forbidden.
 3. One Ticket may produce only one ENTRY command generation.
 4. New ENTRY admission is globally serialized.
-5. Existing protected Tickets progress concurrently.
+5. Existing AUTO protected Tickets progress concurrently; MANUAL Tickets
+   continue readonly observation, accounting, closure and review.
 6. One active Ticket is allowed per Netting Domain:
    `venue + account + instrument + position_side`.
-7. Long and short are independent Netting Domains and may coexist by default.
+7. Long and short are independent exchange Netting Domains, but this product
+   forbids simultaneous opposite-side exposure or nonterminal Tickets within
+   one account/instrument.
 8. Multi-position is architectural; policy may bound capacity without changing
    the model.
 9. Authoritative ENTRY rejection is terminal and is not retried.
@@ -188,12 +193,14 @@ fallback; switching Vacuum drains unfinished ENTRY through durable commands.
 
 Capacity B permits at most two same-strategy/same-side Tickets only for
 different Instruments, Episodes and Signals. The same instrument/side Netting
-Domain remains single-Ticket. Family, direction, global risk and margin gates
+Domain remains single-Ticket. This manual product additionally excludes the opposite side
+while that account/instrument has any nonterminal Ticket. Family, direction, global risk and margin gates
 still bind; first eligible admission has no Dynamic-rank scheduling or preemption.
 
 ExitProfile and EventExitBinding are immutable PostgreSQL facts. Claim/Ticket
 issuance rechecks current binding version/CAS; a Ticket retains its frozen
-profile for Initial Stop, TP1, Runner, guards and exit. Rare Owner binding/profile
+profile for Initial Stop, TP1, Runner, guards and exit while AUTO. A frozen
+profile never overrides confirmed MANUAL management. Rare Owner binding/profile
 mutations share a PostgreSQL transaction-scoped authority lock, not a hot-path
 distributed lock. No YAML/YML owns runtime configuration.
 
@@ -204,6 +211,28 @@ compatibility only. TradFi remains a separate explicit Owner scope.
 （来源：tracked Generic Selection/authority/capacity/ExitProfile code;
 forward migrations; frozen Owner decisions. Current activation facts belong
 only to `MAIN_CONTROL_ROADMAP.md`.）
+
+## App management authority within the same chain
+
+**AUTO / REVIEW_REQUIRED / MANUAL** is persisted per Ticket, independent of the
+frozen ExitProfile and global ENTRY policy. Confirmed external exit order creation,
+amendment or cancellation transfers the whole remaining trade without waiting for
+fill. Accepted external reduction likewise transfers management; system commands
+and natural fills alone do not. Only proven observation gaps can clear REVIEW;
+MANUAL never returns to AUTO, including after restart, upgrade or TP1 fill.
+
+MANUAL has no automatic Initial Stop/TP1/Runner adjustment, exit, residual cancel
+or top-up authority. Existing venue orders remain Owner-managed. Unknown command
+outcomes still need exact readonly resolution; no blind replay or promise to
+recall an already-sent request. Manual flatness with residual orders is not
+terminal. Conservative risk and account/instrument exclusion remain until closure
+facts prove safe release. A new independent Ticket begins AUTO, subject to the
+original trigger/rearm and admission gates.
+
+Sources: [management](../../src/trading_kernel/domain/trade_management.py),
+[observation](../../src/trading_kernel/application/observe_trade_management.py),
+[readonly reconciliation](../../src/trading_kernel/application/reconcile_ticket.py),
+[write boundary](../../src/trading_kernel/application/dispatch_exchange_command.py).
 
 ## Transaction And Exchange Model
 
@@ -271,7 +300,8 @@ The rebuild is complete only when:
 4. retired code, tests, tables, migrations, deployment units, and current
    document references are absent;
 5. the clean baseline rebuilds from empty PostgreSQL;
-6. Tokyo runs the exact commit, schema, seed, and four persistent workers;
+6. the independent manual runtime runs the exact commit, schema, seed, and
+   four persistent workers;
 7. one natural real-funds Ticket reaches terminal exchange-flat state with no
    residual order;
 8. budget and domain holds release, Reconciliation matches, Settlement and

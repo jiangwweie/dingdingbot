@@ -21,9 +21,11 @@ accounting and closure remain. Unknown intervention freezes automatic action.
 Certificates bind the compiled product identity, exact commit and schema. The
 inherited Tokyo deployment backends call `refuse_inherited_tokyo_deployment`
 before any SSH action, including uploads and legacy drain bridges. A matching
-local binding comparison is preparation only: real App protocol acceptance,
-independent target/account/database verification and Owner deployment confirmation
-are still required. This branch is not authority to operate the Tokyo product.
+local binding comparison is preparation only. Actual deployment needs independent
+target/account/database proof, exact certification and current Owner authority.
+Owner approved actual App acceptance during natural trading; preserve that
+remaining evidence explicitly instead of reinstating a pre-ENTRY App test gate.
+This branch is not authority to operate the Tokyo product.
 
 
 ## Authority

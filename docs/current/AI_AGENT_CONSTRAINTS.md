@@ -21,15 +21,17 @@ accounting and closure remain. Unknown intervention freezes automatic action.
 Certificates bind the compiled product identity, exact commit and schema. The
 inherited Tokyo deployment backends call `refuse_inherited_tokyo_deployment`
 before any SSH action, including uploads and legacy drain bridges. A matching
-local binding comparison is preparation only: real App protocol acceptance,
-independent target/account/database verification and Owner deployment confirmation
-are still required. This branch is not authority to operate the Tokyo product.
+local binding comparison is preparation only. Actual deployment needs independent
+target/account/database proof, exact certification and current Owner authority.
+Owner approved actual App acceptance during natural trading; preserve that
+remaining evidence explicitly instead of reinstating a pre-ENTRY App test gate.
+This branch is not authority to operate the Tokyo product.
 
 
 ## Objective
 
 Agents must preserve one production-capable multi-position kernel, one
-unbranched PostgreSQL authority, one Tokyo runtime, and complete the remaining
+unbranched PostgreSQL authority, one isolated manual-product runtime, and complete the remaining
 controlled real-funds terminal acceptance.
 
 ## Required Engineering Posture
@@ -53,7 +55,7 @@ controlled real-funds terminal acceptance.
 ## Local-First Failure Discovery
 
 - Prefer exposing defects in local automated verification rather than on the
-  Tokyo server.
+  production server.
 - Time, concurrency, lease, migration, worker-cadence, deployment-gate, and
   restart behavior must be exercised with production-shaped local tests, not
   synchronized fixtures that remove the real failure condition.
@@ -99,7 +101,10 @@ quality.
 - Unknown command outcome blocks redispatch until external truth resolves it.
 - ENTRY rejection never creates another ENTRY generation.
 - Partial ENTRY fill opens an incident and controlled flatten workflow.
-- One active Ticket is allowed per Netting Domain.
+- One active Ticket is allowed per Netting Domain; this manual product also
+  excludes both sides of the same account/instrument while nonterminal.
+- MANUAL is permanent per Ticket. No restart, upgrade, global control, cleanup
+  or recovery may restore automatic exit/cancel/amend authority.
 - New ENTRY work is globally serialized while existing Ticket lifecycle work
   remains concurrent.
 
@@ -134,7 +139,7 @@ Completion requires current evidence for:
 5. zero retired production imports and current document references;
 6. one unbranched forward schema authority;
 7. crash-safe and resume-safe regular release and flat compatible upgrade;
-8. exact Tokyo commit/schema identity;
+8. exact independent manual-product commit/schema identity;
 9. one terminal controlled real-funds Ticket;
 10. a production-shaped local clean-rebuild rehearsal;
 11. final requirement-by-requirement audit.
