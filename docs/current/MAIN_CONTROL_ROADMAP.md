@@ -22,8 +22,8 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `c93c7b98dd28d74808ffd33e526ad537c3633ce2` |
-| Production tag | `manual-runtime-2026.11.09.2` |
+| Production commit | `c71df09c5c9a8ba65c2ae2acb2df8bda9adb68ab` |
+| Production tag | `manual-runtime-2026.11.09.3` |
 | Production schema | `0018_notice_outbox_v1` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
 | Integration branch | `manual-dev` |
@@ -35,6 +35,40 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Seoul Entry fact timing repair — installed and Owner-paused2026-11-09
+
+Owner approved the Tokyo-compared **Entry10s collection timeout /30s action-fact
+validity**, retaining the final **5s send-authority window**, and completed genuine
+Console maintenance pause **Policy5/false**. This snapshot supersedes the earlier
+Policy4 enabled posture below. Restoration requires genuine Console Resume/TOTP;
+software repair and operational readiness do not grant new trading intent.
+
+At **2026-11-09 16:50:03 Asia/Shanghai**, exact release
+**`c71df09c5c9a8ba65c2ae2acb2df8bda9adb68ab`**, immutable tag
+**`manual-runtime-2026.11.09.3`**, schema **`0018_notice_outbox_v1`** was installed
+through the independent stopped-flat manual upgrade. R4 PASS: **2026 Unit/Architecture,
+1867 Integration,74 Full-chain**, Ruff, Mypy238,961 Golden snapshots /23064 parity
+decisions; exact Owner API/static certification PASS.
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Root cause / accepted change | Same CCXT4.5.56 FIFO weighted reads took about5.9s and could not satisfy Seoul5s/5s. Owner accepted Entry10s/30s; this explicitly changes allowed fact age. Real request-start timestamps and final5s send window are retained; no clock reset, old-fact fallback, limit bypass or missing account-wide order checks |
+| Effective config | Entry Python process10s/30000ms; Observation/Lifecycle/Reconciliation remain5s/5000ms. Installer persists the role override; resident startup rejects uncertified values and promoter reads actual process timing |
+| Source / preservation | Genuine Policy5 pause; account/host/PG identity, flatness and no orders/commands/Incidents proven before stop. All five writers stopped. Every nonidentity/capability table plus Owner policy, Strategy and Selection controls preserved by the official same-schema audit |
+| Installed readonly read chain | Current enabled seven-member scope, admission plus dispatch read phases **14/14 PASS**; slowest6546ms, minimum remaining original fact validity23454ms. GET-only transport; this is not live order acceptance |
+| Operational postflight | Four actual Python Workers and independent API active/NRestarts0; commit/schema match; PG integrity/flatness/current scope readiness/risk authority PASS; no active Ticket/Command/position/Incident. Official promoter **prepared_owner_paused**, operational fence absent; no Owner Resume generated |
+| Health and retirement | Retired daily SOR selection/materialization loops removed; SOR-1H and recoverable families retained. Overview uses current account audit rather than capital-ledger mutation time and returns **fresh**. Entry read failures remain independent Owner attention; shared read group cleans up siblings and logs sanitized stage/throttle/HTTP timing |
+| BNB | Owner independently enabled fee burn; signed readonly facts and monitor prove fee_burn_enabled=true / capability available. No setting or funds mutation by this task |
+| Acceptance boundary | Natural accepted ENTRY/Initial Stop, real App takeover and natural-event phone receipt remain independently unverified. Failed historical signals are not replayed; no test order or fabricated Signal/Ticket |
+
+Evidence: `.local/entry-facts-repair/` in the attached manual release worktree:
+`certification-progress.json`, exact manifests in its Git worktree metadata,
+`candidate-live-readonly.json`, `promotion.json`, `postflight.json`,
+`post-release-journals.json`, `stage-upgrade.log`, `activate-upgrade.log` and
+`deployment-progress.json`. Review/authorized scope:
+[Entry facts repair plan](../superpowers/plans/2026-11-09-seoul-entry-facts-tokyo-comparison-review.md).
+Tokyo account/services/code were not mutated. Unrelated local UI edits were excluded.
 
 ### Seoul current Owner posture — ENTRY enabled, bearish2026-11-09
 
