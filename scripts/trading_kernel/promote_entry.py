@@ -256,9 +256,9 @@ class LocalEntryPromotionBackend:
                 return False
             # Filter inside the privileged reader; no credentials leave the child.
             program=("from pathlib import Path; "
-                f"rows=Path('/proc/{pid}/environ').read_bytes().split(b'\\0'); "
+                f"rows=Path('/proc/{pid}/environ').read_bytes().split(bytes([0])); "
                 "allowed={b'TRADING_KERNEL_TIMEOUT_SECONDS',b'TRADING_KERNEL_ACTION_FACT_VALIDITY_MS'}; "
-                "print('\\0'.join(x.decode() for x in rows if x.split(b'=',1)[0] in allowed),end='')")
+                "print(chr(0).join(x.decode() for x in rows if x.split(b'=',1)[0] in allowed),end='')")
             result=self._run("sudo","python3","-c",program,check=False)
             if result.returncode != 0:
                 return False

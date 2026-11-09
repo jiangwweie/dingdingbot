@@ -23,6 +23,29 @@ def test_promoter_checks_actual_entry_process_timing(monkeypatch, timeout, valid
     assert backend._active("brc-trading-kernel-entry-worker.service") is expected
 
 
+def test_promoter_privileged_reader_parses_real_nul_delimited_environment(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    from types import SimpleNamespace
+
+    environment=tmp_path/"environ"
+    environment.write_bytes(b"TRADING_KERNEL_TIMEOUT_SECONDS=10\0TRADING_KERNEL_ACTION_FACT_VALIDITY_MS=30000\0PRIVATE_DIAGNOSTIC_VALUE=must-not-leave-reader\0")
+    captured=[]
+    def run(*args,**kwargs):
+        if "is-active" in args:
+            return SimpleNamespace(returncode=0)
+        if "show" in args:
+            return SimpleNamespace(returncode=0,stdout="123")
+        program=args[-1].replace("'/proc/123/environ'",repr(str(environment)))
+        result=subprocess.run([sys.executable,"-c",program],capture_output=True,text=True,check=True)
+        captured.append(result.stdout)
+        return result
+    backend=LocalEntryPromotionBackend(python="python",database_url="unused")
+    monkeypatch.setattr(backend,"_run",run)
+    assert backend._active("brc-trading-kernel-entry-worker.service")
+    assert "must-not-leave-reader" not in captured[0]
+
+
 class FakePromotionBackend:
     def __init__(
         self,
