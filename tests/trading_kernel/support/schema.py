@@ -40,6 +40,7 @@ EXPECTED_KERNEL_TABLES = frozenset(
         "brc_instruments",
         "brc_management_order_evidence",
         "brc_management_observation_current",
+        "brc_notice_outbox",
         "brc_monitor_current",
         "brc_monitor_events",
         "brc_owner_policy_current",
