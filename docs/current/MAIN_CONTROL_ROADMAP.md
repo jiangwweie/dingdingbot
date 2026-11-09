@@ -8,6 +8,40 @@ last_verified: 2026-11-09
 
 ## App Product Workspace Status
 
+### Seoul current Owner posture — ENTRY enabled, bearish2026-11-09
+
+At **2026-11-09 14:04:07 Asia/Shanghai**, fresh installed readonly certification,
+PostgreSQL, systemd and signed Binance account/order reads confirm Owner has
+restored global ENTRY through genuine authority: **Policy4/true**, Resume
+authorization valid. Directional control **v2/bearish** is effective with no
+pending change. USD-M USDT wallet, totalWalletBalance and available balance are
+all **1500 USDT**. No transfer or account mutation was performed by this check.
+This current posture supersedes earlier Owner-paused snapshots below; the
+certified notification release identity remains unchanged.
+
+Baseline2%, gross6%, minimum materialization50% and three-Ticket ceiling remain
+unchanged. At the sampled1500U risk basis, planned per-Ticket stop-risk ceiling
+is30U, minimum materialization15U, gross90U; effective long aggregate limit is
+2%/30U and short aggregate4%/60U under bearish control. These are planned
+stop-risk budgets, not position notional or guaranteed realized loss limits.
+The Kernel rereads wallet/margin facts before new admission; the former2500U
+is not fixed sizing authority. Bearish does not disable long strategies.
+
+All four Workers and independent Owner API active/NRestarts0, current commit/
+schema match, maintenance fence absent, database integrity/current enabled scope
+readiness/risk-budget authority PASS. PG has no active Ticket, Command, position
+or Incident; global Entry lane idle. Binance canTrade=true, independent sides
+true, no position or regular/conditional order. No new Ticket/Command in the
+bounded preceding two-hour window. Independent Feishu channel configured;
+pending/dead/accepted0. Natural order/protection, App intervention and Feishu
+acceptance/phone receipt remain separate unverified acceptance evidence.
+
+Evidence: `.local/manual-notification-20261109/owner-adjustment-current.json`
+and `owner-adjustment-balances.json`, freshly collected; no trade, risk control,
+service or credential mutation. User balance reduction was reported by Owner
+and verified as current account truth; this record does not attribute or execute
+the external transfer.
+
 ### Seoul engineering restoration complete — Owner ENTRY paused2026-11-09
 
 This is the independent **`brc-app-manual-v1`** product in
