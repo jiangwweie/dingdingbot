@@ -998,7 +998,7 @@ def _require_target_postflight(
             certification,
             seed_identity=seed_identity,
             preserved_runtime=baseline["preserved_runtime"],
-            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1","0016_app_manual_takeover_v1","0017_app_management_observation"}),
+            hourly_upgrade=(plan.source_schema_revision == "0010_dynamic_intent_v1" and plan.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1","0016_app_manual_takeover_v1","0017_app_management_observation","0018_notice_outbox_v1"}),
             orb_already_installed=plan.source_schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1"},
         )
         policy=certification.get("owner_policy")

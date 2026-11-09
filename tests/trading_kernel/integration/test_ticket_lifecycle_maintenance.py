@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import Mock
 
 import pytest
 import sqlalchemy as sa
@@ -41,11 +40,10 @@ from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.strategy_registry import registered_strategy_contracts
 from src.trading_kernel.domain.ticket import build_ticket_id
-from src.trading_kernel.infrastructure import (
-    feishu_notice as notice_module,
+from src.trading_kernel.infrastructure.pg_models import (
+    notice_outbox,
+    owner_policy_current,
 )
-from src.trading_kernel.infrastructure import pg_unit_of_work as uow_module
-from src.trading_kernel.infrastructure.pg_models import owner_policy_current
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.infrastructure.strategy_registry_seed import (
@@ -75,15 +73,6 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
     lifecycle_engine,
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv(
-        "TRADING_KERNEL_FEISHU_WEBHOOK_URL",
-        "https://open.feishu.cn/open-apis/bot/v2/hook/test-token",
-    )
-    monkeypatch.setattr(
-        notice_module.threading, "Thread", Mock(side_effect=RuntimeError("thread failed"))
-    )
-    notify = Mock(wraps=notice_module.notify_tp1_filled)
-    monkeypatch.setattr(uow_module, "notify_tp1_filled", notify)
     ticket = _registered_sor_long_ticket()
     await _reach_position_protected(lifecycle_engine, ticket)
 
@@ -107,16 +96,17 @@ async def test_maintenance_turns_full_tp1_fill_into_cost_adjusted_runner_protect
                 now_ms=2_500,
             ),
         )
-        notify.assert_not_called()
 
-    notify.assert_called_once()
-    notice_ticket, event = notify.call_args.args
-    assert notice_ticket.identity == ticket.identity
-    assert event.filled_qty == ticket.take_profit_quantities[0]
-    assert event.average_fill_price == ticket.take_profit_prices[0]
-    assert notify.call_args.kwargs["remaining_qty"] == (
-        ticket.quantity - ticket.take_profit_quantities[0]
-    )
+    async with lifecycle_engine.connect() as c:
+        snapshot = (
+            await c.execute(
+                sa.select(notice_outbox.c.snapshot).where(notice_outbox.c.kind == "tp1")
+            )
+        ).scalar_one()
+        assert (
+            Decimal(snapshot["quantity"])
+            == ticket.quantity - ticket.take_profit_quantities[0]
+        )
     assert result.status is LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
@@ -152,14 +142,11 @@ async def test_runner_notice_requires_committed_flatness_after_tp1(
     requested_exit,
     rollback,
 ) -> None:
-    notify = Mock()
-    monkeypatch.setattr(uow_module, "notify_runner_exited", notify)
     ticket = _registered_sor_long_ticket()
     if after_tp1:
         await _reach_runner_protected(lifecycle_engine, ticket)
     else:
         await _reach_position_protected(lifecycle_engine, ticket)
-    notify.assert_not_called()  # Replacing or moving a stop is not a Runner exit.
     if requested_exit:
         async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
             await request_exit(
@@ -190,19 +177,18 @@ async def test_runner_notice_requires_committed_flatness_after_tp1(
                     ),
                 ),
             )
-            notify.assert_not_called()
             if rollback:
                 raise RuntimeError("rollback fixture")
     except RuntimeError as error:
         if not rollback or str(error) != "rollback fixture":
             raise
-    if after_tp1 and not rollback:
-        notify.assert_called_once()
-        assert notify.call_args.kwargs["previous_qty"] == (
-            ticket.quantity - ticket.take_profit_quantities[0]
+    async with lifecycle_engine.connect() as c:
+        count = await c.scalar(
+            sa.select(sa.func.count())
+            .select_from(notice_outbox)
+            .where(notice_outbox.c.kind.in_(["closed", "residual"]))
         )
-    else:
-        notify.assert_not_called()
+        assert count == (0 if rollback else 1)
 
 
 @pytest.mark.asyncio
@@ -897,9 +883,9 @@ def _registered_event_ticket(event_id: str):
     )
     policy = exit_policy_for(contract.event_spec_id)
     updates = {
-            "identity": identity,
-            "exit_policy_id": policy.exit_policy_id,
-            "exit_policy_semantic_hash": policy.semantic_hash(),
+        "identity": identity,
+        "exit_policy_id": policy.exit_policy_id,
+        "exit_policy_semantic_hash": policy.semantic_hash(),
     }
     if contract.position_side == "short":
         updates.update(

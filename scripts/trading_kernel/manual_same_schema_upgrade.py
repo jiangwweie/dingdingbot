@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit stopped-flat manual-product upgrade; no Owner permission or order writes."""
+"""Stopped-flat manual upgrade: same schema or exact 0017-to-0018 notice migration."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from scripts.trading_kernel.manual_host_bootstrap import (
     check_host_identity,
     host_facts,
     require_stopped_upgrade,
+    require_upgrade_schema,
     run,
     validate_certificates,
     write_private,
@@ -48,8 +49,12 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     )
     from src.trading_kernel.infrastructure.runtime_authority_seed import (
         RuntimeAuthoritySeedRequest,
+        deploy_compatible_upgrade_identity,
         deploy_runtime_identity,
     )
+
+    require_upgrade_schema(source["schema"], receipt["schema_revision"])
+    forward = source["schema"] != receipt["schema_revision"]
 
     secret = json.loads((ROOT / "exchange-credentials.json").read_text())
     enrolled = json.loads((ROOT / "verified-account.json").read_text())
@@ -90,6 +95,8 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                     "brc_schema_metadata",
                     "brc_runtime_capabilities_current",
                 }:
+                    continue
+                if table.name == "brc_notice_outbox" and forward:
                     continue
                 # One-off stopped fresh-account deployment audit, never runtime cadence.
                 rows = (
@@ -138,9 +145,23 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
             json.dumps(before, default=str, sort_keys=True) + "\n",
             overwrite=True,
         )
+        if forward:
+            migration_env = os.environ.copy()
+            migration_env["TRADING_KERNEL_DATABASE_URL"] = dsn
+            run(
+                [
+                    str(REPO_ROOT / ".venv/bin/python"),
+                    str(REPO_ROOT / "scripts/trading_kernel/bootstrap_schema.py"),
+                ],
+                env=migration_env,
+            )
         account = json.loads((ROOT / "verified-account.json").read_text())["account_id"]
         async with PostgresKernelUnitOfWork(engine) as uow:
-            await deploy_runtime_identity(
+            await (
+                deploy_compatible_upgrade_identity
+                if forward
+                else deploy_runtime_identity
+            )(
                 uow,
                 RuntimeAuthoritySeedRequest(
                     account_id=account,
@@ -149,6 +170,14 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                     seeded_at_ms=int(time.time() * 1000),
                 ),
             )
+        if forward:
+            async with engine.connect() as c:
+                if not await c.scalar(text("SELECT has_table_privilege('brc_kernel','brc_notice_outbox','SELECT,INSERT,UPDATE') AND has_sequence_privilege('brc_kernel','brc_notice_outbox_sequence_seq','USAGE,SELECT') AND has_table_privilege('brc_owner_console','brc_notice_outbox','SELECT')")):
+                    raise ValueError("notice runtime/read role privileges differ")
+                if await c.scalar(text("SELECT count(*) FROM brc_notice_outbox")) != 0:
+                    raise ValueError(
+                        "new notice outbox must be empty before writers start"
+                    )
         after = await snapshot()
         if before != after:
             raise ValueError(
@@ -164,6 +193,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     if values["TRADING_KERNEL_RUNTIME_COMMIT"] != source["commit"]:
         raise ValueError("source Worker environment commit differs")
     values["TRADING_KERNEL_RUNTIME_COMMIT"] = receipt["commit"]
+    values["TRADING_KERNEL_SCHEMA_REVISION"] = receipt["schema_revision"]
     write_private(
         env_path,
         "".join(k + "=" + json.dumps(v) + "\n" for k, v in values.items()),
@@ -192,6 +222,34 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         canonical.read_text()
     )
     run(["nginx", "-t"])
+    # Notification routing has no trading authority. Use the existing startup-only
+    # environment boundary, keeping runtime cadence free of file reads.
+    if receipt["schema_revision"] == "0018_notice_outbox_v1":
+        credential = Path("/etc/brc/notification-credentials/feishu_webhook")
+        private_env = Path("/etc/brc/notification-credentials/feishu.env")
+        if credential.is_file():
+            from src.trading_kernel.infrastructure.feishu_notice import FeishuChannel
+
+            webhook = credential.read_text().strip()
+            if (
+                credential.is_symlink()
+                or credential.stat().st_mode & 0o077
+                or not FeishuChannel(webhook).configured
+            ):
+                raise ValueError("notification credential permissions or route differ")
+            write_private(
+                private_env,
+                "TRADING_KERNEL_SEOUL_FEISHU_WEBHOOK_URL=" + json.dumps(webhook) + "\n",
+                overwrite=True,
+            )
+            credential.unlink()
+        dropin = Path(
+            "/etc/systemd/system/brc-trading-kernel-reconciliation-worker.service.d/notifications.conf"
+        )
+        dropin.parent.mkdir(parents=True, exist_ok=True)
+        dropin.write_text(
+            "[Service]\nEnvironmentFile=-/etc/brc/notification-credentials/feishu.env\n"
+        )
     run(["systemctl", "daemon-reload"])
     run(
         [
@@ -205,7 +263,10 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     )
     run(["systemctl", "reload", "nginx"])
     result = {
-        "status": "same_schema_upgraded_entry_fenced",
+        "status": "notice_schema_upgraded_entry_fenced"
+        if forward
+        else "same_schema_upgraded_entry_fenced",
+        "schema_revision": receipt["schema_revision"],
         "source_commit": source["commit"],
         "commit": receipt["commit"],
         "preservation_pass": True,

@@ -25,6 +25,7 @@ from src.trading_kernel.infrastructure.pg_models import (
 class PostgresManagementRepository:
     def __init__(self, connection: AsyncConnection):
         self.c = connection
+        self.new_evidence: dict[str, list[OrderEvidence]] = {}
 
     async def refresh_orders(self, ticket_id: str, orders: list) -> None:
         await self.c.execute(
@@ -73,6 +74,7 @@ class PostgresManagementRepository:
                 observed_at_ms=item.received_at_ms,
             )
         )
+        self.new_evidence.setdefault(ticket_id, []).append(item)
         return True
 
     async def save_coverage(

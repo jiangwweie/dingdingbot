@@ -1,134 +1,67 @@
-from __future__ import annotations
+from unittest.mock import AsyncMock, Mock
 
-import json
-import threading
-from decimal import Decimal
-from unittest.mock import Mock
+import pytest
 
-from src.trading_kernel.domain.events import (
-    EntryAccepted,
-    ExternalFlatDetected,
-    TakeProfitFilled,
+from src.trading_kernel.infrastructure.feishu_notice import (
+    FeishuChannel,
+    load_feishu_channel,
 )
-from src.trading_kernel.infrastructure import feishu_notice as module
-from tests.trading_kernel.support.tickets import make_ticket
 
 
-def test_tp1_and_runner_notice_text_only_reports_confirmed_facts(monkeypatch):
+@pytest.mark.parametrize(
+    "route",
+    [
+        "http://open.feishu.cn/open-apis/bot/v2/hook/test",
+        "https://evil.example/open-apis/bot/v2/hook/test",
+        "https://open.feishu.cn.evil.example/open-apis/bot/v2/hook/test",
+        "https://open.feishu.cn/other",
+        "https://open.feishu.cn/open-apis/bot/v2/hook/test?token=secret",
+    ],
+)
+def test_transport_rejects_noncanonical_routes_without_echoing_secret(route):
+    with pytest.raises(ValueError, match="^invalid_feishu_route$"):
+        FeishuChannel(route)
+
+
+def test_absent_independent_credential_never_uses_inherited_webhook(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv(
         "TRADING_KERNEL_FEISHU_WEBHOOK_URL",
-        "https://open.feishu.cn/open-apis/bot/v2/hook/test-token",
+        "https://open.feishu.cn/open-apis/bot/v2/hook/tokyo",
     )
-    thread = Mock()
-    monkeypatch.setattr(module.threading, "Thread", thread)
-    ticket = make_ticket()
-    common = {
-        "event_id": "notice",
-        "ticket_id": ticket.identity.ticket_id,
-        "sequence": 6,
-        "occurred_at_ms": 2000,
-    }
-    module.notify_tp1_filled(
-        ticket,
-        TakeProfitFilled(
-            **common,
-            filled_qty=Decimal("0.0005"),
-            average_fill_price=Decimal(62000),
-            runner_floor_price=Decimal("60080.3"),
-        ),
-        remaining_qty=Decimal("0.0005"),
-    )
-    payload = json.loads(thread.call_args.kwargs["args"][1])
-    text = payload["content"]["text"]
-    assert payload["msg_type"] == "text"
-    assert "🎯 BRC｜TP1 已成交" in text
-    assert "BTCUSDT · 做多" in text
-    assert "成交数量：0.0005 BTC" in text
-    assert "成交均价：62,000 USDT" in text
-    assert "剩余仓位：0.0005 BTC" in text
-    assert "1970-01-01 08:00:02（北京时间）" in text
-    assert ticket.identity.ticket_id in text
-    assert "60080.3" not in text  # Planned runner protection is not a fill.
-    assert thread.call_args.kwargs["daemon"] is True
-    thread.return_value.start.assert_called_once()
-
-    module.notify_runner_exited(
-        ticket,
-        ExternalFlatDetected(**common),
-        previous_qty=Decimal("0.0005"),
-    )
-    text = json.loads(thread.call_args.kwargs["args"][1])["content"]["text"]
-    assert "🏁 BRC｜Runner 已退出，成交明细待确认" in text
-    assert "退出前仓位：0.0005 BTC" in text
-    assert "剩余仓位：0" in text
-    assert "成交数量" not in text
-    assert "成交均价" not in text
-    assert "退出原因" not in text
+    assert not load_feishu_channel(None).configured
 
 
-def test_missing_webhook_is_disabled(monkeypatch):
-    monkeypatch.delenv("TRADING_KERNEL_FEISHU_WEBHOOK_URL", raising=False)
-    start = Mock()
-    monkeypatch.setattr(module.threading, "Thread", start)
-    t = make_ticket()
-    module.notify_entry_accepted(
-        t,
-        EntryAccepted(
-            event_id="notice",
-            ticket_id=t.identity.ticket_id,
-            sequence=2,
-            occurred_at_ms=2000,
-            exchange_order_id="order-1",
-        ),
-    )
-    start.assert_not_called()
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response,status,accepted",
+    [
+        (b'{"code":0}', 200, True),
+        (b'{"code":19024}', 200, False),
+        (b"bad", 503, False),
+        (b"x" * 65537, 200, False),
+    ],
+)
+async def test_platform_acceptance_is_required_and_no_redirect_allowed(
+    monkeypatch, response, status, accepted
+):
+    from src.trading_kernel.infrastructure import feishu_notice as module
 
-
-def test_slow_or_failed_webhook_does_not_block_or_expose_url(monkeypatch, caplog):
-    started = threading.Event()
-    release = threading.Event()
-    finished = threading.Event()
-    webhook = "https://open.feishu.cn/open-apis/bot/v2/hook/secret-test-token"
-    monkeypatch.setenv("TRADING_KERNEL_FEISHU_WEBHOOK_URL", webhook)
-
-    def failing_request(request, *, timeout):
-        assert timeout == 2
-        payload = json.loads(request.data)
-        text = payload["content"]["text"]
-        assert payload["msg_type"] == "text"
-        assert "🟢 BRC｜开仓已接单" in text and "order-1" in text
-        assert "计划初始止损" in text and "已成交" not in text
-        started.set()
-        release.wait(5)
-        raise TimeoutError(webhook)
-
-    monkeypatch.setattr(module.urllib.request, "urlopen", failing_request)
-    original = module._send
-
-    def run(*args):
-        try:
-            original(*args)
-        finally:
-            finished.set()
-
-    monkeypatch.setattr(module, "_send", run)
-    t = make_ticket()
-    try:
-        module.notify_entry_accepted(
-            t,
-            EntryAccepted(
-                event_id="notice",
-                ticket_id=t.identity.ticket_id,
-                sequence=2,
-                occurred_at_ms=2000,
-                exchange_order_id="order-1",
-            ),
-        )
-        assert started.wait(2)
-        # The notification entry point returned while the network was blocked.
-        assert not finished.is_set()
-    finally:
-        release.set()
-        assert finished.wait(2)
-    assert "feishu_notice_failed" in caplog.text
-    assert "secret-test-token" not in caplog.text
+    reply = Mock(status=status)
+    reply.content.read = AsyncMock(side_effect=[response,b""])
+    request = AsyncMock()
+    request.__aenter__.return_value = reply
+    session = Mock()
+    session.post.return_value = request
+    context = AsyncMock()
+    context.__aenter__.return_value = session
+    monkeypatch.setattr(module.aiohttp, "ClientSession", Mock(return_value=context))
+    channel = FeishuChannel("https://open.feishu.cn/open-apis/bot/v2/hook/test")
+    if accepted:
+        await channel.send("frozen facts")
+    else:
+        with pytest.raises(ValueError):
+            await channel.send("frozen facts")
+    assert session.post.call_args.kwargs["allow_redirects"] is False
+    assert session.post.call_args.kwargs["json"]["content"]["text"] == "frozen facts"

@@ -2056,6 +2056,10 @@ class PostgresMonitorRepository:
                 created_at_ms=state.updated_at_ms,
             )
         )
+        from src.trading_kernel.infrastructure.pg_notice_outbox import (
+            enqueue_runtime_notice,
+        )
+        await enqueue_runtime_notice(self._connection, current_row, persisted)
         return persisted
 
 

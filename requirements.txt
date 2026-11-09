@@ -5,3 +5,6 @@ ccxt==4.5.56
 greenlet>=3.0.0
 pydantic>=2.5.3,<3.0.0
 sqlalchemy>=2.0.0,<3.0.0
+
+# Bounded asynchronous independent notification transport
+aiohttp>=3.10.0,<4.0.0

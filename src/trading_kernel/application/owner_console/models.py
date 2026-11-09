@@ -504,7 +504,17 @@ class OwnerConclusion(FrozenModel):
     evidence: tuple[EvidenceRef, ...]
 
 
+class NoticeDeliverySummary(FrozenModel):
+    channel_state: Literal["configured", "missing", "unknown"] = "unknown"
+    pending_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+    pending_count_capped: bool = False
+    failed_count_capped: bool = False
+    last_accepted_at_ms: int | None = None
+
+
 class OwnerOverview(FrozenModel):
+    notification_delivery: NoticeDeliverySummary | None = None
     performance: PerformanceSummary | None = None
     observed_at_ms: int
     conclusion: OwnerConclusion
@@ -1198,6 +1208,7 @@ class StrategyObservationListPage(FrozenModel):
 
 
 class OverviewFacts(FrozenModel):
+    notification_delivery: NoticeDeliverySummary | None = None
     performance: PerformanceSummary | None = None
     observed_at_ms: int
     runtime_freshness: Freshness

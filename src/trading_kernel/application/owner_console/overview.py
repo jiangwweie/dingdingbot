@@ -45,6 +45,7 @@ def build_owner_overview(facts: OverviewFacts, now_ms: int) -> OwnerOverview:
     )
 
     return OwnerOverview(
+        notification_delivery=facts.notification_delivery,
         observed_at_ms=now_ms,
         conclusion=conclusion,
         account_snapshot=account_snapshot,

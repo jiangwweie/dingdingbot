@@ -1200,7 +1200,12 @@ class PostgresOwnerReadRepository:
             )
         )
 
+        from src.trading_kernel.infrastructure.pg_notice_outbox import (
+            read_delivery_summary,
+        )
+        notification_delivery=await read_delivery_summary(self._connection)
         return OverviewFacts(
+            notification_delivery=notification_delivery,
             observed_at_ms=now_ms,
             runtime_freshness=freshness,
             freshness_evidence_identity=freshness_identity,
@@ -4152,6 +4157,7 @@ def _monitor_rows_query(
         )
         .where(
             actionable_scope,
+            ~actionable_monitor.c.monitor_key.like("notification:%"),
             actionable_monitor.c.owner_status == "needs_intervention",
         )
         .order_by(
@@ -4184,7 +4190,7 @@ def _monitor_rows_query(
             )
             .outerjoin(top_intervention, sa.true())
         )
-        .where(scope)
+        .where(scope, ~monitor_current.c.monitor_key.like("notification:%"))
         .order_by(
             monitor_current.c.updated_at_ms.desc(),
             monitor_current.c.monitor_key,

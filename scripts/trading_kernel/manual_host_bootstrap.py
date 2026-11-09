@@ -181,6 +181,13 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/")) -> dict:
     return identity
 
 
+def require_upgrade_schema(source: str, target: str) -> None:
+    if source == target:
+        return
+    if (source, target) != ("0017_app_management_observation", "0018_notice_outbox_v1"):
+        raise ValueError("manual upgrade requires same schema or exact 0017-to-0018 transition")
+
+
 def extract_plain_archive(source, destination: Path) -> None:
     """Release archives contain only plain files/directories, never links/devices."""
     with tarfile.open(fileobj=source, mode="r:*") as archive:
@@ -235,7 +242,7 @@ def validate_certificates(metadata: dict, commit: str) -> None:
         raise ValueError("surface schema identity differs")
 
 
-def receive_release(commit: str, digest: str, stream, *, expected_schema=None) -> dict:
+def receive_release(commit: str, digest: str, stream, *, expected_schema=None, source_schema=None) -> dict:
     data = stream.read(MAX_ARCHIVE + 1)
     if len(data) > MAX_ARCHIVE or hashlib.sha256(data).hexdigest() != digest:
         raise ValueError("release transport digest/size differs")
@@ -257,6 +264,8 @@ def receive_release(commit: str, digest: str, stream, *, expected_schema=None) -
             and metadata["kernel"]["schema_revision"] != expected_schema
         ):
             raise ValueError("manual stopped upgrade forbids a schema change")
+        if source_schema is not None:
+            require_upgrade_schema(source_schema, metadata["kernel"]["schema_revision"])
         kernel = Path("/opt/brc/releases/manual-kernel-" + commit)
         static = Path("/opt/brc/owner-console/releases/" + commit)
         api = Path("/opt/brc/owner-console-api/releases/" + commit)
@@ -587,11 +596,11 @@ def main(argv=None) -> int:
                 args.commit or "",
                 args.digest or "",
                 sys.stdin.buffer,
-                expected_schema=None if source is None else source["schema"],
+                expected_schema=None,
+                source_schema=None if source is None else source["schema"],
             )
             if source is not None:
-                if result["schema_revision"] != source["schema"]:
-                    raise ValueError("manual stopped upgrade forbids a schema change")
+                require_upgrade_schema(source["schema"], result["schema_revision"])
                 write_private(
                     ROOT / "upgrade-source.json",
                     json.dumps(

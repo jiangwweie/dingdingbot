@@ -259,3 +259,18 @@ def test_stopped_upgrade_requires_fence_before_any_database_read(tmp_path, monke
     with pytest.raises(ValueError):
         module.require_stopped_upgrade(filesystem_root=tmp_path)
     read.assert_not_called()
+
+
+@pytest.mark.parametrize('source,target,allowed',[
+    ('0017_app_management_observation','0018_notice_outbox_v1',True),
+    ('0018_notice_outbox_v1','0018_notice_outbox_v1',True),
+    ('0016_app_manual_takeover_v1','0018_notice_outbox_v1',False),
+    ('0018_notice_outbox_v1','0017_app_management_observation',False),
+])
+def test_manual_schema_upgrade_has_only_exact_approved_forward_transition(source,target,allowed):
+    from scripts.trading_kernel.manual_host_bootstrap import require_upgrade_schema
+    if allowed:
+        require_upgrade_schema(source,target)
+    else:
+        with pytest.raises(ValueError):
+            require_upgrade_schema(source,target)

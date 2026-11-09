@@ -2030,6 +2030,37 @@ export interface components {
              */
             status: "not_found";
         };
+        /** NoticeDeliverySummary */
+        NoticeDeliverySummary: {
+            /**
+             * Channel State
+             * @default unknown
+             * @enum {string}
+             */
+            channel_state: "configured" | "missing" | "unknown";
+            /**
+             * Failed Count
+             * @default 0
+             */
+            failed_count: number;
+            /**
+             * Failed Count Capped
+             * @default false
+             */
+            failed_count_capped: boolean;
+            /** Last Accepted At Ms */
+            last_accepted_at_ms?: number | null;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /**
+             * Pending Count Capped
+             * @default false
+             */
+            pending_count_capped: boolean;
+        };
         /** OrbSelectionPreviewView */
         OrbSelectionPreviewView: {
             control: components["schemas"]["SelectionControl"] | null;
@@ -2169,6 +2200,7 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Execution Incident Count */
             execution_incident_count: number | null;
+            notification_delivery?: components["schemas"]["NoticeDeliverySummary"] | null;
             /** Observed At Ms */
             observed_at_ms: number;
             performance?: components["schemas"]["PerformanceSummary"] | null;

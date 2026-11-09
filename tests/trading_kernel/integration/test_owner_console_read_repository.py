@@ -1442,7 +1442,7 @@ async def test_sparse_review_filter_fails_closed_beyond_candidate_cap(
         await engine.dispose()
 
 
-async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
+async def test_overview_reads_eight_bounded_selects_in_supplied_transaction(
     owner_read_dsn: str,
 ) -> None:
     now_ms = 1_800_000_010_000
@@ -1485,7 +1485,7 @@ async def test_overview_reads_seven_bounded_selects_in_supplied_transaction(
             if statement.startswith(("select", "with"))
             and "count(*) from brc_owner_policy_current" not in statement
         ]
-        assert len(overview_selects) == 7
+        assert len(overview_selects) == 8
         assert "brc_owner_policy_current" in overview_selects[0]
         assert "limit" in overview_selects[0]
         assert "brc_capacity_claims" in overview_selects[1]

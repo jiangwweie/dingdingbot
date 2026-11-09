@@ -42,6 +42,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0015_generic_owner_recovery_v1.py",
         "0016_app_manual_takeover_v1.py",
         "0017_app_management_observation.py",
+        "0018_notice_outbox_v1.py",
     )
 
     revisions: dict[str, str | None] = {}
@@ -76,6 +77,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0015_generic_owner_recovery_v1": "0014_dynamic_risk_budget_v1",
         "0016_app_manual_takeover_v1": "0015_generic_owner_recovery_v1",
         "0017_app_management_observation": "0016_app_manual_takeover_v1",
+        "0018_notice_outbox_v1": "0017_app_management_observation",
     }
     assert set(revisions.values()) - {None} == {
         "0001_trading_kernel_baseline_v4",
@@ -94,6 +96,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0014_dynamic_risk_budget_v1",
         "0015_generic_owner_recovery_v1",
         "0016_app_manual_takeover_v1",
+        "0017_app_management_observation",
     }
 
     baseline_source = migration_paths[0].read_text(encoding="utf-8")

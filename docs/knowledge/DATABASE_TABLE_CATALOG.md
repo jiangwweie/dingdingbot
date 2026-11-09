@@ -4,16 +4,16 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 92 张业务表、1093 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **95 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 93 张业务表、1113 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **96 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **90** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **93** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **95** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **96** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
-**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。代码目标结构为 `0013_owner_directional_risk_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
+**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0018_notice_outbox_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
 ## 怎样读这份目录
 
@@ -41,7 +41,7 @@
 | **[观察事实、机会与就绪状态](#catalog-signal)** | **5** | 从收盘观察保存事实、机会去重身份及待准入信号。 |
 | **[准入、容量、执行与生命周期](#catalog-trade)** | **11** | 交易主链路的准入结果、资金占用、订单意图和执行事实。 |
 | **[只读路径研究与采集配额](#catalog-research)** | **4** | 研究记录与真实成交、资金及净收益分开。 |
-| **[事故、Owner 投影与维护记录](#catalog-health)** | **4** | 记录安全阻断、可读状态和显式维护操作。 |
+| **[事故、Owner 投影与维护记录](#catalog-health)** | **5** | 记录安全阻断、可读状态和显式维护操作。 |
 | **[迁移与切换运维](#catalog-operations)** | **3** | Alembic 版本及 cutover run/phase journal；独立于业务 metadata |
 
 <a id="catalog-registry"></a>
@@ -1747,3 +1747,14 @@ COMMIT;
 **主键**：`ticket_id`
 
 **字段清单**：`ticket_id`、`covered_until_ms`、`facts_complete`、`reason`、`updated_at_ms`
+
+
+### `brc_notice_outbox`
+
+**职责**：业务事务内冻结通知事实与正文，事务外有限重试投递；不构成交易权限。
+
+**主键**：`sequence`
+
+**维护与用途**：Kernel UoW 事务末尾归并事实，Reconciliation 隔离循环使用租约/CAS领取；平台接受不等于已读，未知发送结果可能导致重复。正文不展示内部身份，内部键仍用于去重与审计。
+
+**字段清单**：`sequence`、`notice_key`、`stream_key`、`ticket_id`、`kind`、`state_version`、`snapshot`、`payload`、`delivery_payload`、`template_version`、`channel`、`status`、`attempts`、`next_attempt_at_ms`、`lease_token`、`lease_until_ms`、`accepted_at_ms`、`last_error`、`created_at_ms`、`updated_at_ms`

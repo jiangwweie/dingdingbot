@@ -64,8 +64,10 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
             status=ReconciliationWorkerStatus.FEE_CAPABILITY_OBSERVED,
         )
 
-    async def run_process(tick, **kwargs):
+    async def run_process(loops, **kwargs):
         del kwargs
+        assert [item.component_id for item in loops] == ["reconciliation", "notifications"]
+        tick=loops[0].tick
         await tick()
         await tick()
         return 0
@@ -76,7 +78,7 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
     monkeypatch.setattr(runner, "_load_factory", lambda spec: lambda: Adapter())
     monkeypatch.setattr(runner, "create_async_engine", lambda url: Engine())
     monkeypatch.setattr(runner, "run_reconciliation_worker_once", run_once)
-    monkeypatch.setattr(runner, "run_worker_process", run_process)
+    monkeypatch.setattr(runner, "run_worker_process_group", run_process)
 
     args = argparse.Namespace(
         database_url="postgresql+asyncpg://test",

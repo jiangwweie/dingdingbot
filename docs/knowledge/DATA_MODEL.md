@@ -70,7 +70,7 @@ erDiagram
 | **brc_monitor_current / events** | monitor_key / monitor_event_id | Owner 可读状态和事件；终态使用 `owner:ticket:<ticket_id>` | project_owner_state、健康监控 |
 | **brc_shadow_outcomes_current** | shadow_outcome_id；signal_event_id 唯一 | source_kind、evaluation_kind、冻结输入、结果和不可用原因 | 研究 admission 与 projector |
 
-以上字段均可在 [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)找到；对象到持久化的入口为 [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146)、[PostgresSignalRepository](../../src/trading_kernel/infrastructure/pg_signal_repository.py#L116) 和 [pg_repositories](../../src/trading_kernel/infrastructure/pg_repositories.py)。
+以上字段均可在 [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)找到；对象到持久化的入口为 [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L129)、[PostgresSignalRepository](../../src/trading_kernel/infrastructure/pg_signal_repository.py#L116) 和 [pg_repositories](../../src/trading_kernel/infrastructure/pg_repositories.py)。
 
 ## 选币与 Owner 的状态族
 
@@ -115,13 +115,13 @@ stateDiagram-v2
 | 一次机会最多一个 Signal/Ticket | Episode 唯一 Signal；Signal 唯一 Ticket；确定性身份 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)、[producer](../../src/trading_kernel/application/produce_strategy_signal.py) |
 | 同域最多一个活动 Ticket | active_netting_domain_key 唯一；闭合释放活动键 | [PostgresTicketRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L255) |
 | 新 ENTRY 串行、组合占用原子 | lane 与账户 exposure 锁；签发事务内重查 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97) |
-| 聚合事件不能覆盖并发结果 | expected_version、连续 sequence、CAS | [commit_reduction](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L228) |
+| 聚合事件不能覆盖并发结果 | expected_version、连续 sequence、CAS | [commit_reduction](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L234) |
 | 命令不重复生成身份 | command/idempotency/client identity 唯一；ENTRY generation 限制 | [commands](../../src/trading_kernel/domain/commands.py)、[pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | Review 可追溯且当前值唯一 | revision/supersedes 唯一；Aggregate 指针 | [revise_trade_review](../../src/trading_kernel/application/settle_ticket.py#L117) |
 
 ## 事务边界
 
-**PostgresKernelUnitOfWork 正常退出提交，异常退出回滚。** `commit_reduction` 在事务中追加 Event、CAS 更新 Aggregate、物化 Command/Incident/资源 effects；终态 Owner 投影失败会回滚整个转移。（来源：[UoW](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146)、[Owner projection 集成测试](../../tests/trading_kernel/integration/test_owner_projection.py)）
+**PostgresKernelUnitOfWork 正常退出提交，异常退出回滚。** `commit_reduction` 在事务中追加 Event、CAS 更新 Aggregate、物化 Command/Incident/资源 effects；终态 Owner 投影失败会回滚整个转移。（来源：[UoW](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L129)、[Owner projection 集成测试](../../tests/trading_kernel/integration/test_owner_projection.py)）
 
 **飞书通知仅在成功提交并关闭连接后异步发送。**它读取本次已提交的事件及数量快照，不增加投递表、重试或额外交易所查询；发送失败不改变交易事实。Runner 仅确认空仓时不推断成交均价或退出原因。（来源：[通知实现](../../src/trading_kernel/infrastructure/feishu_notice.py)、[通知契约](../current/OWNER_RUNTIME_OPERATING_MODEL.md)）
 
@@ -164,3 +164,7 @@ ORDER BY created_at_ms, command_id LIMIT 100;
 ```
 
 查询有界不代表必须手工 SQL 排障；优先使用 [Owner signals 接口](../../src/trading_kernel/interfaces/owner_console_http/routes/signals.py)与[Owner 查询仓储](../../src/trading_kernel/infrastructure/pg_owner_read_repository.py)。[只读 Signal 路径接口](../../src/trading_kernel/interfaces/read_signal_path.py)以 Shadow 行为起点，只适合已有研究采集的 Signal；空结果不表示 Signal 不存在。本地验证和 schema 约束测试见[代码与测试索引](CODE_AND_TEST_INDEX.md)。
+
+## 首尔通知投递（解释性）
+
+首尔产品使用 `brc_notice_outbox` 保存事务末尾的最终已核实快照和正文；消息与业务事件一并commit或rollback。冻结正文不授予任何交易权限。Reconciliation同一进程的隔离异步循环领取租约，事务外发送，CAS写入平台接受/有限重试/dead/superseded。没有路由时保留待发且不消耗尝试次数；最多5次尝试，超时后可能外部重复。Owner概览只读显示待发、失败和最近平台接受；接受不代表已读。实施边界见[通知计划](../superpowers/plans/2026-11-09-manual-notification-templates-v1.md)，线上状态只见[路线图](../current/MAIN_CONTROL_ROADMAP.md)。（来源：`notice_policy.py`、`pg_notice_outbox.py`、`notice_delivery.py` 与前向迁移0018。）

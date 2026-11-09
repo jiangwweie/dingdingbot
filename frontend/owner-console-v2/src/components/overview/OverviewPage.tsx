@@ -28,6 +28,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
     episodes,
     strategies,
     attentionList,
+    notificationDelivery,
     refetch,
   } = useOverviewData();
 
@@ -85,6 +86,13 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
         pulse={pulse}
         onNavigateToControls={onNavigateToControls}
       />
+
+      <div className="rounded border border-border bg-surface p-3 text-xs" aria-label="飞书通知投递状态">
+        <strong>首尔飞书通知</strong>
+        <span className="ml-3">{notificationDelivery?.channel_state === 'configured' ? '独立机器人已配置' : notificationDelivery?.channel_state === 'missing' ? '机器人未配置' : '通道待核实'}</span>
+        {notificationDelivery && <span className="ml-3">待发 {notificationDelivery.pending_count}{notificationDelivery.pending_count_capped ? '+' : ''} · 失败 {notificationDelivery.failed_count}{notificationDelivery.failed_count_capped ? '+' : ''}</span>}
+        <span className="ml-3 text-text-muted">{notificationDelivery?.last_accepted_at_ms ? `最近平台接受 ${new Date(notificationDelivery.last_accepted_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}` : '尚无平台接受记录'} · 不代表已读</span>
+      </div>
 
       {/* 2. 今日核心表现 (真实今日净收益 $ / 净 R / 今日信号与准入) */}
       <TodayMetricsDeck metrics={todayMetrics} />

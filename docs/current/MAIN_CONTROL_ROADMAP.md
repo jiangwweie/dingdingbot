@@ -66,6 +66,19 @@ acceptance, Initial Stop protection and actual App takeover remain separate
 unclaimed evidence. The installation procedure and approved sequence belong to
 the [installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 
+### Seoul notification V1 — local candidate, release verification pending2026-11-09
+
+Owner approved compact strategy-aware notices, frozen final facts, transactional
+Outbox, bounded retries and an independent Seoul Feishu robot. The independent
+credential has been saved through the private terminal without sending a message.
+Local implementation replaces the old daemon-thread sender, adds the exact
+0017→0018 forward migration and exposes display-only delivery status in Overview.
+ENTRY remains Owner-paused. No new production release or natural-event delivery
+is claimed by this implementation entry; exact certification and postflight are
+still required before promotion. Tokyo code/account/services are outside scope.
+Implementation and acceptance boundaries belong to the
+[notification plan](../superpowers/plans/2026-11-09-manual-notification-templates-v1.md).
+
 ### Seoul Google login — configured and browser-verified2026-11-09
 
 Independent Google Web client **BRC Manual Seoul Console** is configured in

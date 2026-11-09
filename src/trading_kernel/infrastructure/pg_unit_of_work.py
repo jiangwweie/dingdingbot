@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from functools import partial
 from types import TracebackType
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransaction
 from typing_extensions import Self
 
+from src.trading_kernel.application.notice_policy import build_notices
 from src.trading_kernel.application.ports import (
     AdmissionDecisionRepository,
     AggregateRepository,
@@ -39,7 +38,7 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.application.project_owner_state import (
     derive_terminal_owner_projection,
 )
-from src.trading_kernel.domain.aggregate import AggregateStatus
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.capacity import CapacityClaim
 from src.trading_kernel.domain.commands import (
     CancelCommandPayload,
@@ -75,14 +74,6 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
-    EntryAccepted,
-    ExternalFlatDetected,
-    ManagementReviewRequired,
-    ManualPositionObserved,
-    ManualTakeoverConfirmed,
-    PositionFlatConfirmed,
-    PostFillStressAssessed,
-    TakeProfitFilled,
     TicketIssued,
     TradeEvent,
 )
@@ -93,15 +84,6 @@ from src.trading_kernel.domain.incident_blocking import (
 from src.trading_kernel.domain.reducer import Reduction
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 from src.trading_kernel.domain.trade_management import ManagementMode
-from src.trading_kernel.infrastructure.feishu_notice import (
-    notify_entry_accepted,
-    notify_initial_protection,
-    notify_management_review,
-    notify_manual_risk_change,
-    notify_manual_takeover,
-    notify_runner_exited,
-    notify_tp1_filled,
-)
 from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
     PostgresDirectionalRiskRepository,
 )
@@ -114,6 +96,7 @@ from src.trading_kernel.infrastructure.pg_instrument_selection_repository import
 from src.trading_kernel.infrastructure.pg_management_repository import (
     PostgresManagementRepository,
 )
+from src.trading_kernel.infrastructure.pg_notice_outbox import enqueue_notice
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAdmissionDecisionRepository,
     PostgresAggregateRepository,
@@ -170,14 +153,17 @@ class PostgresKernelUnitOfWork:
         self._engine = engine
         self._connection: AsyncConnection | None = None
         self._transaction: AsyncTransaction | None = None
-        self._trade_notices: list[Callable[[], None]] = []
+        self._notice_changes: dict[
+            str, tuple[TradeAggregate | None, list[TradeEvent]]
+        ] = {}
 
     async def __aenter__(self) -> Self:
         if self._connection is not None:
             raise RuntimeError("unit of work is already active")
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
-        self.management = PostgresManagementRepository(self._connection)
+        self._management_repository = PostgresManagementRepository(self._connection)
+        self.management = self._management_repository
         self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
         self.aggregates = PostgresAggregateRepository(self._connection)
@@ -210,10 +196,32 @@ class PostgresKernelUnitOfWork:
     ) -> None:
         transaction = self._require_transaction()
         connection = self._require_connection()
-        notices = self._trade_notices
-        self._trade_notices = []
         try:
             if exc_type is None:
+                for ticket_id in self._management_repository.new_evidence:
+                    if ticket_id not in self._notice_changes:
+                        self._notice_changes[ticket_id] = (
+                            await self.aggregates.get(ticket_id),
+                            [],
+                        )
+                for ticket_id, (before, events) in self._notice_changes.items():
+                    final = await self.aggregates.get(ticket_id)
+                    if final is not None:
+                        position = await self.positions.get(
+                            final.identity.netting_domain.key()
+                        )
+                        for notice in build_notices(
+                            before,
+                            final,
+                            tuple(events),
+                            position,
+                            tuple(
+                                self._management_repository.new_evidence.get(
+                                    ticket_id, []
+                                )
+                            ),
+                        ):
+                            await enqueue_notice(connection, notice)
                 await transaction.commit()
             else:
                 await transaction.rollback()
@@ -221,9 +229,7 @@ class PostgresKernelUnitOfWork:
             await connection.close()
             self._transaction = None
             self._connection = None
-        if exc_type is None:
-            for notify in notices:
-                notify()
+            self._notice_changes.clear()
 
     async def commit_reduction(
         self,
@@ -235,9 +241,18 @@ class PostgresKernelUnitOfWork:
         self._require_connection()
         aggregate = reduction.aggregate
         if aggregate.management_mode is not ManagementMode.AUTO:
-            allowed=(ReleaseBudget,ReleaseCapitalAuthorities,ReleaseEntryLane,ProjectTerminalOwnerState,ResolveIncident,ResolveTicketIncidentsAtClosure)
-            if any(not isinstance(effect,allowed) for effect in reduction.effects):
-                raise UnsupportedKernelEffect("manual/review management forbids exchange effects")
+            allowed = (
+                ReleaseBudget,
+                ReleaseCapitalAuthorities,
+                ReleaseEntryLane,
+                ProjectTerminalOwnerState,
+                ResolveIncident,
+                ResolveTicketIncidentsAtClosure,
+            )
+            if any(not isinstance(effect, allowed) for effect in reduction.effects):
+                raise UnsupportedKernelEffect(
+                    "manual/review management forbids exchange effects"
+                )
         ticket_id = aggregate.identity.ticket_id
         current = await self.aggregates.get_for_update(ticket_id)
 
@@ -268,14 +283,9 @@ class PostgresKernelUnitOfWork:
             raise AggregateVersionConflict("event Ticket differs from reduction")
 
         await self.events.append(event)
-        if isinstance(event,PostFillStressAssessed) and event.status=='passed':
-            self._trade_notices.append(partial(notify_initial_protection,aggregate.ticket,event))
-        if isinstance(event,ManualPositionObserved) and current is not None and current.manual_risk_reason!=event.risk_reason:
-            self._trade_notices.append(partial(notify_manual_risk_change,aggregate.ticket,event))
-        if isinstance(event,ManagementReviewRequired) and current is not None and (current.management_mode is ManagementMode.AUTO or current.management_reason!=event.reason):
-            self._trade_notices.append(partial(notify_management_review,aggregate.ticket,event))
-        if isinstance(event,ManualTakeoverConfirmed):
-            self._trade_notices.append(partial(notify_manual_takeover,aggregate.ticket,event,remaining_qty=aggregate.position_qty))
+        if ticket_id not in self._notice_changes:
+            self._notice_changes[ticket_id] = (current, [])
+        self._notice_changes[ticket_id][1].append(event)
         for effect in reduction.effects:
             if isinstance(effect, PrepareEntryCommand):
                 claim = await self._initial_command_claim(effect.ticket)
@@ -572,9 +582,22 @@ class PostgresKernelUnitOfWork:
                 from src.trading_kernel.application.reconciliation_health import (
                     resolve_reconciliation_wait,
                 )
-                await resolve_reconciliation_wait(self, key=f"reconciliation-mismatch:{effect.ticket_id}", now_ms=event.occurred_at_ms)
-                await resolve_reconciliation_wait(self, key=f"reconciliation-closure:{effect.ticket_id}", now_ms=event.occurred_at_ms)
-                await resolve_reconciliation_wait(self, key=f"reconciliation-overdue:{effect.ticket_id}", now_ms=event.occurred_at_ms)
+
+                await resolve_reconciliation_wait(
+                    self,
+                    key=f"reconciliation-mismatch:{effect.ticket_id}",
+                    now_ms=event.occurred_at_ms,
+                )
+                await resolve_reconciliation_wait(
+                    self,
+                    key=f"reconciliation-closure:{effect.ticket_id}",
+                    now_ms=event.occurred_at_ms,
+                )
+                await resolve_reconciliation_wait(
+                    self,
+                    key=f"reconciliation-overdue:{effect.ticket_id}",
+                    now_ms=event.occurred_at_ms,
+                )
                 continue
             raise UnsupportedKernelEffect(
                 f"no durable materializer for {type(effect).__name__}"
@@ -603,35 +626,6 @@ class PostgresKernelUnitOfWork:
                 ticket_id,
                 status="terminal",
                 terminal_at_ms=event.occurred_at_ms,
-            )
-
-        if isinstance(event, EntryAccepted):
-            self._trade_notices.append(
-                partial(notify_entry_accepted, aggregate.ticket, event)
-            )
-        elif isinstance(event, TakeProfitFilled):
-            self._trade_notices.append(
-                partial(
-                    notify_tp1_filled,
-                    aggregate.ticket,
-                    event,
-                    remaining_qty=aggregate.position_qty,
-                )
-            )
-        elif (
-            isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected))
-            and current is not None
-            and current.tp1_filled_qty > 0
-            and current.position_qty > 0
-            and aggregate.position_qty == 0
-        ):
-            self._trade_notices.append(
-                partial(
-                    notify_runner_exited,
-                    aggregate.ticket,
-                    event,
-                    previous_qty=current.position_qty,
-                )
             )
 
     async def _next_retryable_generation(

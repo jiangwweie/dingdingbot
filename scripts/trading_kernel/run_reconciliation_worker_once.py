@@ -40,7 +40,8 @@ from src.trading_kernel.interfaces.reconciliation_worker import (
     run_reconciliation_worker_once,
 )
 from src.trading_kernel.interfaces.worker_process import (
-    run_worker_process,
+    WorkerProcessLoop,
+    run_worker_process_group,
 )
 
 
@@ -167,12 +168,25 @@ async def _run(args: argparse.Namespace) -> int:
             )
 
 
-        return await run_worker_process(
-            tick,
+        from src.trading_kernel.infrastructure.feishu_notice import load_feishu_channel
+        from src.trading_kernel.infrastructure.notice_delivery import deliver_one_notice
+
+        channel = load_feishu_channel(os.environ.get("TRADING_KERNEL_SEOUL_FEISHU_WEBHOOK_URL"))
+
+        async def notice_tick():
+            return await deliver_one_notice(engine, channel, now_ms=int(time.time() * 1000))
+
+        return await run_worker_process_group(
+            (
+                WorkerProcessLoop(component_id="reconciliation", tick=tick,
+                    poll_interval_ms=args.poll_interval_ms,
+                    idle_statuses=frozenset({"no_work", "account_position_audited"})),
+                WorkerProcessLoop(component_id="notifications", tick=notice_tick,
+                    poll_interval_ms=1000,
+                    idle_statuses=frozenset({"no_work", "channel_missing"})),
+            ),
             run_forever=args.run_forever,
-            poll_interval_ms=args.poll_interval_ms,
             idle_log_interval_ms=args.idle_log_interval_ms,
-            idle_statuses={"no_work", "account_position_audited"},
         )
     finally:
         close = getattr(adapter, "close", None)

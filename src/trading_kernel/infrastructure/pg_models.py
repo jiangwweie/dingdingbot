@@ -3168,3 +3168,35 @@ management_observation_current = sa.Table("brc_management_observation_current",m
     sa.Column("ticket_id",ID,sa.ForeignKey("brc_trade_tickets.ticket_id"),primary_key=True),
     _time("covered_until_ms"),sa.Column("facts_complete",sa.Boolean,nullable=False),sa.Column("reason",LONG_TEXT),_time("updated_at_ms"))
 sa.Index("uq_brc_app_active_instrument",trade_tickets.c.venue_id,trade_tickets.c.account_id,trade_tickets.c.exchange_instrument_id,unique=True,postgresql_where=trade_tickets.c.terminal_at_ms.is_(None))
+
+# Display-only transactional delivery. No consumer may use this as trade authority.
+notice_outbox = sa.Table(
+    'brc_notice_outbox', metadata,
+    sa.Column('sequence', sa.BigInteger, sa.Identity(), primary_key=True),
+    sa.Column('notice_key', ID, nullable=False, unique=True),
+    sa.Column('stream_key', ID, nullable=False),
+    sa.Column('ticket_id', ID, sa.ForeignKey('brc_trade_tickets.ticket_id')),
+    sa.Column('kind', SHORT_TEXT, nullable=False),
+    sa.Column('state_version', sa.BigInteger, nullable=False),
+    sa.Column('snapshot', JSONB, nullable=False),
+    sa.Column('payload', sa.Text, nullable=False),
+    sa.Column('delivery_payload', sa.Text),
+    sa.Column('template_version', SHORT_TEXT, nullable=False),
+    sa.Column('channel', SHORT_TEXT, nullable=False),
+    sa.Column('status', SHORT_TEXT, nullable=False, server_default='pending'),
+    sa.Column('attempts', sa.Integer, nullable=False, server_default='0'),
+    sa.Column('next_attempt_at_ms', sa.BigInteger, nullable=False),
+    sa.Column('lease_token', ID),
+    sa.Column('lease_until_ms', sa.BigInteger),
+    sa.Column('accepted_at_ms', sa.BigInteger),
+    sa.Column('last_error', SHORT_TEXT),
+    sa.Column('created_at_ms', sa.BigInteger, nullable=False),
+    sa.Column('updated_at_ms', sa.BigInteger, nullable=False),
+    sa.CheckConstraint("status IN ('pending','delivering','retry','accepted','dead','superseded')", name='state_valid'),
+    sa.CheckConstraint('attempts BETWEEN 0 AND 5', name='attempts_valid'),
+)
+sa.Index('ix_brc_notice_outbox_actionable', notice_outbox.c.next_attempt_at_ms, notice_outbox.c.sequence,
+         postgresql_where=notice_outbox.c.status.in_(['pending','retry','delivering']))
+sa.Index('ix_brc_notice_outbox_stream', notice_outbox.c.stream_key, notice_outbox.c.sequence)
+
+sa.Index("ix_brc_notice_outbox_delivery", notice_outbox.c.status, notice_outbox.c.sequence)

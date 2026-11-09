@@ -56,9 +56,9 @@ async def test_manual_missing_stop_marks_account_blocker_in_current_projection(
 
 @pytest.mark.asyncio
 async def test_changed_manual_protection_notifies_after_committed_reduction(head_template_engine, monkeypatch):
-    from src.trading_kernel.infrastructure import pg_unit_of_work as pg
-    calls = []
-    monkeypatch.setattr(pg, "notify_manual_risk_change", lambda *a: calls.append(a))
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import notice_outbox
     e = head_template_engine
     t = registered_sor_long_ticket()
     await reach_position_protected(e, t)
@@ -72,5 +72,5 @@ async def test_changed_manual_protection_notifies_after_committed_reduction(head
         await reconcile_ticket(u, ReconcileTicketRequest(ticket_id=t.identity.ticket_id,
             snapshot=PositionSnapshot(netting_domain=t.identity.netting_domain,
                 quantity=t.quantity, average_entry_price=Decimal(60000), observed_at_ms=6000)))
-        assert not calls
-    assert len(calls) == 1
+    async with e.connect() as c:
+        assert await c.scalar(sa.select(sa.func.count()).select_from(notice_outbox).where(notice_outbox.c.kind=="risk")) == 1

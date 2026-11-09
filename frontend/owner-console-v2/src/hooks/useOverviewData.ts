@@ -338,6 +338,7 @@ export function useOverviewData() {
   };
 
   return {
+    notificationDelivery: rawOverview?.notification_delivery,
     isLoading,
     isError,
     error,

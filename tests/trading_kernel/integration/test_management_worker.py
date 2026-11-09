@@ -11,6 +11,7 @@ from src.trading_kernel.domain.trade_management import (
     OrderTerms,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
 from src.trading_kernel.interfaces.management_observation_worker import (
     observe_management_once,
 )
@@ -254,7 +255,7 @@ async def test_selected_auto_ticket_observed_before_legacy_position_reconciliati
         netting_domain=t.identity.netting_domain, quantity=Decimal(0), average_entry_price=None, observed_at_ms=6000)
     await _run_reconciliation_worker_once_core_impl(lambda:PostgresKernelUnitOfWork(e), AsyncMock(), source,
         ReconciliationWorkerRequest(worker_id='selected-ticket', runtime_commit='kernel-test-head',
-            schema_revision='0017_app_management_observation', now_ms=6000, timeout_seconds=1,
+            schema_revision=CURRENT_SCHEMA_REVISION, now_ms=6000, timeout_seconds=1,
             unknown_visibility_grace_ms=30000, idle_poll_interval_ms=1000),
         unknown=None, aggregate=a)
     source.read_management_scan.assert_awaited_once()
@@ -320,7 +321,7 @@ async def test_selected_auto_ticket_still_reconciles_after_complete_scan(head_te
     source.read_position_snapshot.return_value = snap
     await _run_reconciliation_worker_once_core_impl(lambda:PostgresKernelUnitOfWork(e), AsyncMock(), source,
         ReconciliationWorkerRequest(worker_id='selected-ticket', runtime_commit='kernel-test-head',
-            schema_revision='0017_app_management_observation', now_ms=6000, timeout_seconds=1,
+            schema_revision=CURRENT_SCHEMA_REVISION, now_ms=6000, timeout_seconds=1,
             unknown_visibility_grace_ms=30000, idle_poll_interval_ms=1000), unknown=None, aggregate=a)
     source.read_management_scan.assert_awaited_once()
     source.read_position_snapshot.assert_awaited_once()
