@@ -1,138 +1,74 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-08
+last_verified: 2026-11-09
 ---
 
 # Main Control Roadmap
 
 ## App Product Workspace Status
 
-### Owner all-capability restoration — in progress2026-11-08
+### Seoul engineering restoration complete — Owner ENTRY paused2026-11-09
 
-#### Continued2026-11-09
+This is the independent **`brc-app-manual-v1`** product in
+`/Users/jiangwei/Documents/final-manual`, integrated/pushed on `manual-dev`.
+Owner comprehensive local validation is authorized and has completed for the exact
+release recorded here; independent Seoul installation and restoration are authorized.
+Kernel, Owner API and static are installed from exact
+**`d82825de820ee784b3711e94492daf554d55d95b`**, schema
+**`0017_app_management_observation`**, immutable tag
+**`manual-runtime-2026.11.09.1`**. Later documentation-only commits do not change
+that certified runtime identity. Tokyo `dev`, account and services were not changed.
 
-Exact **`877a0d4f619c1ff682a8e20e61887c61a81af187`** is now installed on Seoul,
-schema0017 unchanged. R4 PASS:1978 Unit/Architecture,1850 Integration,74 Full-chain,
-Ruff/Mypy229,961 Golden snapshots/23064 decisions; same-commit API/static PASS.
-All five writers stopped before staging/cutover; canonical identity transition
-preserved every nonidentity/capability table row digest and every Policy/strategy/
-Selection control. Sourceba6c→877a preservation PASS. Kernel/API/static and
-three safety Python Workers match877a; no restart loops, Ticket/Command/Incident.
+Owner requested restoring all capabilities and approved validating real App
+intervention during naturally signalled trading, retaining the existing budget
+and every risk gate. Actual App actions and natural trade acceptance remain
+unverified until observed. After engineering postflight passed, Owner explicitly
+selected **temporarily keeping global ENTRY closed**. This current instruction
+is the sole live posture: no new-entry authorization is inferred from deployment,
+service activity, chat approval or the absence of an operational fence.
 
-Four Generic Specs are installed from fresh96-archive numeric certification.
-Static mode is retained; MPG/MI comparison bindings match the current seven-member
-Static Universe at revision0. SOR-001/TradFi/SOR-1H remain paused; no artificial
-Signal, Ticket, order or Owner Resume was created.
+| Boundary | Direct evidence |
+| --- | --- |
+| Exact certification | R4 PASS: 1978 Unit/Architecture, 1850 Integration, 74 Full-chain; Ruff, Mypy 229, 961 Golden snapshots / 23064 decisions; same-commit API/static PASS |
+| Independent binding | Seoul `43.133.243.174`, machine `f956f502ced4461e9d0fcc0ef637abd6`; account `binance-manual-1290716840`; PG `brc_manual_kernel` / system `7705780580898177062`; host/product/PG/runtime identities match |
+| Cutover | All five writers stopped; same-schema identity transition only. Every nonidentity/capability table row count/digest plus Policy, strategy and Selection controls preserved across both stopped upgrades |
+| Processes | Four actual Python Workers plus independent Owner API active, matching commit/schema, NRestarts0; root0600 runtime environment; Entry process is real Python rather than a fence-wait shell |
+| Operational permission | Official `promote_entry` returned `prepared_owner_paused`; maintenance file absent; current-enabled-scope readiness, database integrity, rules, seven Crypto certifications and Cross/5x/independent sides PASS |
+| Owner permission | Policy3/new_entry_submit_enabled=false; no fabricated Resume/TOTP. Owner explicitly chose to keep ENTRY closed after receiving the ready-to-enable prompt |
+| Strategy and Selection | CPM/MPG/MI/BRF2 enabled and initial Static; four numeric-certified Generic Specs installed. MPG/MI bind the exact current seven-member Static comparison/revision0. SOR-001, SOR-1H and TradFi remain paused; Dynamic still requires genuine Owner control |
+| Risk and account | Baseline 2%, gross 6%, minimum materialization 50%, three-Ticket ceiling unchanged. Preflight available balance 2500 USDT; account/order probes were readonly, no mode/leverage/credential changes |
+| HTTP | Static200, unauthenticated controlPOST401; blanket Nginx write deny removed. Login, Origin/Host, TOTP and application business guards remain active. Owner confirmed actual browser login |
+| Final flatness | No Ticket, Command, position or open Incident. No test order, artificial Signal/Ticket, manual ARMED or Feishu test was created |
 
-Inner current-enabled-scope restoration now passes, but the outer readonly
-certificate still applied the full Registry Universe set and rejected missing
-paused TradFi pointers. Consequently the official promoter refused; ENTRY remains
-fenced/inactive and Policy3 remains paused. This is an actual engineering gate,
-not a request to repeat Owner authorization. A follow-up exact candidate changes
-the wrapper to use the inner projection's explicit enabled Event IDs and keeps
-all database, digest, no-warming, identity, flatness and Owner gates. The new
-regression checks the real outer certificate, including valid retirement of
-paused scope and rejection when an enabled Event is missing. Earlier fixture-only
-deletion had left active orphan scopes and was corrected without weakening integrity.
+Final server postflight at **2026-11-09 09:46:22 Asia/Shanghai** passed every
+engineering-restoration check. Evidence lives under
+`.local/manual-install-20261108/`: `restore-certification-*.log`,
+`restoration-stage-upgrade.log`, `restoration-activate-upgrade.log`,
+`restored-spec-installation.json`, `restoration-entry-promotion.json`, and
+`owner-paused-delivery-postflight.json`. Original failed snapshots and per-candidate
+logs remain preserved. The private terminal normalized the original password's
+hash to the existing Console parameters; password, TOTP and exchange keys did
+not change. No new secret input is required.
 
-Owner explicitly requested full capability restoration and approved actual App
-operation acceptance during natural trading, retaining all budgets and risk gates.
-Actual App evidence remains unverified; it is no longer a prerequisite before the
-controlled live trial. Owner confirmed browser login. Canonical Console control
-routes have replaced the temporary Nginx write deny; application authentication,
-Origin/Host, TOTP and business gates remain intact.
+The delivered repair closes fresh Static Comparison binding and aligns both the
+inner restoration projection and outer certificate with current Owner-enabled
+Events. Missing enabled Event scope, incorrect member digests, integrity gaps,
+stale certification, exposure, unknown result, identity drift or insufficient
+Owner proof still reject restoration. Paused strategies remain in the drift
+basis. The old conflicting hourly-cutover assertion was updated with an explicit
+negative case: enabling an unprepared hourly Event must fail.
 
-Current source remains the exact installed commit recorded below. Independent
-Worker environment is root0600; Observation/Lifecycle/Reconciliation are active.
-Command capability was prepared through canonical arm+pause in one transaction,
-with committed global ENTRY false and no fabricated Owner Resume. Crypto initial
-six-Event Universe bootstrap and seven-member certifications completed; SOR-001
-remains paused. SOR-1H capability/bootstrap was installed without resuming its
-paused strategy. A paused TradFi warming target was abandoned through the Kernel,
-preserving its pause and history; no exchange order was submitted.
+Control operations and the normal runtime are restored. ENTRY may later be
+opened only through the existing Console Owner/TOTP control when the Owner
+intends it. No immediate order or profitability is promised; natural ENTRY
+acceptance, Initial Stop protection and actual App takeover remain separate
+unclaimed evidence. The installation procedure and approved sequence belong to
+the [installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 
-The next candidate repairs fresh Static Comparison binding for MPG/MI and ensures
-ENTRY restoration uses only enabled Events/profiles, retaining every current
-control in the drift digest. It adds explicit stopped-flat, same-schema manual
-upgrade with per-table row preservation. Focused restoration/Comparison tests
-passed55 and Unit/Architecture1978; exact new-candidate certification is pending.
-Numeric source certification reran96 archives: all four Spec sets and common/SOR
-PASS, zero mismatches. Current ENTRY remains fenced/inactive; no trading claim.
-
-This branch is the **App manual-takeover product**, integrated on `manual-dev`
-in `/Users/jiangwei/Documents/final-manual`. Product identity is **`brc-app-manual-v1`**.
-**No trading runtime has been activated for this product.** Owner has confirmed
-creation of an independent subaccount and authorized completion of independent
-Seoul installation; credentials will be provided through a private terminal when
-needed. The previous comprehensive local validation is authorized and complete
-for its exact candidate; later installation changes require their own exact evidence.
-
-Infrastructure directly verified on 2026-11-08: Seoul host `43.133.243.174`,
-root machine identity `f956f502ced4461e9d0fcc0ef637abd6`, independent Python,
-Docker, clock synchronization and `manual.jiaoyingpan.cloud` HTTPS maintenance.
-The initial host had no runtime release, app database, exchange credentials or
-trade units. Inactive installation and fresh database preparation are now being
-completed under the [new-host installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
-ENTRY stays fenced until account identity, current facts and App acceptance gates pass.
-Fresh private enrollment has now verified the independent Seoul subaccount UID,
-reading/futures/IP permissions, disabled withdrawal/transfer capabilities, hedge
-and single-asset mode, and zero positions/open orders. Protected exchange and Owner
-credentials exist with root-only0600 permissions; Owner confirmed authenticator enrollment.
-No trade Worker or Owner API was active in the direct pre-installation inspection.
-The next exact candidate adds explicit Console origin binding and atomic fresh-account
-initialization with retired SOR-001 paused. It will install a read-only Console first;
-trade Workers and exchange-write capability remain disabled pending the separate
-market, real App protocol and Owner ENTRY gates. Current account facts are refreshed
-at initialization rather than inferred from the enrollment receipt.
-
-### Seoul inactive account installation — 2026-11-08
-
-Kernel/API/static artifacts installed from exact **`ba6c23242160981c189d7d5ef4853d2c0ea7a076`**,
-schema **`0017_app_management_observation`**. Exact R4 PASS:1967 Unit/Architecture,
-1846 Integration,74 Full-chain; Ruff, Mypy228,961 Golden snapshots and23064 Core
-decisions PASS. Same-commit API and static certificates PASS. This is an inactive
-installation, not an enabled trading release.
-
-Direct binding: manual product, Seoul machine `f956f502ced4461e9d0fcc0ef637abd6`,
-independent account `binance-manual-1290716840`, PostgreSQL `brc_manual_kernel`,
-system identifier `7705780580898177062`. The official seed and existing strategy
-pause transition ran atomically. Global ENTRY is false, exchange_commands is
-false, SOR-001/TradFi/SOR-1H are paused, baseline2%/gross6%/materialization50% remain
-unchanged. No Ticket, Command, open Incident or trading Worker exists; no trading
-environment file has been installed. ENTRY maintenance fence remains present.
-
-HTTPS static200, root302, unauthenticated401, control-write403 and Unix-socket
-API health **all PASS** in the final direct postflight. Owner API is active with
-NRestarts0; all four trade Workers are inactive/disabled. The enrollment script's
-argon2-cffi default parallelism4 mismatch with Console parallelism1 was diagnosed
-and corrected in source. Owner privately verified the original password and
-normalized its stored hash through the already installed canonical hasher; password,
-TOTP and exchange credentials are unchanged. The repair passed1968 Unit/Architecture
-tests plus Ruff/Mypy. No certificate is transferred to the later enrollment-only
-source repair SHA; installed artifacts remain at the exact certified commit above.
-
-Independent account initialization and read-only Console installation are complete.
-Market runtime certifications, real App operation coverage, trade Worker activation
-and genuine Owner ENTRY authorization remain separate. Current account read probes
-verified2500USDT available, initial seven members Cross/5x, official adapter rules
-and a connected private order-event subscription; zero orders were submitted.
-Subscription connection and local tests do not prove actual App actions.
-
-Evidence: `.local/manual-install-20261108/`, including exact certification logs,
-installation receipts, account preflights, the failed initial `console-postflight.json`,
-successful `console-postflight-after-password.json` and private password-normalization
-receipt. Tokyo `dev` and runtime were not changed. Owner can authenticate at
-`https://manual.jiaoyingpan.cloud/trading/`; only read operations are published at
-this stage. This postflight does not claim a successful Owner browser login,
-actual App intervention acceptance or live trading capability.
-Historical [local validation and preparation](../superpowers/plans/2026-11-08-manual-validation-release-preparation.md)
-records a preceding stage, not a new deployment approval requirement.
-
-The Tokyo release snapshots retained below are inherited historical evidence,
-not current state or authority for this product and not a fresh Tokyo verification.
-The auto product's current roadmap remains in its separate `dev` workspace.
-The workspace update did not grant new trading permission or modify Tokyo.
+All Tokyo production snapshots retained below are inherited historical evidence,
+not this product's current runtime state. The automatic product retains its own
+roadmap and deployment identity in its separate `dev` workspace.
 
 ## Final Target
 
