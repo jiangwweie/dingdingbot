@@ -36,4 +36,3 @@ def test_manual_install_loads_entry_budget_after_shared_environment(tmp_path):
     dropin = (tmp_path / "systemd/system/brc-trading-kernel-entry-worker.service.d/entry-runtime.conf").read_text()
     assert "EnvironmentFile=/etc/brc/trading-kernel-entry.env" in dropin
     assert not list((tmp_path / "systemd/system").glob("*lifecycle*.service.d/*"))
-

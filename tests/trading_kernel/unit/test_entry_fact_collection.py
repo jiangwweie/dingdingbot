@@ -85,4 +85,3 @@ async def test_read_diagnostics_separates_http_from_throttle_without_urls(caplog
     assert row["http_ms"] >= 1
     assert row["http_reads"] == 1
     assert "signature" not in caplog.text
-
