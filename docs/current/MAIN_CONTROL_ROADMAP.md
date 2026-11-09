@@ -66,6 +66,35 @@ acceptance, Initial Stop protection and actual App takeover remain separate
 unclaimed evidence. The installation procedure and approved sequence belong to
 the [installation plan](../superpowers/plans/2026-11-08-manual-new-host-installation.md).
 
+### Seoul Google login — configured and browser-verified2026-11-09
+
+Independent Google Web client **BRC Manual Seoul Console** is configured in
+the existing Google project `brc-owner-console-20261022`, client ID
+`979319422294-on9bb6rva1c8tld8ls9fsqql6udkttu2.apps.googleusercontent.com`.
+Its only authorized origin is `https://manual.jiaoyingpan.cloud`; callback is
+`https://manual.jiaoyingpan.cloud/api/owner/v1/auth/google/callback`.
+The original Tokyo client and server configuration were not changed or reused
+as the new client credential. The existing verified Owner email
+`jiangwei4wh@gmail.com` and fixed Google subject identify the same allowed Owner;
+the subject fingerprint matches the reference identity. No Client Secret, token,
+authorization code, nonce, state or Cookie was printed or placed in Git.
+
+The independent credential is root0600 at the existing systemd credential
+boundary; its canonical `LoadCredential` drop-in is installed. Only Owner API
+was restarted, active/NRestarts0. All four trading Worker PIDs are unchanged.
+Runtime Kernel/API/static commit and release tag remain the certified identity
+above. The offline preparation helper's callback default was corrected for this
+product; this does not replace the installed runtime or transfer a certificate.
+
+Direct providers200 returns `google_login=true`, `google_binding=false`.
+Start303 targets Google with the independent client, exact Seoul callback,
+openid/email only, PKCE S256, state and nonce. Real Chrome OAuth completed with
+the allowed Owner, returned `google_result=success`, and displayed the protected
+Console with the logout action. Unauthenticated session still401. Original
+password/TOTP emergency login and sensitive-control TOTP remain available;
+global ENTRY is still false. Focused Google/runner/deployment verification
+passed60 tests plus Ruff/diff. Evidence: `.local/manual-google-login-20261109/`.
+
 All Tokyo production snapshots retained below are inherited historical evidence,
 not this product's current runtime state. The automatic product retains its own
 roadmap and deployment identity in its separate `dev` workspace.

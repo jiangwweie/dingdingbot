@@ -6,6 +6,10 @@ import pytest
 from scripts.owner_console.prepare_google_credential import CALLBACK, prepare
 
 
+def test_manual_product_prepares_only_its_own_callback():
+    assert CALLBACK == "https://manual.jiaoyingpan.cloud/api/owner/v1/auth/google/callback"
+
+
 def test_owner_preparation_keeps_secret_off_stdout_and_writes_private_file(
     tmp_path: Path, capsys
 ):

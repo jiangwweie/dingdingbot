@@ -19,7 +19,7 @@ from src.trading_kernel.interfaces.owner_console_http.google_oidc import (
     GoogleOidcSettings,
 )
 
-CALLBACK = "https://jiaoyingpan.cloud/api/owner/v1/auth/google/callback"
+CALLBACK = "https://manual.jiaoyingpan.cloud/api/owner/v1/auth/google/callback"
 
 
 def prepare(
