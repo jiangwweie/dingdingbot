@@ -1466,6 +1466,12 @@ async def _certify(
         expected_event_specs=expected_event_specs,
         expected_member_ids=None,
     )
+    entry_enabled_events=set(entry_restoration.enabled_event_spec_ids)
+    entry_current_universe_identity_pass=bool(entry_enabled_events) and _universe_manifest_matches(
+        [row for row in active_universe_manifest if row['event_spec_id'] in entry_enabled_events],
+        expected_event_specs=tuple(item for item in expected_event_specs if item[1] in entry_enabled_events),
+        expected_member_ids=None,
+    )
     warming_universe_manifest = [
         {
             "event_spec_id": str(row["event_spec_id"]),
@@ -1642,10 +1648,12 @@ async def _certify(
         "flatness_pass": flatness_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
         "entry_promotion_pass": entry_promotion_pass,
-        "entry_recovery_ready": bool(database_integrity_pass and universe_identity_pass
+        "entry_recovery_ready": bool(database_integrity_pass and entry_current_universe_identity_pass
             and seed_identity["status"] == "pass" and registry_identity["status"] == "pass"
             and warming_scope_count == 0 and not warming_universe_manifest and entry_restoration.ready),
         "owner_entry_resume_authorized": entry_restoration.owner_resume_authorized,
+        "entry_current_universe_identity_pass":entry_current_universe_identity_pass,
+        "entry_enabled_event_spec_ids":list(entry_restoration.enabled_event_spec_ids),
         "entry_recovery_basis_digest": entry_restoration.basis_digest,
         "entry_recovery_members": list(entry_restoration.member_ids),
         "entry_recovery_account_id": entry_restoration.account_id,

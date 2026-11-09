@@ -69,6 +69,9 @@ def test_paused_strategy_without_current_universe_does_not_block_enabled_crypto(
         engine=create_async_engine(url)
         try:
             async with engine.begin() as c:
+                params={'group':target}
+                await c.execute(sa.text("UPDATE brc_runtime_scopes_current SET lifecycle_state='retired',observation_enabled=false,entry_enabled=false WHERE strategy_group_id=:group"),params)
+                await c.execute(sa.text("UPDATE brc_strategy_universe_versions SET lifecycle_state='retired',retired_at_ms=:at WHERE strategy_group_id=:group AND lifecycle_state='active'"),{**params,'at':NOW_MS+9000})
                 await c.execute(sa.text('DELETE FROM brc_strategy_universe_current WHERE event_spec_id IN (SELECT e.event_spec_id FROM brc_event_specs e JOIN brc_strategy_versions v USING(strategy_version_id) WHERE v.strategy_group_id=:group)'),{'group':target})
             async with engine.connect() as c:
                 await c.execute(sa.text('SET TRANSACTION READ ONLY'))
@@ -76,6 +79,8 @@ def test_paused_strategy_without_current_universe_does_not_block_enabled_crypto(
                 assert state.ready is ready
                 if ready:
                     assert not any(any(stock in member for stock in ('AAPL','MSFT','NVDA','TSLA','SNDK','GOOGL','META','AMZN')) for member in state.member_ids)
+            certificate=await _certify(url,require_flat=True,now_ms=NOW_MS+10000)
+            assert certificate['entry_recovery_ready'] is ready
         finally:await engine.dispose()
     try:asyncio.run(check())
     finally:asyncio.run(_cleanup(name))

@@ -10,6 +10,32 @@ last_verified: 2026-11-08
 
 ### Owner all-capability restoration — in progress2026-11-08
 
+#### Continued2026-11-09
+
+Exact **`877a0d4f619c1ff682a8e20e61887c61a81af187`** is now installed on Seoul,
+schema0017 unchanged. R4 PASS:1978 Unit/Architecture,1850 Integration,74 Full-chain,
+Ruff/Mypy229,961 Golden snapshots/23064 decisions; same-commit API/static PASS.
+All five writers stopped before staging/cutover; canonical identity transition
+preserved every nonidentity/capability table row digest and every Policy/strategy/
+Selection control. Sourceba6c→877a preservation PASS. Kernel/API/static and
+three safety Python Workers match877a; no restart loops, Ticket/Command/Incident.
+
+Four Generic Specs are installed from fresh96-archive numeric certification.
+Static mode is retained; MPG/MI comparison bindings match the current seven-member
+Static Universe at revision0. SOR-001/TradFi/SOR-1H remain paused; no artificial
+Signal, Ticket, order or Owner Resume was created.
+
+Inner current-enabled-scope restoration now passes, but the outer readonly
+certificate still applied the full Registry Universe set and rejected missing
+paused TradFi pointers. Consequently the official promoter refused; ENTRY remains
+fenced/inactive and Policy3 remains paused. This is an actual engineering gate,
+not a request to repeat Owner authorization. A follow-up exact candidate changes
+the wrapper to use the inner projection's explicit enabled Event IDs and keeps
+all database, digest, no-warming, identity, flatness and Owner gates. The new
+regression checks the real outer certificate, including valid retirement of
+paused scope and rejection when an enabled Event is missing. Earlier fixture-only
+deletion had left active orphan scopes and was corrected without weakening integrity.
+
 Owner explicitly requested full capability restoration and approved actual App
 operation acceptance during natural trading, retaining all budgets and risk gates.
 Actual App evidence remains unverified; it is no longer a prerequisite before the

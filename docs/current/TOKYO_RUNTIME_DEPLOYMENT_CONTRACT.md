@@ -46,7 +46,14 @@ continue to enforce the global pause on every admission/dispatch.
 
 Restoration reads one repeatable-read readonly PostgreSQL snapshot. Its
 `entry_recovery_members` is the exact canonical union of current Active Universe
-members, not a fixed initial symbol list and not a caller-supplied subset.
+members for currently Owner-enabled Events, not a fixed initial symbol list or
+a caller-supplied subset. Owner-paused Events do not require a current tradable
+Universe to restore other enabled Events. Their controls remain bound in the
+same drift digest; missing controls or missing enabled Event scope still fail.
+Both the readonly certificate wrapper and its inner restoration projection must
+apply this identical enabled-event scope, while database integrity, exact member
+digests and global account flatness remain mandatory. The dedicated Entry probe
+uses that same authoritative member union and audits the entire external account.
 Current Event/Profile coverage, scope completeness, Universe digests, eligible
 fresh certification facts, 5x/Cross/independent sides, Runtime Capability,
 Registry/Commit/Schema/Seed and flatness must pass. The current Policy's resume

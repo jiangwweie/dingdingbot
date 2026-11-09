@@ -33,6 +33,7 @@ class EntryRestorationState(BaseModel):
     owner_resume_authorized: bool
     account_id: str
     member_ids: tuple[str, ...]
+    enabled_event_spec_ids: tuple[str, ...] = ()
     basis_digest: str
     valid_until_ms: int
     control_posture_digest: str
@@ -299,6 +300,7 @@ async def read_entry_restoration_state(
         owner_resume_authorized=owner_resume,
         account_id=account_id,
         member_ids=members,
+        enabled_event_spec_ids=tuple(sorted(expected_events)),
         basis_digest="sha256:"
         + sha256(
             json.dumps(
