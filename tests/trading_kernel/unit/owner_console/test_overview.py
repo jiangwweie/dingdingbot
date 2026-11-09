@@ -64,6 +64,17 @@ def test_open_owner_incident_wins_over_normal_monitor_rows() -> None:
     assert overview.conclusion.evidence[0].identity == "incident:1"
 
 
+def test_entry_fact_failure_is_attention_despite_fresh_account_audit():
+    facts=overview_facts(runtime_freshness=Freshness.FRESH,
+        monitor_keys=("entry-facts:binance-usdm:test","account:binance-usdm:position-audit"),
+        monitor_statuses=("temporarily_unavailable","running"),
+        monitor_updated_at_ms=(1_800_000_009_000,1_800_000_010_000),
+        attention_incident_ids=(), evidence_gaps=())
+    result=build_owner_overview(facts,now_ms=1_800_000_010_000)
+    assert result.conclusion.level=="attention"
+    assert result.conclusion.evidence[0].identity=="entry-facts:binance-usdm:test"
+
+
 @pytest.mark.parametrize(
     (
         "overrides",
