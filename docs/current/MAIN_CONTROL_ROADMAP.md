@@ -36,6 +36,29 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Seoul genuine Owner Resume after Entry repair — ENTRY enabled2026-11-09
+
+At **2026-11-09 16:59:10 Asia/Shanghai**, genuine Console
+**entry_resume / totp_step_up** created **Policy6/true**. Installed readonly
+certification verifies **owner_entry_resume_authorized=true**, exact release
+identity, current enabled-scope readiness, risk-budget authority and database
+integrity PASS; maintenance fence absent. This supersedes the Policy5 maintenance
+pause below; runtime release and certified Entry10s/30s/final-send5s are unchanged.
+
+At **2026-11-09 17:06:13 Asia/Shanghai**, current Active-Universe readiness for
+BRF2/MI/MPG is signal_absent7 scopes each, SOR-1H signal_absent14 scopes;
+CPM remains deliberately paused7 scopes. The real17:00 close was observed;
+no new signal/admission/Ticket/Command or notice since this release in the
+bounded query. Exchange readonly verification confirms independent account/mode,
+flatness and no regular/conditional orders; BNB fee burn is available. Four
+Workers/API active with NRestarts0, Entry actual10s/30000ms, other Workers5s/5000ms;
+overview freshness fresh. Natural trading/App/phone-delivery acceptance remains
+unverified until directly observed. No agent-created Resume, order or control mutation.
+
+Evidence: `.local/entry-facts-repair/owner-resumed-postflight.json`,
+`owner-resumed-chain.json`, `owner-resumed-logs.json` and current signed
+`entry-readiness-current-details.json` in the attached release worktree.
+
 ### Seoul Entry fact timing repair — installed and Owner-paused2026-11-09
 
 Owner approved the Tokyo-compared **Entry10s collection timeout /30s action-fact
