@@ -138,6 +138,8 @@ class PostgresManagementRepository(PostgresManagementFeed):
                 pt.identity[:4] != t.identity[:4]
                 or pt.side != t.side
                 or pt.quantity != t.quantity
+                or pt.order_type not in {'STOP_MARKET','TAKE_PROFIT_MARKET'}
+                or t.order_type!='MARKET' or t.price is not None or t.trigger_price is not None
             ):
                 continue
             rows = await self.command_rows_for_order(

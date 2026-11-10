@@ -196,7 +196,7 @@ async def test_decoded_own_creation_baselines_allow_auto_tp1_runner_then_app_han
             now_ms=7000,
             lease_until_ms=8000,
             timeout_seconds=1,
-            runtime_commit="kernel-test-head",
+            runtime_commit="kernel-test-head",schema_revision="0019_management_evidence_v2",
         ),
         clock_ms=lambda: 7000,
     )
@@ -224,7 +224,7 @@ async def test_decoded_own_creation_baselines_allow_auto_tp1_runner_then_app_han
             now_ms=7200,
             lease_until_ms=8000,
             timeout_seconds=1,
-            runtime_commit="kernel-test-head",
+            runtime_commit="kernel-test-head",schema_revision="0019_management_evidence_v2",
         ),
         clock_ms=lambda: 7200,
     )

@@ -114,7 +114,7 @@ async def _observe_management_once(
             batch.ticket_id != ticket_id
             or batch.snapshot.netting_domain != req.domain
             or not since <= batch.covered_until_ms <= now_ms
-            or batch.snapshot.observed_at_ms > now_ms
+            or not now_ms-30000 <= batch.snapshot.observed_at_ms <= now_ms
             or (batch.complete and batch.covered_until_ms != now_ms)
             or any(
                 item.terms.identity[:4] != (

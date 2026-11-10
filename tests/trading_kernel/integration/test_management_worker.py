@@ -387,3 +387,21 @@ async def test_triggered_system_algo_child_is_proven_by_exact_parent_and_baselin
             'action':OrderAction.TRADE,'created_at_ms':5000,'exchange_event_at_ms':5000,'received_at_ms':6000,'executed_quantity':t.quantity})
         state=await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=child,now_ms=6000)
         assert state.mode is ManagementMode.AUTO
+
+
+@pytest.mark.asyncio
+async def test_stale_current_flat_snapshot_cannot_release_manual_position(head_template_engine):
+    from src.trading_kernel.application.observe_trade_management import (
+        observe_trade_management,
+    )
+    from tests.trading_kernel.support.manual_management import app_evidence
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    async with PostgresKernelUnitOfWork(e) as u:
+        await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=app_evidence(t),now_ms=6000)
+    source=AsyncMock();source.read_management_scan.return_value=ManagementScan(ticket_id=t.identity.ticket_id,
+        snapshot=PositionSnapshot(netting_domain=t.identity.netting_domain,quantity=Decimal(0),average_entry_price=None,observed_at_ms=6000),
+        orders=(),evidence=(),complete=False,reason='gap',covered_until_ms=t.created_at_ms,current_complete=True)
+    await observe_management_once(lambda:PostgresKernelUnitOfWork(e),source,ticket_id=t.identity.ticket_id,now_ms=60000)
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get(t.identity.ticket_id)
+        assert a.position_qty==t.quantity and a.status.value!='settlement_pending'

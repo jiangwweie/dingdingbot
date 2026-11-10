@@ -390,7 +390,7 @@ async def dispatch_one_command(
                 management_feed_is_current,
             )
             d=command.ticket_identity.netting_domain
-            blocked=blocked or not capability.enabled or capability.certified_commit!=request.runtime_commit
+            blocked=blocked or not capability.enabled or capability.certified_commit!=request.runtime_commit or capability.schema_revision!=request.schema_revision
             if _requires_management_feed(command):
                 blocked=blocked or not await management_feed_is_current(uow,venue_id=d.venue_id,account_id=d.account_id,
                     runtime_commit=request.runtime_commit,now_ms=clock_ms())
