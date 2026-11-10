@@ -533,6 +533,13 @@ def _maintenance_brackets() -> tuple[MaintenanceMarginBracket, ...]:
     )
 
 
+async def _run_lifecycle_at_virtual_time(uow_factory,venue,facts_source,request):
+    """The recorded venue and receiver use the same explicit virtual action clock."""
+    from unittest.mock import patch
+    with patch('src.trading_kernel.application.dispatch_exchange_command.action_clock_ms',lambda:request.now_ms):
+        return await run_lifecycle_worker_once(uow_factory,venue,facts_source,request)
+
+
 async def run_event_chain(
     six_event_engine: AsyncEngine,
     contract: RegisteredStrategyContract,
@@ -661,7 +668,7 @@ async def run_event_chain(
         timeout_seconds=1,
         idle_poll_interval_ms=1_000,
     )
-    initial_stop = await run_lifecycle_worker_once(
+    initial_stop = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
         lifecycle_source,
@@ -681,7 +688,7 @@ async def run_event_chain(
     )
     assert post_fill.status is ReconciliationWorkerStatus.POSITION_RECONCILED
     assert post_fill.detail == "post_fill_stress:passed"
-    take_profit = await run_lifecycle_worker_once(
+    take_profit = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
         lifecycle_source,
@@ -704,7 +711,7 @@ async def run_event_chain(
         observed_at_ms=NOW_MS + 5_000,
     )
     await ready_management_receiver(six_event_engine,now_ms=NOW_MS+5000,ticket_id=ticket.identity.ticket_id)
-    runner_replacement = await run_lifecycle_worker_once(
+    runner_replacement = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
         lifecycle_source,
@@ -713,7 +720,7 @@ async def run_event_chain(
         ),
     )
     assert runner_replacement.status is LifecycleWorkerStatus.DISPATCHED
-    old_stop_cancel = await run_lifecycle_worker_once(
+    old_stop_cancel = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
         lifecycle_source,
@@ -731,7 +738,7 @@ async def run_event_chain(
         reconciliation_request.model_copy(update={"now_ms": NOW_MS + 7_000}),
     )
     assert external_flat.status is ReconciliationWorkerStatus.POSITION_RECONCILED
-    runner_stop_cleanup = await run_lifecycle_worker_once(
+    runner_stop_cleanup = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
         lifecycle_source,
