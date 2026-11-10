@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.trading_kernel.domain.trade_management import OrderEvidence
+from src.trading_kernel.domain.trade_management import OrderEvidence, OrderTerms
 from src.trading_kernel.infrastructure.pg_management_feed import PostgresManagementFeed
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
@@ -269,9 +269,12 @@ class PostgresManagementRepository(PostgresManagementFeed):
             .one_or_none()
         )
         if old is not None:
-            if old["ticket_id"] != ticket_id or any(
-                old["payload"].get(k) != value.get(k)
-                for k in ("terms", "exchange_event_at_ms", "executed_quantity")
+            persisted = OrderEvidence.model_validate(old["payload"])
+            if (
+                old["ticket_id"] != ticket_id
+                or persisted.terms != item.terms
+                or persisted.exchange_event_at_ms != item.exchange_event_at_ms
+                or persisted.executed_quantity != item.executed_quantity
             ):
                 raise ValueError("management evidence identity collision")
             return False
@@ -375,15 +378,16 @@ class PostgresManagementRepository(PostgresManagementFeed):
                 .one_or_none()
             )
             if old is not None:
+                # JSON preserves Decimal scale; order identity depends on exact
+                # numeric values, not whether the venue sent 2135.9 or 2135.90.
                 if any(
                     old[k] != values[k]
                     for k in (
                         "scope_key",
                         "order_namespace",
                         "exchange_order_id",
-                        "confirmed_terms",
                     )
-                ):
+                ) or OrderTerms.model_validate(old["confirmed_terms"]) != evidence.terms:
                     raise ValueError("command baseline identity collision")
                 continue
             await self.c.execute(insert(order_command_baselines).values(**values))

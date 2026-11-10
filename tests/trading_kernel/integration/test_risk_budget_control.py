@@ -537,3 +537,86 @@ async def test_old_directional_receipt_cannot_reactivate_previous_rule(
         assert (
             await repo.get("binance-usdm", "experiment-1")
         ).rule_id == "owner-directional-risk:v2"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "baseline,repeated_baseline", [(".03", ".0300"), (".0300", ".03")]
+)
+async def test_budget_retry_ignores_decimal_scale_and_preserves_original_receipt(
+    head_template_engine, baseline, repeated_baseline
+):
+    from src.trading_kernel.infrastructure.pg_models import directional_risk_events
+
+    engine = head_template_engine
+    await seed_policy(engine)
+    async with engine.begin() as c:
+        repo = PostgresDirectionalRiskRepository(c)
+        await repo.initialize(
+            venue_id="binance-usdm", account_id="experiment-1", now_ms=1000
+        )
+        version = await c.scalar(sa.select(owner_policy_current.c.policy_version))
+        request = change(baseline=baseline, expected_policy_version=version)
+        receipt = await repo.request_budget_change(request)
+        before_policy = dict(
+            (await c.execute(sa.select(owner_policy_current))).mappings().one()
+        )
+        before_events = (
+            (
+                await c.execute(
+                    sa.select(directional_risk_events).order_by(
+                        directional_risk_events.c.event_id
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    async with engine.begin() as c:
+        repo = PostgresDirectionalRiskRepository(c)
+        replay = request.model_copy(
+            update={"baseline": Decimal(repeated_baseline), "requested_at_ms": 3000}
+        )
+        assert await repo.request_budget_change(replay) == receipt
+        assert (
+            dict((await c.execute(sa.select(owner_policy_current))).mappings().one())
+            == before_policy
+        )
+        assert (
+            await c.execute(
+                sa.select(directional_risk_events).order_by(
+                    directional_risk_events.c.event_id
+                )
+            )
+        ).mappings().all() == before_events
+        with pytest.raises(ValueError, match="risk_budget_idempotency_conflict"):
+            await repo.request_budget_change(
+                replay.model_copy(update={"baseline": Decimal(".029")})
+            )
+
+
+@pytest.mark.asyncio
+async def test_budget_retry_still_rejects_corrupted_request_fingerprint(
+    head_template_engine, monkeypatch
+):
+    engine = head_template_engine
+    await seed_policy(engine)
+    async with engine.begin() as c:
+        repo = PostgresDirectionalRiskRepository(c)
+        await repo.initialize(
+            venue_id="binance-usdm", account_id="experiment-1", now_ms=1000
+        )
+        version = await c.scalar(sa.select(owner_policy_current.c.policy_version))
+        req = change(expected_policy_version=version)
+        await repo.request_budget_change(req)
+        original_scalar = type(c).scalar
+
+        async def corrupted_read(connection, *args, **kwargs):
+            value = await original_scalar(connection, *args, **kwargs)
+            if isinstance(value, dict) and "fingerprint" in value:
+                return {**value, "fingerprint": "sha256:" + "0" * 64}
+            return value
+
+        monkeypatch.setattr(type(c), "scalar", corrupted_read)
+        with pytest.raises(ValueError, match="risk_budget_idempotency_conflict"):
+            await repo.request_budget_change(req)

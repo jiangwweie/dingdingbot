@@ -51,7 +51,7 @@ from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
-from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
     assess_post_fill_risk,
@@ -917,7 +917,17 @@ async def _reconcile_manual(uow,aggregate,snapshot):
             risk=None,reason=assessment.reason,orders=list(aggregate.management_orders))
         return ReconcileTicketResult(status=ReconcileTicketStatus.NO_CHANGE)
     desired=reduce_event(aggregate,event)
-    if desired.aggregate.status!=aggregate.status or snapshot.quantity!=aggregate.position_qty or protected!=aggregate.protected_qty or assessment.reason!=aggregate.manual_risk_reason or assessment.risk_at_stop!=aggregate.manual_risk_at_stop or orders!=aggregate.management_orders:
+    previous_orders = tuple(
+        VenueOrderSnapshot.model_validate(order) for order in aggregate.management_orders
+    )
+    if (
+        desired.aggregate.status != aggregate.status
+        or snapshot.quantity != aggregate.position_qty
+        or protected != aggregate.protected_qty
+        or assessment.reason != aggregate.manual_risk_reason
+        or assessment.risk_at_stop != aggregate.manual_risk_at_stop
+        or snapshot.open_orders != previous_orders
+    ):
         await uow.commit_reduction(event=event,reduction=desired,expected_version=aggregate.version)
     else:
         await uow.management.refresh_manual_risk(aggregate.identity.ticket_id,observed_at_ms=snapshot.observed_at_ms,

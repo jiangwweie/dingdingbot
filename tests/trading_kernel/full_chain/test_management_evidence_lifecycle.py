@@ -20,6 +20,9 @@ from src.trading_kernel.application.maintain_ticket_lifecycle import (
     maintain_ticket_lifecycle,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.infrastructure.binance_management_observation import (
+    parse_order_update,
+)
 from src.trading_kernel.infrastructure.management_collector import (
     collect_management_scan,
 )
@@ -36,8 +39,9 @@ from tests.trading_kernel.support.lifecycle import (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recover_review", [False, True])
 async def test_decoded_own_creation_baselines_allow_auto_tp1_runner_then_app_handover(
-    head_template_engine, monkeypatch
+    head_template_engine, monkeypatch, recover_review
 ):
     original = KindAwareAcceptingVenue.execute
 
@@ -125,6 +129,53 @@ async def test_decoded_own_creation_baselines_allow_auto_tp1_runner_then_app_han
                 else "0",
                 time=created,
             )
+        if conditional_order:
+            # Binance stream and REST represent the same financial values with
+            # different decimal scales. Persist the stream before REST backfill.
+            stream = {
+                "e": "ALGO_UPDATE",
+                "E": created,
+                "T": created,
+                "o": {
+                    "s": raw["symbol"],
+                    "ps": raw["positionSide"],
+                    "aid": raw["algoId"],
+                    "caid": raw["clientAlgoId"],
+                    "S": raw["side"],
+                    "o": raw["orderType"],
+                    "q": str(Decimal(raw["quantity"]).normalize()),
+                    "p": "0",
+                    "tp": str(Decimal(raw["triggerPrice"]).normalize()),
+                    "cp": False,
+                    "R": True,
+                    "f": raw["timeInForce"],
+                    "wt": raw["workingType"],
+                    "pP": False,
+                    "pm": "NONE",
+                    "V": "EXPIRE_MAKER",
+                    "gtd": 0,
+                    "X": "NEW",
+                },
+            }
+            evidence = parse_order_update(
+                stream,
+                account_id=d.account_id,
+                received_at_ms=created + 1,
+                coverage_complete=True,
+            )
+            from src.trading_kernel.application.observe_trade_management import (
+                observe_trade_management,
+            )
+
+            async with PostgresKernelUnitOfWork(e) as u:
+                await observe_trade_management(
+                    u,
+                    ticket_id=t.identity.ticket_id,
+                    evidence=evidence,
+                    now_ms=5000,
+                )
+            raw["triggerPrice"] = format(Decimal(raw["triggerPrice"]), ".8f")
+            raw["quantity"] = format(Decimal(raw["quantity"]), ".8f")
         (conditional if conditional_order else regular).append(
             ccxt.binanceusdm().on_json_response(json.dumps(raw))
         )
@@ -151,6 +202,20 @@ async def test_decoded_own_creation_baselines_allow_auto_tp1_runner_then_app_han
                     observed_at_ms=request.now_ms,
                 ),
             )
+
+    if recover_review:
+        failed_source = AsyncMock()
+        failed_source.read_management_scan.side_effect = TimeoutError()
+        await observe_management_once(
+            lambda: PostgresKernelUnitOfWork(e),
+            failed_source,
+            ticket_id=t.identity.ticket_id,
+            now_ms=5500,
+        )
+        async with PostgresKernelUnitOfWork(e) as u:
+            assert (
+                await u.aggregates.get(t.identity.ticket_id)
+            ).management_mode.value == "REVIEW_REQUIRED"
 
     assert (
         await observe_management_once(

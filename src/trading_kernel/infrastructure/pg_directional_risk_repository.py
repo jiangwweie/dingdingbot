@@ -204,7 +204,19 @@ class PostgresDirectionalRiskRepository:
             )
         )
         if previous is not None:
-            if previous["fingerprint"] != fingerprint:
+            # Compare the persisted typed request, preserving its original
+            # fingerprint/receipt while ignoring only retry time and Decimal scale.
+            original = RiskBudgetChangeRequest.model_validate(previous["request"])
+            original_payload = {
+                key: value
+                for key, value in previous["request"].items()
+                if key != "requested_at_ms"
+            }
+            if (
+                previous["fingerprint"] != canonical_digest(original_payload)
+                or original.model_dump(mode="python", exclude={"requested_at_ms"})
+                != request.model_dump(mode="python", exclude={"requested_at_ms"})
+            ):
                 raise ValueError("risk_budget_idempotency_conflict")
             receipt = await self.budget_receipt(
                 request.venue_id, request.account_id, request.idempotency_key
