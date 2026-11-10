@@ -251,6 +251,24 @@ def test_stopped_manual_upgrade_refuses_every_identity_or_activity_fault(
         assert module.require_stopped_upgrade(filesystem_root=tmp_path) == state
 
 
+def test_recovery_installer_keeps_exact_nonterminal_ticket_whitelist(tmp_path,monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from scripts.trading_kernel import manual_host_bootstrap as m
+
+    etc=tmp_path/'etc/brc';etc.mkdir(parents=True);(etc/'trading-kernel.write-fenced').touch();(etc/'trading-kernel.env').touch()
+    release=tmp_path/'release';release.mkdir();(release/'.brc-runtime-commit').write_text('a'*40);(release/'.brc-schema-revision').write_text('0018_notice_outbox_v1')
+    current=tmp_path/'opt/brc/current';current.parent.mkdir(parents=True);current.symlink_to(release)
+    state={'commit':'a'*40,'schema':'0018_notice_outbox_v1','paused':True,'tickets':True,'commands':False,'positions':True,'incidents':False,
+        'active_ticket_ids':['exact'],'recovery_eligible':True}
+    monkeypatch.setattr(m,'read_database',lambda _:json.dumps(state))
+    monkeypatch.setattr(m.subprocess,'run',lambda *a,**kw:SimpleNamespace(returncode=3))
+    with pytest.raises(ValueError):m.require_stopped_upgrade(filesystem_root=tmp_path)
+    assert m.require_stopped_upgrade(filesystem_root=tmp_path,recovery_ticket_ids=('exact',))['recovery_ticket_ids']==['exact']
+    with pytest.raises(ValueError):m.require_stopped_upgrade(filesystem_root=tmp_path,recovery_ticket_ids=('other',))
+
+
 def test_stopped_upgrade_requires_fence_before_any_database_read(tmp_path, monkeypatch):
     from scripts.trading_kernel import manual_host_bootstrap as module
 

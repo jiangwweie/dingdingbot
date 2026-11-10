@@ -137,7 +137,7 @@ def require_inactive() -> None:
         raise ValueError("Owner API writer active")
 
 
-def require_stopped_upgrade(*, filesystem_root: Path = Path("/")) -> dict:
+def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticket_ids: tuple[str,...] = ()) -> dict:
     """A same-schema upgrade is explicit and stopped, never a fresh-host bypass."""
     if not (filesystem_root / "etc/brc/trading-kernel.write-fenced").is_file():
         raise ValueError("upgrade requires the ENTRY maintenance fence")
@@ -161,6 +161,8 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/")) -> dict:
             == 0
         ):
             raise ValueError("all runtime and Owner writers must be stopped")
+    if recovery_ticket_ids and (len(recovery_ticket_ids)!=1 or not re_full_ticket(recovery_ticket_ids[0])):
+        raise ValueError("recovery requires one exact Ticket identity")
     identity = json.loads(
         read_database("""SELECT json_build_object(
         'commit',(SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='runtime_commit'),
@@ -171,14 +173,30 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/")) -> dict:
         'positions',EXISTS(SELECT 1 FROM brc_positions_current WHERE quantity<>0),
         'incidents',EXISTS(SELECT 1 FROM brc_runtime_incidents WHERE status='open'))""")
     )
+    if recovery_ticket_ids:
+        details=json.loads(read_database("""SELECT json_build_object(
+        'active_ticket_ids',(SELECT coalesce(json_agg(ticket_id ORDER BY ticket_id),'[]'::json) FROM brc_trade_tickets WHERE terminal_at_ms IS NULL),
+        'recovery_eligible',NOT EXISTS(SELECT 1 FROM brc_trade_aggregates a JOIN brc_trade_tickets t USING(ticket_id) WHERE t.terminal_at_ms IS NULL AND (a.management_mode NOT IN ('REVIEW_REQUIRED','MANUAL') OR a.post_fill_stress_status IS DISTINCT FROM 'passed')),
+        'commands',EXISTS(SELECT 1 FROM brc_exchange_commands WHERE status IN ('prepared','claimed','dispatch_started','outcome_unknown')))
+        """))
+        identity={**identity,**details}
     if (
         identity["commit"] != (current / ".brc-runtime-commit").read_text().strip()
         or identity["schema"] != (current / ".brc-schema-revision").read_text().strip()
         or not identity["paused"]
-        or any(identity[k] for k in ("tickets", "commands", "positions", "incidents"))
+        or (not recovery_ticket_ids and any(identity[k] for k in ("tickets", "commands", "positions", "incidents")))
+        or (recovery_ticket_ids and (identity['commands'] or identity['incidents'] or not identity['recovery_eligible']
+            or identity['active_ticket_ids']!=list(recovery_ticket_ids)))
     ):
         raise ValueError("fresh-account stopped upgrade identity or flatness differs")
+    if recovery_ticket_ids:
+        identity['recovery_ticket_ids']=list(recovery_ticket_ids)
     return identity
+
+
+def re_full_ticket(value: str) -> bool:
+    import re
+    return re.fullmatch(r"[A-Za-z0-9:_-]{1,200}",value) is not None
 
 
 def require_upgrade_schema(source: str, target: str) -> None:
@@ -575,6 +593,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--commit")
     parser.add_argument("--digest")
+    parser.add_argument("--recovery-ticket-id")
     args = parser.parse_args(argv)
     if os.geteuid() != 0:
         raise ValueError("manual host provisioning requires root")
@@ -583,7 +602,7 @@ def main(argv=None) -> int:
     if args.phase == "inspect":
         print(json.dumps(actual))
         return 0
-    source = require_stopped_upgrade() if args.phase == "receive-upgrade" else None
+    source = require_stopped_upgrade(recovery_ticket_ids=() if args.recovery_ticket_id is None else (args.recovery_ticket_id,)) if args.phase == "receive-upgrade" else None
     if source is None:
         require_inactive()
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)

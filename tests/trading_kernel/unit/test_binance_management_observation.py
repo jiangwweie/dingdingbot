@@ -6,9 +6,40 @@ import pytest
 
 from src.trading_kernel.domain.trade_management import OrderAction
 from src.trading_kernel.infrastructure.binance_management_observation import (
+    _integer,
     parse_order_update,
     read_order_amendments,
 )
+
+
+@pytest.mark.parametrize("value,expected", [(0,0),(123,123),("0",0),("1794218418044",1794218418044)])
+def test_protocol_integer_preserves_ccxt_numeric_strings(value,expected):
+    assert _integer({"time":value},"time")==expected
+
+
+@pytest.mark.parametrize("value", [True,False,1.0,"1.0","1e3","+1","-1"," 1","",None,"１","9"*30,2**64])
+def test_protocol_integer_rejects_ambiguous_or_unbounded_values(value):
+    with pytest.raises(ValueError):
+        _integer({"time":value},"time")
+
+
+def test_rest_protocol_runs_through_actual_ccxt_decoder():
+    import json
+
+    from ccxt.async_support import binanceusdm
+
+    from src.trading_kernel.infrastructure.binance_management_observation import (
+        parse_rest_order,
+    )
+
+    event=message();raw=event["o"]
+    row={"symbol":raw["s"],"orderId":raw["i"],"clientOrderId":raw["c"],"side":raw["S"],"positionSide":raw["ps"],
+         "type":raw["o"],"origQty":raw["q"],"executedQty":raw["z"],"price":raw["p"],"stopPrice":raw["sp"],
+         "status":"NEW","reduceOnly":raw["R"],"closePosition":raw["cp"],"timeInForce":raw["f"],"workingType":raw["wt"],
+         "priceProtect":raw["pP"],"priceMatch":raw["pm"],"selfTradePreventionMode":raw["V"],"goodTillDate":0,"time":2000,"updateTime":2000}
+    decoded=binanceusdm().on_json_response(json.dumps(row))
+    evidence=parse_rest_order(decoded,account_id="test",conditional=False,received_at_ms=2002,coverage_complete=True)
+    assert evidence.exchange_event_at_ms==2000 and evidence.terms.good_till_date_ms==0
 
 
 def message():

@@ -115,11 +115,13 @@ def install_manual_host(
 
 class SshManualInstallationBackend:
     def __init__(
-        self, target: ManualHostTarget, commit: str, repo_root: Path = REPO_ROOT
+        self, target: ManualHostTarget, commit: str, repo_root: Path = REPO_ROOT,
+        recovery_ticket_id: str | None = None,
     ):
         self.target = target
         self.commit = commit
         self.repo_root = repo_root
+        self.recovery_ticket_id = recovery_ticket_id
 
     def _call(self, phase: str, data: bytes | None = None) -> dict:
         source = subprocess.check_output(
@@ -160,6 +162,10 @@ os.execv(p,[p,str(k/'scripts/trading_kernel'/script),*sys.argv[1:]])
         ]
         if phase in {"receive", "receive-upgrade"}:
             args += ["--digest", hashlib.sha256(data or b"").hexdigest()]
+        if self.recovery_ticket_id is not None:
+            if phase not in {'inspect','receive-upgrade','activate-upgrade'}:
+                raise ValueError('recovery scope is only legal for stopped upgrade')
+            args += ['--recovery-ticket-id', self.recovery_ticket_id]
         cmd = (
             "ssh",
             "-o",
@@ -277,6 +283,7 @@ def main(argv=None):
         ),
         required=True,
     )
+    parser.add_argument("--recovery-ticket-id")
     args = parser.parse_args(argv)
     target = ManualHostTarget(
         ssh_target=args.target, public_ip=args.public_ip, machine_id=args.machine_id
@@ -291,7 +298,7 @@ def main(argv=None):
         )
         validate_owner_api_release_certification(REPO_ROOT, commit)
         validate_owner_static_release_certification(REPO_ROOT, commit)
-    backend = SshManualInstallationBackend(target, commit)
+    backend = SshManualInstallationBackend(target, commit, recovery_ticket_id=args.recovery_ticket_id)
     check_host_identity(backend.inspect(), target.model_dump())
     artifacts = (
         build_artifacts(REPO_ROOT, commit)

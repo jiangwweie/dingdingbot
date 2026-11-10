@@ -67,7 +67,9 @@ def _boolean(row: Mapping[str, object], key: str) -> bool:
 
 def _integer(row: Mapping[str, object], key: str) -> int:
     value = row[key]
-    if type(value) is not int or value < 0:
+    if isinstance(value, str) and 0 < len(value) <= 20 and value.isascii() and value.isdecimal():
+        value = int(value)
+    if type(value) is not int or not 0 <= value <= 2**64-1:
         raise ValueError("order protocol integer missing")
     return value
 

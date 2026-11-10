@@ -50,6 +50,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     from src.trading_kernel.infrastructure.runtime_authority_seed import (
         RuntimeAuthoritySeedRequest,
         deploy_compatible_upgrade_identity,
+        deploy_management_recovery_identity,
         deploy_runtime_identity,
     )
 
@@ -157,19 +158,13 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
             )
         account = json.loads((ROOT / "verified-account.json").read_text())["account_id"]
         async with PostgresKernelUnitOfWork(engine) as uow:
-            await (
-                deploy_compatible_upgrade_identity
-                if forward
-                else deploy_runtime_identity
-            )(
-                uow,
-                RuntimeAuthoritySeedRequest(
-                    account_id=account,
-                    runtime_commit=receipt["commit"],
-                    schema_revision=receipt["schema_revision"],
-                    seeded_at_ms=int(time.time() * 1000),
-                ),
-            )
+            request=RuntimeAuthoritySeedRequest(account_id=account,runtime_commit=receipt['commit'],schema_revision=receipt['schema_revision'],seeded_at_ms=int(time.time()*1000))
+            if source.get('recovery_ticket_ids'):
+                if forward:
+                    raise ValueError('recovery-only upgrade must keep exact schema')
+                await deploy_management_recovery_identity(uow,request,recovery_ticket_ids=tuple(source['recovery_ticket_ids']))
+            else:
+                await (deploy_compatible_upgrade_identity if forward else deploy_runtime_identity)(uow,request)
         if forward:
             async with engine.connect() as c:
                 if not await c.scalar(text("SELECT has_table_privilege('brc_kernel','brc_notice_outbox','SELECT,INSERT,UPDATE') AND has_sequence_privilege('brc_kernel','brc_notice_outbox_sequence_seq','USAGE,SELECT') AND has_table_privilege('brc_owner_console','brc_notice_outbox','SELECT')")):
@@ -256,16 +251,13 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
 
     install_entry_runtime_config(REPO_ROOT)
     run(["systemctl", "daemon-reload"])
-    run(
-        [
-            "systemctl",
-            "start",
-            "brc-owner-console-api.service",
+    if not source.get("recovery_ticket_ids"):
+        run([
+            "systemctl", "start", "brc-owner-console-api.service",
             "brc-trading-kernel-observation-worker.service",
             "brc-trading-kernel-lifecycle-worker.service",
             "brc-trading-kernel-reconciliation-worker.service",
-        ]
-    )
+        ])
     run(["systemctl", "reload", "nginx"])
     result = {
         "status": "notice_schema_upgraded_entry_fenced"
@@ -292,6 +284,7 @@ def main():
     p.add_argument("--commit", required=True)
     p.add_argument("--machine-id", required=True)
     p.add_argument("--public-ip", required=True)
+    p.add_argument("--recovery-ticket-id")
     a = p.parse_args()
     if os.geteuid() != 0:
         raise ValueError("root required")
@@ -311,7 +304,7 @@ def main():
     )
     with open("/run/brc-manual-install.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        source = require_stopped_upgrade()
+        source = require_stopped_upgrade(recovery_ticket_ids=() if a.recovery_ticket_id is None else (a.recovery_ticket_id,))
         if source != prepared["source"]:
             raise ValueError("stopped upgrade source changed after staging")
         print(

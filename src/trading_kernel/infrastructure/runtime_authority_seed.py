@@ -1191,6 +1191,7 @@ async def _deploy_runtime_identity(
     recovery_ticket_id: str | None = None,
     closure_ticket_id: str | None = None,
     allow_compatible_runtime_fence: bool = False,
+    management_recovery_ticket_ids: tuple[str, ...] = (),
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -1200,7 +1201,7 @@ async def _deploy_runtime_identity(
             recovery_ticket_id,
             closure_ticket_id,
         )
-    ) > 1:
+    ) + bool(management_recovery_ticket_ids) > 1:
         raise ValueError("runtime identity transition mode is ambiguous")
     connection = uow._require_connection()
     metadata_count = int(
@@ -1213,6 +1214,7 @@ async def _deploy_runtime_identity(
         if (
             recovery_ticket_id is not None
             or closure_ticket_id is not None
+            or bool(management_recovery_ticket_ids)
         ):
             raise RuntimeAuthorityTransitionRefused(
                 "guarded identity requires an existing runtime authority"
@@ -1225,7 +1227,10 @@ async def _deploy_runtime_identity(
             refreshed_existing_authority=False,
         )
 
-    if closure_ticket_id is not None:
+    if management_recovery_ticket_ids:
+        await _require_management_recovery_activity(connection,
+            ticket_ids=management_recovery_ticket_ids,account_id=request.account_id)
+    elif closure_ticket_id is not None:
         await _require_closure_identity_activity(
             connection,
             closure_ticket_id=closure_ticket_id,
@@ -1346,6 +1351,40 @@ async def _deploy_runtime_identity(
         runtime_seed_semantic_hash=expected_seed_identity,
         refreshed_existing_authority=True,
     )
+
+
+async def deploy_management_recovery_identity(uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest, *, recovery_ticket_ids: tuple[str,...]) -> RuntimeDeploymentIdentityResult:
+    """Stopped, externally-flat recovery identity; never grants exchange authority."""
+    if len(recovery_ticket_ids)!=1 or not recovery_ticket_ids[0].strip():
+        raise ValueError("management recovery requires one exact Ticket")
+    result=await _deploy_runtime_identity(uow,request,
+        management_recovery_ticket_ids=recovery_ticket_ids)
+    connection=uow._require_connection()
+    rows=(await connection.execute(sa.select(runtime_capabilities_current).with_for_update())).mappings().all()
+    for row in rows:
+        certification={**row['certification'],'runtime_mode':'management_recovery_only',
+            'management_recovery_ticket_ids':list(recovery_ticket_ids)}
+        await connection.execute(sa.update(runtime_capabilities_current).where(
+            runtime_capabilities_current.c.capability_key==row['capability_key']).values(enabled=False,certification=certification))
+    return result
+
+
+async def _require_management_recovery_activity(connection: AsyncConnection, *, ticket_ids: tuple[str,...],account_id: str) -> None:
+    policy=(await connection.execute(sa.select(owner_policy_current).with_for_update())).mappings().all()
+    if len(policy)!=1 or policy[0]['new_entry_submit_enabled']:
+        raise ValueError("management recovery requires genuine Owner pause")
+    active=(await connection.execute(sa.select(trade_tickets).where(trade_tickets.c.terminal_at_ms.is_(None)).with_for_update())).mappings().all()
+    if {r['ticket_id'] for r in active}!=set(ticket_ids) or any(r['account_id']!=account_id for r in active):
+        raise ValueError("management recovery Ticket whitelist differs")
+    aggregates=(await connection.execute(sa.select(trade_aggregates).where(trade_aggregates.c.ticket_id.in_(ticket_ids)).with_for_update())).mappings().all()
+    if len(aggregates)!=len(ticket_ids) or any(r['management_mode'] not in {'REVIEW_REQUIRED','MANUAL'} or r['post_fill_stress_status']!='passed' for r in aggregates):
+        raise ValueError("management recovery requires previously protected managed Tickets")
+    unresolved=await connection.scalar(sa.select(sa.func.count()).select_from(exchange_commands).where(exchange_commands.c.status.in_(['prepared','claimed','dispatch_started','outcome_unknown'])))
+    incidents=await connection.scalar(sa.select(sa.func.count()).select_from(runtime_incidents).where(runtime_incidents.c.status=='open'))
+    lane=(await connection.execute(sa.select(entry_lane_current).with_for_update())).mappings().all()
+    if unresolved or incidents or len(lane)!=1 or lane[0]['status']!='idle':
+        raise ValueError("management recovery has unrelated or unresolved work")
 
 
 async def arm_acceptance_policy(
