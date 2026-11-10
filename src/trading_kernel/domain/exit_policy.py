@@ -8,8 +8,16 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from src.trading_kernel.domain.exit_quantity import ExitQuantityRule
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
@@ -88,13 +96,29 @@ class TakeProfitRule(BaseModel):
     quantity_fraction: Decimal
     execution_style: Literal["limit_gtc"] = "limit_gtc"
     market_fallback_allowed: Literal[False] = False
+    quantity_rule: ExitQuantityRule | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_rule(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        values = handler(self)
+        if self.quantity_rule is None:
+            values.pop("quantity_rule", None)
+        return values
 
     @model_validator(mode="after")
     def _validate_rule(self) -> TakeProfitRule:
-        if self.reward_multiple <= 0:
+        if not self.reward_multiple.is_finite() or self.reward_multiple <= 0:
             raise ValueError("take-profit reward multiple must be positive")
-        if not Decimal(0) < self.quantity_fraction < Decimal(1):
+        if (
+            not self.quantity_fraction.is_finite()
+            or not Decimal(0) < self.quantity_fraction < Decimal(1)
+        ):
             raise ValueError("take-profit quantity fraction must be in (0, 1)")
+        if (
+            self.quantity_rule is not None
+            and self.quantity_fraction > self.quantity_rule.max_actual_fraction
+        ):
+            raise ValueError("take-profit target exceeds the actual-fraction cap")
         return self
 
 

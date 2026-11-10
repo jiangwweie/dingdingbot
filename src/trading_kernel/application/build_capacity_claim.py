@@ -239,6 +239,7 @@ def build_capacity_claim(
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
             tp1_quantity_fraction=profile.tp1.quantity_fraction,
+            tp1_quantity_rule=profile.tp1.quantity_rule,
         )
     )
     if sizing.status is not CapacitySizingStatus.SELECTED or sizing.selected is None:

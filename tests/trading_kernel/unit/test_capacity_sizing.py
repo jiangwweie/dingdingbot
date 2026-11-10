@@ -331,3 +331,27 @@ def _request(**changes: object) -> CapacitySizingRequest:
     }
     payload.update(changes)
     return CapacitySizingRequest.model_validate(payload)
+
+
+def test_minimum_raised_tp_does_not_change_entry_budget_or_quantity() -> None:
+    facts = {
+        "entry_reference_price": Decimal(75000),
+        "initial_stop_price": Decimal(73500),
+        "take_profit_price": Decimal(76500),
+        "quantity_step": Decimal("0.001"), "min_quantity": Decimal("0.001"),
+        "min_notional": Decimal(50),
+    }
+    original = select_capacity_candidate(_request(**facts))
+    assert original.selected is not None
+    strict = select_capacity_candidate(_request(**facts, tp1_quantity_fraction=Decimal("0.05")))
+    assert strict.status is CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    raised = select_capacity_candidate(_request(
+        **facts, tp1_quantity_fraction=Decimal("0.05"),
+        tp1_quantity_rule={"max_actual_fraction": "0.50"},
+    ))
+    assert raised.selected is not None
+    assert raised.selected.quantity == original.selected.quantity
+    assert raised.selected.planned_stop_risk == original.selected.planned_stop_risk
+    assert raised.selected.reserved_margin == original.selected.reserved_margin
+    assert raised.selected.tp1_quantity == Decimal("0.001")
+    assert raised.selected.runner_quantity == original.selected.quantity - Decimal("0.001")

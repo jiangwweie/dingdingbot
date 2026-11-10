@@ -8,6 +8,12 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exit_quantity import (
+    ExitQuantityRequest,
+    ExitQuantityRule,
+    select_exit_quantities,
+)
+
 FIXED_EXCHANGE_CONFIGURED_LEVERAGE: Final[int] = 5
 
 
@@ -52,6 +58,7 @@ class CapacitySizingRequest(BaseModel):
     min_quantity: Decimal
     min_notional: Decimal
     tp1_quantity_fraction: Decimal
+    tp1_quantity_rule: ExitQuantityRule | None = None
 
     @field_validator(
         "total_wallet_balance",
@@ -126,6 +133,11 @@ class CapacitySizingRequest(BaseModel):
     def _validate_sizing_facts(self) -> CapacitySizingRequest:
         if self.initial_stop_price == self.entry_reference_price:
             raise ValueError("initial stop must differ from entry reference")
+        if (
+            self.tp1_quantity_rule is not None
+            and self.tp1_quantity_fraction > self.tp1_quantity_rule.max_actual_fraction
+        ):
+            raise ValueError("TP1 target exceeds the actual-fraction cap")
         return self
 
 
@@ -324,19 +336,22 @@ def _evaluate_candidate(
         or planned_stop_risk <= 0
     ):
         return CapacitySizingStatus.VENUE_MINIMUM_UNMET
-    tp1_quantity = _floor_to_step(
-        quantity * request.tp1_quantity_fraction,
-        request.quantity_step,
+    exit_decision = select_exit_quantities(
+        ExitQuantityRequest(
+            total_quantity=quantity,
+            quantity_step=request.quantity_step,
+            min_quantity=request.min_quantity,
+            min_notional=request.min_notional,
+            take_profit_price=request.take_profit_price,
+            initial_stop_price=request.initial_stop_price,
+            target_fraction=request.tp1_quantity_fraction,
+            quantity_rule=request.tp1_quantity_rule,
+        )
     )
-    runner_quantity = quantity - tp1_quantity
-    if tp1_quantity <= 0 or runner_quantity < request.min_quantity:
+    if exit_decision.selected is None:
         return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
-    if (
-        tp1_quantity < request.min_quantity
-        or tp1_quantity * request.take_profit_price < request.min_notional
-        or runner_quantity * request.initial_stop_price < request.min_notional
-    ):
-        return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    tp1_quantity = exit_decision.selected.tp1_quantity
+    runner_quantity = exit_decision.selected.runner_quantity
     return CapacitySizingSelection(
         remaining_slots=remaining_slots,
         ticket_stop_risk_budget=ticket_stop_risk_budget,

@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Literal
 
 import pytest
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from src.trading_kernel.application.build_capacity_claim import build_capacity_claim
 from src.trading_kernel.domain.account_entry_health import classify_account_entry_health
@@ -33,6 +33,7 @@ from src.trading_kernel.domain.exit_policy import (
     registered_event_exit_bindings,
     registered_exit_profiles,
 )
+from src.trading_kernel.domain.exit_quantity import ExitQuantityRule
 from src.trading_kernel.domain.instrument_entry_health import (
     classify_instrument_entry_health,
 )
@@ -253,6 +254,8 @@ def _build_decision(
     exit_profile_status: Literal["active", "retired"] = "active",
     profile_side: Literal["long", "short"] = "long",
     min_notional: Decimal = Decimal(5),
+    tp1_fraction: Decimal | None = None,
+    tp1_quantity_rule: ExitQuantityRule | None = None,
 ):
     snapshot = _snapshot()
     risk_values = snapshot.account_risk_snapshot.model_dump(
@@ -275,8 +278,13 @@ def _build_decision(
         for item in registered_exit_profiles()
         if item.exit_profile_id == binding.exit_profile_id
     )
-    if profile_side != profile.position_side:
-        profile = profile.model_copy(update={"position_side": profile_side})
+    if profile_side != profile.position_side or tp1_fraction is not None:
+        payload = profile.model_dump(mode="python")
+        payload["position_side"] = profile_side
+        if tp1_fraction is not None:
+            payload["tp1"]["quantity_fraction"] = tp1_fraction
+            payload["tp1"]["quantity_rule"] = tp1_quantity_rule
+        profile = type(profile).model_validate(payload)
         binding = build_event_exit_binding(
             exit_binding_id=binding.exit_binding_id,
             binding_version=binding.binding_version,
@@ -337,7 +345,7 @@ def _long_signal(selection_authority_id: str | None = None):
     contract = next(
         item for item in registered_strategy_contracts() if item.event_id == "SOR-LONG"
     )
-    values = {
+    values: dict[str, JsonValue] = {
         "opening_range_defined_v3": True,
         "breakout_edge_crossed_v3": True,
         "opening_range_high_reference_v3": "102",
@@ -456,3 +464,20 @@ def _snapshot() -> EntryAdmissionSnapshot:
         observed_at_ms=1_008,
         valid_until_ms=1_020,
     )
+
+
+def test_claim_uses_frozen_minimum_raise_rule_without_growing_entry() -> None:
+    _, original = _build_decision(min_notional=Decimal(50))
+    _, strict = _build_decision(min_notional=Decimal(50), tp1_fraction=Decimal("0.05"))
+    _, raised = _build_decision(
+        min_notional=Decimal(50), tp1_fraction=Decimal("0.05"),
+        tp1_quantity_rule=ExitQuantityRule(max_actual_fraction=Decimal("0.50")),
+    )
+    assert strict.status is CapacityClaimStatus.EXIT_LEG_MATERIALIZATION_UNMET
+    assert original.claim is not None
+    assert raised.claim is not None
+    assert raised.claim.quantity == original.claim.quantity
+    assert raised.claim.risk_at_stop == original.claim.risk_at_stop
+    assert raised.claim.reserved_margin == original.claim.reserved_margin
+    assert raised.claim.take_profit_quantities == (Decimal("0.5"),)
+    assert raised.claim.exit_policy_semantic_hash != original.claim.exit_policy_semantic_hash

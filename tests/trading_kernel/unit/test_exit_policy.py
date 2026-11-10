@@ -591,3 +591,31 @@ def _market_facts(*, holding_bars: int) -> LifecycleMarketFacts:
         atr=Decimal(2),
         holding_bars=holding_bars,
     )
+
+
+def test_quantity_rule_survives_profile_round_trip_and_changes_hash() -> None:
+    profile = registered_exit_profiles()[0]
+    data = profile.model_dump(mode="json")
+    data["tp1"]["quantity_fraction"] = "0.05"
+    data["tp1"]["quantity_rule"] = {"max_actual_fraction": "0.50"}
+    changed = ExitProfile.model_validate(data)
+    assert changed.semantic_hash() != profile.semantic_hash()
+    assert changed.tp1.quantity_rule is not None
+    assert changed.tp1.quantity_rule.max_actual_fraction == Decimal("0.50")
+    assert ExitProfile.model_validate_json(changed.model_dump_json()) == changed
+
+
+def test_original_profile_hashes_remain_exact_when_quantity_rule_is_absent() -> None:
+    expected = {
+        "exit-profile:failure-reversal:1h:short:v1": "fd5948edda062bc63aaa204e7d707153f1971876aa36bfbf1ce076994736970a",
+        "exit-profile:impulse-decay:1h:long:v1": "ed4effce34242587de0bd13a2efbd799b31b0748baa4a2ca571af7053d24a1cb",
+        "exit-profile:momentum-tail:1h:long:v1": "c5edb70e0b4a3ae8bef418f881849143db6860a79736260b1ae5d53233591ee6",
+        "exit-profile:orb-crypto:15m:long:v1": "01e28bade875c826b24a5a2d0d786bbfa5cc4ce9396e1f26548c8690ca773938",
+        "exit-profile:orb-crypto:15m:short:v1": "bec7ce26ddc2e1d4573a06912a3c4cd3299e5a151e451193b7badf9087c6a907",
+        "exit-profile:orb-us:15m:long:v1": "7d0ae94236eb534bc49f9afaeaf6015e1ed5a58c29ed8ad8733b06087799aebf",
+        "exit-profile:orb-us:15m:short:v1": "1ad1dd922105b4edebb9b3b2503edc2058b21a01de562736e84f5634b6f856d4",
+        "exit-profile:trend-continuation:1h:long:v1": "8382a235cf00ed0cb0bdccbae8418d32b280381972ed60ca8a0510688b60e8b4",
+    }
+    for profile in registered_exit_profiles():
+        assert profile.semantic_hash() == "sha256:" + expected[profile.exit_profile_id]
+        assert "quantity_rule" not in profile.tp1.model_dump(mode="json")

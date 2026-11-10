@@ -4,6 +4,7 @@ import asyncio
 import os
 import sys
 from contextlib import suppress
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from src.trading_kernel.application.owner_control import (
     switch_event_exit_profile,
 )
 from src.trading_kernel.domain.exit_policy import (
+    ExitProfile,
     registered_event_exit_bindings,
     registered_exit_profiles,
 )
@@ -61,6 +63,47 @@ from src.trading_kernel.interfaces.readonly_api import (
 from tests.trading_kernel.support.postgres import TEST_POSTGRES_ADMIN_DSN
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@pytest.mark.asyncio
+async def test_minimum_raised_quantity_rule_round_trips_without_changing_source_profile(
+    head_template_engine: AsyncEngine,
+) -> None:
+    await _seed(head_template_engine)
+    source = registered_exit_profiles()[0]
+    original_hash = source.semantic_hash()
+    data = source.model_dump(mode="json")
+    data["exit_profile_id"] = "exit-profile:test-minimum50:short:v2"
+    data["exit_profile_version"] = 2
+    data["tp1"]["quantity_fraction"] = "0.05"
+    data["tp1"]["quantity_rule"] = {"max_actual_fraction": "0.50"}
+    candidate = ExitProfile.model_validate(data)
+    async with head_template_engine.begin() as connection:
+        await connection.execute(sa.insert(exit_policies).values(
+            exit_policy_id=candidate.exit_profile_id,
+            exit_policy_version="2",
+            event_spec_id=None,
+            profile_schema_version=candidate.profile_schema_version,
+            position_side=candidate.position_side,
+            policy=candidate.model_dump(mode="json"),
+            semantic_hash=candidate.semantic_hash(),
+            status="active", created_at_ms=1_800_000_000_000,
+        ))
+    async with head_template_engine.connect() as connection:
+        repository = PostgresExitProfileAuthorityRepository(connection)
+        loaded = await repository.get_profile(
+            exit_profile_id=candidate.exit_profile_id,
+            semantic_hash=candidate.semantic_hash(),
+        )
+        original = await repository.get_profile(
+            exit_profile_id=source.exit_profile_id, semantic_hash=original_hash,
+        )
+    assert loaded is not None
+    assert loaded.profile == candidate
+    assert loaded.profile.tp1.quantity_rule is not None
+    assert loaded.profile.tp1.quantity_rule.max_actual_fraction == Decimal("0.50")
+    assert original is not None
+    assert original.profile.semantic_hash() == original_hash
 
 
 @pytest.mark.asyncio
