@@ -350,6 +350,16 @@ class InitialStopConfirmed(_TicketEvent):
     closes_position: bool = False
 
 
+class InitialStopInactiveConfirmed(_TicketEvent):
+    exchange_order_id: str
+    position_quantity: Decimal
+
+
+class ProtectionReplacementInactiveConfirmed(_TicketEvent):
+    exchange_order_id: str
+    position_quantity: Decimal
+
+
 class PostFillStressAssessed(_TicketEvent):
     status: Literal["passed", "failed"]
     evidence: CrossMarginStressEvidence
@@ -590,6 +600,8 @@ TradeEvent = (
     | VacuumPartialRetained
     | VacuumPartialFlattenRequired
     | InitialStopConfirmed
+    | InitialStopInactiveConfirmed
+    | ProtectionReplacementInactiveConfirmed
     | PostFillStressAssessed
     | InitialStopRejected
     | InitialStopOutcomeUnknown

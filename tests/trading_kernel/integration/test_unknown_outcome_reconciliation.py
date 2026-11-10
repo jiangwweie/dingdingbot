@@ -1241,3 +1241,38 @@ def _absent_truth(
         conditional_open_client_order_ids=(),
         observed_at_ms=observed_at_ms,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("position_flat",[False,True])
+async def test_recovered_inactive_initial_stop_never_invents_protection(dispatch_engine,position_flat):
+    ticket,command=await _make_unknown_initial_stop(dispatch_engine)
+    truth=_visible_truth(ticket,command,"inactive-stop")
+    truth=truth.model_copy(update={"order":truth.order.model_copy(update={"is_open":False}),"position_quantity":Decimal(0) if position_flat else ticket.quantity})
+    await recover_unknown_command(lambda:PostgresKernelUnitOfWork(dispatch_engine),StaticTruthPort(truth),
+        RecoverUnknownCommandRequest(command_id=command.command_id,now_ms=2500,visibility_deadline_ms=2400,timeout_seconds=1))
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate=await uow.aggregates.get(ticket.identity.ticket_id)
+        commands=await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate.status is (AggregateStatus.RECONCILIATION_PENDING if position_flat else AggregateStatus.CONTROLLED_FLATTEN_PENDING)
+    assert aggregate.active_stop_exchange_order_id is None
+    assert not any(c.kind is ExchangeCommandKind.TAKE_PROFIT for c in commands)
+    assert sum(c.kind is ExchangeCommandKind.CONTROLLED_FLATTEN for c in commands)==(0 if position_flat else 1)
+
+
+@pytest.mark.asyncio
+async def test_recovered_inactive_replacement_never_cancels_the_old_stop(dispatch_engine):
+    ticket,command=await _make_unknown_replacement(dispatch_engine,position_side="long",seed_policy=True)
+    truth=_visible_truth(ticket,command,"inactive-replacement")
+    truth=truth.model_copy(update={"order":truth.order.model_copy(update={"is_open":False}),"position_quantity":command.payload.quantity})
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        before=await uow.aggregates.get(ticket.identity.ticket_id)
+        old_stop=before.active_stop_exchange_order_id
+    await recover_unknown_command(lambda:PostgresKernelUnitOfWork(dispatch_engine),StaticTruthPort(truth),
+        RecoverUnknownCommandRequest(command_id=command.command_id,now_ms=2600,visibility_deadline_ms=2500,timeout_seconds=1))
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        aggregate=await uow.aggregates.get(ticket.identity.ticket_id)
+        commands=await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+    assert aggregate.active_stop_exchange_order_id==old_stop
+    assert aggregate.status is AggregateStatus.RUNNER_REPLACEMENT_REJECTED
+    assert not any(c.kind is ExchangeCommandKind.CANCEL_ORDER for c in commands)

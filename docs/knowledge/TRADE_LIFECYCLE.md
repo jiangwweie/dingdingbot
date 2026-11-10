@@ -63,7 +63,7 @@ sequenceDiagram
     R->>DB: 结算 复盘 终态 Owner 投影
 ```
 
-时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L125) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158)。
+时序图合并了多次 tick；**不是一次调用持有一个长事务**。正常路径中，Initial Stop 确认后仍在 post_fill_risk_pending，压力评估通过时才释放 lane 并进入 tp1_pending；TP1 订单确认后进入 position_protected。不能把 lane 释放写成等到 TP1 实际成交。精确转移以 [reduce_event](../../src/trading_kernel/domain/reducer.py#L127) 为准，验证样例见 [完整生命周期测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L158)。
 
 ## 未进入交易的分支
 
@@ -109,11 +109,11 @@ sequenceDiagram
     end
 ```
 
-**ENTRY 的 authoritative absence 不会产生第二代 ENTRY**。其他安全命令是否允许下一代，取决于种类、上一代终态和 reducer；不能套用统一重试规则。（来源：[recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93)、[require_next_generation_allowed](../../src/trading_kernel/domain/commands.py#L385)、[未知结果测试](../../tests/trading_kernel/unit/test_unknown_command_recovery.py)）
+**ENTRY 的 authoritative absence 不会产生第二代 ENTRY**。其他安全命令是否允许下一代，取决于种类、上一代终态和 reducer；不能套用统一重试规则。（来源：[recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L96)、[require_next_generation_allowed](../../src/trading_kernel/domain/commands.py#L385)、[未知结果测试](../../tests/trading_kernel/unit/test_unknown_command_recovery.py)）
 
 ### 部分成交与重启
 
-1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。Vacuum 撤单完成后的partial ENTRY同样受控关闭；历史 `VacuumPartialRetained` 只供终态审计解码，不能触发新的正常生命周期。参见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L125)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L160)）
+1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。Vacuum 撤单完成后的partial ENTRY同样受控关闭；历史 `VacuumPartialRetained` 只供终态审计解码，不能触发新的正常生命周期。参见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L127)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L160)）
 2. **持久化后、派发前重启**：恢复数据库中的 Command，由新租约领取，仍需身份和时效校验。
 3. **派发后、结果落库前重启**：不能凭租约到期认定请求未发；仓储领取与 unknown 恢复负责把不确定性保留下来。（来源：[PostgresExchangeCommandRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L740)、[派发集成测试](../../tests/trading_kernel/integration/test_command_dispatch.py)）
 4. **跨代码或 schema 重启**：先过 Runtime Fence；不匹配写者不能继续外部变更。（来源：[runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15)）

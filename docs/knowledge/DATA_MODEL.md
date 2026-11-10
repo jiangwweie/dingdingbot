@@ -141,7 +141,7 @@ sequenceDiagram
 
 ### 闭合不是删除历史
 
-**ReconciliationMatched** 在确认清理完成后释放资金与活动域，并进入 settlement_pending；**BudgetSettled** 推到 review_pending；**ReviewRecorded** 推到 terminal 并物化 Owner 状态。因此“资金已释放”“Ticket 已终态”“经济指标完整”是可分别观察的事实。（来源：[reduce_event](../../src/trading_kernel/domain/reducer.py#L125)、[settle_ticket](../../src/trading_kernel/application/settle_ticket.py)）
+**ReconciliationMatched** 在确认清理完成后释放资金与活动域，并进入 settlement_pending；**BudgetSettled** 推到 review_pending；**ReviewRecorded** 推到 terminal 并物化 Owner 状态。因此“资金已释放”“Ticket 已终态”“经济指标完整”是可分别观察的事实。（来源：[reduce_event](../../src/trading_kernel/domain/reducer.py#L127)、[settle_ticket](../../src/trading_kernel/application/settle_ticket.py)）
 
 ## 按身份读取的本地查询示例
 

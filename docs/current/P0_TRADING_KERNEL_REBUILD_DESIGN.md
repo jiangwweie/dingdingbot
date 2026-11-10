@@ -331,3 +331,9 @@ cannot cross its fact expiry. Missing/stale/equal-or-below MA50 facts reject onl
 the scoped new LONG entry. Owner directional budgets remain independent; BRF2
 and SOR-1H are outside this new filter. PostgreSQL owns all runtime authority;
 research output and Markdown remain explanatory only.
+
+Unknown-write recovery distinguishes proven submission from currently usable
+protection. A visible but inactive initial stop cannot advance live exposure into
+TP: it requests controlled flatten, or reconciliation when already flat. An
+inactive replacement cannot cancel the old active stop. Contradictory remaining
+quantity stays incident-fenced rather than being assumed protected.

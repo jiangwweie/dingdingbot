@@ -68,6 +68,7 @@ from src.trading_kernel.domain.events import (
     ExternalFlatDetected,
     InitialStopAbsenceConfirmed,
     InitialStopConfirmed,
+    InitialStopInactiveConfirmed,
     InitialStopOutcomeUnknown,
     InitialStopRejected,
     LeverageConfirmed,
@@ -84,6 +85,7 @@ from src.trading_kernel.domain.events import (
     ProtectionCancelRejected,
     ProtectionReplacementAbsenceConfirmed,
     ProtectionReplacementConfirmed,
+    ProtectionReplacementInactiveConfirmed,
     ProtectionReplacementOutcomeUnknown,
     ProtectionReplacementRejected,
     ReconciliationMatched,
@@ -790,6 +792,26 @@ def reduce_event(
                 ),
             ),
         )
+
+    if isinstance(event, InitialStopInactiveConfirmed):
+        _require_status(current, AggregateStatus.INITIAL_STOP_OUTCOME_UNKNOWN)
+        if not event.exchange_order_id.strip() or not event.position_quantity.is_finite() or event.position_quantity not in {Decimal(0),current.position_qty}:
+            raise InvalidLifecycleTransition("inactive initial stop facts contradict exposure")
+        resolved = ResolveIncident(ticket_id=current.identity.ticket_id,incident_kind="initial_stop_outcome_unknown")
+        if event.position_quantity == 0:
+            return _transition(current,event,status=AggregateStatus.RECONCILIATION_PENDING,
+                updates={"position_qty":Decimal(0),"protected_qty":Decimal(0)},effects=(resolved,))
+        return _transition(current,event,status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+            effects=(resolved,OpenIncident(ticket_id=current.identity.ticket_id,incident_kind="initial_stop_inactive"),
+                PrepareControlledFlattenCommand(ticket_id=current.identity.ticket_id,quantity=current.position_qty)))
+
+    if isinstance(event, ProtectionReplacementInactiveConfirmed):
+        _require_status(current,AggregateStatus.RUNNER_REPLACEMENT_OUTCOME_UNKNOWN)
+        if not event.exchange_order_id.strip() or event.position_quantity != current.position_qty or current.active_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("inactive replacement differs from protected exposure")
+        return _transition(current,event,status=AggregateStatus.RUNNER_REPLACEMENT_REJECTED,
+            effects=(ResolveIncident(ticket_id=current.identity.ticket_id,incident_kind="protection_replacement_outcome_unknown"),
+                OpenIncident(ticket_id=current.identity.ticket_id,incident_kind="protection_replacement_inactive")))
 
     if isinstance(event, InitialStopConfirmed):
         _require_status_in(

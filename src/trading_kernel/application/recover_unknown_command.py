@@ -40,11 +40,14 @@ from src.trading_kernel.domain.events import (
     EntryVacuumCancelRejected,
     ExitAbsenceConfirmed,
     ExitAccepted,
+    ExternalFlatDetected,
     InitialStopAbsenceConfirmed,
     InitialStopConfirmed,
+    InitialStopInactiveConfirmed,
     ProtectionCancelAbsenceConfirmed,
     ProtectionReplacementAbsenceConfirmed,
     ProtectionReplacementConfirmed,
+    ProtectionReplacementInactiveConfirmed,
     TakeProfitAbsenceConfirmed,
     TakeProfitConfirmed,
     TradeEvent,
@@ -298,6 +301,9 @@ def _recovery_event(
         if command.kind is ExchangeCommandKind.INITIAL_STOP:
             if not isinstance(command.payload, OrderCommandPayload):
                 raise RuntimeError("initial stop recovery payload is invalid")
+            if decision.protection_open is False:
+                assert decision.observed_position_quantity is not None
+                return InitialStopInactiveConfirmed(**common,exchange_order_id=exchange_order_id,position_quantity=decision.observed_position_quantity)
             return InitialStopConfirmed(
                 **common,
                 exchange_order_id=exchange_order_id,
@@ -314,6 +320,11 @@ def _recovery_event(
                 target_qty=payload.quantity,
             )
         if command.kind is ExchangeCommandKind.REPLACE_PROTECTION:
+            if decision.protection_open is False:
+                assert decision.observed_position_quantity is not None
+                if decision.observed_position_quantity == 0:
+                    return ExternalFlatDetected(**common)
+                return ProtectionReplacementInactiveConfirmed(**common,exchange_order_id=exchange_order_id,position_quantity=decision.observed_position_quantity)
             payload = command.payload
             if not isinstance(payload, OrderCommandPayload) or payload.stop_price is None:
                 raise RuntimeError("replacement recovery payload is invalid")

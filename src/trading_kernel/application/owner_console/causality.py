@@ -98,6 +98,7 @@ _ENTRY_EVENTS = {
 }
 _PROTECTION_EVENTS = {
     "InitialStopConfirmed",
+    "InitialStopInactiveConfirmed",
     "PostFillStressAssessed",
     "InitialStopRejected",
     "InitialStopOutcomeUnknown",
@@ -112,6 +113,7 @@ _TP_RUNNER_EVENTS = {
     "TakeProfitPartiallyFilled",
     "RunnerStopRequested",
     "ProtectionReplacementConfirmed",
+    "ProtectionReplacementInactiveConfirmed",
     "ProtectionReplacementRejected",
     "ProtectionReplacementOutcomeUnknown",
     "ProtectionReplacementAbsenceConfirmed",

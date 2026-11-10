@@ -135,9 +135,19 @@ class UnknownRecoveryDecision(BaseModel):
     observed_at_ms: int
     exchange_order_id: str | None = None
     reason: str | None = None
+    protection_open: bool | None = None
+    observed_position_quantity: Decimal | None = None
 
     @model_validator(mode="after")
     def _validate_decision_shape(self) -> UnknownRecoveryDecision:
+        if (self.protection_open is None) != (self.observed_position_quantity is None):
+            raise ValueError("protection recovery requires both state and quantity")
+        if self.observed_position_quantity is not None and (
+            not self.observed_position_quantity.is_finite() or self.observed_position_quantity < 0
+        ):
+            raise ValueError("recovery position quantity must be finite and nonnegative")
+        if self.protection_open is not None and self.status is not UnknownRecoveryStatus.RECONCILED_SUBMITTED:
+            raise ValueError("only submitted protection can carry recovered state")
         if self.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED:
             if not str(self.exchange_order_id or "").strip() or self.reason is not None:
                 raise ValueError("submitted recovery requires exchange order identity")
@@ -180,10 +190,15 @@ def decide_unknown_recovery(
                 truth,
                 reason=contradiction,
             )
+        protection = command.kind in {ExchangeCommandKind.INITIAL_STOP, ExchangeCommandKind.REPLACE_PROTECTION}
+        if protection and not order.is_open and isinstance(command.payload, OrderCommandPayload) and truth.position_quantity not in {Decimal(0),command.payload.quantity}:
+            return _decision(UnknownRecoveryStatus.IDENTITY_CONTRADICTION,truth,reason="inactive_protection_position_mismatch")
         return UnknownRecoveryDecision(
             status=UnknownRecoveryStatus.RECONCILED_SUBMITTED,
             observed_at_ms=truth.observed_at_ms,
             exchange_order_id=order.exchange_order_id,
+            protection_open=order.is_open if protection else None,
+            observed_position_quantity=truth.position_quantity if protection else None,
         )
 
     submission_evidence = (
