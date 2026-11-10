@@ -36,6 +36,45 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Seoul MA-R2 genuine Owner Resume — ENTRY enabled2026-11-10
+
+At **2026-11-10 14:00:50.718 Asia/Shanghai**, the real Console
+**owner_control_entry_resume / entry_resume / totp_step_up** created
+**Policy8/true**. The authorization timestamp and policy-event timestamp match.
+This supersedes the Owner-paused R1 snapshot below; no agent-created Resume,
+policy mutation, service restart or exchange order was used for this check.
+
+Readonly postflight at **14:01:49**, followed by scoped PostgreSQL/journal and
+exchange verification through **14:03:10 Asia/Shanghai**, confirms:
+
+| Boundary | Direct current result |
+| --- | --- |
+| Deployed identity | Exact SHA/tag/schema in the production table above; database `brc_manual_kernel`, system identifier `7705780580898177062` |
+| Owner authority | Policy8 enabled; `owner_entry_resume_authorized=true`; original strategy controls retained, including deliberate CPM/SOR-001/TradFi pauses |
+| Certification/readiness | Database integrity, flatness, current Entry recovery readiness, risk-budget authority and required management receiver PASS |
+| Resident services | Observation, Entry, Lifecycle, Reconciliation and Owner API active/running, NRestarts0; maintenance fence absent |
+| Management receiver | Same exact installed identity, live ready lease, persisted/applied0/0, no health reason |
+| Exposure/ownership | Exchange independent sides/Cross, seven current instruments checked, non-flat domains0 and open-order domains0; active Tickets/budget/unknown Commands/open Incidents0 |
+| Old BNB | Remains permanent MANUAL/terminal, aggregate quantity/protection0; reopening global ENTRY did not restore AUTO |
+| Recent chain/logs | No new Signal or Ticket between genuine Resume and the bounded check; no tick_failed/runtime_fenced/facts_unavailable in sampled post-Resume worker journals |
+
+The last recorded strategy observations were timestamped **14:00**, before the
+14:00:50 Resume, and still show `selection_owner_or_policy_blocked` from that
+paused observation. This historical readiness label is **not** asserted to be a
+current post-Resume safety failure or proof of a healthy no-signal market. Current
+control/readiness certification passes; the next naturally observed strategy
+close and its resulting Signal/admission remain independent evidence. Do not
+replay a close or create a test order to manufacture it.
+
+No further Owner control action is required by this postflight. New natural AUTO
+lifecycle, actual App intervention and phone notification acceptance remain
+unverified until observed; restoration of policy authority alone does not prove
+those future paths. BNB net economics remain unavailable as previously recorded.
+
+Evidence: `.local/management-r1-20261110/owner-resumed-postflight.json` and
+`owner-resumed-chain.json` in the attached R1 worktree. These are display-only
+snapshots; current PostgreSQL and exchange facts remain runtime authority.
+
 ### Seoul MA-R2 R1 — installed, officially prepared, Owner paused2026-11-10
 
 **At2026-11-10 13:26 Asia/Shanghai**, the exact R1 SHA/tag/schema above is installed
