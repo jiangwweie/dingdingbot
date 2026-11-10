@@ -77,7 +77,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, isLoading, error 
             </span>
           </h1>
           <p className="mt-1 text-xs text-text-muted">
-            Tokyo Trading Kernel · 生产控制台
+            首尔 App 人工接管 · 生产控制台
           </p>
         </div>
 
