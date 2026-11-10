@@ -61,7 +61,7 @@
 | **运行隔离** | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L16) | certified commit/schema、Incident | [runtime workers](../../tests/trading_kernel/integration/test_global_runtime_workers.py) |
 | **Reconciliation 公平性** | [run_reconciliation_worker_once](../../src/trading_kernel/interfaces/reconciliation_worker.py#L237) | unknown / critical / housekeeping、due claims | [reliability integration](../../tests/trading_kernel/integration/test_reconciliation_reliability.py)、[fairness unit](../../tests/trading_kernel/unit/test_reconciliation_worker_fairness.py) |
 | **常驻与重启** | [run_worker_process_group](../../src/trading_kernel/interfaces/worker_process.py#L99) | independently hosted loops、stop signal、burst bounds | [selection hosting](../../tests/trading_kernel/unit/test_selection_runtime_hosting.py)、[shutdown](../../tests/trading_kernel/unit/test_worker_process_shutdown.py) |
-| **发布分类与恢复** | [classify_changed_paths](../../scripts/classify_release.py#L84)、[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L322) | R0–R4、identity、preservation、阶段化恢复 | [deployment tests](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py)、[release classification](../../tests/trading_kernel/unit/test_release_classification.py) |
+| **发布分类与恢复** | [classify_changed_paths](../../scripts/classify_release.py#L85)、[deploy_tokyo_release](../../scripts/trading_kernel/deploy_tokyo_release.py#L322) | R0–R4、identity、preservation、阶段化恢复 | [deployment tests](../../tests/trading_kernel/unit/test_deploy_tokyo_release.py)、[release classification](../../tests/trading_kernel/unit/test_release_classification.py) |
 
 ## 用五个问题贯通验收
 

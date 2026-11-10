@@ -5,7 +5,7 @@ import { fetchControls, controlsQueryKey } from '../api/controlsApi';
 import { fetchTickets, ticketsQueryKey } from '../api/ticketsApi';
 import { formatReviewMoneyMetric } from '../mapping/reviewMapping';
 import { getBeijingDayStartMs } from '../utils/timeRange';
-import { computeUnloadedActiveCount } from '../mapping/ticketMapping';
+import { computeUnloadedActiveCount, mapActiveTicketToOverviewEpisode } from '../mapping/ticketMapping';
 import type {
   SystemPulseData,
   TodayPerformanceMetrics,
@@ -21,17 +21,6 @@ const STRATEGY_META: Record<string, { name_zh: string; timeframe: string }> = {
   'MPG-001': { name_zh: '趋势动量持续', timeframe: '1h close' },
   'SOR-1H-001': { name_zh: '单边突破 (1h/15m)', timeframe: '1h close' },
   'SOR-001': { name_zh: '旧单边突破策略', timeframe: '已停用' },
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  signal: '信号',
-  admission: '准入',
-  entry: '入场',
-  protection: '保护',
-  tp_runner: '止盈 / Runner',
-  exit: '退出',
-  reconciliation: '对账',
-  review: '复盘',
 };
 
 function formatMetric(metric?: { value: string | null; unit: string; unavailable_reason?: string | null } | null): string {
@@ -218,30 +207,7 @@ export function useOverviewData() {
           name_zh: t.strategy_group_id,
           timeframe: '1h close',
         };
-        const stageZh = STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage;
-
-        return {
-          ticket_id: t.ticket_id,
-          strategy_id: t.strategy_group_id,
-          strategy_name_zh: meta.name_zh,
-          symbol: cleanSymbol(t.exchange_instrument_id),
-          side: t.position_side,
-          lifecycle_stage: t.lifecycle_stage,
-          lifecycle_stage_zh: stageZh,
-          completed_stage_count: t.completed_stage_count,
-          total_stage_count: t.total_stage_count,
-          ticket_status: t.ticket_status,
-          issued_at_ms: t.issued_at_ms,
-          issued_at_formatted: new Date(t.issued_at_ms).toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-          }),
-          attention_items: t.attention_items ?? [],
-          net_pnl_formatted: formatMetric(t.net_pnl),
-          net_r_formatted: formatMetric(t.net_r),
-        };
+        return mapActiveTicketToOverviewEpisode(t, meta.name_zh);
       });
 
   // Per-group contributions and headline are from the same full-window snapshot.
@@ -251,14 +217,7 @@ export function useOverviewData() {
     return {strategy_id:group,strategy_version_id:null,name_zh:meta.name_zh,timeframe:'全部版本 · 上海今日终态',status:paused?'paused':'running',status_label:paused?'已暂停':'运行中',ticket_count:stats.sample_count,win_count:stats.win_count,loss_count:stats.loss_count,net_pnl_formatted:formatMetric(stats.verified_totals.net_pnl),net_r_formatted:formatMetric(stats.verified_totals.net_r),active_tickets_count:activeCountByStrategy.get(group)??0,is_metrics_available:stats.confirmed_count>0};
   });
 
-  // 5. Attention Items
-  const isTrulyHealthy =
-    freshness === 'fresh' &&
-    conclusionLevel === 'no_action' &&
-    incidentCount === 0 &&
-    globalEntryEnabled &&
-    (!rawOverview?.attention_summary || rawOverview.attention_summary.length === 0);
-
+  // 5. Attention Items (derived strictly from authoritative facts, never deduce global protection completeness)
   const attentionList: AttentionItem[] = [];
 
   if (rawOverview?.conclusion?.summary && conclusionLevel !== 'no_action') {
@@ -319,14 +278,6 @@ export function useOverviewData() {
     });
   }
 
-  if (isTrulyHealthy && attentionList.length === 0) {
-    attentionList.push({
-      id: 'clean-state',
-      type: 'info',
-      title: '一切正常，无需介入',
-      detail: '当前无阻断、无执行异常、全局准入及保护策略处于健康状态。',
-    });
-  }
 
   const refetch = async () => {
     await Promise.all([

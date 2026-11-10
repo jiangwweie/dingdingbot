@@ -58,6 +58,10 @@ export interface TradeEpisodeSummary {
   attention_items?: string[];
   net_pnl_formatted?: string;
   net_r_formatted?: string;
+  management_mode?: 'AUTO' | 'REVIEW_REQUIRED' | 'MANUAL';
+  is_protected?: boolean;
+  protection_state?: string;
+  manual_risk_reason?: string | null;
   // Optional prototype fixture fields
   entry_price?: number;
   current_price?: number;

@@ -5,16 +5,16 @@
 @layer base {
   :root {
     /* LIGHT THEME TOKENS - Refined financial palette: crisp, calm, professional */
-    --color-background: #F1F4F8;
+    --color-background: #F8FAFC;
     --color-surface: #FFFFFF;
     --color-surface-elevated: #FFFFFF;
-    --color-surface-subtle: #F8FAFC;
+    --color-surface-subtle: #F1F5F9;
 
     --color-border: #E2E8F0;
     --color-border-strong: #CBD5E1;
 
     --color-text-primary: #0F172A;
-    --color-text-secondary: #475569;
+    --color-text-secondary: #334155;
     --color-text-muted: #64748B;
     --color-text-disabled: #94A3B8;
 
@@ -42,15 +42,15 @@
 
   .dark {
     /* DARK THEME TOKENS - Tokyo BRC trading kernel standard: deep, focused, restrained */
-    --color-background: #080A0D;
-    --color-surface: #0F1318;
-    --color-surface-elevated: #151B22;
-    --color-surface-subtle: #121820;
+    --color-background: #0B0E14;
+    --color-surface: #111722;
+    --color-surface-elevated: #17202F;
+    --color-surface-subtle: #0E131C;
 
-    --color-border: #222933;
-    --color-border-strong: #2D3745;
+    --color-border: #1E293B;
+    --color-border-strong: #2E3E55;
 
-    --color-text-primary: #F0F6FC;
+    --color-text-primary: #F1F5F9;
     --color-text-secondary: #94A3B8;
     --color-text-muted: #64748B;
     --color-text-disabled: #475569;
@@ -73,8 +73,8 @@
     --color-info-bg: rgba(59, 130, 246, 0.12);
 
     --color-focus: #F59E0B;
-    --scrollbar-thumb: #222933;
-    --scrollbar-thumb-hover: #2D3745;
+    --scrollbar-thumb: #1E293B;
+    --scrollbar-thumb-hover: #2E3E55;
   }
 
   * {

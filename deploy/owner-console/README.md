@@ -216,3 +216,40 @@ symlink when activation smoke fails. Static rollback changes only
 `/opt/brc/owner-console-api/current`, systemd unit and Owner API process. No
 database migration, Kernel service action or Trading Kernel rollback is
 required.
+
+## Seoul manual-product static release
+
+The manual product uses its own explicit-target static controller. The inherited
+Tokyo release CLI remains disabled on this product; the whole-product manual
+installer remains a stopped upgrade procedure. Neither is used for an active
+static-only deployment.
+
+```bash
+.venv/bin/python scripts/owner_console/certify_static_release_candidate.py --commit <ui-sha>
+.venv/bin/python scripts/owner_console/deploy_manual_static.py \
+  --commit <ui-sha> --expected-runtime-commit <installed-kernel-sha> \
+  --target kr --machine-id <independent-machine-id> --public-ip <independent-public-ip>
+```
+
+The UI candidate must be a clean exact commit and have its own R1 static
+certificate. Builds come from that immutable Git archive with the frozen
+frontend lockfile. Kernel, schema and API-client contract differences from the
+expected installed runtime are rejected. The controller checks independent
+host/product/account/database identity and captures the current policy,
+capability, strategy-control and service-process identities using read-only
+queries. Trading may remain active; no flat-account or Owner Pause/Resume action
+is introduced by a static release.
+
+Only `dist/index.html` and plain `dist/assets/**` files are uploaded to a new
+static release directory. Existing content-hashed assets remain available for
+already-open browser tabs. The controller atomically replaces only the static
+current symlink and verifies HTTPS hashes for every new artifact. Kernel/API
+pointers, configuration, processes and policy must compare unchanged before and
+after the switch. A failed check restores the previous static symlink; it never
+rolls back Owner actions or trading state. No systemd restart, Nginx reload,
+database write or exchange operation is part of this path.
+
+Browser acceptance uses isolated local API responses and blocks all mutation
+requests. Live unauthenticated login/assets checks remain separate from genuine
+Owner-session acceptance; no Owner credentials or authentication proofs are
+fabricated or exported for a frontend release.

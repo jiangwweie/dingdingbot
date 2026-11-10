@@ -68,21 +68,21 @@ export function DirectionalRiskCard() {
     } catch (err) { setError(err instanceof Error ? err.message : '核验失败'); }
     finally { busyRef.current = false; setBusy(false); }
   };
-  return <section className="rounded-xl border border-border bg-surface p-4 space-y-3" aria-label="方向风险偏好">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="text-sm font-semibold text-text-primary">方向风险偏好</h2>
-      <button type="button" className="text-xs text-brand" onClick={() => void query.refetch()}>刷新状态</button>
+  return <section className="rounded-xl border border-border bg-surface p-4 sm:p-5 space-y-3.5 shadow-xs transition-all" aria-label="方向风险偏好">
+    <div className="flex flex-wrap items-center justify-between pb-2 border-b border-border/80 gap-3">
+      <h2 className="text-sm font-bold tracking-tight text-text-primary">方向风险偏好</h2>
+      <button type="button" className="text-xs font-semibold text-brand hover:underline cursor-pointer" onClick={() => void query.refetch()}>刷新状态</button>
     </div>
     {query.isError ? <p role="alert" className="text-sm text-danger">无法读取方向风险控制，暂不能修改。</p> : !state ? <p className="text-sm text-text-muted">正在读取方向风险控制…</p> : <>
       <p className="text-sm text-text-primary" role="status">{pending ? `切换中：${state.control.pending_view ? labels[state.control.pending_view] : '风险预算'}，当前仍为${labels[state.control.view]}` : `当前：${labels[state.control.view]}`}</p>
       <div className="flex flex-wrap gap-2" aria-label="选择市场立场">{(['bullish','neutral','bearish'] as const).map(view => <button type="button" key={view} aria-pressed={!pending && state.control.view === view} disabled={pending || busy || Boolean(frozen)} onClick={() => select(view)} className="rounded-md border border-border px-4 py-2 text-sm text-text-primary disabled:opacity-40 aria-pressed:bg-brand aria-pressed:text-white focus-visible:ring-2 focus-visible:ring-brand">{labels[view]}</button>)}</div>
-      <dl className="grid grid-cols-2 gap-4 text-sm">
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
         <div><dt className="text-text-muted">多头风险上限</dt><dd className="font-semibold">{pct(state.long_limit)} · 已占用 {new Decimal(state.long_risk_at_stop).toFixed(2)} USDT</dd></div>
         <div><dt className="text-text-muted">空头风险上限</dt><dd className="font-semibold">{pct(state.short_limit)} · 已占用 {new Decimal(state.short_risk_at_stop).toFixed(2)} USDT</dd></div>
       </dl>
-      <p className="text-xs text-text-muted">用于已授权的 Crypto 新开仓，不直接控制其他产品。上限按钱包余额的计划止损风险计算。已有持仓继续管理；实际持仓方向不由此按钮直接调整。新增交易仍需通过全部风险检查。</p>
-      {state.balance_captured_at_ms ? <p className="text-xs text-text-muted">最近准入余额快照：{state.wallet_balance_at_last_admission} USDT（{new Date(state.balance_captured_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}），非实时余额。{state.long_over_limit_at_last_balance || state.short_over_limit_at_last_balance ? '按此快照测算，已有方向占用超过当前上限；已有持仓继续受保护。' : '可新增额度仍以实际开仓前核验为准。'}</p> : <p className="text-xs text-text-muted">尚无准入余额快照，当前超限状态未知。实际开仓前核验最新余额。</p>}
-      <p className="text-xs text-text-muted">生效时间：{new Date(state.control.effective_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
+      <p className="text-xs text-text-muted leading-relaxed break-words">用于已授权的 Crypto 新开仓，不直接控制其他产品。上限按钱包余额的计划止损风险计算。已有持仓继续管理；实际持仓方向不由此按钮直接调整。新增交易仍需通过全部风险检查。</p>
+      {state.balance_captured_at_ms ? <p className="text-xs text-text-muted leading-relaxed break-words">最近准入余额快照：{state.wallet_balance_at_last_admission} USDT（{new Date(state.balance_captured_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}），非实时余额。{state.long_over_limit_at_last_balance || state.short_over_limit_at_last_balance ? '按此快照测算，已有方向占用超过当前上限；已有持仓继续受保护。' : '可新增额度仍以实际开仓前核验为准。'}</p> : <p className="text-xs text-text-muted leading-relaxed break-words">尚无准入余额快照，当前超限状态未知。实际开仓前核验最新余额。</p>}
+      <p className="text-xs text-text-muted leading-relaxed break-words">生效时间：{new Date(state.control.effective_at_ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
       {state.review_due && <p className="text-xs text-status-amber">建议复核当前判断，原选择持续有效。</p>}
     </>}
     {message && <p role="status" className="text-xs text-text-secondary">{message}</p>}

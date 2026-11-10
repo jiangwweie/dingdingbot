@@ -927,7 +927,7 @@ async function runAllTests() {
     assert.equal(episode.net_pnl_formatted, '+250.00 USDT');
     assert.equal(episode.net_r_formatted, '+2.50 R');
     assert.equal(episode.duration_formatted, '2小时15分');
-    assert.equal(episode.exit_reason_zh, '止盈平保 (TP1 + Runner Exit)');
+    assert.equal(episode.exit_reason_zh, 'TP1 后 Runner 退出');
     assert.ok(episode.closed_at_formatted !== null);
   });
 
@@ -960,7 +960,7 @@ async function runAllTests() {
     assert.equal(episode.outcome_zh, '已结算 · 亏损 (Loss)');
     assert.equal(episode.net_pnl_formatted, '-100.00 USDT');
     assert.equal(episode.net_r_formatted, '-1.00 R');
-    assert.equal(episode.exit_reason_zh, '外部平仓已确认');
+    assert.equal(episode.exit_reason_zh, '外部平仓已确认，成交明细不可得');
   });
 
   await test('computeTradesSummaryMetrics calculates accurate metrics across mixed episodes with honest coverage and win rate denominator', () => {
@@ -998,7 +998,7 @@ async function runAllTests() {
     // Pagination / Scope
     assert.equal(metrics.isComplete, true);
     assert.equal(metrics.hasMore, false);
-    assert.equal(metrics.scopeLabel, '已加载当前 30 天范围全部账本 · 共 6 笔');
+    assert.equal(metrics.scopeLabel, '已加载所选范围全部明细 · 共 6 笔');
 
     // Empty list boundary
     const emptyMetrics = computeTradesSummaryMetrics([]);

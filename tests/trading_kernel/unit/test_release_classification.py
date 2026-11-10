@@ -8,6 +8,7 @@ def test_release_classification_uses_the_heaviest_changed_boundary() -> None:
         (("docs/current/MAIN_CONTROL_ROADMAP.md",), ReleaseLevel.R0),
         (("scripts/trading_kernel/deploy_tokyo_release.py",), ReleaseLevel.R0),
         (("scripts/owner_console/prepare_google_credential.py",), ReleaseLevel.R0),
+        (("scripts/owner_console/deploy_manual_static.py",), ReleaseLevel.R0),
         (("frontend/owner-console/src/app/App.tsx",), ReleaseLevel.R1),
         (("frontend/owner-console-v2/src/App.tsx",), ReleaseLevel.R1),
         (
@@ -48,3 +49,15 @@ def test_release_classification_keeps_authority_changes_at_r4() -> None:
     assert result.level is ReleaseLevel.R4
     assert result.requires_flat is True
     assert result.requires_kernel_certification is True
+
+
+def test_manual_frontend_and_its_static_controller_do_not_require_trading_cutover():
+    result = classify_changed_paths(
+        (
+            "frontend/owner-console-v2/src/components/Navbar.tsx",
+            "scripts/owner_console/deploy_manual_static.py",
+        )
+    )
+    assert result.level is ReleaseLevel.R1
+    assert not result.requires_flat and not result.requires_kernel_certification
+    assert result.affected_services == ("nginx-static-symlink",)
