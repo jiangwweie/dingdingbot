@@ -20,7 +20,8 @@ TradingKernelSchemaRevision = Literal[
     "0016_app_manual_takeover_v1",
     "0017_app_management_observation",
     "0018_notice_outbox_v1",
+    "0019_management_evidence_v2",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0018_notice_outbox_v1"
+    "0019_management_evidence_v2"
 )

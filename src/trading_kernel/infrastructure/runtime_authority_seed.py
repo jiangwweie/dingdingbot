@@ -268,7 +268,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
             }
             else None
         ),
@@ -299,7 +299,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
             }
         ),
     )
@@ -317,7 +317,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -345,7 +345,7 @@ async def seed_runtime_authority(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
             }
             else None
         ),
@@ -359,11 +359,12 @@ async def seed_runtime_authority(
     )
 
     certification = {
+        **({"management_feed_required":True} if request.schema_revision=="0019_management_evidence_v2" else {}),
         "stage": "entry_paused" if include_tradfi else "observation_only",
         "seed_identity": seed_identity,
         "position_mode": POSITION_MODE,
     }
-    if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1"}:
+    if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
         certification["product_id"] = PRODUCT_ID
     rows = [
         _ExactRow(
@@ -515,7 +516,7 @@ async def seed_runtime_authority(
     )
 
     state = _policy_state(policy)
-    if request.schema_revision in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1"}:
+    if request.schema_revision in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
         await uow.directional_risk.initialize(venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms)
     return RuntimeAuthoritySeedResult(
         **state.model_dump(mode="python"),
@@ -566,14 +567,14 @@ async def deploy_compatible_upgrade_identity(
             await _install_capacity_release_revision(connection, request, source_identity=metadata_rows)
         return result
     source_schema_revision = metadata_rows.get("schema_revision")
-    if source_schema_revision == "0017_app_management_observation" and request.schema_revision == "0018_notice_outbox_v1":
+    if (source_schema_revision,request.schema_revision) in {("0017_app_management_observation","0018_notice_outbox_v1"),("0018_notice_outbox_v1","0019_management_evidence_v2")}:
         if await connection.scalar(sa.text("SELECT version_num FROM alembic_version")) != request.schema_revision:
             raise RuntimeAuthorityTransitionRefused("notice upgrade requires exact migrated schema")
         await _require_flat_compatible_upgrade_activity(connection, allow_compatible_runtime_fence=True)
         policy = dict(await _lock_policy(connection))
         if policy["new_entry_submit_enabled"]:
             raise RuntimeAuthorityTransitionRefused("notice upgrade requires Owner paused ENTRY")
-        if metadata_rows.get("registry_semantic_hash") != build_registry_semantic_hash(_contracts_for_schema(source_schema_revision)):
+        if metadata_rows.get("registry_semantic_hash") != build_registry_semantic_hash(_contracts_for_schema(str(source_schema_revision))):
             raise RuntimeAuthorityTransitionRefused("notice source Registry identity differs")
         expected_source_seed = build_runtime_seed_identity(request.model_copy(update={"schema_revision":source_schema_revision}))
         if metadata_rows.get("seed_identity") != expected_source_seed:
@@ -594,7 +595,7 @@ async def deploy_compatible_upgrade_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -639,7 +640,7 @@ async def deploy_compatible_upgrade_identity(
     )
     current_policy = dict(await _lock_policy(connection))
     target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
-    source_event_spec_ids = _allowed_event_spec_ids(_contracts_for_schema(source_schema_revision))
+    source_event_spec_ids = _allowed_event_spec_ids(_contracts_for_schema(str(source_schema_revision)))
     current_policy_version = int(str(current_policy["policy_version"]))
     expected_policy_version = (
         4
@@ -705,7 +706,7 @@ async def deploy_compatible_upgrade_identity(
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
-            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001") if request.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1"} else ("SOR-US-EQ-PERP-001",),
+            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001") if request.schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"} else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
         )
     if source_entry_enabled:
@@ -776,7 +777,7 @@ async def deploy_compatible_upgrade_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
             }
             else None
         ),
@@ -835,7 +836,7 @@ async def deploy_compatible_upgrade_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
-        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1"}:
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
             certification["product_id"] = PRODUCT_ID
         certification.update(
             {
@@ -941,7 +942,7 @@ async def _deploy_capability_compatible_identity(
         allow_compatible_runtime_fence=True,
     )
     current_policy = dict(await _lock_policy(connection))
-    orb_upgrade=request.schema_revision in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1','0016_app_manual_takeover_v1','0017_app_management_observation','0018_notice_outbox_v1'} and source_schema_revision not in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1','0016_app_manual_takeover_v1','0017_app_management_observation','0018_notice_outbox_v1'}
+    orb_upgrade=request.schema_revision in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1','0016_app_manual_takeover_v1','0017_app_management_observation','0018_notice_outbox_v1','0019_management_evidence_v2'} and source_schema_revision not in {'0011_orb_session_1h_v1','0012_generic_signal_path_v1','0013_owner_directional_risk_v1','0014_dynamic_risk_budget_v1','0015_generic_owner_recovery_v1','0016_app_manual_takeover_v1','0017_app_management_observation','0018_notice_outbox_v1','0019_management_evidence_v2'}
     target_contracts = _contracts_for_schema(request.schema_revision)
     target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
     source_contracts = _contracts_for_schema(source_schema_revision)
@@ -1076,14 +1077,14 @@ async def _deploy_capability_compatible_identity(
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
             }
             else None
         ),
     )
     for capability in capabilities:
         certification = dict(capability["certification"])
-        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1"}:
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
             certification["product_id"] = PRODUCT_ID
         certification.update(
             {
@@ -1103,6 +1104,7 @@ async def _deploy_capability_compatible_identity(
                 schema_revision=request.schema_revision,
                 certification=certification,
                 updated_at_ms=request.seeded_at_ms,
+                **({"enabled":True} if request.schema_revision=="0019_management_evidence_v2" else {}),
             )
         )
         if updated.rowcount != 1:
@@ -1320,8 +1322,13 @@ async def _deploy_runtime_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
-        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1"}:
+        if request.schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
             certification["product_id"] = PRODUCT_ID
+        if request.schema_revision=="0019_management_evidence_v2":
+            certification["management_feed_required"]=True
+        if request.schema_revision=="0019_management_evidence_v2":
+            certification.pop('runtime_mode',None)
+            certification.pop('management_recovery_ticket_ids',None)
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
             sa.update(runtime_capabilities_current)
@@ -1334,6 +1341,7 @@ async def _deploy_runtime_identity(
                 schema_revision=request.schema_revision,
                 certification=certification,
                 updated_at_ms=request.seeded_at_ms,
+                **({"enabled":True} if request.schema_revision=="0019_management_evidence_v2" else {}),
             )
         )
         if updated.rowcount != 1:
@@ -1522,7 +1530,7 @@ def _contracts_for_schema(
     schema_revision: str,
 ) -> tuple[RegisteredStrategyContract, ...]:
     contracts = registered_strategy_contracts() if _schema_includes_tradfi(schema_revision) else _crypto_strategy_contracts()
-    return contracts if schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1"} else tuple(
+    return contracts if schema_revision in {"0011_orb_session_1h_v1","0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"} else tuple(
         c for c in contracts if c.strategy_group_id!="SOR-1H-001")
 
 
@@ -1538,7 +1546,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
                 "0012_generic_signal_path_v1",
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
-                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1",
+                "0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2",
     }
 
 
@@ -1706,11 +1714,11 @@ def _seed_identity(
         "position_mode": POSITION_MODE,
         "acceptance_policy": semantics,
     }
-    if schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1"}:
+    if schema_revision in {"0016_app_manual_takeover_v1", "0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
         payload["product_id"] = PRODUCT_ID
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
-    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1"}:
+    if schema_revision in {"0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1","0013_owner_directional_risk_v1","0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1", "0016_app_manual_takeover_v1","0017_app_management_observation", "0018_notice_outbox_v1", "0019_management_evidence_v2"}:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,
             "long_continuation": 2,

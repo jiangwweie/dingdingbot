@@ -179,6 +179,10 @@ class OrderEvidence(BaseModel):
     coverage_complete: bool
     known_command_outcome_pending: bool
     before_terms: OrderTerms | None = None
+    source_event_id: str | None = None
+    source_kind: Literal["rest", "stream", "amendment", "recovery"] | None = None
+    canonical_schema_version: int = 2
+    source_digest: str | None = None
 
     @model_validator(mode="after")
     def shape(self) -> OrderEvidence:

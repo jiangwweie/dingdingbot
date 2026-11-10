@@ -7,7 +7,8 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     deploy_compatible_upgrade_identity,
     seed_runtime_authority,
 )
-from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+
+CURRENT_NOTICE_SCHEMA_REVISION = "0018_notice_outbox_v1"
 from tests.trading_kernel.support.postgres import (
     create_empty_database,
     drop_disposable_database,
@@ -61,14 +62,14 @@ async def test_exact_0017_notice_migration_preserves_all_source_rows_and_owner_p
                 }
 
         before = await snapshot()
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", CURRENT_NOTICE_SCHEMA_REVISION)
         async with PostgresKernelUnitOfWork(e) as u:
             await deploy_compatible_upgrade_identity(
                 u,
                 RuntimeAuthoritySeedRequest(
                     account_id="manual-migration",
                     runtime_commit="b" * 40,
-                    schema_revision=CURRENT_SCHEMA_REVISION,
+                    schema_revision=CURRENT_NOTICE_SCHEMA_REVISION,
                     seeded_at_ms=2000,
                 ),
             )
@@ -105,7 +106,7 @@ async def test_notice_identity_upgrade_rejects_drifted_source(fault):
                     seeded_at_ms=1000,
                 ),
             )
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", CURRENT_NOTICE_SCHEMA_REVISION)
         async with e.begin() as c:
             if fault == "seed":
                 await c.execute(
@@ -129,7 +130,7 @@ async def test_notice_identity_upgrade_rejects_drifted_source(fault):
                         if fault == "account"
                         else "manual-migration",
                         runtime_commit="b" * 40,
-                        schema_revision=CURRENT_SCHEMA_REVISION,
+                        schema_revision=CURRENT_NOTICE_SCHEMA_REVISION,
                         seeded_at_ms=2000,
                     ),
                 )

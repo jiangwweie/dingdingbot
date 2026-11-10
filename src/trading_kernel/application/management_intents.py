@@ -20,8 +20,14 @@ def accepted_order_identities(rows: list[dict]) -> frozenset[tuple[str, str]]:
         if row["status"] not in ("accepted", "reconciled_accepted") or order_id is None:
             continue
         payload = row["request_payload"]
-        namespace = payload.get("order_namespace") if row["command_kind"] == "cancel_order" else (
-            "conditional" if payload.get("order_type") in ("stop_market", "take_profit_market") else "regular"
+        namespace = (
+            payload.get("order_namespace")
+            if row["command_kind"] == "cancel_order"
+            else (
+                "conditional"
+                if payload.get("order_type") in ("stop_market", "take_profit_market")
+                else "regular"
+            )
         )
         if namespace not in ("regular", "conditional"):
             raise ValueError("accepted order namespace missing")
@@ -74,26 +80,60 @@ def system_intents_for(
         )
         if namespace != t.order_namespace:
             continue
-        expected = OrderTerms.model_validate(
-            {
-                **t.model_dump(),
-                "side": payload["side"],
-                "order_type": payload["order_type"].upper(),
-                "quantity": Decimal(payload["quantity"]),
-                "price": payload.get("limit_price"),
-                "trigger_price": payload.get("stop_price"),
-                "time_in_force": payload.get("time_in_force") or "GTC",
-                "close_position": False,
-                "reduce_only": False,
-                "working_type": "CONTRACT_PRICE",
-                "price_protect": False,
-                "activation_price": None,
-                "callback_rate": None,
-                "price_match": "NONE",
-                "self_trade_prevention_mode": "NONE",
-                "good_till_date_ms": 0,
-            }
-        )
+        baseline = response.get("management_baseline") or response.get(
+            "venue_payload", {}
+        ).get("management_baseline")
+        if baseline is not None:
+            expected = OrderTerms.model_validate(baseline)
+            if (
+                expected.identity != t.identity
+                or expected.client_order_id != t.client_order_id
+            ):
+                continue
+        else:
+            # Without a confirmed baseline, only an unchanged creation record
+            # within the exact dispatch/acceptance interval may establish terms.
+            completed = row.get("completed_at_ms")
+            creation = (
+                evidence.created_at_ms
+                if evidence.created_at_ms is not None
+                else (
+                    evidence.exchange_event_at_ms
+                    if evidence.action is OrderAction.NEW
+                    else None
+                )
+            )
+            if (
+                creation is None
+                or completed is None
+                or not row["created_at_ms"] <= creation <= completed
+            ):
+                continue
+            if (
+                evidence.action not in {OrderAction.NEW, OrderAction.TRADE}
+                or evidence.exchange_event_at_ms != creation
+            ):
+                continue
+            if (
+                t.side != payload["side"]
+                or t.order_type != payload["order_type"].upper()
+                or t.quantity != Decimal(payload["quantity"])
+                or t.price
+                != (
+                    None
+                    if payload.get("limit_price") is None
+                    else Decimal(payload["limit_price"])
+                )
+                or t.trigger_price
+                != (
+                    None
+                    if payload.get("stop_price") is None
+                    else Decimal(payload["stop_price"])
+                )
+                or t.time_in_force != (payload.get("time_in_force") or "GTC")
+            ):
+                continue
+            expected = t
         result.append(
             SystemOrderIntent(
                 command_id=row["command_id"],

@@ -65,3 +65,28 @@ async def test_management_outcome_event_has_no_runner_effects(head_template_engi
         r=reduce_event(a,event)
         assert r.effects==() and r.aggregate.management_mode==a.management_mode
         assert r.aggregate.active_stop_exchange_order_id==a.active_stop_exchange_order_id
+
+
+@pytest.mark.asyncio
+async def test_feed_loss_defers_prepared_runner_without_unknown_or_venue_write(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get_for_update(t.identity.ticket_id)
+        fill=TakeProfitFilled(event_id='tp1-real',ticket_id=t.identity.ticket_id,sequence=a.last_event_sequence+1,
+            occurred_at_ms=5000,filled_qty=a.tp1_target_qty,average_fill_price=Decimal(62000),runner_floor_price=Decimal(60100))
+        await u.commit_reduction(event=fill,reduction=reduce_event(a,fill),expected_version=a.version)
+    async with e.begin() as c:
+        await c.execute(sa.update(runtime_capabilities_current).values(certification={'product_id':'brc-app-manual-v1','management_feed_required':True}))
+    venue=KindAwareAcceptingVenue();venue.execute=AsyncMock(wraps=venue.execute)
+    result=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(e),venue,
+        DispatchCommandRequest(worker_id='test',now_ms=6000,lease_until_ms=8000,timeout_seconds=1,ticket_id=t.identity.ticket_id,
+            runtime_commit='kernel-test-head'),clock_ms=lambda:6000)
+    assert result.status.value=='deferred'
+    venue.execute.assert_not_awaited()
+    async with PostgresKernelUnitOfWork(e) as u:
+        rows=await u.management.command_rows(t.identity.ticket_id)
+        runner=next(r for r in rows if r['command_kind']=='replace_protection')
+        assert runner['status']=='prepared' and runner['claim_owner'] is None and runner['lease_until_ms'] is None

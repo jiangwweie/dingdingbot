@@ -6,8 +6,63 @@ import asyncio
 import time
 from collections import deque
 from copy import deepcopy
+from uuid import uuid4
 
 import ccxt.pro as ccxt_pro  # type: ignore[import-untyped]
+
+_ORDER_FIELDS = frozenset(
+    [
+        "s",
+        "c",
+        "S",
+        "o",
+        "f",
+        "q",
+        "p",
+        "sp",
+        "x",
+        "X",
+        "i",
+        "z",
+        "ps",
+        "cp",
+        "R",
+        "wt",
+        "pP",
+        "AP",
+        "cr",
+        "pm",
+        "V",
+        "gtd",
+        "O",
+        "aid",
+        "caid",
+        "tp",
+        "ia",
+        "aq",
+        "actualOrderId",
+    ]
+)
+
+
+def safe_order_message(message):
+    """Persist only order protocol fields; credentials and transport URLs are excluded."""
+    safe = {
+        k: deepcopy(message[k])
+        for k in ("e", "E", "T")
+        if k in message and isinstance(message[k], (str, int, bool, type(None)))
+    }
+    order = message.get("o")
+    safe["o"] = (
+        {
+            k: deepcopy(v)
+            for k, v in order.items()
+            if k in _ORDER_FIELDS and isinstance(v, (str, int, bool, type(None)))
+        }
+        if isinstance(order, dict)
+        else {}
+    )
+    return safe
 
 
 class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
@@ -20,6 +75,11 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         self._management_task = None
         self._management_client = None
         self._management_connected_ms = None
+        self.management_epoch_id = "management-epoch:" + uuid4().hex
+        self.management_receive_sequence = 0
+        self.management_pending_events = deque(maxlen=4096)
+        self.management_receive_gap = None
+        self.management_closed_batches = deque(maxlen=8)
 
     def _is_management_client(self, client):
         key = self.options.get("future", {}).get("listenKey")
@@ -27,6 +87,21 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
 
     def on_connected(self, client, message=None):
         if self._is_management_client(client):
+            if self.management_pending_events:
+                self.management_closed_batches.append(
+                    {
+                        "epoch_id": self.management_epoch_id,
+                        "events": self.management_pending_events,
+                        "connected_at_ms": None,
+                        "gap_reason": self.management_receive_gap
+                        or "private_stream_epoch_replaced",
+                    }
+                )
+            self.management_pending_events = deque(maxlen=4096)
+            self.management_epoch_id = "management-epoch:" + uuid4().hex
+            self.management_receive_sequence = 0
+            self.management_pending_events.clear()
+            self.management_receive_gap = None
             self._management_client = client
             self._management_connected_ms = self.milliseconds()
             self.management_gap = False
@@ -35,6 +110,7 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
     def _lose_management_connection(self, client):
         if client is self._management_client:
             self.management_gap = True
+            self.management_receive_gap = "private_stream_disconnected"
             self._management_connected_ms = None
 
     def on_error(self, client, error):
@@ -53,26 +129,53 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
             and not self.management_gap
             and self._management_connected_ms is not None
             and self._management_connected_ms <= start_ms <= end_ms
-            and (self.management_lost_before_ms is None
-                 or self.management_lost_before_ms < start_ms)
+            and (
+                self.management_lost_before_ms is None
+                or self.management_lost_before_ms < start_ms
+            )
         )
 
     def handle_order_update(self, client, message):
         if message.get("e") in ("ORDER_TRADE_UPDATE", "ALGO_UPDATE"):
+            self.management_receive_sequence += 1
+            if (
+                len(self.management_pending_events)
+                == self.management_pending_events.maxlen
+            ):
+                self.management_receive_gap = "management_receive_queue_overflow"
+            self.management_pending_events.append(
+                {
+                    "sequence": self.management_receive_sequence,
+                    "received_at_ms": int(time.time() * 1000),
+                    "payload": safe_order_message(message),
+                }
+            )
             if len(self.management_messages) == self.management_messages.maxlen:
                 self.management_lost_before_ms = self.management_messages[0][0]
-            self.management_messages.append((int(time.time() * 1000), deepcopy(message)))
+            self.management_messages.append(
+                (int(time.time() * 1000), deepcopy(message))
+            )
         return super().handle_order_update(client, message)
 
     async def _management_loop(self):
         while True:
             try:
                 await self.watch_orders()
+                if self.management_receive_gap is not None:
+                    raise RuntimeError("management receive gap requires new transport")
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - stream failure marks a gap and reconnects.
+            except Exception:  # noqa: BLE001 - uncertain stream state starts a new connection epoch.
                 self.management_gap = True
+                self.management_receive_gap = "private_stream_watch_failed"
                 self._management_connected_ms = None
+                client = self._management_client
+                if client is not None and not client.closed():
+                    try:
+                        await asyncio.wait_for(client.close(), timeout=5)
+                    except Exception:  # noqa: BLE001 - transport failure must not kill reconnection.
+                        self.management_receive_gap="private_stream_close_failed"
+                self._management_client = None
                 await asyncio.sleep(2)
 
     def start_management_stream(self):

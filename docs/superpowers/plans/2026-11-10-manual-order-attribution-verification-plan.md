@@ -103,7 +103,7 @@
 
 ### 5.2 命令与测试组合
 
-以下为执行计划，**本轮不运行**：
+以下为原方案命令清单；Owner已经批准实施，实际结果以精确候选认证日志为准：
 
 ```bash
 scripts/local/manual_pytest.sh -q tests/trading_kernel/unit/test_binance_management_observation.py tests/trading_kernel/unit/test_management_collector.py tests/trading_kernel/unit/test_binance_management_stream.py tests/trading_kernel/unit/test_trade_management.py
@@ -186,8 +186,15 @@ scripts/local/manual_pytest.sh -q tests/trading_kernel/integration/test_manageme
 - R1迁移后：只允许forward-fix，禁止旧writer/旧表读取/双写/降级。
 - 真正丢失的条件改单历史不能凭新连接或最终相同价格补造。恢复不了AUTO不等于无法证明已知外部退出并依法收尾，但后者也必须独立证明。
 
-## 10. 本轮交付与下一步授权边界
+## 10. 实施状态与验收边界
 
-**本轮仅写文档并检查本地引用和差异。没有编写生产修复、执行新测试、恢复BNB、迁移或部署。**
+Owner已明确“同意，实施”。MA-03/04恢复专用认证、安装与旧BNB收尾已完成，当前现场状态仅记录于[路线图](../../current/MAIN_CONTROL_ROADMAP.md)。MA-01/02/05/06的R1实现已进入候选冻结，完整认证通过前不安装。
 
-Owner确认前，MA-00及之后任务均不开始。确认时需覆盖设计文档§11，尤其是**R0外部flat/内部非终态的恢复专用正式切换范围**；无此明确范围就只保留方案，不以现有站立授权解释为可绕过当前升级门禁。
+1. 真实REST回放采用脱敏的已解码BNB端点记录，经过锁定CCXT JSON解码器；provenance明确它不等于当时原始HTTP字节。真实历史WS未保存，不能补造；合成WS与本地链路单独标记。
+2. 接收先持久化，规范化与活动Ticket归属应用之后才推进applied水位。旧epoch未确认事件保留为有界待持久输入；断流、坏协议与无法回填区间分别记录，不用新连接涂绿旧缺口。
+3. 当前暴露、单次归属、历史连续性分别写入proof_refs。旧facts_complete迁移进历史审计并移除，当前运行只读取新continuity_complete；不读旧列、无schema fallback。
+4. 本地专项覆盖重复冲突、租约/错身份、提交失败不ack、积压/水位、条件改回、准备失败、外部全平加历史缺口、安全延期和MANUAL不可逆；现有full-chain继续验证完整自动退出与事故恢复。
+5. 已对实际终态源数据作只读导出、独立可丢弃PG恢复和完整前向迁移/身份切换演练，核对所有保留表摘要；原Owner状态与历史不变。导出只在忽略私有目录，不提交Git，不构成运行authority。
+6. 费用/资金费未完整估值时不生成净收益；自然新AUTO、实际App干预、平台接受和手机到达仍按各自真实证据验收。
+
+精确候选完整R4、API/static、正式安装、当前管理能力探针、官方promoter与真实Owner Resume仍是分阶段门禁，任何失败都不以测试总数替代。

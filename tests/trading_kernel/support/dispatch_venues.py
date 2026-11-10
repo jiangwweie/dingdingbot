@@ -99,6 +99,10 @@ class CountingVenue:
 
 
 class KindAwareAcceptingVenue:
+    observed_at_ms = 2_000
+    def __init__(self, *, observed_at_ms: int = 2_000):
+        self.observed_at_ms = observed_at_ms
+
     async def execute(self, request: VenueCommandRequest) -> ExchangeCommandResult:
         exchange_order_id = (
             request.payload.exchange_order_id
@@ -107,7 +111,7 @@ class KindAwareAcceptingVenue:
         )
         return ExchangeCommandResult(
             status=ExchangeCommandStatus.ACCEPTED,
-            observed_at_ms=2_000,
+            observed_at_ms=self.observed_at_ms,
             exchange_order_id=exchange_order_id,
         )
 

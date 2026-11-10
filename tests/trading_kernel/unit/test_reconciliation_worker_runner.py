@@ -66,7 +66,7 @@ async def test_runner_always_delegates_durable_fee_due_decision_to_worker(
 
     async def run_process(loops, **kwargs):
         del kwargs
-        assert [item.component_id for item in loops] == ["reconciliation", "notifications"]
+        assert [item.component_id for item in loops] == ["reconciliation", "management-feed", "notifications"]
         tick=loops[0].tick
         await tick()
         await tick()

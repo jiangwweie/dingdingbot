@@ -4,16 +4,16 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 93 张业务表、1113 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **96 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 97 张业务表、1155 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **96 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **93** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **97** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **96** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **100** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
-**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0018_notice_outbox_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
+**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0019_management_evidence_v2`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
 ## 怎样读这份目录
 
@@ -46,7 +46,7 @@
 
 <a id="catalog-registry"></a>
 
-| **App 管理权观察** | **2** | 外部订单证据和观察完整性，服务人工接管。 |
+| **App 管理权观察** | **6** | 外部订单证据和观察完整性，服务人工接管。 |
 
 ## 策略与事实语义
 
@@ -1746,7 +1746,7 @@ COMMIT;
 
 **主键**：`ticket_id`
 
-**字段清单**：`ticket_id`、`covered_until_ms`、`facts_complete`、`reason`、`updated_at_ms`
+**字段清单**：`ticket_id`、`covered_until_ms`、`continuity_complete`、`reason`、`updated_at_ms`、`current_complete`、`attribution_complete`、`proof_refs`
 
 
 ### `brc_notice_outbox`
@@ -1758,3 +1758,43 @@ COMMIT;
 **维护与用途**：Kernel UoW 事务末尾归并事实，Reconciliation 隔离循环使用租约/CAS领取；平台接受不等于已读，未知发送结果可能导致重复。正文不展示内部身份，内部键仍用于去重与审计。
 
 **字段清单**：`sequence`、`notice_key`、`stream_key`、`ticket_id`、`kind`、`state_version`、`snapshot`、`payload`、`delivery_payload`、`template_version`、`channel`、`status`、`attempts`、`next_attempt_at_ms`、`lease_token`、`lease_until_ms`、`accepted_at_ms`、`last_error`、`created_at_ms`、`updated_at_ms`
+
+### `brc_management_stream_events`
+
+**职责**：保存脱敏订单协议原始输入及接收序号，提交后才确认接收水位。
+
+**维护与用途**：现有 Reconciliation 所有权下的持久接收与归属证明；无独立交易执行权限。
+
+**主键**：`event_id`
+
+**字段清单**：`event_id`、`scope_key`、`epoch_id`、`receive_sequence`、`received_at_ms`、`exchange_event_at_ms`、`message_kind`、`safe_payload`、`payload_digest`
+
+### `brc_order_command_baselines`
+
+**职责**：保存准确命令与交易所已确认条款，不用预期默认值冒充回显。
+
+**维护与用途**：现有 Reconciliation 所有权下的持久接收与归属证明；无独立交易执行权限。
+
+**主键**：`baseline_id`
+
+**字段清单**：`baseline_id`、`command_id`、`scope_key`、`order_namespace`、`exchange_order_id`、`confirmed_terms`、`evidence_id`、`confirmed_at_ms`
+
+### `brc_management_coverage_events`
+
+**职责**：追加连接区间、关闭与缺口事实；重连不覆盖历史缺口。
+
+**维护与用途**：现有 Reconciliation 所有权下的持久接收与归属证明；无独立交易执行权限。
+
+**主键**：`coverage_event_id`
+
+**字段清单**：`coverage_event_id`、`scope_key`、`epoch_id`、`kind`、`from_ms`、`to_ms`、`receive_watermark`、`reason`、`occurred_at_ms`
+
+### `brc_management_feed_current`
+
+**职责**：投影当前接收租约、运行身份、持久与应用水位，供准入门禁读取。
+
+**维护与用途**：现有 Reconciliation 所有权下的持久接收与归属证明；无独立交易执行权限。
+
+**主键**：`scope_key`
+
+**字段清单**：`scope_key`、`epoch_id`、`owner_worker_id`、`runtime_commit`、`schema_revision`、`lease_until_ms`、`connection_state`、`persisted_watermark`、`applied_watermark`、`connected_at_ms`、`last_successful_at_ms`、`health_reason`、`revision`

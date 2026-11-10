@@ -292,3 +292,24 @@ async def test_two_day_regular_history_uses_bounded_amendment_windows():
     for call in x.fapiPrivateGetOrderAmendment.await_args_list:
         query = call.args[0]
         assert query["endTime"] - query["startTime"] <= 86400000
+
+
+@pytest.mark.asyncio
+async def test_durable_complete_stream_retains_conditional_change_and_change_back():
+    x=AsyncMock();x.management_started_ms=None
+    req=request()
+    base={'symbol':'BTCUSDT','algoId':'12','clientAlgoId':'brc-stop','side':'SELL','positionSide':'LONG','orderType':'STOP_MARKET',
+        'quantity':'1','price':'0','triggerPrice':'95','algoStatus':'NEW','reduceOnly':True,'closePosition':False,'timeInForce':'GTC',
+        'workingType':'CONTRACT_PRICE','priceProtect':False,'priceMatch':'NONE','selfTradePreventionMode':'EXPIRE_MAKER','goodTillDate':'0',
+        'createTime':'1200','updateTime':'1800'}
+    x.fapiPrivateGetAllOrders.return_value=[];x.fapiPrivateGetAllAlgoOrders.return_value=[base]
+    def event(at,trigger):
+        return {'received_at_ms':at+1,'safe_payload':{'e':'ALGO_UPDATE','E':at,'T':at,'o':{'s':'BTCUSDT','aid':'12','caid':'brc-stop','S':'SELL','ps':'LONG',
+            'o':'STOP_MARKET','f':'GTC','q':'1','p':'0','tp':trigger,'X':'NEW','R':True,'cp':False,'wt':'CONTRACT_PRICE',
+            'pP':False,'pm':'NONE','V':'EXPIRE_MAKER','gtd':'0','ia':False,'O':'1200'}}}
+    req=req.model_copy(update={'durable_context_required':True,'durable_coverage':True,'durable_events':(event(1600,'96'),event(1800,'95'))})
+    batch=await collect_management_scan(x,req,PositionSnapshot(netting_domain=req.domain,quantity=Decimal(1),average_entry_price=Decimal(100),observed_at_ms=2000))
+    assert batch.complete and batch.current_complete
+    assert any(e.terms.trigger_price==96 for e in batch.evidence)
+    assert any(e.terms.trigger_price==95 for e in batch.evidence)
+    assert batch.reason is None

@@ -1,0 +1,23 @@
+{
+  "algoId": "201",
+  "clientAlgoId": "brc-recorded-bnb_stop_cancelled",
+  "orderType": "STOP_MARKET",
+  "symbol": "BNBUSDT",
+  "side": "BUY",
+  "positionSide": "SHORT",
+  "timeInForce": "GTC",
+  "quantity": "2.82",
+  "algoStatus": "CANCELED",
+  "actualOrderId": "",
+  "triggerPrice": "692.260",
+  "price": "0.000",
+  "selfTradePreventionMode": "EXPIRE_MAKER",
+  "workingType": "CONTRACT_PRICE",
+  "priceMatch": "NONE",
+  "closePosition": false,
+  "priceProtect": false,
+  "reduceOnly": true,
+  "createTime": "1794218421967",
+  "updateTime": "1794235942209",
+  "goodTillDate": "0"
+}

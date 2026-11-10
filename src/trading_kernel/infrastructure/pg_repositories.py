@@ -980,6 +980,13 @@ class PostgresExchangeCommandRepository:
                 "leverage command claim changed before result"
             )
 
+    async def release_unstarted_claim(self, *, command_id: str, worker_id: str) -> None:
+        result=await self._connection.execute(sa.update(exchange_commands).where(
+            exchange_commands.c.command_id==command_id,exchange_commands.c.status=='claimed',exchange_commands.c.claim_owner==worker_id
+        ).values(status='prepared',claim_owner=None,lease_until_ms=None))
+        if result.rowcount!=1:
+            raise AggregateVersionConflict('unstarted command claim changed before deferral')
+
     async def mark_claimed_superseded(
         self,
         *,

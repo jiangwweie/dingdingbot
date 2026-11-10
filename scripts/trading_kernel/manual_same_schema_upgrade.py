@@ -97,14 +97,16 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                     "brc_runtime_capabilities_current",
                 }:
                     continue
-                if table.name == "brc_notice_outbox" and forward:
+                if table.name in {"brc_management_stream_events","brc_order_command_baselines","brc_management_coverage_events","brc_management_feed_current"} and forward:
+                    continue
+                if table.name == "brc_notice_outbox" and forward and source["schema"]=="0017_app_management_observation":
                     continue
                 # One-off stopped fresh-account deployment audit, never runtime cadence.
                 rows = (
                     (
                         await c.execute(
                             text(
-                                'SELECT to_jsonb(t)::text FROM "'
+                                'SELECT ((to_jsonb(t)' + ("-'current_complete'-'attribution_complete'-'proof_refs'-'continuity_complete') || jsonb_build_object('facts_complete',coalesce(to_jsonb(t)->'facts_complete',to_jsonb(t)->'proof_refs'->'migration'->'legacy_facts_complete'))" if table.name=='brc_management_observation_current' and forward else ')') + ')::text FROM "'
                                 + table.name
                                 + '" t ORDER BY to_jsonb(t)::text LIMIT 100001'
                             )
@@ -165,7 +167,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                 await deploy_management_recovery_identity(uow,request,recovery_ticket_ids=tuple(source['recovery_ticket_ids']))
             else:
                 await (deploy_compatible_upgrade_identity if forward else deploy_runtime_identity)(uow,request)
-        if forward:
+        if forward and source["schema"]=="0017_app_management_observation":
             async with engine.connect() as c:
                 if not await c.scalar(text("SELECT has_table_privilege('brc_kernel','brc_notice_outbox','SELECT,INSERT,UPDATE') AND has_sequence_privilege('brc_kernel','brc_notice_outbox_sequence_seq','USAGE,SELECT') AND has_table_privilege('brc_owner_console','brc_notice_outbox','SELECT')")):
                     raise ValueError("notice runtime/read role privileges differ")
@@ -219,7 +221,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     run(["nginx", "-t"])
     # Notification routing has no trading authority. Use the existing startup-only
     # environment boundary, keeping runtime cadence free of file reads.
-    if receipt["schema_revision"] == "0018_notice_outbox_v1":
+    if receipt["schema_revision"] in {"0018_notice_outbox_v1","0019_management_evidence_v2"}:
         credential = Path("/etc/brc/notification-credentials/feishu_webhook")
         private_env = Path("/etc/brc/notification-credentials/feishu.env")
         if credential.is_file():

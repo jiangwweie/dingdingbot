@@ -168,8 +168,8 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
         'commit',(SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='runtime_commit'),
         'schema',(SELECT version_num FROM alembic_version),
         'paused',NOT(SELECT new_entry_submit_enabled FROM brc_owner_policy_current WHERE owner_policy_id='policy-main'),
-        'tickets',EXISTS(SELECT 1 FROM brc_trade_tickets),
-        'commands',EXISTS(SELECT 1 FROM brc_exchange_commands),
+        'tickets',EXISTS(SELECT 1 FROM brc_trade_tickets WHERE terminal_at_ms IS NULL),
+        'commands',EXISTS(SELECT 1 FROM brc_exchange_commands WHERE status IN ('prepared','claimed','dispatch_started','outcome_unknown')),
         'positions',EXISTS(SELECT 1 FROM brc_positions_current WHERE quantity<>0),
         'incidents',EXISTS(SELECT 1 FROM brc_runtime_incidents WHERE status='open'))""")
     )
@@ -202,7 +202,7 @@ def re_full_ticket(value: str) -> bool:
 def require_upgrade_schema(source: str, target: str) -> None:
     if source == target:
         return
-    if (source, target) != ("0017_app_management_observation", "0018_notice_outbox_v1"):
+    if (source,target) not in {("0017_app_management_observation","0018_notice_outbox_v1"),("0018_notice_outbox_v1","0019_management_evidence_v2")}:
         raise ValueError("manual upgrade requires same schema or exact 0017-to-0018 transition")
 
 

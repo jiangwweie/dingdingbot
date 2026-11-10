@@ -741,6 +741,45 @@ class CcxtVenueAdapter:
             start=getattr(exchange,"start_management_stream",None)
             if callable(start):start()
 
+    def management_feed_batches(self):
+        states=[]
+        for (venue,account),exchange in self._exchanges.items():
+            if not hasattr(exchange,'management_epoch_id'):
+                continue
+            if exchange.management_closed_batches:
+                old=exchange.management_closed_batches[0]
+                states.append({'venue_id':venue,'account_id':account,'epoch_id':old['epoch_id'],
+                    'connected_at_ms':old['connected_at_ms'],'gap_reason':old['gap_reason'],
+                    'backlog_pending':True,'events':[{**event,'account_id':account} for event in list(old['events'])[:128]]})
+                continue
+            states.append({'venue_id':venue,'account_id':account,'epoch_id':exchange.management_epoch_id,
+                'connected_at_ms':exchange._management_connected_ms,'gap_reason':exchange.management_receive_gap,'backlog_pending':len(exchange.management_pending_events)>128,
+                'events':[{**event,'account_id':account} for event in list(exchange.management_pending_events)[:128]]})
+        return states
+
+    def acknowledge_management_events(self,epoch_id,watermark):
+        for exchange in self._exchanges.values():
+            closed=getattr(exchange,'management_closed_batches',None)
+            if closed and closed[0]['epoch_id']==epoch_id:
+                pending=closed[0]['events']
+                while pending and pending[0]['sequence']<=watermark:pending.popleft()
+                if not pending:closed.popleft()
+                continue
+            if getattr(exchange,'management_epoch_id',None)!=epoch_id:
+                continue
+            while exchange.management_pending_events and exchange.management_pending_events[0]['sequence']<=watermark:
+                exchange.management_pending_events.popleft()
+
+    async def restart_management_transport(self,epoch_id):
+        for exchange in self._exchanges.values():
+            if getattr(exchange,'management_epoch_id',None)!=epoch_id:continue
+            exchange.management_receive_gap='management_receiver_protocol_gap'
+            exchange.management_gap=True
+            exchange._management_connected_ms=None
+            client=exchange._management_client
+            if client is not None and not client.closed():await client.close()
+            exchange._management_client=None
+
     async def read_management_scan(self, request):
         from src.trading_kernel.infrastructure.management_collector import (
             collect_management_scan,
@@ -749,6 +788,8 @@ class CcxtVenueAdapter:
             account_id=request.domain.account_id,exchange_instrument_id=request.domain.exchange_instrument_id)
         position=await self.read_position_snapshot(PositionSnapshotRequest(ticket_id=request.ticket_id,
             netting_domain=request.domain,observed_at_ms=request.now_ms))
+        context=getattr(self,'management_context_reader',None)
+        if callable(context):request=await context(request)
         return await collect_management_scan(exchange,request,position)
 
     async def read_position_snapshot(
@@ -1201,11 +1242,27 @@ class CcxtVenueAdapter:
         if not exchange_order_id:
             raise RuntimeError("venue acceptance lacks exchange order identity")
 
+        receipt=_safe_response_payload(response)
+        raw=response.get('info')
+        if isinstance(raw,Mapping):
+            from src.trading_kernel.infrastructure.binance_management_observation import (
+                parse_rest_order,
+            )
+            try:
+                confirmed=parse_rest_order(raw,account_id=request.account_id,conditional='algoId' in raw,
+                    received_at_ms=self._clock_ms(),coverage_complete=True)
+                if confirmed.terms.exchange_order_id!=exchange_order_id or confirmed.terms.client_order_id!=request.venue_client_order_id:
+                    raise ValueError('creation receipt identity differs')
+                receipt['management_baseline']=confirmed.terms.model_dump(mode='json')
+            except (KeyError,ValueError,TypeError):
+                # An incomplete receipt does not authorize invented defaults.
+                # The durable authenticated creation event must supply baseline.
+                pass
         return ExchangeCommandResult(
             status=ExchangeCommandStatus.ACCEPTED,
             observed_at_ms=self._clock_ms(),
             exchange_order_id=exchange_order_id,
-            venue_payload=_safe_response_payload(response),
+            venue_payload=receipt,
         )
 
     async def set_leverage(

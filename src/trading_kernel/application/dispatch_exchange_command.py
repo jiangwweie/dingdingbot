@@ -113,6 +113,7 @@ class _EventCommon(TypedDict):
 
 class DispatchCommandStatus(StrEnum):
     NO_COMMAND = "no_command"
+    DEFERRED = "deferred"
     SUPERSEDED = "superseded"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -271,6 +272,16 @@ async def dispatch_one_command(
                     observed_at_ms=request.now_ms,
                     reason=f"trade_management:{aggregate.management_mode.value}")
                 return DispatchCommandResult(status=DispatchCommandStatus.SUPERSEDED,command_id=command.command_id)
+            capability=await uow.signals.get_runtime_capability('exchange_commands')
+            if capability is not None and capability.certification.get('management_feed_required') and _requires_management_feed(command):
+                from src.trading_kernel.application.management_health import (
+                    management_feed_is_current,
+                )
+                d=command.ticket_identity.netting_domain
+                if not await management_feed_is_current(uow,venue_id=d.venue_id,account_id=d.account_id,
+                    runtime_commit=request.runtime_commit,now_ms=clock_ms()):
+                    await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
+                    return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
             if not _command_is_applicable(command, aggregate.status):
                 await uow.exchange_commands.mark_claimed_superseded(
                     command_id=command.command_id,
@@ -361,6 +372,33 @@ async def dispatch_one_command(
                 entry_authorized_at_ms is not None
                 and entry_send_expires_at_ms is not None
             )
+
+    # A fresh short transaction closes the collection/claim race. No network I/O
+    # runs under this lock; only an unstarted claim may return to PREPARED.
+    async with uow_factory() as uow:
+        current=await uow.aggregates.get_for_update(command.ticket_identity.ticket_id)
+        if current is None:
+            raise RuntimeError('dispatch aggregate missing')
+        if current.management_mode is ManagementMode.MANUAL:
+            await uow.exchange_commands.mark_claimed_superseded(command_id=command.command_id,worker_id=request.worker_id,
+                observed_at_ms=clock_ms(),reason='trade_management:MANUAL')
+            return DispatchCommandResult(status=DispatchCommandStatus.SUPERSEDED,command_id=command.command_id)
+        capability=await uow.signals.get_runtime_capability('exchange_commands')
+        blocked=current.management_mode is not ManagementMode.AUTO
+        if capability is not None and capability.certification.get('management_feed_required'):
+            from src.trading_kernel.application.management_health import (
+                management_feed_is_current,
+            )
+            d=command.ticket_identity.netting_domain
+            blocked=blocked or not capability.enabled or capability.certified_commit!=request.runtime_commit
+            if _requires_management_feed(command):
+                blocked=blocked or not await management_feed_is_current(uow,venue_id=d.venue_id,account_id=d.account_id,
+                    runtime_commit=request.runtime_commit,now_ms=clock_ms())
+                if command.kind is not ExchangeCommandKind.ENTRY:
+                    blocked=blocked or not await uow.management.ticket_stream_is_applied(command.ticket_identity.ticket_id)
+        if blocked:
+            await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
+            return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
 
     try:
         if command.kind is ExchangeCommandKind.SET_LEVERAGE:
@@ -683,6 +721,13 @@ async def _preflight_new_entry_mutation(
                 > snapshot.account_risk_snapshot.total_wallet_balance * limit
             ):
                 return refused(EntryDispatchPreflightStatus.DIRECTIONAL_RISK_EXHAUSTED)
+        if capability is not None and capability.certification.get('management_feed_required'):
+            from src.trading_kernel.application.management_health import (
+                management_feed_is_current,
+            )
+            if not await management_feed_is_current(uow,venue_id=domain.venue_id,account_id=domain.account_id,
+                runtime_commit=request.runtime_commit,now_ms=clock_ms()):
+                return refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
         evaluated_at_ms = clock_ms()
         if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
             return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
@@ -871,6 +916,12 @@ async def _record_preflight_refusal(
             reduction=reduce_event(aggregate, event),
             expected_version=aggregate.version,
         )
+
+
+def _requires_management_feed(command: ExchangeCommand) -> bool:
+    if command.kind in {ExchangeCommandKind.ENTRY,ExchangeCommandKind.REPLACE_PROTECTION,ExchangeCommandKind.EXIT}:
+        return True
+    return command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload,CancelCommandPayload) and command.payload.purpose in {'runner_old_stop','reconciliation_cleanup'}
 
 
 def _command_is_applicable(

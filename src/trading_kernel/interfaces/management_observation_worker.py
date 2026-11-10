@@ -44,7 +44,30 @@ class ManagementObservationSource(Protocol):
     ) -> ManagementScan: ...
 
 
-async def observe_management_once(
+async def observe_management_once(uow_factory,source,*,ticket_id,now_ms,timeout_seconds=15):
+    try:
+        return await _observe_management_once(uow_factory,source,ticket_id=ticket_id,now_ms=now_ms,timeout_seconds=timeout_seconds)
+    except Exception as exc:  # noqa: BLE001 - all preparation/parse/commit failures affect management health.
+        return await _management_failure(uow_factory,ticket_id=ticket_id,now_ms=now_ms,error_type=type(exc).__name__)
+
+
+async def _management_failure(uow_factory,*,ticket_id,now_ms,error_type):
+    async with uow_factory() as u:
+        a=await u.aggregates.get_for_update(ticket_id)
+        if a is None:return 'ticket_absent'
+        await u.management.save_coverage(ticket_id,through_ms=a.ticket.created_at_ms,complete=False,
+            reason=f'collector:{error_type}',observed_at_ms=now_ms)
+        if a.management_mode is ManagementMode.AUTO and a.active_stop_exchange_order_id is not None:
+            ev=ManagementReviewRequired(event_id=f'management-gap:{ticket_id}:{a.version}',ticket_id=ticket_id,
+                sequence=a.last_event_sequence+1,occurred_at_ms=now_ms,evidence_id=f'gap:{now_ms}',reason='collector_gap')
+            await u.commit_reduction(event=ev,reduction=reduce_event(a,ev),expected_version=a.version)
+        await u.monitors.save_if_changed(MonitorStateRecord(monitor_key=f'management-feed:{ticket_id}',
+            owner_status=MonitorOwnerStatus.TEMPORARILY_UNAVAILABLE,summary=f'管理采集失败：{error_type}；自动处置受限',
+            intervention='系统有界重试；持续失败需工程核查',ticket_id=ticket_id,updated_at_ms=now_ms))
+    return 'management_facts_unavailable'
+
+
+async def _observe_management_once(
     uow_factory: UnitOfWorkFactory,
     source: ManagementObservationSource,
     *,
@@ -64,13 +87,13 @@ async def observe_management_once(
         commands = await u.management.command_rows(ticket_id)
         if any(
             c["status"] in ("claimed", "dispatch_started", "outcome_unknown")
-            for c in commands
+            for c in await u.management.pending_command_rows(ticket_id)
         ):
             return "command_truth_pending"
         coverage = await u.management.get_coverage(ticket_id)
         since = (
             a.ticket.created_at_ms
-            if coverage is None or a.management_mode is ManagementMode.REVIEW_REQUIRED
+            if coverage is None
             else max(a.ticket.created_at_ms, coverage["covered_until_ms"] - 1000)
         )
         req = ManagementScanRequest(
@@ -104,33 +127,8 @@ async def observe_management_once(
             )
         ):
             raise ValueError("management batch identity/time mismatch")
-    except Exception as exc:  # noqa: BLE001 - observation failures must fence facts, not trade.
-        async with uow_factory() as u:
-            await u.management.save_coverage(
-                ticket_id,
-                through_ms=since,
-                complete=False,
-                reason=f"collector:{type(exc).__name__}",
-                observed_at_ms=now_ms,
-            )
-            a = await u.aggregates.get_for_update(ticket_id)
-            if (
-                a is not None
-                and a.management_mode is ManagementMode.AUTO
-                and a.active_stop_exchange_order_id is not None
-            ):
-                ev = ManagementReviewRequired(
-                    event_id=f"management-gap:{ticket_id}:{a.version}",
-                    ticket_id=ticket_id,
-                    sequence=a.last_event_sequence + 1,
-                    occurred_at_ms=now_ms,
-                    evidence_id=f"gap:{now_ms}",
-                    reason="collector_gap",
-                )
-                await u.commit_reduction(
-                    event=ev, reduction=reduce_event(a, ev), expected_version=a.version
-                )
-        return "management_facts_unavailable"
+    except Exception as exc:  # noqa: BLE001 - preserve evidence gaps, never guess Owner action.
+        return await _management_failure(uow_factory,ticket_id=ticket_id,now_ms=now_ms,error_type=type(exc).__name__)
     async with uow_factory() as u:
         current = await u.aggregates.get_for_update(ticket_id)
         if current is None:
@@ -152,6 +150,12 @@ async def observe_management_once(
             complete=batch.complete,
             reason=batch.reason,
             observed_at_ms=now_ms,
+            current_complete=batch.current_complete and batch.snapshot.orders_complete,
+            attribution_complete=batch.attribution_complete,
+            proof_refs={'attribution':{'status':'complete' if batch.attribution_complete else 'partial','evidence_ids':[x.evidence_id for x in batch.evidence]},
+                'current_exposure':{'status':'complete' if batch.current_complete and batch.snapshot.orders_complete else 'unknown',
+                    'observed_at_ms':batch.snapshot.observed_at_ms,'valid_until_ms':batch.snapshot.observed_at_ms+30000},
+                'continuity':{'status':'complete' if batch.complete else 'gap','from_ms':since,'through_ms':batch.covered_until_ms,'reason':batch.reason}},
         )
         decisive = all(
             classify_order_evidence(
@@ -176,8 +180,9 @@ async def observe_management_once(
             and batch.complete
             and decisive
             and bool(required_orders)
-            and required_orders <= observed_orders
-            and req.since_ms == current.ticket.created_at_ms
+            and (required_orders <= observed_orders or await u.management.accepted_orders_confirmed(ticket_id))
+            and (req.since_ms == current.ticket.created_at_ms or
+                 coverage is not None and coverage['covered_until_ms']>=req.since_ms)
         ):
             cleared_event = ManagementReviewCleared(
                 event_id=f"management-clear:{ticket_id}:{current.version}",
@@ -204,20 +209,17 @@ async def observe_management_once(
                 ReconcileTicketRequest(
                     ticket_id=ticket_id,
                     snapshot=batch.snapshot.model_copy(
-                        update={
-                            "orders_complete": batch.complete
-                            and batch.snapshot.orders_complete
-                        }
+                        update={"orders_complete":batch.current_complete and batch.snapshot.orders_complete}
                     ),
                 ),
             )
-        if batch.complete:
+        if batch.current_complete and batch.snapshot.orders_complete:
             await u.management.refresh_orders(
                 ticket_id,
                 [o.model_dump(mode="json") for o in batch.snapshot.open_orders],
             )
-        elif (
-            current.management_mode is ManagementMode.AUTO
+        if (
+            not batch.complete and current.management_mode is ManagementMode.AUTO
             and current.active_stop_exchange_order_id is not None
         ):
             ev = ManagementReviewRequired(

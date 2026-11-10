@@ -16,6 +16,9 @@ class ManagementScanRequest(BaseModel):
     since_ms: int = Field(gt=0)
     now_ms: int = Field(gt=0)
     known_orders: tuple[OrderTerms, ...] = ()
+    durable_events: tuple[dict, ...] = ()
+    durable_coverage: bool = False
+    durable_context_required: bool = False
 
 
 class ManagementScan(BaseModel):
@@ -27,3 +30,5 @@ class ManagementScan(BaseModel):
     complete: bool
     reason: str | None = None
     covered_until_ms: int = Field(gt=0)
+    current_complete: bool = True
+    attribution_complete: bool = False

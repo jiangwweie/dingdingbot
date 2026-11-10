@@ -136,6 +136,8 @@ async def run_lifecycle_worker_once(
         request,
         ticket_id=None,
     )
+    if dispatched.status is DispatchCommandStatus.DEFERRED:
+        return LifecycleWorkerResult(status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,detail="management_feed_not_ready")
     if dispatched.status is not DispatchCommandStatus.NO_COMMAND:
         return LifecycleWorkerResult(
             status=(
@@ -322,6 +324,9 @@ async def run_lifecycle_worker_once(
         request,
         ticket_id=aggregate.identity.ticket_id,
     )
+    if dispatched.status is DispatchCommandStatus.DEFERRED:
+        return LifecycleWorkerResult(status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,ticket_id=aggregate.identity.ticket_id,
+            command_id=dispatched.command_id,dispatch_status=dispatched.status,detail='management_feed_not_ready')
     return LifecycleWorkerResult(
         status=(
             LifecycleWorkerStatus.SUPERSEDED

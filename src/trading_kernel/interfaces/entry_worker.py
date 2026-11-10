@@ -127,6 +127,8 @@ async def run_entry_worker_once(
         entry_facts_source=facts_source,
         clock_ms=clock_ms,
     )
+    if existing.status is DispatchCommandStatus.DEFERRED:
+        return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE,dispatch_status=existing.status)
     if existing.status is not DispatchCommandStatus.NO_COMMAND:
         return EntryWorkerResult(
             status=(
@@ -191,6 +193,16 @@ async def run_entry_worker_once(
             )
             return EntryWorkerResult(status=EntryWorkerStatus.ISSUE_REFUSED)
 
+    capability = None
+    async with uow_factory() as uow:
+        capability=await uow.signals.get_runtime_capability('exchange_commands')
+        if capability is not None and capability.certification.get('management_feed_required'):
+            from src.trading_kernel.application.management_health import (
+                management_feed_is_current,
+            )
+            if not await management_feed_is_current(uow,venue_id=profile.venue_id,account_id=profile.account_id,
+                runtime_commit=request.runtime_commit,now_ms=clock_ms()):
+                return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
     facts_requested_at_ms = clock_ms()
     snapshot_request = EntryAdmissionSnapshotRequest(
         venue_id=profile.venue_id,
@@ -299,6 +311,9 @@ async def run_entry_worker_once(
         entry_facts_source=facts_source,
         clock_ms=clock_ms,
     )
+    if dispatched.status is DispatchCommandStatus.DEFERRED:
+        return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE,command_id=dispatched.command_id,
+            dispatch_status=dispatched.status)
     return EntryWorkerResult(
         status=(
             EntryWorkerStatus.SUPERSEDED

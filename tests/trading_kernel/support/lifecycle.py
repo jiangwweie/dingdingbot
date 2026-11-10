@@ -95,8 +95,8 @@ async def reach_position_protected(engine, ticket) -> None:
                 ),
             ),
         )
-    await dispatch_for_ticket(engine, venue, ticket.identity.ticket_id, now_ms=2_200)
-    await dispatch_for_ticket(engine, venue, ticket.identity.ticket_id, now_ms=2_300)
+    await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=2_201), ticket.identity.ticket_id, now_ms=2_200)
+    await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=2_301), ticket.identity.ticket_id, now_ms=2_300)
 
 
 async def reach_runner_protected(engine, ticket) -> None:

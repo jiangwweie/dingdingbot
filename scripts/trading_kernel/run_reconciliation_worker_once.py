@@ -12,7 +12,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -121,6 +121,19 @@ async def _run(args: argparse.Namespace) -> int:
     if callable(start_management):
         start_management()
     engine = create_async_engine(database_url)
+    receiver_lock=asyncio.Lock()
+    async def management_context(request):
+        await management_feed_tick()
+        from src.trading_kernel.interfaces.management_feed_worker import (
+            management_scope,
+        )
+        scope=management_scope(request.domain.venue_id,request.domain.account_id)
+        async with PostgresKernelUnitOfWork(engine) as u:
+            rows=await u.management.stream_events(scope,request.since_ms,request.now_ms)
+            covered=await u.management.continuity_covers(scope,request.since_ms,request.now_ms)
+        return request.model_copy(update={'durable_events':tuple(rows),'durable_coverage':covered,'durable_context_required':True})
+    cast(Any, adapter).management_context_reader = management_context
+
     try:
         async def tick():
             now_ms = args.now_ms or int(time.time() * 1_000)
@@ -173,6 +186,14 @@ async def _run(args: argparse.Namespace) -> int:
 
         channel = load_feishu_channel(os.environ.get("TRADING_KERNEL_SEOUL_FEISHU_WEBHOOK_URL"))
 
+        from src.trading_kernel.interfaces.management_feed_worker import (
+            persist_management_feed_once,
+        )
+        async def management_feed_tick():
+            async with receiver_lock:
+                return await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(engine),adapter,
+                    worker_id=f'{args.worker_id}:{os.getpid()}',runtime_commit=args.runtime_commit,now_ms=int(time.time()*1000))
+
         async def notice_tick():
             return await deliver_one_notice(engine, channel, now_ms=int(time.time() * 1000))
 
@@ -181,6 +202,8 @@ async def _run(args: argparse.Namespace) -> int:
                 WorkerProcessLoop(component_id="reconciliation", tick=tick,
                     poll_interval_ms=args.poll_interval_ms,
                     idle_statuses=frozenset({"no_work", "account_position_audited"})),
+                WorkerProcessLoop(component_id="management-feed",tick=management_feed_tick,
+                    poll_interval_ms=500,idle_statuses=frozenset({'management_feed_persisted'})),
                 WorkerProcessLoop(component_id="notifications", tick=notice_tick,
                     poll_interval_ms=1000,
                     idle_statuses=frozenset({"no_work", "channel_missing"})),

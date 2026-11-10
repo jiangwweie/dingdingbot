@@ -11,7 +11,6 @@ from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     MonitorStateRecord,
 )
-from src.trading_kernel.domain.commands import ExchangeCommandStatus
 from src.trading_kernel.domain.events import (
     ManagementReviewRequired,
     ManualTakeoverConfirmed,
@@ -57,13 +56,13 @@ async def observe_trade_management(
     await uow.management.save_evidence(ticket_id,evidence)
     if state.mode is ManagementMode.MANUAL:
         return state
-    commands = await uow.exchange_commands.list_for_ticket(ticket_id)
+    commands = await uow.management.pending_command_rows(ticket_id)
     # Never trust a caller's negative flag when the durable ledger has unknown
     # or in-flight work. Own orders are bound to scoped durable command results;
     # an ID prefix alone cannot establish automatic ownership.
     pending = any(
-        c.status
-        in {ExchangeCommandStatus.CLAIMED, ExchangeCommandStatus.OUTCOME_UNKNOWN}
+        c["status"]
+        in {"claimed", "dispatch_started", "outcome_unknown"}
         for c in commands
     )
     verified = OrderEvidence.model_validate(
@@ -74,7 +73,9 @@ async def observe_trade_management(
         }
     )
     from src.trading_kernel.application.management_intents import system_intents_for
-    intents=system_intents_for(verified,await uow.management.command_rows(ticket_id))
+    rows=await uow.management.command_rows_for_order(ticket_id,verified.terms.order_namespace,verified.terms.exchange_order_id)
+    intents=system_intents_for(verified,rows)
+    await uow.management.save_baseline(ticket_id,verified,rows)
     after = transition_management(
         state,
         verified,
@@ -103,9 +104,9 @@ async def observe_trade_management(
         expected_version=aggregate.version,
     )
     for command in commands:
-        if after.mode is ManagementMode.MANUAL and command.status is ExchangeCommandStatus.PREPARED:
+        if after.mode is ManagementMode.MANUAL and command["status"] == "prepared":
             await uow.exchange_commands.mark_prepared_superseded(
-                command_id=command.command_id,
+                command_id=command["command_id"],
                 observed_at_ms=now_ms,
                 reason=f"trade_management:{after.mode.value}",
             )

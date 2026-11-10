@@ -664,6 +664,20 @@ async def _certify(
             entry_restoration = await read_entry_restoration_state(
                 connection, now_ms=effective_now_ms,
             )
+            management_feed_required=bool(await connection.scalar(text("SELECT certification->>'management_feed_required'='true' FROM brc_runtime_capabilities_current WHERE capability_key='exchange_commands'")))
+            management_feed_pass=True
+            if management_feed_required:
+                from src.trading_kernel.domain.product_identity import (
+                    PRODUCT_ID as MANAGEMENT_PRODUCT_ID,
+                )
+                from src.trading_kernel.infrastructure.pg_management_feed import (
+                    PostgresManagementFeed,
+                )
+                account=await connection.scalar(text("SELECT account_id FROM brc_runtime_profiles WHERE runtime_profile_id='tiny-live-v1'"))
+                management_feed_pass=await PostgresManagementFeed(connection).feed_ready(
+                    f'{MANAGEMENT_PRODUCT_ID}:binance-usdm:{account}',now_ms=effective_now_ms,
+                    runtime_commit=runtime_identity.get('runtime_commit'))
+
             dynamic_selection_runtime_counts_row = (
                 await connection.execute(
                     text(
@@ -1650,7 +1664,9 @@ async def _certify(
         "entry_promotion_pass": entry_promotion_pass,
         "entry_recovery_ready": bool(database_integrity_pass and entry_current_universe_identity_pass
             and seed_identity["status"] == "pass" and registry_identity["status"] == "pass"
-            and warming_scope_count == 0 and not warming_universe_manifest and entry_restoration.ready),
+            and warming_scope_count == 0 and not warming_universe_manifest and entry_restoration.ready and management_feed_pass),
+        "management_feed_required":management_feed_required,
+        "management_feed_pass":management_feed_pass,
         "owner_entry_resume_authorized": entry_restoration.owner_resume_authorized,
         "entry_current_universe_identity_pass":entry_current_universe_identity_pass,
         "entry_enabled_event_spec_ids":list(entry_restoration.enabled_event_spec_ids),

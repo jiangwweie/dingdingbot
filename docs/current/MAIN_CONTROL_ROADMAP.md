@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-09
+last_verified: 2026-11-10
 ---
 
 # Main Control Roadmap
@@ -22,8 +22,8 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `c71df09c5c9a8ba65c2ae2acb2df8bda9adb68ab` |
-| Production tag | `manual-runtime-2026.11.09.3` |
+| Production commit | `687adecb7cf4da8ffc15c3d2ca391751793368cf` |
+| Production tag | `manual-runtime-2026.11.10.0` |
 | Production schema | `0018_notice_outbox_v1` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
 | Integration branch | `manual-dev` |
@@ -35,6 +35,30 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Seoul MA-R2 R0 recovery — Owner paused, R1 not installed2026-11-10
+
+**Directly verified:** Owner Console pause created **Policy7/false**. The exact
+R0 recovery-only commit above passed Kernel R4, API and static certification,
+was installed through the official independent installer with all five writers
+stopped, same schema and a single exact BNB Ticket whitelist. Both capabilities
+are disabled; the maintenance fence remains. This is intentional recovery
+posture and supersedes the prior Policy6 enabled snapshot.
+
+The BNB Ticket `ticket:deeac8998f0562a48be1ffade8d2c3c6` was closed through
+fresh signed GET-only external execution/current-flat proof and ordinary Kernel
+MANUAL -> reconciliation -> settlement -> review reductions. It is terminal,
+permanently MANUAL, has no active budget reservation and one Review. Original
+seven Trade Events, three Commands and Owner controls are byte-for-byte
+preserved; four closure events were appended. No exchange writes occurred.
+Net PnL remains unavailable because fee/funding valuation is incomplete.
+The preview rolled back; apply recollected fresh evidence; a repeat returned
+already_terminal. R1 durable evidence/schema0019 work is local and uninstalled.
+Natural AUTO/App/notification acceptance is not inferred from this recovery.
+
+Evidence: `.local/management-r0-20261110/` in the R0 attached worktree,
+server-private `/etc/brc/manual-install/management-r0-before.json`, official
+same-schema preservation receipt and live PostgreSQL comparison.
 
 ### Seoul genuine Owner Resume after Entry repair — ENTRY enabled2026-11-09
 

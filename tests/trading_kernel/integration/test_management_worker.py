@@ -202,6 +202,8 @@ async def test_worker_system_tp_creation_does_not_take_over(head_template_engine
  terms=OrderTerms(venue_id=d.venue_id,account_id=d.account_id,exchange_instrument_id=d.exchange_instrument_id,position_side=d.position_side,order_namespace='regular',exchange_order_id=row['result_payload']['exchange_order_id'],client_order_id=row['venue_client_order_id'],side=payload['side'],order_type='LIMIT',quantity=payload['quantity'],price=payload['limit_price'],trigger_price=None,close_position=False,reduce_only=False,time_in_force=payload['time_in_force'],working_type='CONTRACT_PRICE',price_protect=False,activation_price=None,callback_rate=None,price_match='NONE',self_trade_prevention_mode='NONE',good_till_date_ms=0)
  event=OrderEvidence(evidence_id='system-tp-new',terms=terms,action=OrderAction.NEW,exchange_event_at_ms=row['created_at_ms'],received_at_ms=now,created_at_ms=row['created_at_ms'],executed_quantity='0',coverage_complete=True,known_command_outcome_pending=False)
  source=AsyncMock();source.read_management_scan.return_value=ManagementScan(ticket_id=t.identity.ticket_id,snapshot=PositionSnapshot(netting_domain=d,quantity=t.quantity,average_entry_price=Decimal(60000),observed_at_ms=now),orders=(),evidence=(event,),complete=True,covered_until_ms=now)
+ from src.trading_kernel.application.management_intents import system_intents_for
+ assert system_intents_for(event,rows)
  assert await observe_management_once(lambda:PostgresKernelUnitOfWork(e),source,ticket_id=t.identity.ticket_id,now_ms=now)=='AUTO'
  async with PostgresKernelUnitOfWork(e) as u:assert (await u.aggregates.get(t.identity.ticket_id)).status==a.status
 
@@ -325,3 +327,35 @@ async def test_selected_auto_ticket_still_reconciles_after_complete_scan(head_te
             unknown_visibility_grace_ms=30000, idle_poll_interval_ms=1000), unknown=None, aggregate=a)
     source.read_management_scan.assert_awaited_once()
     source.read_position_snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_positive_external_full_close_survives_unrelated_history_gap(head_template_engine):
+    from tests.trading_kernel.support.manual_management import app_order
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    event=OrderEvidence(evidence_id='external-full-close',terms=app_order(t,order_type='MARKET',price=None,quantity=t.quantity),
+        action='trade',exchange_event_at_ms=5000,received_at_ms=6000,created_at_ms=5000,executed_quantity=t.quantity,
+        coverage_complete=True,known_command_outcome_pending=False)
+    source=AsyncMock();source.read_management_scan.return_value=ManagementScan(ticket_id=t.identity.ticket_id,
+        snapshot=PositionSnapshot(netting_domain=t.identity.netting_domain,quantity=Decimal(0),average_entry_price=None,observed_at_ms=6000),
+        orders=(),evidence=(event,),complete=False,reason='unrelated_history_gap',covered_until_ms=t.created_at_ms,current_complete=True)
+    assert await observe_management_once(lambda:PostgresKernelUnitOfWork(e),source,ticket_id=t.identity.ticket_id,now_ms=6000)=='MANUAL'
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get(t.identity.ticket_id)
+        assert a.management_mode is ManagementMode.MANUAL and a.position_qty==0
+        assert a.status.value=='settlement_pending'
+
+
+@pytest.mark.asyncio
+async def test_invalid_preparation_terms_also_freezes_management(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import trade_aggregates
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    async with e.begin() as c:
+        await c.execute(sa.update(trade_aggregates).where(trade_aggregates.c.ticket_id==t.identity.ticket_id).values(management_orders=[{'terms':{'invalid':'protocol'}}]))
+    source=AsyncMock()
+    assert await observe_management_once(lambda:PostgresKernelUnitOfWork(e),source,ticket_id=t.identity.ticket_id,now_ms=6000)=='management_facts_unavailable'
+    source.read_management_scan.assert_not_awaited()
+    async with PostgresKernelUnitOfWork(e) as u:
+        assert (await u.aggregates.get(t.identity.ticket_id)).management_mode is ManagementMode.REVIEW_REQUIRED

@@ -3166,7 +3166,7 @@ management_order_evidence = sa.Table("brc_management_order_evidence",metadata,
 sa.Index("ix_brc_management_order_evidence_ticket_id_observed_at_ms",management_order_evidence.c.ticket_id,management_order_evidence.c.observed_at_ms)
 management_observation_current = sa.Table("brc_management_observation_current",metadata,
     sa.Column("ticket_id",ID,sa.ForeignKey("brc_trade_tickets.ticket_id"),primary_key=True),
-    _time("covered_until_ms"),sa.Column("facts_complete",sa.Boolean,nullable=False),sa.Column("reason",LONG_TEXT),_time("updated_at_ms"))
+    _time("covered_until_ms"),sa.Column("continuity_complete",sa.Boolean,nullable=False),sa.Column("reason",LONG_TEXT),_time("updated_at_ms"))
 sa.Index("uq_brc_app_active_instrument",trade_tickets.c.venue_id,trade_tickets.c.account_id,trade_tickets.c.exchange_instrument_id,unique=True,postgresql_where=trade_tickets.c.terminal_at_ms.is_(None))
 
 # Display-only transactional delivery. No consumer may use this as trade authority.
@@ -3200,3 +3200,11 @@ sa.Index('ix_brc_notice_outbox_actionable', notice_outbox.c.next_attempt_at_ms, 
 sa.Index('ix_brc_notice_outbox_stream', notice_outbox.c.stream_key, notice_outbox.c.sequence)
 
 sa.Index("ix_brc_notice_outbox_delivery", notice_outbox.c.status, notice_outbox.c.sequence)
+
+
+from src.trading_kernel.infrastructure.management_schema import define_management_tables
+
+management_stream_events,order_command_baselines,management_coverage_events,management_feed_current=define_management_tables(metadata)
+management_observation_current.append_column(sa.Column('current_complete',sa.Boolean,nullable=False,server_default=sa.false()))
+management_observation_current.append_column(sa.Column('attribution_complete',sa.Boolean,nullable=False,server_default=sa.false()))
+management_observation_current.append_column(sa.Column('proof_refs',JSONB,nullable=False,server_default=sa.text("'{}'::jsonb")))

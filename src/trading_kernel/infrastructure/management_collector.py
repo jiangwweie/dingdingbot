@@ -32,16 +32,10 @@ async def collect_management_scan(
 ) -> ManagementScan:
     now = request.now_ms
     start = request.since_ms
-    if now - start >= 3 * 86400000:
-        return ManagementScan(
-            ticket_id=request.ticket_id,
-            snapshot=position,
-            orders=(),
-            evidence=(),
-            complete=False,
-            reason="management_history_retention_gap",
-            covered_until_ms=start,
-        )
+    requested_start=start
+    retention_gap=now-start>=3*86400000
+    if retention_gap:
+        start=max(start,now-3*86400000+1)
     symbol = request.domain.exchange_instrument_id.split(":")[1]
     async def history(method,key):
         query={"symbol":symbol,"startTime":start,"endTime":now,"limit":100}
@@ -56,9 +50,9 @@ async def collect_management_scan(
             if identifiers!=sorted(set(identifiers)):raise ValueError("history cursor order ambiguous")
             query={**query,key:max(identifiers)+1}
         return combined,False
-    collected=await asyncio.gather(history(exchange.fapiPrivateGetAllOrders,"orderId"),history(exchange.fapiPrivateGetAllAlgoOrders,"algoId"))
-    rows=[r[0] for r in collected]
-    page_complete=all(r[1] for r in collected)
+    collected=await asyncio.gather(history(exchange.fapiPrivateGetAllOrders,"orderId"),history(exchange.fapiPrivateGetAllAlgoOrders,"algoId"),return_exceptions=True)
+    rows=[r[0] if isinstance(r,tuple) else [] for r in collected]
+    page_complete=all(isinstance(r,tuple) and r[1] for r in collected)
     # Add exact lookups for currently open orders created before this window.
     # Historical endpoints filter creation time, not every later modification.
     for order in position.open_orders:
@@ -93,13 +87,13 @@ async def collect_management_scan(
                 }
             )
             rows[ns].append(row)
-    complete = page_complete
-    reason = None if page_complete else "management_history_page_full"
+    complete = page_complete and not retention_gap
+    reason = "management_history_retention_gap" if retention_gap else None if page_complete else "management_history_page_full"
     conditional_present = bool(rows[1]) or any(
         order.order_namespace == "conditional" for order in request.known_orders
     )
     covers = getattr(exchange, "management_covers", None)
-    stream_complete = callable(covers) and covers(start_ms=start, end_ms=now) is True
+    stream_complete = request.durable_coverage if request.durable_context_required else (callable(covers) and covers(start_ms=start, end_ms=now) is True)
     if conditional_present and not stream_complete:
         complete = False
         reason = "conditional_stream_coverage_unproven"
@@ -108,9 +102,10 @@ async def collect_management_scan(
     amendment_reads = 0
     remaining = {}
     lost=getattr(exchange,"management_lost_before_ms",None)
-    if type(lost) is int and lost>=start:
+    if not request.durable_context_required and type(lost) is int and lost>=start:
         complete=False;reason="management_stream_buffer_gap"
     previous = {t.identity: t for t in request.known_orders}
+    revision_suspects=set()
     triggered_children = {
         str(row.get("actualOrderId")): row
         for row in rows[1]
@@ -121,8 +116,9 @@ async def collect_management_scan(
         if not isinstance(page, list):
             raise TypeError("management order page invalid")
         for raw in page:
-            if raw["symbol"] != symbol:
-                raise ValueError("management instrument mismatch")
+            if not isinstance(raw,dict) or raw.get("symbol") != symbol or raw.get("positionSide") is None:
+                complete=False;reason='management_order_scope_invalid'
+                continue
             if str(raw["positionSide"]).lower() != request.domain.position_side:
                 continue
             if not conditional and str(raw["orderId"]) in triggered_children:
@@ -135,13 +131,17 @@ async def collect_management_scan(
                     reason = "conditional_child_identity_mismatch"
                 else:
                     continue
-            e = parse_rest_order(
-                raw,
-                account_id=request.domain.account_id,
-                conditional=conditional,
-                received_at_ms=now,
-                coverage_complete=True,
+            try:
+                e = parse_rest_order(
+                    raw,account_id=request.domain.account_id,conditional=conditional,
+                    received_at_ms=now,coverage_complete=True)
+            except (ValueError,TypeError,KeyError):
+                complete=False;reason='management_order_protocol_invalid'
+                continue
+            from src.trading_kernel.domain.entry_admission_snapshot import (
+                canonical_digest,
             )
+            e=e.model_copy(update={'source_kind':'rest','source_digest':canonical_digest(raw)})
             before = previous.get(e.terms.identity)
             if before is not None and before != e.terms:
                 e = e.model_copy(
@@ -158,14 +158,14 @@ async def collect_management_scan(
             if (
                 conditional
                 and status == "NEW"
-                and raw["updateTime"] > raw["createTime"]
+                and e.created_at_ms is not None
+                and e.exchange_event_at_ms > e.created_at_ms
                 and (before is None or before == e.terms)
                 and e.terms.order_type != "TRAILING_STOP_MARKET"
             ):
                 # No conditional amendment journal is documented. A changed-back order
                 # cannot be declared untouched solely from the final identical terms.
-                complete = False
-                reason = "conditional_revision_history_unproven"
+                revision_suspects.add(e.terms.identity)
             if start <= e.exchange_event_at_ms <= now:
                 events.append(e)
             if (
@@ -260,7 +260,7 @@ async def collect_management_scan(
     # without previous terms as unresolved rather than claiming a manual actor.
     stream = getattr(exchange, "management_events", None)
     if (
-        callable(stream)
+        not request.durable_context_required and callable(stream)
         and getattr(exchange, "management_started_ms", None) is not None
     ):
         for received, raw in stream(
@@ -282,6 +282,21 @@ async def collect_management_scan(
                 if before is not None and before != streamed.terms:
                     streamed = streamed.model_copy(update={"before_terms": before})
             events.append(streamed)
+    for row in request.durable_events:
+        try:
+            streamed=parse_order_update(row['safe_payload'],account_id=request.domain.account_id,
+                received_at_ms=row['received_at_ms'],coverage_complete=True)
+        except (ValueError,TypeError,KeyError):
+            complete=False;reason='management_stream_protocol_invalid'
+            continue
+        streamed=streamed.model_copy(update={'source_event_id':row.get('event_id'),'source_kind':'stream','source_digest':row.get('payload_digest')})
+        if streamed.terms.identity[:4] != (request.domain.venue_id,request.domain.account_id,request.domain.exchange_instrument_id,request.domain.position_side):continue
+        if streamed.action is OrderAction.AMENDMENT:
+            before=previous.get(streamed.terms.identity)
+            if before is not None and before!=streamed.terms:streamed=streamed.model_copy(update={'before_terms':before})
+        events.append(streamed)
+    if revision_suspects and not stream_complete:
+        complete=False;reason='conditional_revision_history_unproven'
     events = sorted(
         {e.evidence_id: e for e in events}.values(),
         key=lambda e: (e.exchange_event_at_ms, e.evidence_id),
@@ -291,14 +306,16 @@ async def collect_management_scan(
         snapshot=position.model_copy(
             update={
                 "open_orders": tuple(enriched),
-                "orders_complete": complete and position.orders_complete,
+                "orders_complete": position.orders_complete,
             }
         ),
         orders=tuple(t for t in (o.terms for o in enriched) if t is not None),
         evidence=tuple(
-            e.model_copy(update={"coverage_complete": complete}) for e in events
+            e for e in events
         ),
         complete=complete,
         reason=reason,
-        covered_until_ms=now if complete else start,
+        covered_until_ms=now if complete else requested_start,
+        current_complete=position.orders_complete,
+        attribution_complete=page_complete,
     )

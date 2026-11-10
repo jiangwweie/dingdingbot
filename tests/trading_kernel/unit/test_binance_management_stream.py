@@ -65,3 +65,21 @@ def test_buffer_overflow_fences_lost_interval_but_not_later_tickets(monkeypatch)
     x.handle_order_update(client, {'e': 'ORDER_TRADE_UPDATE'})
     assert not x.management_covers(start_ms=1000, end_ms=2000)
     assert x.management_covers(start_ms=1500, end_ms=2000)
+
+
+def test_protocol_capture_excludes_transport_secrets_and_preserves_unacked_epoch(monkeypatch):
+    import ccxt.pro as ccxt_pro
+    x=exchange()
+    client=SimpleNamespace(url=x.get_private_ws_url('future','not-a-credential'),closed=lambda:False)
+    monkeypatch.setattr(x,'milliseconds',lambda:900)
+    monkeypatch.setattr(ccxt_pro.binanceusdm,'handle_order_update',lambda *a:None)
+    x.on_connected(client)
+    epoch=x.management_epoch_id
+    x.handle_order_update(client,{'e':'ORDER_TRADE_UPDATE','E':1000,'T':1000,'listenKey':'never-persist',
+        'apiKey':'never-persist','o':{'s':'BNBUSDT','i':1,'signature':'never-persist'}})
+    assert 'never-persist' not in str(x.management_pending_events)
+    x.on_error(client,RuntimeError('lost'))
+    x.on_connected(client)
+    assert x.management_epoch_id!=epoch
+    assert x.management_closed_batches[0]['epoch_id']==epoch
+    assert len(x.management_closed_batches[0]['events'])==1

@@ -2370,6 +2370,9 @@ def test_dynamic_intent_upgrade_uses_exact_0009_source(monkeypatch) -> None:
 def test_hourly_upgrade_uses_exact_source0010_and_keeps_entry_fenced(monkeypatch):
     import sys
     monkeypatch.setattr(sys.modules[__name__],'SOURCE_SCHEMA_REVISION','0010_dynamic_intent_v1')
+    monkeypatch.setattr(sys.modules[__name__], 'TARGET_SCHEMA_REVISION', '0011_orb_session_1h_v1')
+    monkeypatch.setattr('scripts.trading_kernel.deploy_tokyo_release.CURRENT_SCHEMA_REVISION', '0011_orb_session_1h_v1')
+    monkeypatch.setattr('scripts.trading_kernel.deploy_tokyo_release.SCHEMA_REVISION', '0011_orb_session_1h_v1')
     backend=FakeDeploymentBackend(source_schema_revision=SOURCE_SCHEMA_REVISION)
     original_certify = backend.certify_flat
     def hourly_certify(release):

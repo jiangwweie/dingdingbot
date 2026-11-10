@@ -161,13 +161,13 @@ def _conclusion(facts: OverviewFacts) -> OwnerConclusion:
 
     for index, key in enumerate(facts.monitor_keys):
         if (
-            key.startswith("entry-facts:")
+            key.startswith(("entry-facts:","management-feed:"))
             and index < len(facts.monitor_statuses)
             and facts.monitor_statuses[index] == "temporarily_unavailable"
         ):
             return _owner_conclusion(
                 level="attention",
-                summary="Entry action-time facts are unavailable; the attempted entry was blocked.",
+                summary="Trading management facts are unavailable; automatic action is restricted.",
                 owner_action=None,
                 evidence=_fact_evidence(key, facts.monitor_updated_at_ms[index]
                     if index < len(facts.monitor_updated_at_ms) else facts.observed_at_ms),

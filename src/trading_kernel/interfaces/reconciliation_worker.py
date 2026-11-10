@@ -1167,7 +1167,7 @@ async def _run_reconciliation_worker_once_core_impl(
             if outcome not in ("AUTO", "initial_handover_pending") or current is None:
                 async with uow_factory() as uow:
                     await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
-                return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail=outcome)
+                return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE if outcome=='management_facts_unavailable' else ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail=outcome)
             aggregate = current
         snapshot_request = PositionSnapshotRequest(
             ticket_id=aggregate.identity.ticket_id,
