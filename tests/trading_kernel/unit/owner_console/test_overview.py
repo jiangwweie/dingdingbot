@@ -215,3 +215,13 @@ def test_first_evidence_gap_keeps_its_matching_boundary_fact() -> None:
             occurred_at_ms=1_800_000_001_000,
         ),
     )
+
+
+def test_expired_management_heartbeat_cannot_display_healthy_from_last_green_state():
+    facts=overview_facts(runtime_freshness=Freshness.FRESH,
+        monitor_keys=('management-feed:brc-app-manual-v1:binance-usdm:test','account:binance-usdm:position-audit'),
+        monitor_statuses=('running','running'),monitor_updated_at_ms=(1_800_000_000_000,1_800_000_020_000),
+        attention_incident_ids=(),evidence_gaps=(),observed_at_ms=1_800_000_020_000)
+    result=build_owner_overview(facts,now_ms=1_800_000_020_000)
+    assert result.conclusion.level=='attention'
+    assert result.conclusion.evidence[0].identity.startswith('management-feed:')

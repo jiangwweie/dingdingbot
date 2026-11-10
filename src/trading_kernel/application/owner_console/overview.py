@@ -19,7 +19,7 @@ def build_owner_overview(facts: OverviewFacts, now_ms: int) -> OwnerOverview:
     """Classify one immutable PostgreSQL fact snapshot without external I/O."""
 
     account_snapshot = _account_snapshot(facts)
-    conclusion = _conclusion(facts)
+    conclusion = _conclusion(facts,now_ms)
     capacity = (
         None
         if facts.max_concurrent_tickets is None
@@ -96,7 +96,7 @@ def _account_snapshot(facts: OverviewFacts) -> AdmissionAccountSnapshot:
     )
 
 
-def _conclusion(facts: OverviewFacts) -> OwnerConclusion:
+def _conclusion(facts: OverviewFacts,now_ms: int) -> OwnerConclusion:
     if facts.open_owner_incident_id is not None:
         return _owner_conclusion(
             level="intervention",
@@ -160,6 +160,10 @@ def _conclusion(facts: OverviewFacts) -> OwnerConclusion:
         )
 
     for index, key in enumerate(facts.monitor_keys):
+        if key.startswith('management-feed:') and (index>=len(facts.monitor_updated_at_ms) or
+            not now_ms-15000 <= facts.monitor_updated_at_ms[index] <= now_ms):
+            return _owner_conclusion(level='attention',summary='Management receiver heartbeat is stale; automatic action is restricted.',
+                owner_action=None,evidence=_fact_evidence(key,facts.monitor_updated_at_ms[index] if index<len(facts.monitor_updated_at_ms) else now_ms))
         if (
             key.startswith(("entry-facts:","management-feed:"))
             and index < len(facts.monitor_statuses)
