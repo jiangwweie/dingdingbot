@@ -26,6 +26,7 @@ blocked until closure. Full business rules live in the
 | Production tag | `manual-runtime-2026.11.10.1` |
 | Production schema | `0019_management_evidence_v2` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
+| Static frontend commit | `1a5dbf9226c262f96be9bd5c721d9ad9f04d9344` — independent R1 static release; Kernel/API remain above |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
 | Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
@@ -35,6 +36,40 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Seoul independent frontend optimization — live static release2026-11-10
+
+**At2026-11-10 14:54 Asia/Shanghai**, frontend static commit
+**`1a5dbf9226c262f96be9bd5c721d9ad9f04d9344`** is live at
+`https://manual.jiaoyingpan.cloud/trading/`. Its exact R1 static certificate PASS;
+release classification requires only `nginx-static-symlink`, no flatness or
+Kernel certification/cutover. This is a separate frontend identity; the installed
+Kernel and Owner API remain on the certified production commit above.
+
+| Release/continuity gate | Direct evidence |
+| --- | --- |
+| Scope | Overview layout/responsive navigation, AUTO/MANUAL/REVIEW_REQUIRED and protection facts, stale snapshot warning, conservative metric labels and correct Seoul login branding; no Kernel/schema/API-client changes |
+| Frontend validation | TypeScript/production build PASS; Vitest25 files/136 tests PASS; direct defect34 and auth-evaluator12 assertions PASS plus mapping/pagination/filter/review regression scripts |
+| Local engineering | Complete unit/architecture2073 PASS; independent host, scope classification, archive, preservation and rollback tests; Ruff/Mypy/diff PASS |
+| Browser evidence | Isolated localhost responses, desktop1440/mobile390, light/dark screenshots; mobile scroll width390; no real Owner session or live control mutation used |
+| Static switch | Official Seoul-only static controller verifies exact host/product/account/database, uploads only three built index/assets files, preserves prior content-hashed assets, atomic static symlink switch |
+| HTTPS artifact evidence | Root/index and every new JS/CSS asset hash PASS; index SHA256 `89093268dd5522a8044a3af5e04d08bd9fca8c5d5be2f41439ac8157263a8c2f` |
+| Runtime continuity | Policy8/new ENTRY true; kernel/API pointers and five MainPIDs/NRestarts unchanged; authority digest identical before/after, zero service restarts, no maintenance fence |
+| Current state | Management receiver ready; active Tickets0, unknown Commands0, open Incidents0; unauthenticated overview401 |
+
+The previous static release remains available for rollback. No service reload,
+restart, exchange operation, database mutation, Pause or Resume is part of this
+static deployment. The original UI optimization worktree's16 captured source/test
+files retain their original hashes and uncommitted changes. Local isolated
+screenshots do not prove authenticated production Owner flows; public live login
+and static assets are verified separately. Existing controlled-operation tests
+retain TOTP/version/idempotency and unresolved-result protections.
+
+Evidence: `.local/manual-static-ui-20261110/` — source snapshot/hashes,
+`vitest-certified-input.log`, `kernel-fast-final.log`, Node regression logs,
+`certification.log`, `deployment-final-receipt.json`, public login snapshot and
+`output/playwright/manual-*.png`. The server release directory retains its static
+manifest, marker and receipt. Runtime does not consume generated evidence.
 
 ### Seoul MA-R2 genuine Owner Resume — ENTRY enabled2026-11-10
 
