@@ -22,9 +22,9 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `687adecb7cf4da8ffc15c3d2ca391751793368cf` |
-| Production tag | `manual-runtime-2026.11.10.0` |
-| Production schema | `0018_notice_outbox_v1` |
+| Production commit | `65a44c0291ac9e75dd9b53cfc247086294ea095e` |
+| Production tag | `manual-runtime-2026.11.10.1` |
+| Production schema | `0019_management_evidence_v2` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
@@ -35,6 +35,66 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Seoul MA-R2 R1 — installed, officially prepared, Owner paused2026-11-10
+
+**At2026-11-10 13:26 Asia/Shanghai**, the exact R1 SHA/tag/schema above is installed
+through the official independent manual installer. Owner **Policy7/false** is
+preserved. Official promoter returned **prepared_owner_paused**; maintenance
+fence removed and all four persistent Workers plus Owner API active, NRestarts0.
+Real Owner Resume/TOTP is still required; no program-created Resume occurred.
+This supersedes the R0 stopped recovery posture below.
+
+| Engineering/runtime gate | Direct evidence |
+| --- | --- |
+| Exact candidate | Kernel R4, Owner API and static PASS |
+| Kernel portfolio | Unit/architecture2064, integration1884, full-chain75 PASS; Ruff/Mypy246 source files, diff, Golden961 snapshots and parity23064 decisions PASS |
+| Current management receiver | Exact product/account/commit/schema, new live epoch, ready lease, persisted/applied watermark0/0, no health reason |
+| Installed fact probe | All7 current crypto members, admission+dispatch14 reads PASS; existing Entry10s/30s/final5s contract unchanged |
+| Closure/account state | BNB permanent MANUAL/terminal, aggregate position/protection0, active Tickets0, active budget0, unknown/prepared Commands0, readonly account flat/order-free |
+| Preservation | Official migration compares all original history/control rows; actual stopped R0 dump rehearsal preserved91 tables/1521 rows; original7 Trade Events/3 Commands retained |
+| Serving/health | Five services active/restarts0, `/trading/`200, unauthenticated overview401; bounded recent structured-log sample has no tick_failed/runtime_fenced/facts_unavailable |
+
+The first promoter attempt rejected its final action-time postflight and kept the
+fence. Its transient cause was not fully captured and is not invented. The later
+instrumented **official promoter** performed fresh complete checks: both readonly
+certifications PASS with an identical recovery-basis digest, both external
+flatness/rule checks PASS and safety-service checks PASS. Final installed readonly
+certification verifies database/flatness/readiness/risk-budget and management-feed
+PASS with Owner still paused. No gate was weakened or bypassed.
+
+R1 now persists sanitized raw order input before acknowledgement, applies exact
+Ticket attribution before advancing the applied watermark, stores confirmed
+command/order baselines and scoped connection intervals, links conditional child
+orders through exact parent evidence, separates attribution/current exposure/
+continuity proofs, rejects stale flatness and shows stale receiver heartbeats.
+Ordinary AUTO writes recheck current receiver/management/schema and defer only
+unstarted claims; initial safety paths and irreversible MANUAL remain intact.
+Schema0019 archives the old complete flag for audit and removes it from runtime.
+
+Local boundary evidence includes actual-CCXT BNB REST replay, fixed-algo protocol
+and child proof tests, wrong identity/duplicate/commit/queue/gap/stale tests,
+actual terminal-source forward migration and a240-tick isolated receiver soak
+(max51ms/tick, five coverage transitions, one current row and one monitor event,
+zero Tickets/Commands). Original historical HTTP/WS bytes were not archived;
+recorded decoded REST and synthetic protocol inputs are labelled separately.
+A live candidate probe retained four old BNB order observations and positive
+external-close evidence while correctly retaining the historical continuity gap.
+
+**Remaining acceptance:** genuine Owner Resume, a new natural AUTO lifecycle,
+actual App intervention/continued MANUAL/readonly closure and independent platform
+notification/phone-arrival evidence. Old BNB recovery does not prove those natural
+future paths. Its Review still declares net economics unavailable until fees and
+funding are valued. Tokyo, other workspaces, risk budgets, leverage and strategies
+were not changed by this repair.
+
+Evidence: `.local/management-r1-20261110/` in the attached R1 worktree:
+`certification-progress.json`, `certification-{kernel,api,static}.log`,
+`terminal-upgrade-rehearsal.json`, `candidate-live-readonly.json`,
+`receiver-soak.json`, official `stage-upgrade.log`/`activate-upgrade.log`,
+`promotion.json` (first refusal), `promoter-diagnostic.json` (official successful
+recheck), `postflight.json` and `release-progress.json`. Server preservation
+receipts remain private under `/etc/brc/manual-install/`.
 
 ### Seoul MA-R2 R0 recovery — Owner paused, R1 not installed2026-11-10
 
