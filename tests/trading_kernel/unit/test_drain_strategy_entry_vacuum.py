@@ -14,7 +14,6 @@ from src.trading_kernel.domain.events import (
     EntryVacuumOrderAbsenceConfirmed,
     TicketIssued,
     VacuumPartialFlattenRequired,
-    VacuumPartialRetained,
 )
 from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
 from src.trading_kernel.domain.reducer import reduce_event
@@ -66,7 +65,7 @@ def test_cancel_acceptance_waits_for_order_absence_before_quantity_freeze() -> N
     assert planned.event.final_filled_qty == Decimal("0.0006")
 
 
-def test_frozen_partial_uses_certified_two_leg_exit_policy_split() -> None:
+def test_frozen_partial_requires_close_even_when_two_leg_split_is_possible() -> None:
     aggregate = _quantity_frozen_aggregate(final_qty=Decimal("0.0006"))
 
     planned = plan_vacuum_ticket_drain(
@@ -74,14 +73,11 @@ def test_frozen_partial_uses_certified_two_leg_exit_policy_split() -> None:
             aggregate=aggregate,
             entry_vacuum_id=VACUUM_ID,
             now_ms=1_400,
-            quantity_step=Decimal("0.0001"),
-            tp1_quantity_fraction=Decimal("0.5"),
         )
     )
 
-    assert isinstance(planned.event, VacuumPartialRetained)
-    assert planned.event.effective_tp1_qty == Decimal("0.0003")
-    assert planned.event.effective_runner_qty == Decimal("0.0003")
+    assert isinstance(planned.event, VacuumPartialFlattenRequired)
+    assert planned.event.final_filled_qty == Decimal("0.0006")
 
 
 def test_frozen_one_step_partial_requires_controlled_flatten() -> None:
@@ -92,13 +88,11 @@ def test_frozen_one_step_partial_requires_controlled_flatten() -> None:
             aggregate=aggregate,
             entry_vacuum_id=VACUUM_ID,
             now_ms=1_400,
-            quantity_step=Decimal("0.0001"),
-            tp1_quantity_fraction=Decimal("0.5"),
         )
     )
 
     assert isinstance(planned.event, VacuumPartialFlattenRequired)
-    assert planned.event.reason == "vacuum_partial_two_leg_unavailable"
+    assert planned.event.reason == "vacuum_partial_entry_requires_flatten"
 
 
 def test_frozen_full_fill_enters_normal_protection_chain() -> None:

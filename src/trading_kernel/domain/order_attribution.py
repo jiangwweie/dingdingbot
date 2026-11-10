@@ -33,6 +33,7 @@ class ConditionalOrderExpectation(BaseModel):
     side: Literal["buy", "sell"]
     order_type: Literal["stop_market", "take_profit_market"]
     quantity: Decimal
+    close_position: bool = False
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod

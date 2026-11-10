@@ -41,6 +41,7 @@ from tests.trading_kernel.support.capacity_claims import (
     make_stress_evidence,
 )
 from tests.trading_kernel.support.dispatch_venues import AcceptingVenue, PreflightFacts
+from tests.trading_kernel.support.post_fill_exit import make_post_fill_exit_plan
 from tests.trading_kernel.support.runtime_scope import seed_ticket_runtime_scope
 from tests.trading_kernel.support.tickets import make_ticket
 
@@ -157,7 +158,7 @@ async def issue(
                 ticket_margin_budget=ticket_margin_budget,
             ),
         )
-    assert result.status is IssueTicketStatus.ISSUED
+    assert result.status is IssueTicketStatus.ISSUED, result
 
 
 async def commit_passed_post_fill_stress_if_pending(
@@ -172,7 +173,7 @@ async def commit_passed_post_fill_stress_if_pending(
         ):
             assert aggregate.average_fill_price is not None
             assert aggregate.initial_stop_exchange_order_id is not None
-            event = PostFillStressAssessed(
+            event = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(aggregate, at_ms=2200),
                 event_id=f"event:{ticket_id}:{aggregate.last_event_sequence + 1}",
                 ticket_id=ticket_id,
                 sequence=aggregate.last_event_sequence + 1,

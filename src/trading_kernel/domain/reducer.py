@@ -94,6 +94,7 @@ from src.trading_kernel.domain.events import (
     TakeProfitConfirmed,
     TakeProfitFilled,
     TakeProfitOutcomeUnknown,
+    TakeProfitPartiallyFilled,
     TakeProfitRejected,
     TicketIssued,
     TradeEvent,
@@ -761,55 +762,8 @@ def reduce_event(
         )
 
     if isinstance(event, VacuumPartialRetained):
-        _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
-        if (
-            event.entry_vacuum_id != current.entry_vacuum_id
-            or
-            event.requested_qty != current.ticket.quantity
-            or event.final_filled_qty != current.position_qty
-            or event.average_fill_price != current.average_fill_price
-            or event.post_fill_risk.disposition is not PostFillDisposition.NORMAL
-            or event.post_fill_risk.actual_stop_risk
-            != event.final_filled_qty
-            * abs(event.average_fill_price - current.ticket.initial_stop_price)
-        ):
-            raise InvalidLifecycleTransition(
-                "retained Vacuum partial differs from cancelled exposure"
-            )
-        if (
-            current.ticket.selection_authority_id is not None
-            and event.selection_authority_id
-            != current.ticket.selection_authority_id
-        ):
-            raise InvalidLifecycleTransition(
-                "retained Vacuum partial Authority differs from Ticket birth"
-            )
-        if (
-            current.ticket.selection_authority_id is None
-            and event.selection_authority_id is not None
-        ):
-            raise InvalidLifecycleTransition(
-                "retained Vacuum partial cannot invent Ticket Authority"
-            )
-        return _transition(
-            current,
-            event,
-            status=AggregateStatus.PROTECTION_PENDING,
-            updates={
-                "actual_stop_risk": event.post_fill_risk.actual_stop_risk,
-                "post_fill_risk_status": event.post_fill_risk.status,
-                "post_fill_disposition": event.post_fill_risk.disposition,
-                "tp1_target_qty": event.effective_tp1_qty,
-                "entry_materialization_kind": "VACUUM_PARTIAL_RETAINED",
-            },
-            effects=(
-                PrepareInitialStopCommand(
-                    ticket_id=current.identity.ticket_id,
-                    quantity=event.final_filled_qty,
-                    stop_price=current.ticket.initial_stop_price,
-                ),
-            ),
-        )
+        # Kept in persisted event decoding for terminal history only.
+        raise InvalidLifecycleTransition("partial ENTRY cannot be retained")
 
     if isinstance(event, VacuumPartialFlattenRequired):
         _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
@@ -859,6 +813,7 @@ def reduce_event(
             )
         stop_updates = {
             "protected_qty": event.protected_qty,
+            "initial_stop_closes_position": event.closes_position,
             "initial_stop_exchange_order_id": event.exchange_order_id.strip(),
             "active_stop_exchange_order_id": event.exchange_order_id.strip(),
             "active_stop_price": current.ticket.initial_stop_price,
@@ -937,17 +892,35 @@ def reduce_event(
                     ),
                 ),
             )
-        tp_prices = current.ticket.take_profit_prices
-        tp_quantities = (
-            (current.tp1_target_qty,)
-            if current.tp1_target_qty > 0
-            else current.ticket.take_profit_quantities
-        )
-        if len(tp_prices) != 1 or len(tp_quantities) != 1:
-            raise InvalidLifecycleTransition(
-                "registered exit policy requires exactly one TP1 leg"
+        plan = event.exit_plan
+        if plan is None:
+            if not event.exit_plan_failure:
+                raise InvalidLifecycleTransition("post-fill exit plan is required")
+            return _transition(
+                current, event, status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
+                updates=stress_updates,
+                effects=(
+                    OpenIncident(ticket_id=current.identity.ticket_id, incident_kind="post_fill_exit_unexecutable"),
+                    PrepareControlledFlattenCommand(ticket_id=current.identity.ticket_id, quantity=current.position_qty),
+                ),
             )
-        tp1_quantity = tp_quantities[0]
+        source = plan.request
+        if (
+            event.exit_plan_failure is not None
+            or current.post_fill_exit_plan is not None
+            or source.ticket_id != current.identity.ticket_id
+            or source.exit_binding_id != current.ticket.exit_binding_id
+            or source.profile.exit_profile_id != current.ticket.exit_policy_id
+            or source.profile.semantic_hash() != current.ticket.exit_policy_semantic_hash
+            or source.profile.position_side != current.identity.netting_domain.position_side
+            or source.quantity != current.position_qty
+            or source.quantity != current.ticket.quantity
+            or source.average_fill_price != current.average_fill_price
+            or source.initial_stop_price != current.ticket.initial_stop_price
+            or source.created_at_ms != event.occurred_at_ms
+        ):
+            raise InvalidLifecycleTransition("post-fill exit plan differs from Ticket exposure")
+        tp1_quantity = plan.tp1_quantity
         if tp1_quantity >= current.position_qty:
             raise InvalidLifecycleTransition("TP1 must preserve a runner quantity")
         return _transition(
@@ -958,13 +931,14 @@ def reduce_event(
                 **stress_updates,
                 "entry_lane_held": False,
                 "tp1_target_qty": tp1_quantity,
+                "post_fill_exit_plan": plan,
             },
             effects=(
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
                 PrepareTakeProfitCommand(
                     ticket_id=current.identity.ticket_id,
                     quantity=tp1_quantity,
-                    limit_price=tp_prices[0],
+                    limit_price=plan.take_profit_price,
                 ),
             ),
         )
@@ -974,22 +948,6 @@ def reduce_event(
         reason = str(event.reason or "").strip()
         if not reason:
             raise InvalidLifecycleTransition("initial stop rejection requires reason")
-        if current.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED":
-            return _transition(
-                current,
-                event,
-                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
-                effects=(
-                    OpenIncident(
-                        ticket_id=current.identity.ticket_id,
-                        incident_kind="vacuum_partial_initial_stop_rejected",
-                    ),
-                    PrepareControlledFlattenCommand(
-                        ticket_id=current.identity.ticket_id,
-                        quantity=current.position_qty,
-                    ),
-                ),
-            )
         return _transition(
             current,
             event,
@@ -1029,26 +987,6 @@ def reduce_event(
         if not str(event.command_id or "").strip():
             raise InvalidLifecycleTransition(
                 "reconciled initial stop absence requires command identity"
-            )
-        if current.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED":
-            return _transition(
-                current,
-                event,
-                status=AggregateStatus.CONTROLLED_FLATTEN_PENDING,
-                effects=(
-                    ResolveIncident(
-                        ticket_id=current.identity.ticket_id,
-                        incident_kind="initial_stop_outcome_unknown",
-                    ),
-                    OpenIncident(
-                        ticket_id=current.identity.ticket_id,
-                        incident_kind="vacuum_partial_initial_stop_absent",
-                    ),
-                    PrepareControlledFlattenCommand(
-                        ticket_id=current.identity.ticket_id,
-                        quantity=current.position_qty,
-                    ),
-                ),
             )
         return _transition(
             current,
@@ -1139,8 +1077,8 @@ def reduce_event(
             raise InvalidLifecycleTransition(
                 "reconciled TP1 absence requires command identity"
             )
-        if len(current.ticket.take_profit_prices) != 1:
-            raise InvalidLifecycleTransition("TP1 retry requires one frozen price")
+        if current.post_fill_exit_plan is None:
+            raise InvalidLifecycleTransition("TP1 retry requires its post-fill exit plan")
         return _transition(
             current,
             event,
@@ -1153,9 +1091,26 @@ def reduce_event(
                 PrepareTakeProfitCommand(
                     ticket_id=current.identity.ticket_id,
                     quantity=current.tp1_target_qty,
-                    limit_price=current.ticket.take_profit_prices[0],
+                    limit_price=current.post_fill_exit_plan.take_profit_price,
                 ),
             ),
+        )
+
+    if isinstance(event, TakeProfitPartiallyFilled):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        if not current.initial_stop_closes_position:
+            raise InvalidLifecycleTransition("partial TP1 requires full-side initial protection")
+        if not current.tp1_filled_qty < event.cumulative_filled_qty < current.tp1_target_qty:
+            raise InvalidLifecycleTransition("partial TP1 cumulative quantity must increase below target")
+        if event.average_fill_price <= 0:
+            raise InvalidLifecycleTransition("partial TP1 requires a positive fill price")
+        remaining = current.position_qty - (event.cumulative_filled_qty - current.tp1_filled_qty)
+        if remaining <= 0 or current.active_stop_exchange_order_id is None:
+            raise InvalidLifecycleTransition("partial TP1 lost protected remaining exposure")
+        return _transition(
+            current, event, status=AggregateStatus.POSITION_PROTECTED,
+            updates={"position_qty": remaining, "protected_qty": remaining,
+                "tp1_filled_qty": event.cumulative_filled_qty},
         )
 
     if isinstance(event, TakeProfitFilled):
@@ -1166,7 +1121,7 @@ def reduce_event(
             raise InvalidLifecycleTransition("TP1 fill and runner floor must be positive")
         if current.active_stop_exchange_order_id is None:
             raise InvalidLifecycleTransition("TP1 fill has no active stop to replace")
-        runner_qty = current.position_qty - event.filled_qty
+        runner_qty = current.position_qty - (event.filled_qty - current.tp1_filled_qty)
         if runner_qty <= 0:
             raise InvalidLifecycleTransition("TP1 fill must preserve runner exposure")
         return _transition(

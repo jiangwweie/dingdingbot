@@ -14,6 +14,7 @@ from src.trading_kernel.domain.events import (
     ExitRequested,
     RunnerStopRequested,
     TakeProfitFilled,
+    TakeProfitPartiallyFilled,
     TradeEvent,
 )
 from src.trading_kernel.domain.exit_policy import (
@@ -31,6 +32,7 @@ class LifecycleMaintenanceStatus(StrEnum):
     BREAK_EVEN_REQUESTED = "break_even_requested"
     RUNNER_MOVE_REQUESTED = "runner_move_requested"
     EXIT_REQUESTED = "exit_requested"
+    PARTIAL_TP_RECORDED = "partial_tp_recorded"
 
 
 class TicketLifecycleFacts(BaseModel):
@@ -117,7 +119,7 @@ async def maintain_ticket_lifecycle(
     uow: KernelUnitOfWork,
     request: LifecycleMaintenanceRequest,
 ) -> LifecycleMaintenanceResult:
-    aggregate = await uow.aggregates.get(request.ticket_id)
+    aggregate = await uow.aggregates.get_for_update(request.ticket_id)
     if aggregate is None:
         raise ValueError("lifecycle Ticket does not exist")
     profile_record = await uow.exit_profiles.get_profile(
@@ -132,19 +134,32 @@ async def maintain_ticket_lifecycle(
 
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
         target = aggregate.tp1_target_qty
-        if request.facts.tp1_filled_quantity == 0:
-            if request.facts.position_quantity != aggregate.position_qty:
-                raise ValueError(
-                    "pre-TP1 venue quantity differs from Ticket projection"
+        filled = request.facts.tp1_filled_quantity
+        if not aggregate.tp1_filled_qty <= filled <= target:
+            raise ValueError("TP1 cumulative quantity is stale or exceeds its target")
+        delta = filled - aggregate.tp1_filled_qty
+        if request.facts.position_quantity != aggregate.position_qty - delta:
+            raise ValueError("TP1 venue quantity differs from cumulative fills")
+        partial_result = LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+        if filled < target:
+            if delta > 0:
+                assert request.facts.tp1_average_fill_price is not None
+                partial_event = TakeProfitPartiallyFilled(
+                    **_event_fields(aggregate, request.now_ms),
+                    cumulative_filled_qty=filled,
+                    average_fill_price=request.facts.tp1_average_fill_price,
+                )
+                reduction = reduce_event(aggregate, partial_event)
+                await uow.commit_reduction(event=partial_event, reduction=reduction, expected_version=aggregate.version)
+                aggregate = reduction.aggregate
+                partial_result = LifecycleMaintenanceResult(
+                    status=LifecycleMaintenanceStatus.PARTIAL_TP_RECORDED,
+                    event_id=partial_event.event_id,
                 )
             if not profile.pre_tp1_guards and profile.time_stop is None:
-                return LifecycleMaintenanceResult(
-                    status=LifecycleMaintenanceStatus.NO_CHANGE
-                )
+                return partial_result
             if request.facts.market_facts is None:
-                return LifecycleMaintenanceResult(
-                    status=LifecycleMaintenanceStatus.NO_CHANGE
-                )
+                return partial_result
             decision = evaluate_profile_pre_tp1_exit(
                 profile=profile,
                 market_facts=request.facts.market_facts,
@@ -166,12 +181,8 @@ async def maintain_ticket_lifecycle(
                     status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
                     event_id=exit_event.event_id,
                 )
-            return LifecycleMaintenanceResult(
-                status=LifecycleMaintenanceStatus.NO_CHANGE
-            )
-        if request.facts.tp1_filled_quantity != target:
-            raise ValueError("partial TP1 fill is outside the registered exit policy")
-        runner_quantity = aggregate.position_qty - target
+            return partial_result
+        runner_quantity = aggregate.position_qty - delta
         if (
             runner_quantity <= 0
             or request.facts.position_quantity != runner_quantity
@@ -190,6 +201,11 @@ async def maintain_ticket_lifecycle(
                 profile.break_even_floor.slippage_buffer_ticks
             ),
         )
+        if aggregate.active_stop_price is not None:
+            floor = (
+                max(floor, aggregate.active_stop_price) if profile.position_side == "long"
+                else min(floor, aggregate.active_stop_price)
+            )
         tp1_event = TakeProfitFilled(
             **_event_fields(aggregate, request.now_ms),
             filled_qty=target,

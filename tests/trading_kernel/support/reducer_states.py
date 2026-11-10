@@ -29,6 +29,7 @@ from src.trading_kernel.domain.post_fill_risk import (
     assess_post_fill_risk,
 )
 from src.trading_kernel.domain.reducer import reduce_event
+from tests.trading_kernel.support.post_fill_exit import make_post_fill_exit_plan
 from tests.trading_kernel.support.tickets import make_ticket
 
 
@@ -94,7 +95,7 @@ def post_fill_stress_event(aggregate, *, passed: bool = True):
     )
     expected_status: Literal["passed", "failed"] = "passed" if passed else "failed"
     assert evidence.proof.status.value == expected_status
-    return PostFillStressAssessed(
+    return PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(aggregate, at_ms=1250),
         event_id=f"event-stress-{aggregate.last_event_sequence + 1}",
         ticket_id=ticket.identity.ticket_id,
         sequence=aggregate.last_event_sequence + 1,

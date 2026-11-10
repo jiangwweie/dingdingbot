@@ -2,6 +2,10 @@ from __future__ import annotations
 
 EXPECTED_KERNEL_TABLES = frozenset(
     {
+        "brc_entry_regime_revisions",
+        "brc_entry_regime_current",
+        "brc_entry_regime_evidence",
+        "brc_btc_ma50_current",
         "brc_directional_risk_rules",
         "brc_directional_risk_controls",
         "brc_directional_risk_events",

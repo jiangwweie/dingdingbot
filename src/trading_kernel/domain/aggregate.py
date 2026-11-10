@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from src.trading_kernel.domain.identities import TicketIdentity
+from src.trading_kernel.domain.post_fill_exit import PostFillExitPlan
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
@@ -119,7 +120,9 @@ class TradeAggregate(BaseModel):
     post_fill_disposition: PostFillDisposition | None = None
     post_fill_stress_status: Literal["passed", "failed"] | None = None
     post_fill_stress_proof_digest: str | None = None
+    post_fill_exit_plan: PostFillExitPlan | None = None
     protected_qty: Decimal = Decimal(0)
+    initial_stop_closes_position: bool = False
     entry_exchange_order_id: str | None = None
     initial_stop_exchange_order_id: str | None = None
     active_stop_exchange_order_id: str | None = None

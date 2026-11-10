@@ -389,3 +389,14 @@ def _truth(
         observed_at_ms=observed_at_ms,
         reason=reason,
     )
+
+
+def test_unknown_initial_close_position_stop_matches_zero_quantity_protocol() -> None:
+    original=_entry_command()
+    command=original.model_copy(update={"kind":ExchangeCommandKind.INITIAL_STOP,"payload":OrderCommandPayload(side="sell",quantity=Decimal("0.019"),order_type="stop_market",reduce_only=True,stop_price=Decimal(59000),close_position=True)})
+    result=decide_unknown_recovery(command,_truth(lookup_status=VenueLookupStatus.VISIBLE,order=VenueOrderTruth(
+        exchange_order_id="close-all-stop",venue_client_order_id=command.venue_client_order_id,
+        exchange_instrument_id=command.ticket_identity.netting_domain.exchange_instrument_id,
+        position_side="long",order_side="sell",quantity=Decimal(0),reduce_only=True,
+        close_position=True,order_namespace="conditional")),visibility_deadline_ms=5000)
+    assert result.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED

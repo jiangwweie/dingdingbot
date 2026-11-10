@@ -87,7 +87,7 @@ sequenceDiagram
     W->>DB: 按原 Ticket 冻结规则继续
 ```
 
-**Vacuum 不阻断已有 Ticket 生命周期，也不改写其来源。**但它可能要求未完成 ENTRY 精确撤单或等待外部事实，不能解释成“切换币池时一律平掉全部持仓”。（来源：[blocks_existing_ticket_lifecycle](../../src/trading_kernel/domain/strategy_entry_vacuum.py)、[plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L170)）
+**Vacuum 不阻断已有 Ticket 生命周期，也不改写其来源。**但它可能要求未完成 ENTRY 精确撤单或等待外部事实，不能解释成“切换币池时一律平掉全部持仓”。（来源：[blocks_existing_ticket_lifecycle](../../src/trading_kernel/domain/strategy_entry_vacuum.py)、[plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L160)）
 
 ## 正常交接与恢复的差别
 

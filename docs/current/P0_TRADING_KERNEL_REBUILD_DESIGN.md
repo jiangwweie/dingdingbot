@@ -297,3 +297,37 @@ epoch atomically. Existing Tickets keep their frozen Crypto 15m exit rules.
 
 These are tracked target semantics. Server deployment and new strategy ENTRY
 remain separate action-time Owner decisions and gates.
+
+
+## Configurable exit and BTC MA50 — approved code target
+
+This section defines the tracked target capability; deployment and activation
+remain exclusively in MAIN_CONTROL_ROADMAP. Each Event/side owns an immutable
+ExitProfile and binding. Owner publication creates new profiles and atomically
+switches selected future-Ticket bindings; it never rewrites active Tickets or
+resumes a strategy. The supported Console surface is TP1 multiple/target fraction,
+optional minimum-executable quantity increase (maximum actual fraction 50%), and
+the separate CPM/MI/MPG LONG BTC closed-4h SMA50 gate.
+
+Profiles explicitly distinguish reference-price targets from actual-fill targets.
+New Owner parameter publications use actual fill. After full ENTRY and confirmed
+initial protection, one immutable PostFillExitPlan freezes exact average entry,
+quantity, original stop, Profile/hash, binding, current venue rules, TP1 price/size
+and Runner size. Invalid post-fill plans enter controlled flatten with initial
+protection retained. Existing reference profiles retain their frozen terms.
+
+Binance initial protection uses side-scoped close-position STOP_MARKET, without
+quantity/reduceOnly wire fields. Partial TP1 records cumulative exact fills and
+remaining quantity under that initial protection. Full target confirmation alone
+starts fee-adjusted break-even replacement; the new precise Runner stop is
+confirmed before the old stop is cancelled. Unknown outcomes are reconciled,
+never blindly resent. Partial ENTRY, including Selection Vacuum partials, is
+cancel-confirm-flatten; historical retained-partial facts do not authorize a new
+normal lifecycle.
+
+Observation owns the bounded fifty-bar BTC fact; Admission and final ENTRY send
+both recheck the current closed period and append exact evidence. The send window
+cannot cross its fact expiry. Missing/stale/equal-or-below MA50 facts reject only
+the scoped new LONG entry. Owner directional budgets remain independent; BRF2
+and SOR-1H are outside this new filter. PostgreSQL owns all runtime authority;
+research output and Markdown remain explanatory only.

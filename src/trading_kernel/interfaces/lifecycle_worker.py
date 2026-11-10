@@ -263,11 +263,11 @@ async def run_lifecycle_worker_once(
 
     expected_position_quantity: Decimal | None = aggregate.position_qty
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
-        if facts.tp1_filled_quantity == aggregate.tp1_target_qty:
+        if aggregate.tp1_filled_qty <= facts.tp1_filled_quantity <= aggregate.tp1_target_qty:
             expected_position_quantity = (
-                aggregate.position_qty - aggregate.tp1_target_qty
+                aggregate.position_qty - (facts.tp1_filled_quantity - aggregate.tp1_filled_qty)
             )
-        elif facts.tp1_filled_quantity != 0:
+        else:
             expected_position_quantity = None
     if facts.position_quantity != expected_position_quantity:
         async with uow_factory() as uow:

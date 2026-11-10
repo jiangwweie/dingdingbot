@@ -2942,3 +2942,39 @@ def _entry_order_reference() -> TicketOrderReference:
         submitted_exchange_order_id="venue-entry-1",
         command_created_at_ms=1_000,
     )
+
+
+@pytest.mark.asyncio
+async def test_initial_stop_close_position_omits_quantity_and_remains_hedge_side_scoped() -> None:
+    exchange = FakeAsyncExchange()
+    adapter = CcxtVenueAdapter(exchanges={("binance-usdm", "experiment-1"): exchange}, clock_ms=lambda:2000)
+    req = _request().model_copy(update={
+        "kind": ExchangeCommandKind.INITIAL_STOP,
+        "payload": OrderCommandPayload(side="sell", quantity=Decimal("0.019"),
+            order_type="stop_market", reduce_only=True, stop_price=Decimal(59000), close_position=True),
+    })
+    await adapter.execute(req)
+    assert exchange.call is not None
+    assert exchange.call[2] == "sell"
+    assert exchange.call[3] is None
+    assert exchange.call[-1]["positionSide"] == "LONG"
+    assert exchange.call[-1]["closePosition"] is True
+    assert "reduceOnly" not in exchange.call[-1]
+
+
+def test_pinned_ccxt_serializes_initial_close_all_without_quantity_or_reduce_only() -> None:
+    import ccxt
+    exchange=ccxt.binance({"options":{"defaultType":"future"}})
+    exchange.set_markets([{
+        "id":"BTCUSDT","symbol":"BTC/USDT:USDT","base":"BTC","quote":"USDT","settle":"USDT",
+        "type":"swap","swap":True,"spot":False,"future":False,"option":False,"contract":True,
+        "linear":True,"inverse":False,"contractSize":1,"active":True,
+        "precision":{"amount":0.001,"price":0.1},
+        "limits":{"amount":{"min":0.001,"max":1000},"price":{},"cost":{},"leverage":{}},
+        "info":{"orderTypes":["MARKET","LIMIT","STOP_MARKET"]},
+    }])
+    request=exchange.create_order_request("BTC/USDT:USDT","stop_market","sell",None,None,
+        {"stopPrice":59000,"closePosition":True,"positionSide":"LONG","newClientOrderId":"brc-close-stop"})
+    assert request["closePosition"] is True and request["positionSide"]=="LONG"
+    assert request["side"]=="SELL"
+    assert "quantity" not in request and "reduceOnly" not in request

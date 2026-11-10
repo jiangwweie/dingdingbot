@@ -47,6 +47,7 @@ from src.trading_kernel.domain.directional_risk import (
     effective_directional_limit,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
+from src.trading_kernel.domain.entry_regime import REGIME_EVENTS
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.instrument_entry_health import (
@@ -270,6 +271,9 @@ async def issue_ready_signal(
             # Invalid authority remains missing, so the common refusal path
             # persists a blocker; it is never interpreted as neutral.
             directional_control = None
+    regime_evidence = None
+    if signal.event_spec_id in REGIME_EVENTS:
+        regime_evidence = await uow.entry_regimes.evaluate(signal.event_spec_id, now_ms=request.now_ms)
     current_exit_binding = await uow.exit_profiles.get_current_binding(
         signal.event_spec_id,
         for_update=True,
@@ -444,6 +448,15 @@ async def issue_ready_signal(
         exchange_instrument_id=signal.exchange_instrument_id,
         position_side=signal.position_side,
     )
+    if regime_evidence is not None and not regime_evidence.allowed:
+        await uow.entry_regimes.record(phase="admission", identity_key=signal.signal_event_id, ticket_id=None, evidence=regime_evidence)
+        return await _refuse(
+            uow, signal, IssueTicketStatus.ENTRY_REGIME_BLOCKED, request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint=regime_evidence.result,
+            admission_snapshot=request.admission_snapshot,
+        )
     decision = build_capacity_claim(
         directional_overlay_limit=directional_limit,
         signal=signal,
@@ -540,6 +553,8 @@ async def issue_ready_signal(
             admission_snapshot=request.admission_snapshot,
         )
     if result.status is IssueTicketStatus.ISSUED:
+        if regime_evidence is not None:
+            await uow.entry_regimes.record(phase="admission", identity_key=signal.signal_event_id, ticket_id=result.ticket_id, evidence=regime_evidence)
         if directional_control is not None and directional_limit is not None:
             await uow.directional_risk.record_admission(
                 signal_event_id=signal.signal_event_id,

@@ -938,3 +938,30 @@ and protection replacement acceptance do not count as Runner exits. See
 This adds no table, migration or service. Its same-schema Kernel release is R3;
 any combined release still takes the highest classification. Existing R4, R2
 and R1 certificates remain evidence for their exact original commits.
+
+
+## Exit/regime schema upgrade — tracked target
+
+The exact `0015_generic_owner_recovery_v1 -> 0016_exit_regime_v1` target uses the
+existing stopped, flat, quiescent, forward-only release path. Source preservation
+covers every pre-existing table/column and all terminal lineage. The migration
+adds nullable historical-safe actual-fill exit plans, initial protection mode,
+three explicitly disabled entry-filter controls, a bounded BTC fact projection
+and immutable evaluation evidence. It installs no BTC snapshot, exchange command,
+Owner strategy resume or experimental exit binding. Existing Owner bindings are
+preserved during identity rotation. Post-migration failures remain fenced and
+fix-forward; active-position handover and schema downgrade remain forbidden.
+
+Parameter publication is separate from software installation. The Owner-confirmed
+initial configuration is CPM/MI/MPG MA50 gating, CPM/MI/MPG/BRF2 actual-entry 1R
+with target 5% and minimum-executable increase capped at actual 50%, plus SOR-1H
+actual-entry 1.2R preserving its original fraction. Fetch exact current binding
+and filter revisions before one atomic authenticated publication. Existing
+strategy pauses, direction, selection and capital policy remain authoritative.
+This contract does not claim that this target has been deployed or activated.
+
+The first exit/regime rollout defaults to fenced ENTRY and natural source lifecycle
+completion. Do not enable optional `deployment_drain` to represent that wait: the
+existing opt-in Drain requests controlled exits and requires its own exact
+authorization. The target migration still begins only after final stopped-flat
+proof; no new active-position handover or forced-close default is introduced.

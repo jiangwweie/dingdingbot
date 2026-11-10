@@ -30,6 +30,14 @@ class PostgresExitProfileAuthorityRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def add_profile(self, profile: ExitProfile, *, created_at_ms: int) -> None:
+        await self._connection.execute(sa.insert(exit_policies).values(
+            exit_policy_id=profile.exit_profile_id,exit_policy_version=str(profile.exit_profile_version),
+            event_spec_id=None,profile_schema_version=profile.profile_schema_version,
+            position_side=profile.position_side,policy=profile.model_dump(mode="json"),
+            semantic_hash=profile.semantic_hash(),status="active",created_at_ms=created_at_ms,
+        ))
+
     async def acquire_authority_write_lock(self) -> None:
         await self._connection.execute(
             sa.text("SELECT pg_advisory_xact_lock(:lock_key)"),

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
 
@@ -29,9 +28,7 @@ from src.trading_kernel.domain.events import (
     EntryVacuumOrderAbsenceConfirmed,
     EntryVacuumSuperseded,
     VacuumPartialFlattenRequired,
-    VacuumPartialRetained,
 )
-from src.trading_kernel.domain.exit_policy import split_tp1_quantity
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
@@ -43,7 +40,6 @@ from src.trading_kernel.domain.orb_session_selection import (
 )
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
-    PostFillDisposition,
     PostFillRiskRequest,
     assess_post_fill_risk,
 )
@@ -68,9 +64,6 @@ class VacuumDrainStatus(StrEnum):
     ORDER_ABSENCE_RECORDED = "ORDER_ABSENCE_RECORDED"
     ZERO_FILL_CLOSED = "ZERO_FILL_CLOSED"
     FULL_FILL_PROTECTION_REQUESTED = "FULL_FILL_PROTECTION_REQUESTED"
-    PARTIAL_RETAINED_PROTECTION_REQUESTED = (
-        "PARTIAL_RETAINED_PROTECTION_REQUESTED"
-    )
     PARTIAL_FLATTEN_REQUESTED = "PARTIAL_FLATTEN_REQUESTED"
     WAITING_COMMAND = "WAITING_COMMAND"
     WAITING_UNKNOWN_OUTCOME = "WAITING_UNKNOWN_OUTCOME"
@@ -131,8 +124,6 @@ class VacuumTicketDrainFacts(BaseModel):
     entry_vacuum_id: str
     now_ms: int
     position_snapshot: PositionSnapshot | None = None
-    quantity_step: Decimal | None = None
-    tp1_quantity_fraction: Decimal | None = None
 
     @field_validator("entry_vacuum_id", mode="before")
     @classmethod
@@ -150,7 +141,6 @@ VacuumDrainEvent = (
     | EntryVacuumOrderAbsenceConfirmed
     | EntryVacuumSuperseded
     | VacuumPartialFlattenRequired
-    | VacuumPartialRetained
 )
 
 
@@ -259,37 +249,7 @@ def plan_vacuum_ticket_drain(
             ),
             "VACUUM_FULL_FILL_MATERIALIZED",
         )
-    if facts.quantity_step is None or facts.tp1_quantity_fraction is None:
-        return VacuumTicketDrainPlan(None, "EXIT_POLICY_FACTS_REQUIRED")
-    try:
-        split = split_tp1_quantity(
-            total_quantity=aggregate.position_qty,
-            quantity_step=facts.quantity_step,
-            quantity_fraction=facts.tp1_quantity_fraction,
-        )
-    except ValueError:
-        split = None
-    if split is not None and risk.disposition is PostFillDisposition.NORMAL:
-        return VacuumTicketDrainPlan(
-            VacuumPartialRetained(
-                **_event_fields(aggregate, facts.now_ms),
-                entry_vacuum_id=facts.entry_vacuum_id,
-                selection_authority_id=aggregate.ticket.selection_authority_id,
-                requested_qty=aggregate.ticket.quantity,
-                final_filled_qty=aggregate.position_qty,
-                average_fill_price=aggregate.average_fill_price,
-                quantity_step=facts.quantity_step,
-                effective_tp1_qty=split.tp1_quantity,
-                effective_runner_qty=split.runner_quantity,
-                post_fill_risk=risk,
-            ),
-            "VACUUM_PARTIAL_RETAINED",
-        )
-    reason = (
-        "vacuum_partial_two_leg_unavailable"
-        if split is None
-        else f"vacuum_partial_{risk.status.value}"
-    )
+    reason = "vacuum_partial_entry_requires_flatten"
     return VacuumTicketDrainPlan(
         VacuumPartialFlattenRequired(
             **_event_fields(aggregate, facts.now_ms),
@@ -396,28 +356,6 @@ async def drain_strategy_entry_vacuum_once(
                 "VACUUM_CANCEL_OUTCOME_UNKNOWN",
             )
 
-    quantity_step: Decimal | None = None
-    tp1_fraction: Decimal | None = None
-    if aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED:
-        rules = await uow.signals.get_instrument_rules(
-            aggregate.identity.netting_domain.venue_id,
-            aggregate.identity.netting_domain.exchange_instrument_id,
-        )
-        profile_record = await uow.exit_profiles.get_profile(
-            exit_profile_id=aggregate.ticket.exit_policy_id,
-            semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
-        )
-        if aggregate.position_qty not in {Decimal(0), aggregate.ticket.quantity}:
-            if rules is None or profile_record is None:
-                return _ticket_result(
-                    VacuumDrainStatus.BLOCKED,
-                    vacuum.entry_vacuum_id,
-                    aggregate,
-                    "VACUUM_PARTIAL_EXIT_POLICY_FACTS_MISSING",
-                )
-            quantity_step = rules.quantity_step
-            tp1_fraction = profile_record.profile.tp1.quantity_fraction
-
     snapshot = request.position_snapshot
     if aggregate.status is AggregateStatus.ENTRY_VACUUM_CANCELLED and aggregate.position_qty == 0:
         prior_position = await uow.positions.get(aggregate.identity.netting_domain.key())
@@ -460,8 +398,6 @@ async def drain_strategy_entry_vacuum_once(
             entry_vacuum_id=vacuum.entry_vacuum_id,
             now_ms=request.now_ms,
             position_snapshot=snapshot,
-            quantity_step=quantity_step,
-            tp1_quantity_fraction=tp1_fraction,
         )
     )
     if planned.event is None:
@@ -819,7 +755,6 @@ def _event_result(
         EntryVacuumOrderAbsenceConfirmed: VacuumDrainStatus.ORDER_ABSENCE_RECORDED,
         EntryVacuumAbsenceConfirmed: VacuumDrainStatus.ZERO_FILL_CLOSED,
         EntryFilled: VacuumDrainStatus.FULL_FILL_PROTECTION_REQUESTED,
-        VacuumPartialRetained: VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED,
         VacuumPartialFlattenRequired: VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED,
     }[type(event)]
     return DrainStrategyEntryVacuumResult(

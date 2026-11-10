@@ -81,6 +81,11 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
     CurrentFinalCloseGrantProof,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
+from src.trading_kernel.domain.entry_regime import (
+    BtcMa50Snapshot,
+    EntryRegimeControl,
+    EntryRegimeEvidence,
+)
 from src.trading_kernel.domain.events import TradeEvent
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
@@ -947,6 +952,7 @@ class MonitorRepository(Protocol):
 
 
 class DirectionalRiskRepository(Protocol):
+    async def has_in_flight(self, venue_id: str, account_id: str) -> bool: ...
     async def next_pending_budget(self) -> tuple[str, str] | None: ...
     async def request_budget_change(self, request: RiskBudgetChangeRequest) -> RiskBudgetReceipt: ...
 
@@ -2254,6 +2260,7 @@ class InstrumentSelectionRepository(Protocol):
 
 
 class ExitProfileAuthorityRepository(Protocol):
+    async def add_profile(self, profile: ExitProfile, *, created_at_ms: int) -> None: ...
     async def acquire_authority_write_lock(self) -> None: ...
 
     async def get_current_binding(
@@ -2468,7 +2475,20 @@ class VenueTruthPort(Protocol):
 UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]
 
 
+class EntryRegimeRepository(Protocol):
+    async def try_begin_refresh(self, *, now_ms: int, retry_interval_ms: int) -> bool: ...
+    async def lock_controls(self, event_spec_ids: tuple[str, ...]) -> None: ...
+    async def switch(self, *, event_spec_id: str, expected_revision: int, enabled: bool, authorization_id: str, now_ms: int) -> EntryRegimeControl: ...
+    async def get_control(self, event_spec_id: str, *, lock: bool = False) -> EntryRegimeControl | None: ...
+    async def any_enabled(self) -> bool: ...
+    async def snapshot(self) -> BtcMa50Snapshot | None: ...
+    async def save_snapshot(self, snapshot: BtcMa50Snapshot) -> None: ...
+    async def evaluate(self, event_spec_id: str, *, now_ms: int) -> EntryRegimeEvidence: ...
+    async def record(self, *, phase: str, identity_key: str, ticket_id: str | None, evidence: EntryRegimeEvidence) -> None: ...
+
+
 class KernelUnitOfWork(Protocol):
+    entry_regimes: EntryRegimeRepository
     directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository

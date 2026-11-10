@@ -1165,13 +1165,21 @@ class CcxtVenueAdapter:
             params["timeInForce"] = request.payload.time_in_force
         if request.payload.stop_price is not None:
             params["stopPrice"] = request.payload.stop_price
+        if request.payload.close_position:
+            if (
+                request.venue_id != "binance-usdm"
+                or request.kind is not ExchangeCommandKind.INITIAL_STOP
+                or request.payload.side != ("sell" if request.position_side == "long" else "buy")
+            ):
+                raise ValueError("close-position initial stop scope mismatch")
+            params["closePosition"] = True
 
         response = await _call_exchange(
             exchange.create_order,
             symbol,
             request.payload.order_type,
             request.payload.side,
-            request.payload.quantity,
+            None if request.payload.close_position else request.payload.quantity,
             request.payload.limit_price,
             params,
             clock_ms=self._clock_ms,
@@ -1579,6 +1587,14 @@ def _parse_order_truth(
             raise RuntimeError(
                 "canonical Binance USD-M instrument is unavailable"
             ) from exc
+    close_position = (
+        _boolean_field(value,"closePosition")
+        if value.get("closePosition") is not None or raw_info.get("closePosition") is not None else False
+    )
+    reduce_only = (
+        _boolean_field(value,"reduceOnly")
+        if value.get("reduceOnly") is not None or raw_info.get("reduceOnly") is not None else False
+    )
     return VenueOrderTruth(
         exchange_order_id=str(value.get("id") or ""),
         venue_client_order_id=str(value.get("clientOrderId") or ""),
@@ -1586,7 +1602,8 @@ def _parse_order_truth(
         position_side=position_side,
         order_side=order_side,
         quantity=Decimal(str(value.get("amount") or "0")),
-        reduce_only=bool(value.get("reduceOnly", False)),
+        reduce_only=reduce_only or close_position,
+        close_position=close_position,
         order_namespace=order_namespace,
         is_open=known_open or _unified_order_is_open(value),
     )

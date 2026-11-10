@@ -20,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.domain.post_fill_exit import PostFillExitPlan
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -1368,6 +1369,7 @@ class TradeCausalityAggregateFacts(FrozenModel):
     tp1_target_qty: Decimal
     tp1_filled_qty: Decimal
     updated_at_ms: int
+    post_fill_exit_plan: PostFillExitPlan | None = None
 
 
 class TradeCausalitySignalFacts(FrozenModel):

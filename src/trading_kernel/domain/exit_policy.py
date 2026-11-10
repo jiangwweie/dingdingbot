@@ -97,12 +97,17 @@ class TakeProfitRule(BaseModel):
     execution_style: Literal["limit_gtc"] = "limit_gtc"
     market_fallback_allowed: Literal[False] = False
     quantity_rule: ExitQuantityRule | None = None
+    price_basis: Literal["entry_reference", "actual_fill"] = "entry_reference"
 
     @model_serializer(mode="wrap")
-    def _serialize_rule(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+    def _serialize_rule(self, handler: SerializerFunctionWrapHandler):
+        # Keep the declared model schema; a dict return schema would erase the
+        # typed TP fields in OpenAPI. Absent extension fields retain old hashes.
         values = handler(self)
         if self.quantity_rule is None:
             values.pop("quantity_rule", None)
+        if self.price_basis == "entry_reference":
+            values.pop("price_basis", None)
         return values
 
     @model_validator(mode="after")

@@ -53,6 +53,7 @@ class OrderCommandPayload(BaseModel):
     quantity: Decimal
     order_type: Literal["market", "limit", "stop_market", "take_profit_market"]
     reduce_only: bool
+    close_position: bool = False
     limit_price: Decimal | None = None
     time_in_force: Literal["GTC", "GTX"] | None = None
     stop_price: Decimal | None = None
@@ -80,6 +81,11 @@ class OrderCommandPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_order_shape(self) -> OrderCommandPayload:
+        if self.close_position and (
+            self.order_type != "stop_market" or not self.reduce_only
+            or self.replaces_exchange_order_id is not None
+        ):
+            raise ValueError("close-position is restricted to the initial protective stop")
         if self.order_type == "limit":
             if self.limit_price is None:
                 raise ValueError("limit order requires limit_price")

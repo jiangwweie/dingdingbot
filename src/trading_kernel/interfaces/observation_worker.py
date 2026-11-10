@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -27,6 +28,7 @@ from src.trading_kernel.application.ports import (
 from src.trading_kernel.application.project_shadow_outcome import (
     project_claimed_shadow_outcome,
 )
+from src.trading_kernel.application.refresh_entry_regime import refresh_entry_regime
 from src.trading_kernel.domain.market import ClosedCandle
 
 
@@ -90,6 +92,10 @@ async def run_observation_worker_once(
     market_source: PublicMarketSource,
     request: ObservationWorkerRequest,
 ) -> ObservationWorkerResult:
+    try:
+        await refresh_entry_regime(uow_factory, market_source, now_ms=request.now_ms, timeout_seconds=request.timeout_seconds, runtime_commit=request.runtime_commit, schema_revision=request.schema_revision, worker_id=request.worker_id)
+    except Exception as exc:  # noqa: BLE001 - unavailable BTC facts fail closed only for scoped new ENTRY.
+        logging.getLogger(__name__).warning("entry_regime_refresh_unavailable", extra={"error_type":type(exc).__name__})
     if request.prefer_shadow:
         shadow = await _run_one_due_shadow(uow_factory, market_source, request)
         if shadow.status is not ObservationWorkerStatus.NO_WORK:

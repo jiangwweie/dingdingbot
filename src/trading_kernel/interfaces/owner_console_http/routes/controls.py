@@ -9,6 +9,16 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from src.trading_kernel.application.exit_parameter_controls import (
+    SUPPORTED_EVENTS,
+    ExitParameterChange,
+    ExitParameterPreview,
+    ExitParameterPublishRequest,
+    ExitParameterReceipt,
+    ExitQuantitySample,
+    preview_exit_parameters,
+    publish_exit_parameters,
+)
 from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
     ExitProfileBindingMutationRequest,
@@ -36,8 +46,14 @@ from src.trading_kernel.domain.directional_risk import (
     DirectionalChangeRequest,
     DirectionalControl,
 )
+from src.trading_kernel.domain.entry_regime import (
+    REGIME_EVENTS,
+    EntryRegimeControl,
+    evaluate_btc_ma50,
+)
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
+    ExitProfile,
     ExitProfileRecord,
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
@@ -54,10 +70,17 @@ from src.trading_kernel.domain.selection_authority import (
 from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
     PostgresDirectionalRiskRepository,
 )
+from src.trading_kernel.infrastructure.pg_entry_regime_repository import (
+    PostgresEntryRegimeRepository,
+)
 from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
     PostgresExitProfileAuthorityRepository,
 )
-from src.trading_kernel.infrastructure.pg_models import capacity_claims
+from src.trading_kernel.infrastructure.pg_models import (
+    capacity_claims,
+    trade_aggregates,
+    trade_tickets,
+)
 from src.trading_kernel.infrastructure.pg_owner_read_repository import (
     owner_read_transaction,
 )
@@ -1180,3 +1203,98 @@ async def get_risk_budget_receipt(
             settings.venue_id, settings.account_id, idempotency_key
         )
     return None if result is None else RiskBudgetReceipt.model_validate(result)
+
+
+class ExitParameterBody(ControlWriteBody):
+    changes: tuple[ExitParameterChange, ...]
+    quantity_samples: tuple[ExitQuantitySample, ...] = ()
+
+
+def _exit_parameter_request(body: ExitParameterBody, request: Request) -> ExitParameterPublishRequest:
+    settings=get_settings(request)
+    return ExitParameterPublishRequest(expected_version=body.expected_version,reason=body.reason,
+        idempotency_key=body.idempotency_key,owner_identity=settings.auth.username,now_ms=get_clock_ms(request),
+        venue_id=settings.venue_id,account_id=settings.account_id,changes=body.changes,quantity_samples=body.quantity_samples)
+
+
+class ExitParameterRow(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    event_spec_id: str
+    binding: CurrentEventExitBinding
+    profile: ExitProfile
+    regime: EntryRegimeControl | None
+
+
+class FrozenTicketExitView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    ticket_id: str
+    event_spec_id: str
+    exit_profile_id: str
+    actual_tp1_fraction: Decimal | None
+
+
+class EntryRegimeMarketView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    status: str
+    latest_close_ms: int | None
+    close_price: Decimal | None
+    sma50: Decimal | None
+
+
+class ExitParameterCurrentView(BaseModel):
+    model_config=ConfigDict(frozen=True,extra="forbid")
+    rows: tuple[ExitParameterRow,...]
+    active_tickets: tuple[FrozenTicketExitView,...]
+    observed_at_ms: int
+    btc_ma50: EntryRegimeMarketView
+
+
+@router.get("/controls/exit-parameters")
+async def read_exit_parameters(request: Request) -> ExitParameterCurrentView:
+    rows=[]
+    settings=get_settings(request)
+    now_ms=get_clock_ms(request)
+    async with owner_read_transaction(get_read_engine(request)) as connection:
+        profiles=PostgresExitProfileAuthorityRepository(connection)
+        regimes=PostgresEntryRegimeRepository(connection)
+        btc_snapshot=await regimes.snapshot()
+        btc_view=EntryRegimeMarketView(
+            status=evaluate_btc_ma50(btc_snapshot,now_ms=now_ms),
+            latest_close_ms=None if btc_snapshot is None else btc_snapshot.latest_close_ms,
+            close_price=None if btc_snapshot is None else btc_snapshot.candles[-1].close,
+            sma50=None if btc_snapshot is None else btc_snapshot.sma50,
+        )
+        for event_spec_id in sorted(SUPPORTED_EVENTS):
+            binding=await profiles.get_current_binding(event_spec_id)
+            if binding is None:continue
+            source=await profiles.get_binding(binding.exit_binding_id)
+            if source is None:raise OwnerControlBlocked("exit_binding_missing")
+            profile=await profiles.get_profile(exit_profile_id=source.exit_profile_id,semantic_hash=source.exit_profile_semantic_hash)
+            if profile is None:raise OwnerControlBlocked("exit_profile_missing")
+            rows.append(ExitParameterRow(event_spec_id=binding.event_spec_id,binding=binding,profile=profile.profile,
+                regime=await regimes.get_control(binding.event_spec_id) if binding.event_spec_id in REGIME_EVENTS else None))
+        active=(await connection.execute(sa.select(trade_tickets.c.ticket_id,trade_tickets.c.event_spec_id,
+            trade_tickets.c.exit_policy_id,trade_aggregates.c.post_fill_exit_plan).join(trade_aggregates,trade_aggregates.c.ticket_id==trade_tickets.c.ticket_id).where(
+                trade_tickets.c.venue_id==settings.venue_id,trade_tickets.c.account_id==settings.account_id,
+                trade_tickets.c.terminal_at_ms.is_(None),trade_tickets.c.event_spec_id.in_(SUPPORTED_EVENTS)
+            ).order_by(trade_tickets.c.created_at_ms.desc()).limit(64))).mappings().all()
+        frozen=tuple(FrozenTicketExitView(ticket_id=row["ticket_id"],event_spec_id=row["event_spec_id"],exit_profile_id=row["exit_policy_id"],
+            actual_tp1_fraction=Decimal(row["post_fill_exit_plan"]["actual_fraction"]) if row["post_fill_exit_plan"] is not None else None) for row in active)
+    return ExitParameterCurrentView(rows=tuple(rows),active_tickets=frozen,observed_at_ms=now_ms,btc_ma50=btc_view)
+
+
+@router.post("/controls/exit-parameters/preview")
+async def preview_exit_parameter_changes(body: ExitParameterBody,request: Request) -> ExitParameterPreview:
+    _validate_write_request(request)
+    async with PostgresKernelUnitOfWork(get_read_engine(request)) as uow:
+        assert uow._connection is not None
+        await uow._connection.execute(sa.text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        return await preview_exit_parameters(uow,_exit_parameter_request(body,request))
+
+
+@router.post("/controls/exit-parameters/publish")
+async def publish_exit_parameter_changes(body: ExitParameterBody,request: Request) -> ExitParameterReceipt:
+    _validate_write_request(request)
+    await _require_step_up(body,request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await publish_exit_parameters(uow,_exit_parameter_request(body,request),authentication_strength="totp_step_up")

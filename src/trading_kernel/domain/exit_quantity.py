@@ -37,6 +37,7 @@ class ExitQuantityRequest(BaseModel):
     target_fraction: Decimal
     quantity_rule: ExitQuantityRule | None = None
     max_quantity: Decimal | None = None
+    frozen_tp1_quantity: Decimal | None = None
 
     @field_validator(
         "total_quantity",
@@ -45,7 +46,7 @@ class ExitQuantityRequest(BaseModel):
         "min_notional",
         "take_profit_price",
         "initial_stop_price",
-        "max_quantity",
+        "max_quantity", "frozen_tp1_quantity",
     )
     @classmethod
     def _positive_finite(cls, value: Decimal | None) -> Decimal | None:
@@ -62,6 +63,8 @@ class ExitQuantityRequest(BaseModel):
 
     @model_validator(mode="after")
     def _cap_covers_target(self) -> ExitQuantityRequest:
+        if self.frozen_tp1_quantity is not None and self.quantity_rule is not None:
+            raise ValueError("frozen TP1 quantity cannot enable minimum raising")
         if (
             self.quantity_rule is not None
             and self.target_fraction > self.quantity_rule.max_actual_fraction
@@ -74,6 +77,7 @@ class ExitQuantityStatus(StrEnum):
     SELECTED = "selected"
     TOTAL_NOT_STEP_ALIGNED = "total_not_step_aligned"
     TP_MIN_QUANTITY = "tp_min_quantity"
+    TP_NOT_STEP_ALIGNED = "tp_not_step_aligned"
     TP_MIN_NOTIONAL = "tp_min_notional"
     TP_MAX_QUANTITY = "tp_max_quantity"
     FRACTION_CAP_EXCEEDED = "fraction_cap_exceeded"
@@ -114,6 +118,10 @@ def select_exit_quantities(request: ExitQuantityRequest) -> ExitQuantityDecision
     target_floor = (
         request.total_quantity * request.target_fraction / step
     ).to_integral_value(rounding=ROUND_FLOOR) * step
+    if request.frozen_tp1_quantity is not None:
+        target_floor = request.frozen_tp1_quantity
+        if target_floor % step:
+            return ExitQuantityDecision(status=ExitQuantityStatus.TP_NOT_STEP_ALIGNED)
     minimum = (
         max(
             step, request.min_quantity, request.min_notional / request.take_profit_price

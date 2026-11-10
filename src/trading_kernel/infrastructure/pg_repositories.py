@@ -838,6 +838,7 @@ class PostgresExchangeCommandRepository:
                             payload.order_type,
                         ),
                         quantity=payload.quantity,
+                        close_position=payload.close_position,
                     )
                 )
             else:
@@ -3439,7 +3440,12 @@ def _aggregate_values(
         ),
         "post_fill_stress_status": aggregate.post_fill_stress_status,
         "post_fill_stress_proof_digest": (aggregate.post_fill_stress_proof_digest),
+        "post_fill_exit_plan": (
+            None if aggregate.post_fill_exit_plan is None
+            else aggregate.post_fill_exit_plan.model_dump(mode="json")
+        ),
         "protected_qty": aggregate.protected_qty,
+        "initial_stop_closes_position": aggregate.initial_stop_closes_position,
         "entry_exchange_order_id": aggregate.entry_exchange_order_id,
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
         "active_stop_exchange_order_id": aggregate.active_stop_exchange_order_id,
@@ -3680,6 +3686,8 @@ def _aggregate_from_row(
             else str(row["post_fill_stress_proof_digest"])
         ),
         protected_qty=Decimal(row["protected_qty"]),
+        initial_stop_closes_position=bool(row["initial_stop_closes_position"]),
+        post_fill_exit_plan=row["post_fill_exit_plan"],
         entry_exchange_order_id=(
             None
             if row["entry_exchange_order_id"] is None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from src.trading_kernel.domain.exit_policy import registered_exit_profiles
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
@@ -245,10 +246,13 @@ async def seed_ticket_registry(connection, ticket) -> None:
         .values(
             exit_policy_id=exit_profile_id,
             exit_policy_version="test-v1",
-            event_spec_id=runtime.event_spec_id,
-            profile_schema_version=None,
+            event_spec_id=None,
+            profile_schema_version="exit_profile_v1",
             position_side=identity.netting_domain.position_side,
-            policy={},
+            policy=next(
+                p.model_dump(mode="json") for p in registered_exit_profiles()
+                if p.exit_profile_id == exit_profile_id and p.semantic_hash() == exit_profile_semantic_hash
+            ),
             semantic_hash=exit_profile_semantic_hash,
             status="active",
             created_at_ms=ticket.created_at_ms,
@@ -264,7 +268,7 @@ async def seed_ticket_registry(connection, ticket) -> None:
             exit_profile_id=exit_profile_id,
             exit_profile_semantic_hash=exit_profile_semantic_hash,
             binding_semantic_hash=binding.binding_semantic_hash,
-            activation_reason="test_fixture",
+            activation_reason=binding.activation_reason,
             created_at_ms=ticket.created_at_ms,
         )
         .on_conflict_do_nothing(

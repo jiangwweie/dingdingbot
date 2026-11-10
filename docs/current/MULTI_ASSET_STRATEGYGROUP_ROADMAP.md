@@ -95,8 +95,8 @@ RECOVERY_TRANSITION 才 future-close-only + rebase。不存在额外经济上线
     窗口或source integrity失败时whole-attempt=`SOURCE_FAILED`且不得Rank补位；`Ready=1..7`形成
     同等数量 Desired members，`Ready=0` 是不 fallback 的 **`VALID_EMPTY`**；相同成员走
     **`NO_CHANGE`**；变化时先建立 **Strategy Entry Vacuum**，停止新交易并撤销unfinished
-    ENTRY，真空归因的部分成交只有在实际数量形成合法TP1+Runner双腿时才保留，否则
-    controlled flatten；任何未连续覆盖eligible close的SOR Authority都必须在grant前完成durable
+    ENTRY；当前代码目标对真空归因的部分ENTRY同样取消余单并确认后controlled flatten，
+    不因可拆TP1+Runner而保留（部署状态仍仅由MAIN_CONTROL_ROADMAP记录）；任何未连续覆盖eligible close的SOR Authority都必须在grant前完成durable
     Authority Gap Audit，Vacuum activation/fallback使用`previous ∪ desired`，late continuity和
     late普通`NO_CHANGE`只审计current pair，checked-negative与positive suppression均可证明；
     LONG/SHORT串行warming、最终原子切换。每个已经处于dynamic mode的Session在Selection结果
@@ -494,9 +494,9 @@ Historical Replay 只产生研究证据；当前生产设计新增 PostgreSQL Sc
 authority和FinalGate验证，但不强制新增第五个systemd Worker、不改变Alpha或资本边界，也不
 自行恢复Crypto `SOR-001`。Selection Runner、Materialization Coordinator和Observation Runner
 必须具有独立application entry point和DB lease，即使V0暂时托管于现有进程。Owner冻结的
-unfinished ENTRY撤销和真空partial-retained规则会窄幅扩展Ticket lineage、durable cancel
-Command和Lifecycle reducer；actual quantity只有能形成正数量TP1+Runner时才保留，否则
-controlled flatten。所有未连续覆盖eligible close的Authority都必须在grant前完成durable Gap
+unfinished ENTRY撤销规则扩展Ticket lineage、durable cancel Command和Lifecycle reducer；
+当前代码目标对所有partial ENTRY确认撤销余单后controlled flatten，不再将双腿可拆作为
+保留依据。历史partial-retained事件只保留终态审计解码。所有未连续覆盖eligible close的Authority都必须在grant前完成durable Gap
 Audit；Vacuum activation/fallback审计`previous ∪ desired`，late continuity/普通`NO_CHANGE`
 审计current pair。没有suppression row只有在audit COMPLETE时才表示已检查无trigger；Authority
 以`first_eligible_close_time_ms`形成不相交的audit/Observation close边界。
@@ -561,8 +561,8 @@ P2.1–P2.4 的工程基础设施能力已经完成。本节保留当时的排�
    certification；不强制第五个Worker、不新增全市场扫描服务或文件型Runtime authority。每
    Session只处理固定24 members × 96 closed 15m bars。
 10. P3-X 的 Strategy Entry Vacuum 只阻断新 Admission/Ticket/ENTRY dispatch；已有Position的
-    Stop、TP1、Runner、Exit、Settlement和Review继续。真空partial-retained仅允许合法TP1+
-    Runner双腿，普通partial fill和无法双腿物化的actual fill仍执行既有controlled flatten。
+    Stop、TP1、Runner、Exit、Settlement和Review继续。当前代码目标对真空与普通partial ENTRY
+    均取消余单并确认后controlled flatten，不转成正常TP1/Runner仓位。
 11. P3-X发布区分`COMPATIBLE_RESTART`与`REQUIRES_RUNTIME_REMATERIALIZATION`；Software
     Deployment完成不等待Dynamic Universe materialization，pending Generation由后台恢复；
     compatibility fact仅为现有Release Certification manifest的薄投影，不建设第二release
@@ -633,7 +633,7 @@ P2.1–P2.4 的工程基础设施能力已经完成。本节保留当时的排�
     Selection facts、SelectionSessionAuthority、`1..7` Desired members、
     `PRE_FENCE_CONTINUITY/VALID_EMPTY/NO_CHANGE/SUPERSEDED`、Strategy Entry Vacuum、
     unfinished ENTRY drain、通用Authority Gap Audit与`first_eligible_close_time_ms`、Pause Resume、
-    双腿partial-retained保护、serial warming、atomic pair switch、唯一Generation→Universe linkage、
+    历史双腿partial-retained（当前代码目标已改为严格关闭）、serial warming、atomic pair switch、唯一Generation→Universe linkage、
     first Static-to-Dynamic特例、post-fence`FALLBACK_PREVIOUS`、thin release compatibility projection、Migration、
     rollback和测试矩阵。
 14. P3-X 实施计划：

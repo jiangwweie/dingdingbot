@@ -103,6 +103,7 @@ from src.trading_kernel.domain.post_fill_risk import (
 )
 from src.trading_kernel.domain.reducer import InvalidLifecycleTransition, reduce_event
 from src.trading_kernel.domain.vacuum_late_fill import vacuum_no_fill_proof_digest
+from tests.trading_kernel.support.post_fill_exit import make_post_fill_exit_plan
 from tests.trading_kernel.support.tickets import make_ticket as _ticket
 
 
@@ -192,7 +193,7 @@ def _post_fill_stress_event(aggregate, *, passed: bool = True):
     )
     expected_status: Literal["passed", "failed"] = "passed" if passed else "failed"
     assert evidence.proof.status.value == expected_status
-    return PostFillStressAssessed(
+    return PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(aggregate, at_ms=1250),
         event_id=f"event-stress-{aggregate.last_event_sequence + 1}",
         ticket_id=ticket.identity.ticket_id,
         sequence=aggregate.last_event_sequence + 1,
@@ -527,7 +528,7 @@ def test_partial_entry_fill_is_incident_and_controlled_flatten_not_normal_positi
     )
 
 
-def test_vacuum_partial_retained_freezes_actual_two_leg_plan_and_keeps_capacity() -> None:
+def test_new_reduction_rejects_retired_partial_entry_retention() -> None:
     ticket = _ticket(selection_authority_id="selection-authority:test")
     issued = reduce_event(
         None,
@@ -598,46 +599,29 @@ def test_vacuum_partial_retained_freezes_actual_two_leg_plan_and_keeps_capacity(
             average_fill_price=Decimal(60000),
         ),
     ).aggregate
-    retained = reduce_event(
-        frozen,
-        VacuumPartialRetained(
-            event_id="event-6",
-            ticket_id=ticket.identity.ticket_id,
-            sequence=6,
-            occurred_at_ms=1_200,
-            entry_vacuum_id="vacuum:SOR-001:1704067200000",
-            selection_authority_id="selection-authority:test",
-            requested_qty=ticket.quantity,
-            final_filled_qty=Decimal("0.0006"),
-            average_fill_price=Decimal(60000),
-            quantity_step=Decimal("0.0001"),
-            effective_tp1_qty=Decimal("0.0003"),
-            effective_runner_qty=Decimal("0.0003"),
-            post_fill_risk=_normal_post_fill_risk(
-                ticket,
-                Decimal(60000),
-                filled_quantity=Decimal("0.0006"),
-            ),
-        ),
-    )
-
-    assert retained.aggregate.status is AggregateStatus.PROTECTION_PENDING
-    assert retained.aggregate.position_qty == Decimal("0.0006")
-    assert retained.aggregate.tp1_target_qty == Decimal("0.0003")
-    assert retained.aggregate.entry_materialization_kind == (
-        "VACUUM_PARTIAL_RETAINED"
-    )
-    assert retained.aggregate.position_qty - retained.aggregate.tp1_target_qty == Decimal(
-        "0.0003"
-    )
-    assert retained.aggregate.entry_lane_held is True
-    assert retained.effects == (
-        PrepareInitialStopCommand(
-            ticket_id=ticket.identity.ticket_id,
-            quantity=Decimal("0.0006"),
-            stop_price=ticket.initial_stop_price,
-        ),
-    )
+    with pytest.raises(InvalidLifecycleTransition, match="cannot be retained"):
+        reduce_event(
+                frozen,
+                VacuumPartialRetained(
+                    event_id="event-6",
+                    ticket_id=ticket.identity.ticket_id,
+                    sequence=6,
+                    occurred_at_ms=1_200,
+                    entry_vacuum_id="vacuum:SOR-001:1704067200000",
+                    selection_authority_id="selection-authority:test",
+                    requested_qty=ticket.quantity,
+                    final_filled_qty=Decimal("0.0006"),
+                    average_fill_price=Decimal(60000),
+                    quantity_step=Decimal("0.0001"),
+                    effective_tp1_qty=Decimal("0.0003"),
+                    effective_runner_qty=Decimal("0.0003"),
+                    post_fill_risk=_normal_post_fill_risk(
+                        ticket,
+                        Decimal(60000),
+                        filled_quantity=Decimal("0.0006"),
+                    ),
+                ),
+            )
 
 
 def test_vacuum_partial_without_two_legs_controlled_flattens_after_cancel() -> None:
@@ -2260,7 +2244,7 @@ def test_proven_absent_tp1_unknown_prepares_one_safe_new_generation() -> None:
         PrepareTakeProfitCommand(
             ticket_id=unknown.identity.ticket_id,
             quantity=unknown.tp1_target_qty,
-            limit_price=unknown.ticket.take_profit_prices[0],
+            limit_price=unknown.post_fill_exit_plan.take_profit_price,
         ),
     )
 

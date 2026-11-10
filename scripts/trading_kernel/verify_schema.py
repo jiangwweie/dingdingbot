@@ -398,7 +398,7 @@ async def _verify_compatible_source(
     database_url: str,
     source_revision: str,
 ) -> dict[str, object]:
-    if source_revision in {GENERIC_SELECTION_SOURCE_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1"}:
+    if source_revision in {GENERIC_SELECTION_SOURCE_REVISION, "0009_capacity_policy_v0", "0010_dynamic_intent_v1", "0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
         return await _verify_generic_selection_source(database_url, source_revision)
     if source_revision == DYNAMIC_SELECTION_SOURCE_REVISION:
         return await _verify_dynamic_selection_source(
@@ -500,7 +500,7 @@ async def _verify_preservation(
         "0012_generic_signal_path_v1",
         "0013_owner_directional_risk_v1",
         "0014_dynamic_risk_budget_v1",
-    }:
+    "0015_generic_owner_recovery_v1"}:
         raise ValueError("preservation source revision is unsupported")
     if not _is_sha256_identity(expected_digest):
         raise ValueError(
@@ -511,7 +511,9 @@ async def _verify_preservation(
         async with engine.connect() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
-            if source_revision == "0014_dynamic_risk_budget_v1":
+            if source_revision == "0015_generic_owner_recovery_v1":
+                manifest=await _exit_regime_source_preservation_manifest(connection)
+            elif source_revision == "0014_dynamic_risk_budget_v1":
                 manifest=await _generic_owner_recovery_preservation_manifest(connection)
             elif source_revision == "0013_owner_directional_risk_v1":
                 manifest=await _risk_budget_source_preservation_manifest(connection)
@@ -544,7 +546,8 @@ async def _verify_preservation(
     finally:
         await engine.dispose()
     allowed_targets_by_source: dict[str, frozenset[str]] = {
-        "0014_dynamic_risk_budget_v1":frozenset({"0014_dynamic_risk_budget_v1",EXPECTED_ALEMBIC_REVISION}),
+        "0015_generic_owner_recovery_v1":frozenset({"0015_generic_owner_recovery_v1",EXPECTED_ALEMBIC_REVISION}),
+        "0014_dynamic_risk_budget_v1":frozenset({"0014_dynamic_risk_budget_v1",EXPECTED_ALEMBIC_REVISION,"0015_generic_owner_recovery_v1"}),
         "0013_owner_directional_risk_v1":frozenset({"0013_owner_directional_risk_v1",EXPECTED_ALEMBIC_REVISION}),
         "0012_generic_signal_path_v1":frozenset({"0012_generic_signal_path_v1",EXPECTED_ALEMBIC_REVISION}),
         "0011_orb_session_1h_v1":frozenset({"0011_orb_session_1h_v1","0012_generic_signal_path_v1",EXPECTED_ALEMBIC_REVISION}),
@@ -942,7 +945,7 @@ async def _verify_generic_selection_source(
             await connection.execute(text("SET TRANSACTION READ ONLY"))
             revision = await _alembic_revision(connection)
             shape = await _verify_exact_metadata_shape(
-                connection, expected_columns=({t.name:tuple(t.c.keys()) for t in metadata.tables.values()} if source_revision=="0014_dynamic_risk_budget_v1" else _source_0013_table_columns() if source_revision=="0013_owner_directional_risk_v1" else _source_0012_table_columns() if source_revision=="0012_generic_signal_path_v1" else _source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
+                connection, expected_columns=(_source_0015_table_columns() if source_revision in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"} else _source_0013_table_columns() if source_revision=="0013_owner_directional_risk_v1" else _source_0012_table_columns() if source_revision=="0012_generic_signal_path_v1" else _source_0011_table_columns() if source_revision=="0011_orb_session_1h_v1"
                     else _source_0010_table_columns() if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1"}
                     else _source_0007_table_columns()),
             )
@@ -961,10 +964,10 @@ async def _verify_generic_selection_source(
                 ))) or 0),
                 "open_selection_vacuums": await connection.run_sync(
                     lambda bind: count_nonquiescent_source_vacuums(bind,
-                        allow_paused_failed_generic=source_revision in {"0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1"})
+                        allow_paused_failed_generic=source_revision in {"0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"})
                 ),
             })
-            manifest = (await _generic_owner_recovery_preservation_manifest(connection) if source_revision=="0014_dynamic_risk_budget_v1" else await _risk_budget_source_preservation_manifest(connection) if source_revision=="0013_owner_directional_risk_v1" else await _directional_source_preservation_manifest(connection) if source_revision=="0012_generic_signal_path_v1" else await _signal_path_source_preservation_manifest(connection) if source_revision=="0011_orb_session_1h_v1" else
+            manifest = (await _exit_regime_source_preservation_manifest(connection) if source_revision=="0015_generic_owner_recovery_v1" else await _generic_owner_recovery_preservation_manifest(connection) if source_revision=="0014_dynamic_risk_budget_v1" else await _risk_budget_source_preservation_manifest(connection) if source_revision=="0013_owner_directional_risk_v1" else await _directional_source_preservation_manifest(connection) if source_revision=="0012_generic_signal_path_v1" else await _signal_path_source_preservation_manifest(connection) if source_revision=="0011_orb_session_1h_v1" else
                 await _orb_source_preservation_manifest(connection) if source_revision=="0010_dynamic_intent_v1" else
                 await _dynamic_intent_source_preservation_manifest(connection) if source_revision=="0009_capacity_policy_v0" else await _generic_source_preservation_manifest(connection))
             preserved_runtime = await read_preserved_runtime_state(connection)
@@ -976,7 +979,7 @@ async def _verify_generic_selection_source(
             capabilities = await _current_capabilities(
                 connection, runtime_identity=runtime_identity,
             )
-            if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1"}:
+            if source_revision in {"0009_capacity_policy_v0","0010_dynamic_intent_v1","0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
                 provenance: dict[str, object] = {"status": "pass" if shape["status"] == "pass" and revision == source_revision else "fail", "basis": "exact unchanged 0009 authority"}
             else:
                 try:
@@ -2691,7 +2694,7 @@ async def _inspect_deployment_revision(database_url: str) -> dict[str, object]:
                 "0013_owner_directional_risk_v1",
                 "0014_dynamic_risk_budget_v1",
                 EXPECTED_ALEMBIC_REVISION,
-            }
+            "0015_generic_owner_recovery_v1"}
             else "fail"
         ),
         "alembic_revision": revision,
@@ -2885,9 +2888,8 @@ _DIRECTIONAL_NEW_TABLES = {
 
 def _source_0012_table_columns() -> dict[str, tuple[str, ...]]:
     return {
-        table.name: tuple(table.c.keys())
-        for table in metadata.tables.values()
-        if table.name not in _DIRECTIONAL_NEW_TABLES
+        name: columns for name, columns in _source_0013_table_columns().items()
+        if name not in _DIRECTIONAL_NEW_TABLES
     }
 
 
@@ -2953,16 +2955,16 @@ def _source_tables_before_signal_path() -> tuple[sa.Table, ...]:
     """Exact deployment source inventory; never a runtime compatibility reader."""
     source_metadata=sa.MetaData()
     return tuple(sa.Table(table.name,source_metadata,
-        *(sa.Column(column.name,column.type) for column in table.c
-          if table.name!="brc_shadow_outcomes_current" or column.name not in _SIGNAL_PATH_NEW_COLUMNS))
+        *(sa.Column(name,table.c[name].type) for name in _source_0015_table_columns()[table.name]
+          if (table.name!="brc_shadow_outcomes_current" or name not in _SIGNAL_PATH_NEW_COLUMNS)
+          and name not in _BUDGET_NEW_COLUMNS.get(table.name, ())))
         for table in sorted(metadata.tables.values(),key=lambda item:item.name)
-        if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES))
+        if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES | _EXIT_REGIME_NEW_TABLES))
 
 
 def _source_0011_table_columns() -> dict[str, tuple[str, ...]]:
-    return {table.name:tuple(c.name for c in table.c if table.name!="brc_shadow_outcomes_current"
-        or c.name not in _SIGNAL_PATH_NEW_COLUMNS)
-        for table in metadata.tables.values() if table.name not in (_SIGNAL_PATH_NEW_TABLES | _DIRECTIONAL_NEW_TABLES)}
+    return {name:tuple(c for c in columns if name!="brc_shadow_outcomes_current" or c not in _SIGNAL_PATH_NEW_COLUMNS)
+        for name,columns in _source_0012_table_columns().items() if name not in _SIGNAL_PATH_NEW_TABLES}
 
 
 async def _signal_path_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:
@@ -2987,7 +2989,7 @@ def _source_0010_table_columns() -> dict[str,tuple[str,...]]:
 
 
 def _registry_contracts_for_revision(revision: str):
-    return tuple(c for c in registered_strategy_contracts() if revision in {EXPECTED_ALEMBIC_REVISION,"0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1"} or c.strategy_group_id!='SOR-1H-001')
+    return tuple(c for c in registered_strategy_contracts() if revision in {EXPECTED_ALEMBIC_REVISION,"0011_orb_session_1h_v1", "0012_generic_signal_path_v1", "0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"} or c.strategy_group_id!='SOR-1H-001')
 
 
 async def _orb_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:
@@ -3029,12 +3031,12 @@ async def _dynamic_intent_source_preservation_manifest(connection: AsyncConnecti
 # Exact stopped-upgrade evidence only; never used by runtime readers.
 def _source_0013_table_columns() -> dict[str, tuple[str, ...]]:
     additions = {"pending_baseline", "pending_budget_request_id", "pending_policy_version"}
-    return {t.name: tuple(c.name for c in t.c if (t.name != "brc_directional_risk_controls" or c.name not in additions) and (t.name != "brc_directional_risk_rules" or c.name != "budget_contract")) for t in metadata.tables.values()}
+    return {name:tuple(c for c in columns if (name!="brc_directional_risk_controls" or c not in additions) and (name!="brc_directional_risk_rules" or c!="budget_contract")) for name,columns in _source_0015_table_columns().items()}
 
 
 async def _risk_budget_source_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
     revision = await _alembic_revision(connection)
-    if revision not in {"0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1", EXPECTED_ALEMBIC_REVISION}:
+    if revision not in {"0013_owner_directional_risk_v1", "0014_dynamic_risk_budget_v1", EXPECTED_ALEMBIC_REVISION,"0015_generic_owner_recovery_v1"}:
         raise ValueError("risk budget preservation requires exact source or target")
     old_rule = (await connection.execute(text("SELECT rule_digest FROM brc_directional_risk_rules WHERE rule_id='owner-directional-risk:v1'"))).scalar_one()
     tables = []
@@ -3042,7 +3044,7 @@ async def _risk_budget_source_preservation_manifest(connection: AsyncConnection)
     for name, columns in sorted(_source_0013_table_columns().items()):
         table = metadata.tables[name]
         rows = [dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
-        if revision in {"0014_dynamic_risk_budget_v1", EXPECTED_ALEMBIC_REVISION}:
+        if revision in {"0014_dynamic_risk_budget_v1", EXPECTED_ALEMBIC_REVISION,"0015_generic_owner_recovery_v1"}:
             if name == "brc_directional_risk_rules":
                 rows = [r for r in rows if r["rule_id"] != "owner-directional-risk:v2"]
             if name == "brc_directional_risk_controls":
@@ -3067,13 +3069,13 @@ async def _risk_budget_source_preservation_manifest(connection: AsyncConnection)
 async def _generic_owner_recovery_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
     """Function-only 0014->0015 upgrade preserves every source table and row."""
     revision=await _alembic_revision(connection)
-    if revision not in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1"}:
+    if revision not in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1","0016_exit_regime_v1"}:
         raise ValueError("Generic owner recovery requires exact source/target")
     tables=[]
     count=0
-    for name,table in sorted(metadata.tables.items()):
-        columns=tuple(table.c.keys())
-        rows=[dict(r) for r in (await connection.execute(sa.select(table))).mappings()]
+    for name,columns in sorted(_source_0015_table_columns().items()):
+        table=metadata.tables[name]
+        rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
         canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))
         item={"table":name,"columns":list(columns),"rows":canonical,"row_count":len(rows)}
         tables.append({**item,"digest":_sha256_json(item)})
@@ -3081,6 +3083,31 @@ async def _generic_owner_recovery_preservation_manifest(connection: AsyncConnect
     payload={"schema":"brc.trading_kernel.0014_preservation.v1","source_revision":"0014_dynamic_risk_budget_v1","tables":tables,"table_count":len(tables),"row_count":count}
     return {**payload,"digest":_sha256_json(payload)}
 
+
+
+_EXIT_REGIME_NEW_TABLES = {"brc_entry_regime_revisions","brc_entry_regime_current","brc_entry_regime_evidence","brc_btc_ma50_current"}
+_EXIT_REGIME_NEW_COLUMNS = {"brc_trade_aggregates":{"post_fill_exit_plan","initial_stop_closes_position"}}
+_BUDGET_NEW_COLUMNS = {"brc_directional_risk_controls":{"pending_baseline","pending_budget_request_id","pending_policy_version"},"brc_directional_risk_rules":{"budget_contract"}}
+
+
+def _source_0015_table_columns() -> dict[str,tuple[str,...]]:
+    return {name:tuple(c.name for c in table.c if c.name not in _EXIT_REGIME_NEW_COLUMNS.get(name,()))
+        for name,table in metadata.tables.items() if name not in _EXIT_REGIME_NEW_TABLES}
+
+
+async def _exit_regime_source_preservation_manifest(connection: AsyncConnection) -> dict[str,object]:
+    revision=await _alembic_revision(connection)
+    if revision not in {"0015_generic_owner_recovery_v1","0016_exit_regime_v1"}:
+        raise ValueError("Exit regime preservation requires exact source or target")
+    tables=[];count=0
+    for name,columns in sorted(_source_0015_table_columns().items()):
+        table=metadata.tables[name]
+        rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
+        canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))
+        item={"table":name,"columns":list(columns),"rows":canonical,"row_count":len(rows)}
+        tables.append({**item,"digest":_sha256_json(item)});count+=len(rows)
+    payload={"schema":"brc.trading_kernel.0015_preservation.v1","source_revision":"0015_generic_owner_recovery_v1","tables":tables,"table_count":len(tables),"row_count":count}
+    return {**payload,"digest":_sha256_json(payload)}
 
 if __name__ == "__main__":
     raise SystemExit(main())

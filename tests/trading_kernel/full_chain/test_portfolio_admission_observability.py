@@ -1571,3 +1571,54 @@ async def _refresh_instrument_certification(
     raise AssertionError(
         f"certification did not refresh {exchange_instrument_id} by {now_ms}"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("btc_case",["missing","equal","above"])
+async def test_natural_cpm_signal_keeps_canonical_admission_and_ma50_evidence(replay_engine,btc_case):
+    from src.trading_kernel.application.exit_parameter_controls import (
+        ExitParameterChange,
+        ExitParameterPublishRequest,
+        publish_exit_parameters,
+    )
+    from src.trading_kernel.domain.entry_regime import (
+        FOUR_HOURS_MS,
+        REGIME_EVENTS,
+        BtcMa50Snapshot,
+    )
+    from src.trading_kernel.infrastructure.pg_models import entry_regime_evidence
+    source=RecordingReplayMarketSource()
+    await _seed_replay_runtime(replay_engine,source)
+    baseline=await _exchange_command_ids(replay_engine)
+    event=REGIME_EVENTS[0]
+    async with PostgresKernelUnitOfWork(replay_engine) as uow:
+        pointer=await uow.exit_profiles.get_current_binding(event)
+        await publish_exit_parameters(uow,ExitParameterPublishRequest(expected_version=1,reason="bounded_regime_experiment",idempotency_key="regime:natural:"+btc_case,
+            owner_identity="owner",now_ms=NOW_MS-1,venue_id="binance-usdm",account_id="subaccount-source-test",
+            changes=(ExitParameterChange(event_spec_id=event,expected_version=pointer.projection_version,expected_binding_id=pointer.exit_binding_id,
+                reward_multiple=Decimal(1),quantity_fraction=Decimal("0.05"),max_actual_fraction=Decimal("0.50"),ma50_enabled=True,expected_regime_revision=1),)),authentication_strength="totp_step_up")
+        if btc_case!="missing":
+            last=NOW_MS//FOUR_HOURS_MS*FOUR_HOURS_MS
+            bars=[]
+            for i in range(50):
+                value=Decimal(101 if btc_case=="above" and i==49 else 100)
+                bars.append(ClosedCandle(open_time_ms=last-(50-i)*FOUR_HOURS_MS,close_time_ms=last-(49-i)*FOUR_HOURS_MS,
+                    open=value,high=value,low=value,close=value,volume=Decimal(1)))
+            await uow.entry_regimes.save_snapshot(BtcMa50Snapshot(candles=tuple(bars),observed_at_ms=NOW_MS))
+    venue=CertifiedVenue()
+    result=await _observe_and_admit(replay_engine,source,venue,runtime_scope_id=await _active_scope_id(replay_engine,BNB),offset_ms=0)
+    async with PostgresKernelUnitOfWork(replay_engine) as uow:
+        decision=await uow.admission_decisions.get_for_signal(result[2])
+        assert decision is not None
+    async with replay_engine.connect() as c:
+        row=(await c.execute(sa.select(entry_regime_evidence).where(entry_regime_evidence.c.phase=="admission",entry_regime_evidence.c.identity_key==result[2]))).mappings().one()
+    if btc_case=="above":
+        assert result[1] is EntryWorkerStatus.DISPATCHED and result[5] is not None,result
+        assert row["ticket_id"]==result[5]
+        assert decision.decision_status is AdmissionDecisionStatus.ADMITTED
+    else:
+        expected="btc4h_facts_unavailable" if btc_case=="missing" else "btc4h_not_above_ma50"
+        assert result[3]=="entry_regime_blocked" and result[4]==expected,result
+        assert decision.decision_status is AdmissionDecisionStatus.REJECTED
+        assert row["ticket_id"] is None and row["evidence"]["result"]==expected
+        assert await _exchange_command_ids(replay_engine)==baseline

@@ -296,10 +296,13 @@ def _recovery_event(
                 exchange_order_id=exchange_order_id,
             )
         if command.kind is ExchangeCommandKind.INITIAL_STOP:
+            if not isinstance(command.payload, OrderCommandPayload):
+                raise RuntimeError("initial stop recovery payload is invalid")
             return InitialStopConfirmed(
                 **common,
                 exchange_order_id=exchange_order_id,
                 protected_qty=aggregate.position_qty,
+                closes_position=command.payload.close_position,
             )
         if command.kind is ExchangeCommandKind.TAKE_PROFIT:
             payload = command.payload

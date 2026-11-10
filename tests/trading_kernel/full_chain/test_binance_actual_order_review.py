@@ -134,7 +134,8 @@ class _RunnerTradesExchange(FakeAsyncExchange):
             "side": expectation.side.upper(),
             "positionSide": expectation.position_side.upper(),
             "orderType": expectation.order_type.upper(),
-            "quantity": str(expectation.quantity),
+            "quantity": "0" if expectation.close_position else str(expectation.quantity),
+            "closePosition": expectation.close_position,
         }
         if reference.command_kind is ExchangeCommandKind.REPLACE_PROTECTION:
             return {

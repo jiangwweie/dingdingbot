@@ -510,6 +510,11 @@ async def test_due_strategy_scope_wins_over_shadow(
         "src.trading_kernel.interfaces.observation_worker.observe_strategy_scope",
         observed,
     )
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(
+        "src.trading_kernel.interfaces.observation_worker.refresh_entry_regime",
+        AsyncMock(),
+    )
     result = await run_observation_worker_once(factory, source, _worker_request())
 
     assert result.status is ObservationWorkerStatus.OBSERVED

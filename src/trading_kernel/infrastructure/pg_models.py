@@ -2776,6 +2776,8 @@ trade_aggregates = sa.Table(
     sa.Column("post_fill_disposition", SHORT_TEXT, nullable=True),
     sa.Column("post_fill_stress_status", SHORT_TEXT, nullable=True),
     sa.Column("post_fill_stress_proof_digest", LONG_TEXT, nullable=True),
+    sa.Column("post_fill_exit_plan", JSONB(none_as_null=True), nullable=True),
+    sa.Column("initial_stop_closes_position", sa.Boolean, nullable=False, server_default=sa.false()),
     sa.Column("protected_qty", MONEY, nullable=False),
     _id("entry_exchange_order_id", nullable=True),
     _id("initial_stop_exchange_order_id", nullable=True),
@@ -3147,4 +3149,36 @@ sa.Index(
 sa.CheckConstraint(
     "max_ticket_stop_risk_fraction BETWEEN 0.02 AND 0.03 AND mod(max_ticket_stop_risk_fraction,0.001)=0 AND max_gross_stop_risk_fraction=3*max_ticket_stop_risk_fraction AND directional_stop_risk_limit_fraction=2*max_ticket_stop_risk_fraction AND min_materialization_ratio=0.5",
     name="dynamic_risk_budget_valid", table=owner_policy_current,
+)
+
+# Independent new-ENTRY qualification; no authority over existing exposure.
+entry_regime_revisions = sa.Table(
+    "brc_entry_regime_revisions", metadata,
+    sa.Column("event_spec_id", SHORT_TEXT, primary_key=True),
+    sa.Column("revision", sa.BigInteger, primary_key=True),
+    sa.Column("enabled", sa.Boolean, nullable=False),
+    sa.Column("rule_id", SHORT_TEXT, nullable=False),
+    sa.Column("authorization_id", SHORT_TEXT, nullable=True),
+    sa.Column("created_at_ms", sa.BigInteger, nullable=False),
+    sa.CheckConstraint("revision>0",name="revision_positive"),
+)
+entry_regime_current = sa.Table(
+    "brc_entry_regime_current", metadata,
+    sa.Column("event_spec_id", SHORT_TEXT, primary_key=True),
+    sa.Column("revision", sa.BigInteger, nullable=False),
+    sa.ForeignKeyConstraint(["event_spec_id","revision"],["brc_entry_regime_revisions.event_spec_id","brc_entry_regime_revisions.revision"]),
+)
+btc_ma50_current = sa.Table(
+    "brc_btc_ma50_current", metadata,
+    sa.Column("exchange_instrument_id", SHORT_TEXT, primary_key=True),
+    sa.Column("latest_close_ms", sa.BigInteger, nullable=False),
+    sa.Column("snapshot", JSONB(none_as_null=True), nullable=True),
+    sa.Column("retry_not_before_ms", sa.BigInteger, nullable=False, server_default="0"),
+)
+entry_regime_evidence = sa.Table(
+    "brc_entry_regime_evidence",metadata,
+    sa.Column("phase",SHORT_TEXT,primary_key=True),
+    sa.Column("identity_key",SHORT_TEXT,primary_key=True),
+    sa.Column("ticket_id",SHORT_TEXT,nullable=True),
+    sa.Column("evidence",JSONB,nullable=False),
 )

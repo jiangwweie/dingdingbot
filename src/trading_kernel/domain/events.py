@@ -12,6 +12,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressEvidence,
     CrossMarginStressStatus,
 )
+from src.trading_kernel.domain.post_fill_exit import PostFillExitPlan
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 
@@ -346,6 +347,7 @@ class VacuumPartialFlattenRequired(_TicketEvent):
 class InitialStopConfirmed(_TicketEvent):
     exchange_order_id: str
     protected_qty: Decimal
+    closes_position: bool = False
 
 
 class PostFillStressAssessed(_TicketEvent):
@@ -357,6 +359,8 @@ class PostFillStressAssessed(_TicketEvent):
     average_fill_price: Decimal
     initial_stop_price: Decimal
     initial_stop_exchange_order_id: str
+    exit_plan: PostFillExitPlan | None = None
+    exit_plan_failure: str | None = None
 
     @model_validator(mode="after")
     def _validate_assessment_identity(self) -> PostFillStressAssessed:
@@ -414,6 +418,11 @@ class TakeProfitFilled(_TicketEvent):
     filled_qty: Decimal
     average_fill_price: Decimal
     runner_floor_price: Decimal
+
+
+class TakeProfitPartiallyFilled(_TicketEvent):
+    cumulative_filled_qty: Decimal
+    average_fill_price: Decimal
 
 
 class RunnerStopRequested(_TicketEvent):
@@ -590,6 +599,7 @@ TradeEvent = (
     | TakeProfitOutcomeUnknown
     | TakeProfitAbsenceConfirmed
     | TakeProfitFilled
+    | TakeProfitPartiallyFilled
     | RunnerStopRequested
     | ProtectionReplacementConfirmed
     | ProtectionReplacementRejected

@@ -965,3 +965,56 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
         engine,
         ticket_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_partial_tp_records_remaining_then_full_fill_starts_break_even_once(lifecycle_engine) -> None:
+    ticket = _registered_sor_long_ticket()
+    await _reach_position_protected(lifecycle_engine, ticket)
+    target = ticket.take_profit_quantities[0]
+    partial = target / 2
+    def facts(filled):
+        return TicketLifecycleFacts(position_quantity=ticket.quantity-filled,
+            tp1_filled_quantity=filled, tp1_average_fill_price=ticket.take_profit_prices[0],
+            allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
+            price_tick=Decimal("0.1"),market_facts=None,observed_at_ms=2500)
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(ticket_id=ticket.identity.ticket_id,facts=facts(partial),now_ms=2500))
+        assert result.status is LifecycleMaintenanceStatus.PARTIAL_TP_RECORDED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        saved = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert saved.tp1_filled_qty == partial
+        assert saved.position_qty == ticket.quantity-partial
+        assert saved.status is AggregateStatus.POSITION_PROTECTED
+        assert saved.break_even_floor_price is None
+        version = saved.version
+        result = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(ticket_id=ticket.identity.ticket_id,facts=facts(partial),now_ms=2501))
+        assert result.status is LifecycleMaintenanceStatus.NO_CHANGE
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        saved = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert saved.version == version
+        result = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(ticket_id=ticket.identity.ticket_id,facts=facts(target),now_ms=2502))
+        assert result.status is LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        saved = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert saved.position_qty == ticket.quantity-target
+        commands = await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        assert sum(c.kind is ExchangeCommandKind.REPLACE_PROTECTION for c in commands)==1
+
+
+@pytest.mark.asyncio
+async def test_post_fill_exit_plan_is_immutable_in_postgres(lifecycle_engine):
+    from src.trading_kernel.infrastructure.pg_models import trade_aggregates
+    ticket=_registered_sor_long_ticket()
+    await _reach_position_protected(lifecycle_engine,ticket)
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate=await uow.aggregates.get(ticket.identity.ticket_id)
+        assert aggregate.post_fill_exit_plan is not None
+        original=aggregate.post_fill_exit_plan
+    forged=original.model_dump(mode="json")
+    forged["take_profit_price"]="1"
+    with pytest.raises(sa.exc.DBAPIError,match="immutable"):
+        async with lifecycle_engine.begin() as c:
+            await c.execute(sa.update(trade_aggregates).where(trade_aggregates.c.ticket_id==ticket.identity.ticket_id).values(post_fill_exit_plan=forged))
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        assert (await uow.aggregates.get(ticket.identity.ticket_id)).post_fill_exit_plan==original

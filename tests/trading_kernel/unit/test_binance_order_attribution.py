@@ -255,3 +255,17 @@ async def test_terminal_untriggered_conditional_order_rejects_nonzero_or_invalid
             reference=_reference(namespace=OrderNamespace.CONDITIONAL),
             observed_at_ms=10_000,
         )
+
+
+@pytest.mark.asyncio
+async def test_close_position_algo_can_close_remaining_quantity_after_partial_tp() -> None:
+    ref = _reference(namespace=OrderNamespace.CONDITIONAL)
+    ref = ref.model_copy(update={"conditional_expectation": ref.conditional_expectation.model_copy(update={"close_position": True})})
+    exchange = _AlgoExchange({
+        "algoId": ref.submitted_exchange_order_id, "clientAlgoId": ref.venue_client_order_id,
+        "actualOrderId": "actual-stop", "symbol": "BTCUSDT", "side": "SELL",
+        "positionSide": "LONG", "orderType": "STOP_MARKET", "quantity": "0",
+        "closePosition": True, "actualQty": "0.0003", "algoStatus": "FINISHED",
+    })
+    result = await resolve_binance_order_identity(exchange=exchange, reference=ref, observed_at_ms=10000)
+    assert result.actual_order_id == "actual-stop"

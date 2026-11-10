@@ -154,6 +154,7 @@ from tests.trading_kernel.support.generic_selection import (
 from tests.trading_kernel.support.owner_roles import (
     apply_owner_control_grants as _apply_owner_control_grants,
 )
+from tests.trading_kernel.support.post_fill_exit import make_post_fill_exit_plan
 from tests.trading_kernel.unit.detectors.fixtures import (
     brf2_short_snapshot,
     cpm_flat_snapshot,
@@ -5428,7 +5429,7 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
         async with PostgresKernelUnitOfWork(database) as uow:
             pending = await uow.aggregates.get(issued.ticket_id)
             if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
-                event = PostFillStressAssessed(
+                event = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(pending, at_ms=issued_at + step - 1),
                     event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                     ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
                     occurred_at_ms=issued_at+step-1,status="passed",
@@ -5802,64 +5803,37 @@ async def _assert_natural_sent_entry_drained_by_selection(
         still_active = await uow.entry_admission.has_active_ticket_in_domain(
             ticket.identity.netting_domain.key())
     if partial_fill:
-        assert closed.status is VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED, closed
+        assert closed.status is VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED, closed
         assert reservation is not None and reservation.status == "active" and still_active
-        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
-            new=AsyncMock(return_value=now+9)):
-            waiting_protection = await coordinate_selection_materialization_once(
-                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+9)
-        assert waiting_protection.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), waiting_protection
         async with PostgresKernelUnitOfWork(database) as uow:
-            assert await uow.strategy_universes.get_generation_universe_targets(original_vacuum.source_generation_id) == ()
-            assert await uow.instrument_selection.get_generic_materialization_generation(
-                GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
-        venue.now_ms = now+10
-        stop = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
-            dispatch_request.model_copy(update={"now_ms":now+10}), clock_ms=lambda: now+10)
-        assert stop.status.value == "accepted", stop
-        async with PostgresKernelUnitOfWork(database) as uow:
-            protected = await uow.aggregates.get(issued.ticket_id)
-            assert protected is not None and protected.position_qty == partial_qty
-            assert protected.initial_stop_exchange_order_id is not None
-            assert protected.status is AggregateStatus.POST_FILL_RISK_PENDING
             assert await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=group)
-        with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
-            new=AsyncMock(return_value=now+11)):
-            waiting_stress = await coordinate_selection_materialization_once(
-                uow_factory=lambda:PostgresKernelUnitOfWork(database),request=request,clock_ms=lambda:now+11)
-        assert waiting_stress.disposition is (MaterializationDisposition.OWNER_PAUSED if pause_owner and not early_resume else MaterializationDisposition.WAITING_VACUUM), waiting_stress
-        from src.trading_kernel.domain.cross_margin_stress import (
-            evaluate_cross_margin_stress,
+        venue.now_ms=now+9
+        flatten=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            dispatch_request.model_copy(update={"now_ms":now+9}),clock_ms=lambda:now+9)
+        assert flatten.status.value=="accepted",flatten
+        from src.trading_kernel.application.reconcile_ticket import (
+            ReconcileTicketRequest,
+            reconcile_ticket,
         )
-        from src.trading_kernel.domain.events import PostFillStressAssessed
-        from src.trading_kernel.domain.reducer import reduce_event
-        from tests.trading_kernel.support.capacity_claims import make_stress_evidence
-
-        # Recorded local risk fixture evaluates the actual partial quantity.
-        # It is evidence input only; never rewrite the immutable Ticket.
+        from src.trading_kernel.application.settle_ticket import (
+            RecordTradeReviewRequest,
+            SettleTicketRequest,
+            record_trade_review,
+            settle_ticket,
+        )
+        truly_flat=flat.model_copy(update={"quantity":Decimal(0),"average_entry_price":None,"open_orders":(),"observed_at_ms":now+10})
         async with PostgresKernelUnitOfWork(database) as uow:
-            pending = await uow.aggregates.get(issued.ticket_id)
-            assert pending is not None
-            base_stress = make_stress_evidence(pending.ticket)
-            actual_stress = evaluate_cross_margin_stress(base_stress.request.model_copy(update={
-                "projected_instrument_positions":tuple(position.model_copy(update={"quantity":partial_qty})
-                    for position in base_stress.request.projected_instrument_positions)}))
-            stress = PostFillStressAssessed(
-                event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
-                ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
-                occurred_at_ms=now+12,status="passed",
-                evidence=actual_stress,
-                owner_policy_id=pending.ticket.owner_policy_id,
-                owner_policy_version=pending.ticket.owner_policy_version,
-                filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
-                initial_stop_price=pending.ticket.initial_stop_price,
-                initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
-            await uow.commit_reduction(event=stress,reduction=reduce_event(pending,stress),expected_version=pending.version)
+            flattened=await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,snapshot=truly_flat))
+            matched=await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,snapshot=truly_flat.model_copy(update={"observed_at_ms":now+11})))
+            await settle_ticket(uow,SettleTicketRequest(ticket_id=issued.ticket_id,settled_at_ms=now+12))
+            await record_trade_review(uow,RecordTradeReviewRequest(ticket_id=issued.ticket_id,review_id=f"review:partial-flat:{group}",
+                outcome="closed",metrics={"unavailable_reason":"recording_fake_no_economics"},decision_impact={"strategy_action":"review"},recorded_at_ms=now+13))
             assert not await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=group)
+        assert flattened.status.value=="position_flat_recorded" and matched.status.value=="matched"
     else:
         assert closed.status is VacuumDrainStatus.ZERO_FILL_CLOSED, closed
         assert reservation is not None and reservation.status == "released" and not still_active
-    resume_offset = 13 if partial_fill else 9
+    resume_offset = 14 if partial_fill else 9
     if pause_owner:
         actual_execute=sa.ext.asyncio.AsyncConnection.execute
         if early_resume:
@@ -5940,8 +5914,9 @@ async def _assert_natural_sent_entry_drained_by_selection(
         authority = await uow.instrument_selection.get_current_generic_authority(empty.selection_spec_id)
     assert terminal is not None
     if partial_fill:
-        assert terminal.position_qty == partial_qty and terminal.initial_stop_exchange_order_id is not None
-        assert terminal.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED"
+        assert terminal.status is AggregateStatus.TERMINAL
+        assert terminal.position_qty == 0 and terminal.initial_stop_exchange_order_id is None
+        assert terminal.entry_materialization_kind is None
         assert terminal.ticket.model_dump(exclude={"status"}) == ticket.model_dump(exclude={"status"})
     else:
         assert terminal.status is AggregateStatus.ENTRY_RECONCILED_ABSENT
@@ -5992,7 +5967,8 @@ async def _assert_natural_sent_entry_drained_by_selection(
     if partial_fill:
         assert sum(command.kind is ExchangeCommandKind.ENTRY for command in final_commands) == 1
         assert sum(command.kind is ExchangeCommandKind.CANCEL_ORDER for command in final_commands) == 1
-        assert sum(command.kind is ExchangeCommandKind.INITIAL_STOP for command in final_commands) == 1
+        assert sum(command.kind is ExchangeCommandKind.INITIAL_STOP for command in final_commands) == 0
+        assert sum(command.kind is ExchangeCommandKind.CONTROLLED_FLATTEN for command in final_commands) == 1
         assert len(venue.calls)==3
     else:
         assert [command.kind for command in final_commands] == [ExchangeCommandKind.ENTRY,ExchangeCommandKind.CANCEL_ORDER]
@@ -6002,66 +5978,6 @@ async def _assert_natural_sent_entry_drained_by_selection(
         assert frozenset((await conn.execute(sa.text("SELECT signal_event_id FROM brc_signal_events"))).scalars()) == source_signal_ids
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 1
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'")) == 0
-    if partial_fill:
-        from src.trading_kernel.application.maintain_ticket_lifecycle import (
-            LifecycleMaintenanceRequest,
-            TicketLifecycleFacts,
-            maintain_ticket_lifecycle,
-        )
-        from src.trading_kernel.application.reconcile_ticket import (
-            ReconcileTicketRequest,
-            reconcile_ticket,
-        )
-        from src.trading_kernel.application.settle_ticket import (
-            RecordTradeReviewRequest,
-            SettleTicketRequest,
-            record_trade_review,
-            settle_ticket,
-        )
-
-        async def safety_dispatch(offset):
-            venue.now_ms = now+offset
-            result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
-                dispatch_request.model_copy(update={"now_ms":now+offset}), clock_ms=lambda: now+offset)
-            assert result.status.value == "accepted", result
-
-        await safety_dispatch(20)
-        async with PostgresKernelUnitOfWork(database) as uow:
-            protected = await uow.aggregates.get(issued.ticket_id)
-            assert protected is not None and protected.status is AggregateStatus.POSITION_PROTECTED
-            assert protected.tp1_target_qty is not None and Decimal(0)<protected.tp1_target_qty<partial_qty
-            runner = await maintain_ticket_lifecycle(uow,LifecycleMaintenanceRequest(ticket_id=issued.ticket_id,
-                facts=TicketLifecycleFacts(position_quantity=partial_qty-protected.tp1_target_qty,
-                    tp1_filled_quantity=protected.tp1_target_qty,tp1_average_fill_price=ticket.take_profit_prices[0],
-                    allocated_entry_fee_quote=Decimal("0.01"),exit_taker_fee_rate=Decimal("0.001"),
-                    price_tick=Decimal("0.01"),market_facts=None,observed_at_ms=now+21),now_ms=now+21))
-        assert runner.status.value == "break_even_requested", runner
-        await safety_dispatch(22)
-        await safety_dispatch(23)
-        truly_flat = flat.model_copy(update={"quantity":Decimal(0),"average_entry_price":None,
-            "observed_at_ms":now+24})
-        async with PostgresKernelUnitOfWork(database) as uow:
-            external_flat = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,snapshot=truly_flat))
-        assert external_flat.status.value == "external_flat_incident", external_flat
-        await safety_dispatch(25)
-        async with PostgresKernelUnitOfWork(database) as uow:
-            matched = await reconcile_ticket(uow,ReconcileTicketRequest(ticket_id=issued.ticket_id,
-                snapshot=truly_flat.model_copy(update={"observed_at_ms":now+26})))
-            settled = await settle_ticket(uow,SettleTicketRequest(ticket_id=issued.ticket_id,settled_at_ms=now+27))
-            reviewed = await record_trade_review(uow,RecordTradeReviewRequest(ticket_id=issued.ticket_id,
-                review_id=f"review:selection-partial-{group}",outcome="closed",metrics={"realized_pnl":"1.25"},
-                decision_impact={"strategy_action":"keep"},recorded_at_ms=now+28))
-            terminal = await uow.aggregates.get(issued.ticket_id)
-            reservation = await uow.budgets.get_for_ticket(issued.ticket_id)
-            assert await uow.incidents.get_open_for_ticket(issued.ticket_id) is None
-            assert not await uow.entry_admission.has_active_ticket_in_domain(ticket.identity.netting_domain.key())
-            final_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
-        assert matched.status.value == "matched" and settled.status.value == "budget_settled"
-        assert reviewed.status.value == "review_recorded"
-        assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
-        assert terminal.ticket.selection_authority_id == current.authority.selection_authority_id
-        assert reservation is not None and reservation.status == "released"
-        assert sum(command.kind is ExchangeCommandKind.ENTRY for command in final_commands) == 1
 
 
 @pytest.mark.asyncio
@@ -9982,7 +9898,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 async with PostgresKernelUnitOfWork(database) as uow:
                     aggregate = await uow.aggregates.get(issued.ticket_id)
                     if aggregate is not None and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING:
-                        stress = PostFillStressAssessed(event_id=f"event:{issued.ticket_id}:{aggregate.last_event_sequence+1}",
+                        stress = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(aggregate, at_ms=now - 1), event_id=f"event:{issued.ticket_id}:{aggregate.last_event_sequence+1}",
                             ticket_id=issued.ticket_id,sequence=aggregate.last_event_sequence+1,
                             occurred_at_ms=now-1,status="passed",evidence=make_stress_evidence(aggregate.ticket),
                             owner_policy_id=aggregate.ticket.owner_policy_id,
@@ -11411,7 +11327,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         async with PostgresKernelUnitOfWork(database) as uow:
             pending = await uow.aggregates.get(issued.ticket_id)
             if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
-                event = PostFillStressAssessed(
+                event = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(pending, at_ms=now_ms + step - 1),
                     event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                     ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
                     occurred_at_ms=now_ms+step-1,status="passed",
@@ -13176,7 +13092,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                     async with PostgresKernelUnitOfWork(database) as stress_uow:
                         pending = await stress_uow.aggregates.get(issued.ticket_id)
                         if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
-                            event = PostFillStressAssessed(
+                            event = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(pending, at_ms=issued_at + step - 1),
                                 event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                                 ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
                                 occurred_at_ms=issued_at+step-1,status="passed",

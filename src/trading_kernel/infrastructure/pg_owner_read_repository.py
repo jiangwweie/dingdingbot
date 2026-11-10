@@ -1839,6 +1839,7 @@ def _causality_ticket_query(ticket_id: str) -> sa.Select[Any]:
             trade_aggregates.c.active_stop_price,
             trade_aggregates.c.tp1_target_qty,
             trade_aggregates.c.tp1_filled_qty,
+            trade_aggregates.c.post_fill_exit_plan,
             trade_aggregates.c.updated_at_ms.label("aggregate_updated_at_ms"),
         )
         .select_from(
@@ -1977,6 +1978,7 @@ def _causality_aggregate_facts(
         active_stop_price=row["active_stop_price"],
         tp1_target_qty=row["tp1_target_qty"],
         tp1_filled_qty=row["tp1_filled_qty"],
+        post_fill_exit_plan=row["post_fill_exit_plan"],
         updated_at_ms=int(row["aggregate_updated_at_ms"]),
     )
 

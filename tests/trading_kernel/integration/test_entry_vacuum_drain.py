@@ -107,6 +107,7 @@ from tests.trading_kernel.support.dispatch_venues import (
     PreflightFacts,
 )
 from tests.trading_kernel.support.lifecycle import registered_sor_long_ticket
+from tests.trading_kernel.support.post_fill_exit import make_post_fill_exit_plan
 from tests.trading_kernel.support.selection_vacuum import (
     SESSION_START_MS,
     open_entry_vacuum,
@@ -681,7 +682,7 @@ async def test_exact_late_fill_rejoins_original_ticket_and_prepares_protection(
         pending_stress = await uow.aggregates.get(ticket.identity.ticket_id)
         assert pending_stress is not None
         assert pending_stress.status is AggregateStatus.POST_FILL_RISK_PENDING
-        stress = PostFillStressAssessed(
+        stress = PostFillStressAssessed(exit_plan=make_post_fill_exit_plan(pending_stress, at_ms=vacuum.fenced_at_ms + 11),
             event_id=f"event:{ticket.identity.ticket_id}:{pending_stress.last_event_sequence+1}",
             ticket_id=ticket.identity.ticket_id,
             sequence=pending_stress.last_event_sequence+1,
@@ -828,7 +829,7 @@ async def _finish_exact_late_fill_ticket(dispatch_engine, ticket, vacuum, venue)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group,expected", [
-    (None, VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED),
+    (None, VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED),
     ("MPG-001", VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED),
 ])
 async def test_exact_partial_late_fill_uses_existing_vacuum_reduction(
@@ -894,49 +895,45 @@ async def test_exact_partial_late_fill_uses_existing_vacuum_reduction(
     assert persisted is not None and persisted.position_qty == partial_qty
     assert reservation is not None and reservation.status == "active"
     assert len([command for command in persisted_commands if command.kind is ExchangeCommandKind.ENTRY]) == 1
-    if expected is VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED:
-        assert persisted.status is AggregateStatus.PROTECTION_PENDING
-        assert persisted_commands[-1].kind is ExchangeCommandKind.INITIAL_STOP
-    else:
-        assert persisted.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
-        assert persisted_commands[-1].kind is ExchangeCommandKind.CONTROLLED_FLATTEN
-        await dispatch_for_ticket(
-            dispatch_engine,KindAwareAcceptingVenue(),ticket.identity.ticket_id,
-            now_ms=vacuum.fenced_at_ms+10,
-        )
-        async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-            flattened = await reconcile_ticket(uow,ReconcileTicketRequest(
-                ticket_id=ticket.identity.ticket_id,
-                snapshot=_position_snapshot(ticket,quantity=Decimal(0),
-                    average_entry_price=None,open_entry_order=False,
-                    observed_at_ms=vacuum.fenced_at_ms+11),
-            ))
-            matched = await reconcile_ticket(uow,ReconcileTicketRequest(
-                ticket_id=ticket.identity.ticket_id,
-                snapshot=_position_snapshot(ticket,quantity=Decimal(0),
-                    average_entry_price=None,open_entry_order=False,
-                    observed_at_ms=vacuum.fenced_at_ms+12),
-            ))
-            settled = await settle_ticket(uow,SettleTicketRequest(
-                ticket_id=ticket.identity.ticket_id,settled_at_ms=vacuum.fenced_at_ms+13))
-            reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
-                ticket_id=ticket.identity.ticket_id,
-                review_id="review:late-partial-flatten-mpg",
-                outcome="closed",metrics={"realized_pnl":"-1.0"},
-                decision_impact={"strategy_action":"review"},
-                recorded_at_ms=vacuum.fenced_at_ms+14))
-            terminal = await uow.aggregates.get(ticket.identity.ticket_id)
-            incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
-            released = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
-            active = await uow.entry_admission.has_active_ticket_in_domain(
-                ticket.identity.netting_domain.key())
-        assert flattened.status is ReconcileTicketStatus.POSITION_FLAT_RECORDED
-        assert matched.status is ReconcileTicketStatus.MATCHED
-        assert settled.status.value == "budget_settled"
-        assert reviewed.status.value == "review_recorded"
-        assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
-        assert incident is None and released is not None and released.status == "released"
-        assert not active
+    assert persisted.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert persisted_commands[-1].kind is ExchangeCommandKind.CONTROLLED_FLATTEN
+    await dispatch_for_ticket(
+        dispatch_engine,KindAwareAcceptingVenue(),ticket.identity.ticket_id,
+        now_ms=vacuum.fenced_at_ms+10,
+    )
+    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
+        flattened = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=ticket.identity.ticket_id,
+            snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                average_entry_price=None,open_entry_order=False,
+                observed_at_ms=vacuum.fenced_at_ms+11),
+        ))
+        matched = await reconcile_ticket(uow,ReconcileTicketRequest(
+            ticket_id=ticket.identity.ticket_id,
+            snapshot=_position_snapshot(ticket,quantity=Decimal(0),
+                average_entry_price=None,open_entry_order=False,
+                observed_at_ms=vacuum.fenced_at_ms+12),
+        ))
+        settled = await settle_ticket(uow,SettleTicketRequest(
+            ticket_id=ticket.identity.ticket_id,settled_at_ms=vacuum.fenced_at_ms+13))
+        reviewed = await record_trade_review(uow,RecordTradeReviewRequest(
+            ticket_id=ticket.identity.ticket_id,
+            review_id="review:late-partial-flatten-mpg",
+            outcome="closed",metrics={"realized_pnl":"-1.0"},
+            decision_impact={"strategy_action":"review"},
+            recorded_at_ms=vacuum.fenced_at_ms+14))
+        terminal = await uow.aggregates.get(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        released = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
+        active = await uow.entry_admission.has_active_ticket_in_domain(
+            ticket.identity.netting_domain.key())
+    assert flattened.status is ReconcileTicketStatus.POSITION_FLAT_RECORDED
+    assert matched.status is ReconcileTicketStatus.MATCHED
+    assert settled.status.value == "budget_settled"
+    assert reviewed.status.value == "review_recorded"
+    assert terminal is not None and terminal.status is AggregateStatus.TERMINAL
+    assert incident is None and released is not None and released.status == "released"
+    assert not active
 
 
 @pytest.mark.asyncio
@@ -2020,80 +2017,14 @@ async def _assert_unknown_cancel(
         assert sum(c.kind == ExchangeCommandKind.CANCEL_ORDER for c in final_commands) == 2
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_retained_partial_keeps_original_capacity_until_protected(
-    dispatch_engine, group: str | None,
-) -> None:
-    ticket, vacuum, partial_qty = await _reach_retained_partial_pending(
-        dispatch_engine, group=group,
-    )
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-        reservation = await uow.budgets.get_for_ticket(ticket.identity.ticket_id)
-        exposure = await uow.entry_admission.get_account_exposure(
-            ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id,
-        )
-        lane = await uow.entry_admission.get_global_lane()
-        domain_active = await uow.entry_admission.has_active_ticket_in_domain(
-            ticket.identity.netting_domain.key()
-        )
-        drain_blocked = await uow.instrument_selection.entry_vacuum_has_drain_blockers(
-            strategy_group_id=ticket.identity.runtime.strategy_group_id
-        )
-    assert aggregate is not None
-    assert aggregate.status is AggregateStatus.PROTECTION_PENDING
-    assert aggregate.position_qty == partial_qty
-    assert aggregate.tp1_target_qty == Decimal("0.001")
-    assert aggregate.entry_materialization_kind == "VACUUM_PARTIAL_RETAINED"
-    assert reservation is not None and reservation.status == "active"
-    assert reservation.reserved_notional == ticket.notional
-    assert reservation.reserved_risk == ticket.risk_at_stop
-    assert exposure is not None and exposure.active_ticket_count == 1
-    assert lane is not None and lane.ticket_id == ticket.identity.ticket_id
-    assert domain_active is True
-    assert drain_blocked is True
-
-    await dispatch_for_ticket(
-        dispatch_engine,
-        KindAwareAcceptingVenue(),
-        ticket.identity.ticket_id,
-        now_ms=vacuum.fenced_at_ms + 5,
-    )
-    async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
-        protected = await uow.aggregates.get(ticket.identity.ticket_id)
-        reservation_after = await uow.budgets.get_for_ticket(
-            ticket.identity.ticket_id
-        )
-        exposure_after = await uow.entry_admission.get_account_exposure(
-            ticket.identity.netting_domain.venue_id,
-            ticket.identity.netting_domain.account_id,
-        )
-        lane_after = await uow.entry_admission.get_global_lane()
-        domain_after = await uow.entry_admission.has_active_ticket_in_domain(
-            ticket.identity.netting_domain.key()
-        )
-        drain_blocked_after = (
-            await uow.instrument_selection.entry_vacuum_has_drain_blockers(
-                strategy_group_id=ticket.identity.runtime.strategy_group_id
-            )
-        )
-    assert protected is not None
-    assert protected.status is AggregateStatus.TP1_PENDING
-    assert reservation_after is not None and reservation_after.status == "active"
-    assert exposure_after is not None and exposure_after.active_ticket_count == 1
-    assert lane_after is not None and lane_after.ticket_id is None
-    assert domain_after is True
-    assert drain_blocked_after is False
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", [None, "CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"])
-async def test_retained_partial_initial_stop_rejection_requires_controlled_flatten(
+async def test_partial_entry_flatten_rejection_keeps_original_capacity(
     dispatch_engine, group: str | None,
 ) -> None:
-    ticket, vacuum, partial_qty = await _reach_retained_partial_pending(
+    ticket, vacuum, partial_qty = await _reach_partial_flatten_pending(
         dispatch_engine, group=group,
     )
 
@@ -2113,7 +2044,7 @@ async def test_retained_partial_initial_stop_rejection_requires_controlled_flatt
     assert rejected.status is DispatchCommandStatus.REJECTED
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
-        incident = await uow.incidents.get_open_for_ticket(ticket.identity.ticket_id)
+        incident = await uow.incidents.get_open_for_ticket_kind(ticket.identity.ticket_id, "controlled_flatten_rejected")
         commands = await uow.exchange_commands.list_for_ticket(
             ticket.identity.ticket_id
         )
@@ -2126,18 +2057,16 @@ async def test_retained_partial_initial_stop_rejection_requires_controlled_flatt
         )
 
     assert aggregate is not None
-    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+    assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_REJECTED
     assert aggregate.position_qty == partial_qty
     assert incident is not None
-    assert incident.incident_kind == "vacuum_partial_initial_stop_rejected"
+    assert incident.incident_kind == "controlled_flatten_rejected"
     assert [command.kind for command in commands] == [
         ExchangeCommandKind.ENTRY,
         ExchangeCommandKind.CANCEL_ORDER,
-        ExchangeCommandKind.INITIAL_STOP,
         ExchangeCommandKind.CONTROLLED_FLATTEN,
     ]
-    assert commands[-2].status is ExchangeCommandStatus.REJECTED
-    assert commands[-1].status is ExchangeCommandStatus.PREPARED
+    assert commands[-1].status is ExchangeCommandStatus.REJECTED
     assert reservation is not None and reservation.status == "active"
     assert domain_active is True
     assert drain_blocked is True
@@ -2210,7 +2139,7 @@ async def _commands(engine, ticket):
         )
 
 
-async def _reach_retained_partial_pending(engine, *, group: str | None = None, splittable: bool = True):
+async def _reach_partial_flatten_pending(engine, *, group: str | None = None, splittable: bool = True):
     ticket = _ticket_for_group(_retained_partial_ticket(), group)
     if group == "MPG-001" and splittable:
         # 33% of two quantity steps rounds to zero. Use four filled steps
@@ -2277,14 +2206,13 @@ async def _reach_retained_partial_pending(engine, *, group: str | None = None, s
             uow,
             _request(ticket, now_ms=vacuum.fenced_at_ms + 4),
         )
-    assert retained.status is (VacuumDrainStatus.PARTIAL_RETAINED_PROTECTION_REQUESTED
-        if splittable else VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED)
+    assert retained.status is VacuumDrainStatus.PARTIAL_FLATTEN_REQUESTED
     return ticket, vacuum, partial_qty
 
 
 @pytest.mark.asyncio
 async def test_mpg_unsplittable_partial_requests_exact_controlled_flatten(dispatch_engine) -> None:
-    ticket, _vacuum, quantity = await _reach_retained_partial_pending(dispatch_engine,group="MPG-001",splittable=False)
+    ticket, _vacuum, quantity = await _reach_partial_flatten_pending(dispatch_engine,group="MPG-001",splittable=False)
     async with PostgresKernelUnitOfWork(dispatch_engine) as uow:
         aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
         assert aggregate is not None and aggregate.status == AggregateStatus.CONTROLLED_FLATTEN_PENDING

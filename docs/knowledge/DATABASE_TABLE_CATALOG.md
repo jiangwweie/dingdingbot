@@ -4,14 +4,14 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 90 张业务表、1075 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **93 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 94 张业务表、1093 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **97 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **90** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **94** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **93** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **97** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
 **范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。代码目标结构为 `0013_owner_directional_risk_v1`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
@@ -29,6 +29,7 @@
 | --- | --- | --- |
 | **[策略与事实语义](#catalog-registry)** | **5** | 定义策略“是什么”，不授予当前下单权限。 |
 | **[标的、产品与市场规则](#catalog-product)** | **5** | 描述交易产品、市场状态、精度及最小下单约束。 |
+| **[新入场MA50资格](#catalog-entry-regime)** | **4** | 版本化门槛、当前BTC闭合事实及准入/发送证据。 |
 | **[退出方案及版本绑定](#catalog-exit)** | **4** | 不可变方案与可切换绑定分离；Ticket 冻结签发时的方案。 |
 | **[方向风险与最终发送授权](#catalog-directional)** | **5** | Owner 偏好、不可变审计和最终 ENTRY 发送时间窗。 |
 | **[Owner 政策、授权与控制](#catalog-owner)** | **7** | 控制允许范围和异步操作，不直接写交易所。 |
@@ -1300,9 +1301,9 @@
 **维护与用途**：commit_reduction CAS 推进，Worker 调度读取；不是不可变合同。
 
 <details>
-<summary>完整字段（34 列）</summary>
+<summary>完整字段（36 列）</summary>
 
-**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
+**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`post_fill_exit_plan`、`initial_stop_closes_position`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
 </details>
 
@@ -1724,4 +1725,50 @@ GROUP BY n.nspname ORDER BY n.nspname;
 COMMIT;
 ```
 
-**持续检查**：[知识库架构测试](../../tests/trading_kernel/architecture/test_project_knowledge.py)逐一比对 85 张业务表的章节、主键、全部字段及顺序，发现新增/漏表/字段漂移时失败；不会为了保持旧数量阻止 schema 正常演进。新增结构时同步更新目录、分组数量、来源说明和该处数量摘要，当前实库事实另更新唯一 roadmap。
+**持续检查**：[知识库架构测试](../../tests/trading_kernel/architecture/test_project_knowledge.py)逐一比对 94 张业务表的章节、主键、全部字段及顺序，发现新增/漏表/字段漂移时失败；不会为了保持旧数量阻止 schema 正常演进。新增结构时同步更新目录、分组数量、来源说明和该处数量摘要，当前实库事实另更新唯一 roadmap。
+
+<a id="catalog-entry-regime"></a>
+
+## 新入场MA50资格
+
+**范围**：当前代码能力，未声明部署；只过滤CPM/MI/MPG新LONG，原Owner预算独立生效。（来源：[仓储](../../src/trading_kernel/infrastructure/pg_entry_regime_repository.py)、[字段定义](../../src/trading_kernel/infrastructure/pg_models.py)。）
+
+### `brc_entry_regime_revisions`
+
+**职责**：一行一个事件的不可变MA50控制版本。
+
+**主键**：`event_spec_id`、`revision`
+
+**维护与用途**：Owner控制应用经TOTP创建版本，安装仅写显式关闭版本，不恢复策略。
+
+**字段清单**：`event_spec_id`、`revision`、`enabled`、`rule_id`、`authorization_id`、`created_at_ms`
+
+### `brc_entry_regime_current`
+
+**职责**：每事件当前MA50版本指针。
+
+**主键**：`event_spec_id`
+
+**维护与用途**：原子配置发布以expected revision切换；仅约束新ENTRY。
+
+**字段清单**：`event_spec_id`、`revision`
+
+### `brc_btc_ma50_current`
+
+**职责**：指定BTC市场最近连续50根闭合4h行情事实。
+
+**主键**：`exchange_instrument_id`
+
+**维护与用途**：Observation有界刷新；跨4h边界旧快照失效，不写报告文件。
+
+**字段清单**：`exchange_instrument_id`、`latest_close_ms`、`snapshot`、`retry_not_before_ms`
+
+### `brc_entry_regime_evidence`
+
+**职责**：一次准入或发送检查的不可变事实与决定。
+
+**主键**：`phase`、`identity_key`
+
+**维护与用途**：保存对应Signal/Command与Ticket、控制版本、行情窗口及首阻断原因。
+
+**字段清单**：`phase`、`identity_key`、`ticket_id`、`evidence`

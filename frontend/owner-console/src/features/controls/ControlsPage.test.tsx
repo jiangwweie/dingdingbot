@@ -75,7 +75,7 @@ it("shows compact controls and keeps flatten scope server-owned", async () => {
 
   expect(await screen.findByText(/ticket:ada-short/)).toBeInTheDocument();
   expect(screen.getByText(/ticket:btc-long/)).toBeInTheDocument();
-  expect(screen.queryByLabelText(/数量|价格|订单类型/)).not.toBeInTheDocument();
+  expect(within(screen.getByRole("alertdialog")).queryByLabelText(/数量|价格|订单类型/)).not.toBeInTheDocument();
   expect(vi.mocked(getFlattenPreview)).toHaveBeenCalledTimes(1);
 });
 

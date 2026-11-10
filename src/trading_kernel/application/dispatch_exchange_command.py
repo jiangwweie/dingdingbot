@@ -51,6 +51,7 @@ from src.trading_kernel.domain.directional_risk import (
     SCOPED_EVENTS,
     effective_directional_limit,
 )
+from src.trading_kernel.domain.entry_regime import FOUR_HOURS_MS, REGIME_EVENTS
 from src.trading_kernel.domain.events import (
     CancelOrderOutcomeUnknown,
     CancelOrderRejected,
@@ -710,6 +711,13 @@ async def _preflight_new_entry_mutation(
             snapshot=current_product_session,
             now_ms=evaluated_at_ms,
         )
+        regime_evidence = None
+        if command.kind is ExchangeCommandKind.ENTRY and command.ticket_identity.runtime.event_spec_id in REGIME_EVENTS:
+            regime_evidence = await uow.entry_regimes.evaluate(command.ticket_identity.runtime.event_spec_id, now_ms=evaluated_at_ms)
+            await uow.entry_regimes.record(phase="dispatch",identity_key=command.command_id,
+                ticket_id=command.ticket_identity.ticket_id,evidence=regime_evidence)
+            if not regime_evidence.allowed:
+                return refused(EntryDispatchPreflightStatus.ENTRY_REGIME_BLOCKED)
         decision = revalidate_entry_dispatch(
             EntryDispatchPreflightRequest(
                 command=current_command,
@@ -761,6 +769,9 @@ async def _preflight_new_entry_mutation(
             and product_compatibility.product_family == "tradfi_equity_perpetual"
             else command.deadline_at_ms,
         )
+        if regime_evidence is not None and regime_evidence.control is not None and regime_evidence.control.enabled:
+            assert regime_evidence.snapshot is not None
+            valid_until_ms = min(valid_until_ms, regime_evidence.snapshot.latest_close_ms + FOUR_HOURS_MS)
         try:
             authorized_at_ms = await uow.directional_risk.authorize_send(
                 command_id=command.command_id,
@@ -1034,10 +1045,13 @@ def _command_result_event(
             f"unsupported {kind.value} result status: {result.status.value}"
         )
     if kind is ExchangeCommandKind.INITIAL_STOP:
+        if not isinstance(command.payload, OrderCommandPayload):
+            raise RuntimeError("initial stop payload is invalid")
         return InitialStopConfirmed(
             **common,
             exchange_order_id=str(result.exchange_order_id),
             protected_qty=aggregate.position_qty,
+            closes_position=command.payload.close_position,
         )
     if kind is ExchangeCommandKind.EXIT:
         return ExitAccepted(

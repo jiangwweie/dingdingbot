@@ -51,6 +51,7 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class EntryDispatchPreflightStatus(StrEnum):
+    ENTRY_REGIME_BLOCKED = "entry_regime_blocked"
     DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     ALLOWED = "allowed"

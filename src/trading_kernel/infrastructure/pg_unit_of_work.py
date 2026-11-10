@@ -18,6 +18,7 @@ from src.trading_kernel.application.ports import (
     CapacityClaimRepository,
     DirectionalRiskRepository,
     EntryAdmissionRepository,
+    EntryRegimeRepository,
     EventRepository,
     ExchangeCommandRepository,
     ExitProfileAuthorityRepository,
@@ -95,6 +96,9 @@ from src.trading_kernel.infrastructure.feishu_notice import (
 from src.trading_kernel.infrastructure.pg_directional_risk_repository import (
     PostgresDirectionalRiskRepository,
 )
+from src.trading_kernel.infrastructure.pg_entry_regime_repository import (
+    PostgresEntryRegimeRepository,
+)
 from src.trading_kernel.infrastructure.pg_exit_profile_repository import (
     PostgresExitProfileAuthorityRepository,
 )
@@ -131,6 +135,7 @@ __all__ = ["AggregateVersionConflict", "PostgresKernelUnitOfWork"]
 
 
 class PostgresKernelUnitOfWork:
+    entry_regimes: EntryRegimeRepository
     directional_risk: DirectionalRiskRepository
     tickets: TicketRepository
     aggregates: AggregateRepository
@@ -163,6 +168,7 @@ class PostgresKernelUnitOfWork:
             raise RuntimeError("unit of work is already active")
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
+        self.entry_regimes = PostgresEntryRegimeRepository(self._connection)
         self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
         self.aggregates = PostgresAggregateRepository(self._connection)
@@ -777,6 +783,7 @@ def _initial_stop_command(
             quantity=effect.quantity,
             order_type="stop_market",
             reduce_only=True,
+            close_position=aggregate.identity.netting_domain.venue_id == "binance-usdm",
             stop_price=effect.stop_price,
         ),
         occurred_at_ms=occurred_at_ms,

@@ -144,9 +144,9 @@ class StressFactsSource:
             raise TimeoutError("sanitized instrument-rule timeout")
         return InstrumentRulesFacts(
             exchange_instrument_id=request.exchange_instrument_id,
-            quantity_step=Decimal("0.001"),
+            quantity_step=Decimal("0.0001"),
             price_tick=Decimal("0.1"),
-            min_quantity=Decimal("0.001"),
+            min_quantity=Decimal("0.0001"),
             min_notional=Decimal(5),
             exchange_max_leverage=10,
             maintenance_margin_brackets=_brackets(),
@@ -298,7 +298,9 @@ async def test_raw_liquidation_observation_never_controls_post_fill_decision(
             f"venue-liquidation-observation:{ticket.identity.ticket_id}"
         )
     assert aggregate is not None
-    assert aggregate.status is AggregateStatus.TP1_PENDING
+    assert aggregate.status is AggregateStatus.TP1_PENDING, [
+        event.exit_plan_failure for event in events if isinstance(event, PostFillStressAssessed)
+    ]
     assert aggregate.post_fill_stress_status == "passed"
     assert aggregate.venue_reported_liquidation_price == (raw_liquidation_observation)
     assessed = [event for event in events if isinstance(event, PostFillStressAssessed)]
@@ -870,3 +872,24 @@ async def test_concurrent_rule_change_is_not_overwritten_by_post_fill_refresh(
         )
     assert cached is not None
     assert cached.maintenance_margin_brackets_digest == "sha256:" + "7" * 64
+
+
+@pytest.mark.asyncio
+async def test_actual_exit_plan_failure_flattens_after_protection_without_tp(stress_engine):
+    ticket=_ticket()
+    await _reach_post_fill_pending(stress_engine,ticket)
+    source=StressFactsSource(ticket,margin_balance=Decimal(1000))
+    read=source.read_instrument_rules
+    async def stricter_rules(request):
+        rules=await read(request)
+        return rules.model_copy(update={"min_notional":Decimal(1000)})
+    source.read_instrument_rules=stricter_rules
+    await _run_post_fill_worker(stress_engine,ticket,source,now_ms=3000)
+    async with PostgresKernelUnitOfWork(stress_engine) as uow:
+        aggregate=await uow.aggregates.get(ticket.identity.ticket_id)
+        commands=await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)
+        assert aggregate.status is AggregateStatus.CONTROLLED_FLATTEN_PENDING
+        assert aggregate.active_stop_exchange_order_id is not None
+        assert aggregate.post_fill_exit_plan is None
+        assert not any(c.kind is ExchangeCommandKind.TAKE_PROFIT for c in commands)
+        assert sum(c.kind is ExchangeCommandKind.CONTROLLED_FLATTEN for c in commands)==1

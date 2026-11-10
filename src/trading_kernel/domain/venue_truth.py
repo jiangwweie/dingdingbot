@@ -42,6 +42,7 @@ class VenueOrderTruth(BaseModel):
     order_side: Literal["buy", "sell"]
     quantity: Decimal
     reduce_only: bool
+    close_position: bool = False
     order_namespace: Literal["regular", "conditional"] = "regular"
     is_open: bool = True
 
@@ -61,9 +62,18 @@ class VenueOrderTruth(BaseModel):
     @field_validator("quantity")
     @classmethod
     def _require_positive_quantity(cls, value: Decimal) -> Decimal:
-        if value <= 0:
-            raise ValueError("venue order truth quantity must be positive")
+        if not value.is_finite() or value < 0:
+            raise ValueError("venue order truth quantity must be finite and nonnegative")
         return value
+
+    @model_validator(mode="after")
+    def _close_position_shape(self) -> VenueOrderTruth:
+        if self.close_position:
+            if self.quantity != 0 or self.order_namespace != "conditional" or not self.reduce_only:
+                raise ValueError("close-position truth requires a zero-quantity conditional close")
+        elif self.quantity <= 0:
+            raise ValueError("fixed-quantity venue order requires positive quantity")
+        return self
 
 
 class VenueTruthSnapshot(BaseModel):
@@ -293,7 +303,9 @@ def order_identity_contradiction(
         return "command_kind_not_order_lookup"
     if order.order_side != command.payload.side:
         return "order_side_mismatch"
-    if order.quantity != command.payload.quantity:
+    if order.close_position != command.payload.close_position:
+        return "close_position_mismatch"
+    if order.quantity != (Decimal(0) if command.payload.close_position else command.payload.quantity):
         return "quantity_mismatch"
     if order.reduce_only != command.payload.reduce_only:
         return "reduce_only_mismatch"

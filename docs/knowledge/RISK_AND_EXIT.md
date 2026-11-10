@@ -4,7 +4,7 @@
 
 ## 风险分布在哪些边界
 
-**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L152)）
+**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L98)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)）
 
 | 边界 | 输入 | 关键判断 | 拒绝或后续处理 |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@
 
 ### 已从代码验证的公式
 
-所有金融量使用 **Decimal**。下列是 [select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L172) 的可读展开；数量还必须满足交易所步长、最小量与双腿退出约束。
+所有金融量使用 **Decimal**。下列是 [select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L184) 的可读展开；数量还必须满足交易所步长、最小量与双腿退出约束。
 
 ```text
 剩余总止损风险 = max(wallet × gross_stop_fraction − 已占总风险, 0)
@@ -64,9 +64,11 @@ stateDiagram-v2
     review_pending --> terminal: ReviewRecorded
 ```
 
-这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L19) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L124) 为准。
+这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L20) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L125) 为准。
 
 ### 冻结退出规则怎样使用
+
+**当前代码新增目标能力，部署状态仍见唯一roadmap：**Owner按策略事件/方向创建新Profile版本，支持实际成交R、小额TP目标与最多50%的最小可执行数量提升。完整ENTRY及初始整侧保护后冻结PostFillExitPlan；部分TP累计减仓期间保留初始整侧止损，完整TP后才确认费用保本与原Runner。原参考价Profile保留原冻结目标；新配置只作用于新票。BTC闭合4h SMA50只过滤CPM/MI/MPG新LONG，与Owner方向预算取交集。（来源：[退出执行计划](../../src/trading_kernel/domain/post_fill_exit.py)、[参数发布](../../src/trading_kernel/application/exit_parameter_controls.py)、[MA50事实](../../src/trading_kernel/domain/entry_regime.py)。）
 
 1. Claim 签发时读取当前 **EventExitBinding**，把 Profile identity、semantic hash 和绑定版本冻结到 Ticket。
 2. Lifecycle 按 Ticket 的精确 Profile 读取，而不是每个 tick 跟随 Event 的新绑定。
@@ -74,7 +76,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L116)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L124)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L118)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L657)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L745)、[Reducer](../../src/trading_kernel/domain/reducer.py#L125)。
 
 ## 成交后风险与部分成交
 
@@ -84,7 +86,7 @@ stateDiagram-v2
 | 实际风险超过计划预算 | 仍在冻结容忍上限内是 TOLERATED_OVERRUN；超过上限是 HARD_OVERRUN | 容忍区间继续 NORMAL；硬超额先保护再 flatten；保护方向错误立即 flatten | [test_post_fill_risk](../../tests/trading_kernel/unit/test_post_fill_risk.py) |
 | Cross margin 压力不通过 | 当前整体账户及 instrument facts | 禁止继续正常暴露，进入受控处置 | [cross_margin_stress](../../src/trading_kernel/domain/cross_margin_stress.py)、[全链压力测试](../../tests/trading_kernel/full_chain/test_cross_margin_post_fill_stress.py) |
 | 普通部分 ENTRY 成交 | 请求数量未全部成交 | Incident、精确撤余量、确认后 flatten | [fault matrix](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120) |
-| Vacuum 撤单后部分成交 | 撤单已确认、风险 NORMAL 且可分双腿 | 专用 `VacuumPartialRetained` 分支；否则 flatten | [plan_vacuum_ticket_drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L170)、[D5 差异](SOURCE_AUTHORITY.md) |
+| Vacuum 撤单后部分成交 | 撤单已确认、ENTRY未完整成交 | Incident、受控关闭实际数量；不再保留为TP1/Runner正常仓位 | [drain](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py) |
 
 **最后一行是当前代码中的专门行为，不能用它解释所有部分成交。**广义契约与该特例是否应统一措辞，仍是明确记录的待裁定项。
 
@@ -94,7 +96,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | ENTRY authoritative reject | 不能自动另发一代 ENTRY | 终结拒绝，释放其资源 | [commands](../../src/trading_kernel/domain/commands.py)、[reducer](../../src/trading_kernel/domain/reducer.py) |
 | 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L93) |
-| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L132) |
+| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L137) |
 | 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L738) |
 | Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L15) |
 | 退出事实过期或缺失 | 不能编造市场判定 | 记录健康/重试并保持现有事实边界 | [lifecycle_facts_health](../../src/trading_kernel/application/lifecycle_facts_health.py)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py) |

@@ -34,6 +34,7 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class IssueTicketStatus(StrEnum):
+    ENTRY_REGIME_BLOCKED = "entry_regime_blocked"
     DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     ISSUED = "issued"

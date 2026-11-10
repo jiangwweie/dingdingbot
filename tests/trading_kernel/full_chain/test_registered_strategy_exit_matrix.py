@@ -245,18 +245,10 @@ def _ticket_for_event(event_spec_id: str):
             ),
         }
     )
-    return ticket.model_copy(
-        update={
-            "identity": identity,
-            "quantity": Decimal("0.005"),
-            "notional": Decimal("0.5"),
-            "entry_reference_price": Decimal(100),
-            "initial_stop_price": (
+    return _ticket(
+        identity=identity, quantity=Decimal("0.005"), notional=Decimal("0.5"), entry_reference_price=Decimal(100), initial_stop_price=(
                 Decimal(95) if contract.position_side == "long" else Decimal(105)
-            ),
-            "take_profit_prices": (
+            ), take_profit_prices=(
                 Decimal(105) if contract.position_side == "long" else Decimal(95),
-            ),
-            "take_profit_quantities": (Decimal("0.002"),),
-        }
+            ), take_profit_quantities=(Decimal("0.002"),)
     )

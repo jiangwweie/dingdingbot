@@ -68,6 +68,10 @@ export function formatOwnerStatus(value: string): string {
 }
 
 export function formatOwnerReason(raw: string): OwnerReason {
+  if (raw === "entry_regime_blocked") return { label: "BTC 4h MA50 准入过滤", raw };
+  if (raw === "btc4h_not_above_ma50") return { label: "BTC 4h 收盘价未高于 MA50", raw };
+  if (raw === "btc4h_facts_unavailable") return { label: "等待有效 BTC 4h 闭合行情", raw };
+  if (raw === "entry_regime_control_missing") return { label: "MA50 准入配置缺失", raw };
   if (raw.startsWith("owner_flatten_all")) return { label: "Owner 受控平仓", raw };
   if (raw.startsWith("deployment_drain")) return { label: "部署前安全退出", raw };
   if (raw === "initial_stop_triggered" || raw === "Initial Stop") return { label: "初始止损触发", raw };

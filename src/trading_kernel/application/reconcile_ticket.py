@@ -27,6 +27,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     StressPosition,
     evaluate_cross_margin_stress,
 )
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
     CancelOrderAbsenceConfirmed,
     EntryFilled,
@@ -46,6 +47,10 @@ from src.trading_kernel.domain.incident_blocking import (
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.position import PositionSnapshot
+from src.trading_kernel.domain.post_fill_exit import (
+    PostFillExitRequest,
+    build_post_fill_exit_plan,
+)
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillRiskRequest,
     assess_post_fill_risk,
@@ -559,6 +564,38 @@ async def reconcile_post_fill_stress(
         result_status = PostFillStressReconcileStatus.FAILED
         event_status = "failed"
     assert aggregate.initial_stop_exchange_order_id is not None
+    exit_plan = None
+    exit_failure = None
+    if event_status == "passed":
+        profile = await uow.exit_profiles.get_profile(
+            exit_profile_id=aggregate.ticket.exit_policy_id,
+            semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
+        )
+        if profile is None:
+            exit_failure = "post_fill_exit_profile_missing"
+        elif aggregate.ticket.exit_binding_id is None:
+            exit_failure = "post_fill_exit_binding_missing"
+        elif aggregate.position_qty != aggregate.ticket.quantity:
+            exit_failure = "post_fill_entry_quantity_mismatch"
+        else:
+            exit_decision = build_post_fill_exit_plan(PostFillExitRequest(
+                ticket_id=request.ticket_id,
+                exit_binding_id=aggregate.ticket.exit_binding_id,
+                profile=profile.profile, quantity=aggregate.position_qty,
+                average_fill_price=aggregate.average_fill_price,
+                initial_stop_price=aggregate.ticket.initial_stop_price,
+                quantity_step=rules.quantity_step, price_tick=rules.price_tick,
+                min_quantity=rules.min_quantity, min_notional=rules.min_notional,
+                rules_digest=canonical_digest(rules.model_dump(mode="json")),
+                rules_observed_at_ms=rules.observed_at_ms,
+                rules_valid_until_ms=rules.valid_until_ms,
+                created_at_ms=request.assessed_at_ms,
+                reference_take_profit_price=aggregate.ticket.take_profit_prices[0] if len(aggregate.ticket.take_profit_prices)==1 else None,
+                reference_tp1_quantity=aggregate.ticket.take_profit_quantities[0] if len(aggregate.ticket.take_profit_quantities)==1 else None,
+            ))
+            exit_plan = exit_decision.plan
+            if exit_plan is None:
+                exit_failure = exit_decision.quantity_rejection or exit_decision.status
     event = PostFillStressAssessed(
         event_id=_event_id(aggregate),
         ticket_id=request.ticket_id,
@@ -574,6 +611,8 @@ async def reconcile_post_fill_stress(
         initial_stop_exchange_order_id=(
             aggregate.initial_stop_exchange_order_id
         ),
+        exit_plan=exit_plan,
+        exit_plan_failure=exit_failure,
     )
     reduction = reduce_event(aggregate, event)
     await uow.commit_reduction(

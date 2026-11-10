@@ -109,6 +109,7 @@ _TP_RUNNER_EVENTS = {
     "TakeProfitOutcomeUnknown",
     "TakeProfitAbsenceConfirmed",
     "TakeProfitFilled",
+    "TakeProfitPartiallyFilled",
     "RunnerStopRequested",
     "ProtectionReplacementConfirmed",
     "ProtectionReplacementRejected",
@@ -303,6 +304,9 @@ def _price_plan(
         if facts.ticket.take_profit_quantities
         else None
     )
+    if facts.aggregate.post_fill_exit_plan is not None:
+        tp1_price = facts.aggregate.post_fill_exit_plan.take_profit_price
+        tp1_target_quantity = facts.aggregate.post_fill_exit_plan.tp1_quantity
     return TradePricePlanView(
         strategy_timeframe=_strategy_timeframe(facts),
         entry_reference_price=facts.ticket.entry_reference_price,
