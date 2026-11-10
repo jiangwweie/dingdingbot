@@ -25,6 +25,14 @@ Status: current Trading Kernel authority index
 [前置交付](superpowers/plans/2026-11-07-app-manual-takeover-prevalidation-handoff.md)是历史阶段记录。
 [通知方案](superpowers/plans/2026-11-09-manual-notification-templates-v1.md)说明最终快照和可靠投递边界。
 
+### MA50 与小TP1退出的人工版后续设计
+
+[人工版完整设计](superpowers/specs/2026-11-10-manual-exit-regime-release-design.md)与
+[实施、认证和首尔发布方案](superpowers/plans/2026-11-10-manual-exit-regime-release-implementation-plan.md)
+适配东京研究方案：三LONG策略MA50、四策略实际1R目标5%／最小量提升且实际不超过50%、SOR-1H实际1.2R并保持原数量合同。
+**这是已完成的文档适配，尚未开始实现或发布；不改变当前参数或管理权。**
+新增自动处置仍服从AUTO／REVIEW_REQUIRED／永久MANUAL，首次schema升级需真实Owner暂停、人工产品自然Drain／终态保全及独立认证。
+
 ## 两条产品线与正式发布
 
 [固定工作区规则](superpowers/plans/2026-11-08-two-product-workspaces.md)定义人工 `manual-dev` 与自动 `dev` 的隔离。
