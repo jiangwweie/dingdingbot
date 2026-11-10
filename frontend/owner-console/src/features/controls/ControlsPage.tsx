@@ -1,7 +1,6 @@
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { ExitParametersPanel } from "./ExitParametersPanel";
 import { AppShell } from "../../app/AppShell";
 import { ownerQueryClient } from "../../app/queryClient";
 import { Button } from "../../components/ui/Button";
@@ -166,7 +165,6 @@ export function ControlsPage() {
         <div><span>当前受控操作</span><strong>{operation ? operationResult(operation) : "无"}</strong></div>
       </section>
 
-
       <section className="danger-zone mb-3.5">
         <div>
           <span className="danger-zone__eyebrow">危险操作 · 紧急熔断</span>
@@ -236,7 +234,6 @@ export function ControlsPage() {
           </Panel>
 
           <div className="space-y-3">
-            <ExitParametersPanel />
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-divider)] pb-2.5">
               <div>
                 <h3 className="m-0 text-[13px] font-bold text-[var(--color-text-primary)]">动态选币与轮动管理</h3>

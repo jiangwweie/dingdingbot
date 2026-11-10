@@ -1,6 +1,6 @@
-import { apiClient } from "../../api/client";
-import { ApiError, apiErrorFromResponse } from "../../api/errors";
-import type { components } from "../../api/schema";
+import { apiClient } from "./client";
+import { ApiError, apiErrorFromResponse } from "./errors";
+import type { components } from "./schema";
 
 export type ExitCurrent = components["schemas"]["ExitParameterCurrentView"];
 export type ExitBody = components["schemas"]["ExitParameterBody"];

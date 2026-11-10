@@ -16,6 +16,7 @@ import { SelectionSection } from './components/SelectionSection';
 import { DangerZoneCard } from './components/DangerZoneCard';
 import { ControlledFlattenModal } from './components/ControlledFlattenModal';
 import { RiskBudgetCard } from './components/overview/RiskBudgetCard';
+import { ExitParametersPanel } from './components/ExitParametersPanel';
 import { CapacitySection } from './components/CapacitySection';
 import { RecentOperations } from './components/RecentOperations';
 import { useFlattenControl } from './hooks/useFlattenControl';
@@ -299,6 +300,7 @@ export const App: React.FC = () => {
                 />
 
                 <RiskBudgetCard />
+                <ExitParametersPanel />
 
                 {/* Level 2: Strategy Control Matrix */}
                 <StrategyMatrix

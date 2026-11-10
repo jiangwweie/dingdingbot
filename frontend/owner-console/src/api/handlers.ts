@@ -2,7 +2,6 @@ import { http, HttpResponse } from "msw";
 import { ownerApiFixtures } from "./fixtures";
 
 export const ownerApiHandlers = [
-  http.get("/api/owner/v1/controls/exit-parameters", () => HttpResponse.json({ rows: [], active_tickets: [], observed_at_ms: 1800000000000 })),
   http.get("/api/owner/v1/auth/session", () => HttpResponse.json({ authenticated: true })),
   http.post("/api/owner/v1/auth/login", () => new HttpResponse(null, { status: 204 })),
   http.post("/api/owner/v1/auth/logout", () => new HttpResponse(null, { status: 204 })),

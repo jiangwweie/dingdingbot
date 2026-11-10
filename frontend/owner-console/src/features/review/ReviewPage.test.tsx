@@ -30,7 +30,6 @@ const reviewEnvelope = {
   source_watermark: "2026-08-09T08:00:00.000Z",
   freshness: "fresh" as const,
   data: {
-    summary_scope: "page" as const,
     from_ms: 1_804_816_000_000,
     to_ms: 1_807_408_800_000,
     sample_count: 1,
@@ -42,7 +41,6 @@ const reviewEnvelope = {
       position_side: "long" as const,
       terminal_at_ms: 1_807_408_800_000,
       review: {
-        economic_gaps: [], execution_gaps: [],
         ticket_id: "ticket:1",
         review_status: "complete" as const,
         execution_classification: "complete" as const,

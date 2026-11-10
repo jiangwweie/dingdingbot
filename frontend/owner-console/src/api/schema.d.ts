@@ -269,57 +269,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/owner/v1/controls/exit-parameters": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Read Exit Parameters */
-        get: operations["read_exit_parameters_api_owner_v1_controls_exit_parameters_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/owner/v1/controls/exit-parameters/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Exit Parameter Changes */
-        post: operations["preview_exit_parameter_changes_api_owner_v1_controls_exit_parameters_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/owner/v1/controls/exit-parameters/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish Exit Parameter Changes */
-        post: operations["publish_exit_parameter_changes_api_owner_v1_controls_exit_parameters_publish_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/owner/v1/controls/exit-profiles": {
         parameters: {
             query?: never;
@@ -382,58 +331,6 @@ export interface paths {
         put?: never;
         /** Flatten Preview */
         post: operations["flatten_preview_api_owner_v1_controls_exposure_flatten_all_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/owner/v1/controls/risk-budget": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Risk Budget */
-        get: operations["get_risk_budget_api_owner_v1_controls_risk_budget_get"];
-        put?: never;
-        /** Change Risk Budget */
-        post: operations["change_risk_budget_api_owner_v1_controls_risk_budget_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/owner/v1/controls/risk-budget/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Risk Budget */
-        post: operations["preview_risk_budget_api_owner_v1_controls_risk_budget_preview_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/owner/v1/controls/risk-budget/requests/{idempotency_key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Risk Budget Receipt */
-        get: operations["get_risk_budget_receipt_api_owner_v1_controls_risk_budget_requests__idempotency_key__get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1292,12 +1189,6 @@ export interface components {
             account_id: string;
             /** Effective At Ms */
             effective_at_ms: number;
-            /** Pending Baseline */
-            pending_baseline?: string | null;
-            /** Pending Budget Request Id */
-            pending_budget_request_id?: string | null;
-            /** Pending Policy Version */
-            pending_policy_version?: number | null;
             /** Pending Request Id */
             pending_request_id?: string | null;
             pending_view?: components["schemas"]["DirectionalView"] | null;
@@ -1305,12 +1196,12 @@ export interface components {
             requested_at_ms?: number | null;
             /**
              * Rule Digest
-             * @default sha256:54563b9f46a0370f2efda893fd6b4acc18ed6933f75961818ae7003b0f1a1406
+             * @default sha256:2379d5e3f0db356c026c214e9e2713cab7bf335d0026a903d12e82ec3902f23c
              */
             rule_digest: string;
             /**
              * Rule Id
-             * @default owner-directional-risk:v2
+             * @default owner-directional-risk:v1
              */
             rule_id: string;
             /** Venue Id */
@@ -1444,36 +1335,6 @@ export interface components {
         };
         /** EmptyControlBody */
         EmptyControlBody: Record<string, never>;
-        /** EntryRegimeControl */
-        EntryRegimeControl: {
-            /** Authorization Id */
-            authorization_id?: string | null;
-            /** Created At Ms */
-            created_at_ms: number;
-            /** Enabled */
-            enabled: boolean;
-            /** Event Spec Id */
-            event_spec_id: string;
-            /** Revision */
-            revision: number;
-            /**
-             * Rule Id
-             * @default btc4h_ma50_long_v1
-             * @constant
-             */
-            rule_id: "btc4h_ma50_long_v1";
-        };
-        /** EntryRegimeMarketView */
-        EntryRegimeMarketView: {
-            /** Close Price */
-            close_price: string | null;
-            /** Latest Close Ms */
-            latest_close_ms: number | null;
-            /** Sma50 */
-            sma50: string | null;
-            /** Status */
-            status: string;
-        };
         /** EventExitBinding */
         EventExitBinding: {
             /** Activation Reason */
@@ -1560,88 +1421,6 @@ export interface components {
              */
             source: "exit_event" | "review_fills" | "unavailable" | "not_applicable";
         };
-        /** ExitParameterBody */
-        ExitParameterBody: {
-            /** Changes */
-            changes: components["schemas"]["ExitParameterChange"][];
-            /** Expected Version */
-            expected_version: number;
-            /** Idempotency Key */
-            idempotency_key: string;
-            /**
-             * Quantity Samples
-             * @default []
-             */
-            quantity_samples: components["schemas"]["ExitQuantitySample-Input"][];
-            /** Reason */
-            reason: string;
-            /** Totp Code */
-            totp_code?: string | null;
-        };
-        /** ExitParameterChange */
-        ExitParameterChange: {
-            /** Event Spec Id */
-            event_spec_id: string;
-            /** Expected Binding Id */
-            expected_binding_id: string;
-            /** Expected Regime Revision */
-            expected_regime_revision?: number | null;
-            /** Expected Version */
-            expected_version: number;
-            /** Ma50 Enabled */
-            ma50_enabled?: boolean | null;
-            /** Max Actual Fraction */
-            max_actual_fraction?: number | string | null;
-            /** Quantity Fraction */
-            quantity_fraction: number | string;
-            /** Reward Multiple */
-            reward_multiple: number | string;
-        };
-        /** ExitParameterCurrentView */
-        ExitParameterCurrentView: {
-            /** Active Tickets */
-            active_tickets: components["schemas"]["FrozenTicketExitView"][];
-            btc_ma50: components["schemas"]["EntryRegimeMarketView"];
-            /** Observed At Ms */
-            observed_at_ms: number;
-            /** Rows */
-            rows: components["schemas"]["ExitParameterRow"][];
-        };
-        /** ExitParameterPreview */
-        ExitParameterPreview: {
-            /**
-             * Affects
-             * @default new_tickets_only
-             * @constant
-             */
-            affects: "new_tickets_only";
-            /** Profiles */
-            profiles: components["schemas"]["ExitProfile"][];
-            /**
-             * Quantity Previews
-             * @default []
-             */
-            quantity_previews: components["schemas"]["ExitQuantitySampleResult"][];
-            /** Source Profiles */
-            source_profiles: components["schemas"]["ExitProfile"][];
-        };
-        /** ExitParameterReceipt */
-        ExitParameterReceipt: {
-            /** Authorized At Ms */
-            authorized_at_ms: number;
-            /** Bindings */
-            bindings: components["schemas"]["CurrentEventExitBinding"][];
-            /** Regimes */
-            regimes: components["schemas"]["EntryRegimeControl"][];
-        };
-        /** ExitParameterRow */
-        ExitParameterRow: {
-            binding: components["schemas"]["CurrentEventExitBinding"];
-            /** Event Spec Id */
-            event_spec_id: string;
-            profile: components["schemas"]["ExitProfile"];
-            regime: components["schemas"]["EntryRegimeControl"] | null;
-        };
         /** ExitProfile */
         ExitProfile: {
             break_even_floor: components["schemas"]["BreakEvenFloorRule"];
@@ -1719,53 +1498,6 @@ export interface components {
             /** Totp Code */
             totp_code?: string | null;
         };
-        /**
-         * ExitQuantityRule
-         * @description Explicit opt-in to raising a target split to venue minimums.
-         */
-        ExitQuantityRule: {
-            /**
-             * Algorithm
-             * @default target_floor_then_minimum_v1
-             * @constant
-             */
-            algorithm: "target_floor_then_minimum_v1";
-            /** Max Actual Fraction */
-            max_actual_fraction: string;
-        };
-        /** ExitQuantitySample */
-        "ExitQuantitySample-Input": {
-            /** Entry Price */
-            entry_price: number | string;
-            /** Event Spec Id */
-            event_spec_id: string;
-            /** Exchange Instrument Id */
-            exchange_instrument_id: string;
-            /** Quantity */
-            quantity: number | string;
-            /** Stop Price */
-            stop_price: number | string;
-        };
-        /** ExitQuantitySample */
-        "ExitQuantitySample-Output": {
-            /** Entry Price */
-            entry_price: string;
-            /** Event Spec Id */
-            event_spec_id: string;
-            /** Exchange Instrument Id */
-            exchange_instrument_id: string;
-            /** Quantity */
-            quantity: string;
-            /** Stop Price */
-            stop_price: string;
-        };
-        /** ExitQuantitySampleResult */
-        ExitQuantitySampleResult: {
-            plan?: components["schemas"]["PostFillExitPlan"] | null;
-            sample: components["schemas"]["ExitQuantitySample-Output"];
-            /** Status */
-            status: string;
-        };
         /** FlattenBody */
         FlattenBody: {
             /**
@@ -1816,17 +1548,6 @@ export interface components {
          * @enum {string}
          */
         Freshness: "fresh" | "stale" | "unavailable" | "contradictory";
-        /** FrozenTicketExitView */
-        FrozenTicketExitView: {
-            /** Actual Tp1 Fraction */
-            actual_tp1_fraction: string | null;
-            /** Event Spec Id */
-            event_spec_id: string;
-            /** Exit Profile Id */
-            exit_profile_id: string;
-            /** Ticket Id */
-            ticket_id: string;
-        };
         /** GenericSelectionActivationBody */
         GenericSelectionActivationBody: {
             /** Effective Period Anchor Ms */
@@ -2484,58 +2205,6 @@ export interface components {
             /** Win Count */
             win_count: number;
         };
-        /** PostFillExitPlan */
-        PostFillExitPlan: {
-            /** Actual Fraction */
-            actual_fraction: string;
-            /** Effective Reward Multiple */
-            effective_reward_multiple: string;
-            /** Minimum Raised */
-            minimum_raised: boolean;
-            request: components["schemas"]["PostFillExitRequest"];
-            /** Risk Quote */
-            risk_quote: string;
-            /** Runner Quantity */
-            runner_quantity: string;
-            /** Take Profit Price */
-            take_profit_price: string;
-            /** Tp1 Quantity */
-            tp1_quantity: string;
-        };
-        /** PostFillExitRequest */
-        PostFillExitRequest: {
-            /** Average Fill Price */
-            average_fill_price: string;
-            /** Created At Ms */
-            created_at_ms: number;
-            /** Exit Binding Id */
-            exit_binding_id: string;
-            /** Initial Stop Price */
-            initial_stop_price: string;
-            /** Min Notional */
-            min_notional: string;
-            /** Min Quantity */
-            min_quantity: string;
-            /** Price Tick */
-            price_tick: string;
-            profile: components["schemas"]["ExitProfile"];
-            /** Quantity */
-            quantity: string;
-            /** Quantity Step */
-            quantity_step: string;
-            /** Reference Take Profit Price */
-            reference_take_profit_price?: string | null;
-            /** Reference Tp1 Quantity */
-            reference_tp1_quantity?: string | null;
-            /** Rules Digest */
-            rules_digest: string;
-            /** Rules Observed At Ms */
-            rules_observed_at_ms: number;
-            /** Rules Valid Until Ms */
-            rules_valid_until_ms: number;
-            /** Ticket Id */
-            ticket_id: string;
-        };
         /**
          * PreTp1GuardKind
          * @enum {string}
@@ -2742,91 +2411,6 @@ export interface components {
             template_id: "execution_complete" | "execution_recovered" | "execution_incomplete" | "economics_complete" | "economics_incomplete" | "review_waiting" | "ticket_in_progress";
             /** Text */
             text: string;
-        };
-        /** RiskBudgetBody */
-        RiskBudgetBody: {
-            /** Baseline */
-            baseline: string;
-            /** Expected Directional Version */
-            expected_directional_version: number;
-            /** Expected Version */
-            expected_version: number;
-            /** Idempotency Key */
-            idempotency_key: string;
-            /** Reason */
-            reason: string;
-            /** Totp Code */
-            totp_code?: string | null;
-        };
-        /** RiskBudgetPreviewBody */
-        RiskBudgetPreviewBody: {
-            /** Baseline */
-            baseline: string;
-        };
-        /** RiskBudgetReceipt */
-        RiskBudgetReceipt: {
-            /** Baseline */
-            baseline: string;
-            /** Effective At Ms */
-            effective_at_ms?: number | null;
-            /** Policy Version */
-            policy_version?: number | null;
-            /** Request Id */
-            request_id: string;
-            /** Requested At Ms */
-            requested_at_ms: number;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "pending" | "effective" | "unchanged";
-        };
-        /** RiskBudgetView */
-        RiskBudgetView: {
-            /** Account Id */
-            account_id: string;
-            /** Balance Captured At Ms */
-            balance_captured_at_ms: number | null;
-            /** Baseline */
-            baseline: string;
-            /** Directional Limit */
-            directional_limit: string;
-            /** Directional Version */
-            directional_version: number;
-            /** Entry Enabled */
-            entry_enabled: boolean;
-            /** Gross Limit */
-            gross_limit: string;
-            /** Long Limit */
-            long_limit: string;
-            /** Long Risk At Stop */
-            long_risk_at_stop: string;
-            /** Max Baseline */
-            max_baseline: string;
-            /** Min Baseline */
-            min_baseline: string;
-            /** Minimum Risk */
-            minimum_risk: string;
-            /** Pending Baseline */
-            pending_baseline: string | null;
-            /** Pending Directional View */
-            pending_directional_view: string | null;
-            /** Policy Version */
-            policy_version: number;
-            /** Short Limit */
-            short_limit: string;
-            /** Short Risk At Stop */
-            short_risk_at_stop: string;
-            /** Step */
-            step: string;
-            /** Updated At Ms */
-            updated_at_ms: number;
-            /** Venue Id */
-            venue_id: string;
-            /** View */
-            view: string;
-            /** Wallet Balance At Last Admission */
-            wallet_balance_at_last_admission: string | null;
         };
         /** RollingExtremeAtrRunnerRule */
         RollingExtremeAtrRunnerRule: {
@@ -3566,15 +3150,8 @@ export interface components {
              * @constant
              */
             market_fallback_allowed: false;
-            /**
-             * Price Basis
-             * @default entry_reference
-             * @enum {string}
-             */
-            price_basis: "entry_reference" | "actual_fill";
             /** Quantity Fraction */
             quantity_fraction: string;
-            quantity_rule?: components["schemas"]["ExitQuantityRule"] | null;
             /** Reward Multiple */
             reward_multiple: string;
         };
@@ -4262,92 +3839,6 @@ export interface operations {
             };
         };
     };
-    read_exit_parameters_api_owner_v1_controls_exit_parameters_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExitParameterCurrentView"];
-                };
-            };
-        };
-    };
-    preview_exit_parameter_changes_api_owner_v1_controls_exit_parameters_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExitParameterBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExitParameterPreview"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_exit_parameter_changes_api_owner_v1_controls_exit_parameters_publish_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ExitParameterBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ExitParameterReceipt"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     read_exit_profile_authority_api_owner_v1_controls_exit_profiles_get: {
         parameters: {
             query?: {
@@ -4468,123 +3959,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlattenPreview"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_risk_budget_api_owner_v1_controls_risk_budget_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RiskBudgetView"];
-                };
-            };
-        };
-    };
-    change_risk_budget_api_owner_v1_controls_risk_budget_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RiskBudgetBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RiskBudgetReceipt"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    preview_risk_budget_api_owner_v1_controls_risk_budget_preview_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RiskBudgetPreviewBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RiskBudgetView"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_risk_budget_receipt_api_owner_v1_controls_risk_budget_requests__idempotency_key__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                idempotency_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RiskBudgetReceipt"] | null;
                 };
             };
             /** @description Validation Error */

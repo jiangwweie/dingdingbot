@@ -222,7 +222,7 @@ const completeReviewItem = {
   exchange_instrument_id: terminalTrade.exchange_instrument_id,
   position_side: terminalTrade.position_side,
   terminal_at_ms: terminalTrade.terminal_at_ms!,
-  review: { economic_gaps: [], execution_gaps: [], ticket_id: terminalTrade.ticket_id, review_status: "complete", execution_classification: "complete", economic_summary: { gross_pnl: terminalTrade.gross_pnl, fees: terminalTrade.fees, funding: terminalTrade.funding, net_pnl: terminalTrade.net_pnl, net_r: money("-1.114162711864406779661016949", "R") }, exit_reason: terminalTrade.exit_reason, attention_items: [], sentences: [{ template_id: "execution_complete", text: "执行链完整。ENTRY 后初始保护已确认；退出由 TP1 后 Runner EXIT 触发。", evidence: [evidence("event", "event:terminal:complete"), evidence("review", "review:ticket:terminal:2")] }], final_conclusion: "执行链完整。", evidence: terminalTrade.evidence },
+  review: { ticket_id: terminalTrade.ticket_id, review_status: "complete", execution_classification: "complete", economic_summary: { gross_pnl: terminalTrade.gross_pnl, fees: terminalTrade.fees, funding: terminalTrade.funding, net_pnl: terminalTrade.net_pnl, net_r: money("-1.114162711864406779661016949", "R") }, exit_reason: terminalTrade.exit_reason, attention_items: [], sentences: [{ template_id: "execution_complete", text: "执行链完整。ENTRY 后初始保护已确认；退出由 TP1 后 Runner EXIT 触发。", evidence: [evidence("event", "event:terminal:complete"), evidence("review", "review:ticket:terminal:2")] }], final_conclusion: "执行链完整。", evidence: terminalTrade.evidence },
 } satisfies components["schemas"]["ReviewCenterItem"];
 
 export const reviewFixture = {
@@ -230,7 +230,7 @@ export const reviewFixture = {
   generated_at: generatedAt,
   source_watermark: generatedAt,
   freshness: "fresh",
-  data: { summary_scope: "page", from_ms: baseTime - 30 * 86_400_000, to_ms: baseTime, sample_count: 1, next_cursor: null, items: [completeReviewItem], net_pnl: terminalTrade.net_pnl, net_r: money("-1.114162711864406779661016949", "R"), fees: terminalTrade.fees, funding: terminalTrade.funding, exit_reason_breakdown: [{ label: "deployment_drain:deploy-20260804-8627ae9c:8627ae9ca5430fd9f8b9a76935f685cd36960ccc", ticket_count: 1, evidence: terminalTrade.evidence }], execution_quality_breakdown: [{ label: "complete", ticket_count: 1, evidence: terminalTrade.evidence }], complete_review_count: 1, incomplete_review_count: 0, strategy_group_samples: [{ strategy_group_id: terminalTrade.strategy_group_id, sample_count: 1, evidence_state: "observe_only", evidence: terminalTrade.evidence }], evidence: terminalTrade.evidence },
+  data: { from_ms: baseTime - 30 * 86_400_000, to_ms: baseTime, sample_count: 1, next_cursor: null, items: [completeReviewItem], net_pnl: terminalTrade.net_pnl, net_r: money("-1.114162711864406779661016949", "R"), fees: terminalTrade.fees, funding: terminalTrade.funding, exit_reason_breakdown: [{ label: "deployment_drain:deploy-20260804-8627ae9c:8627ae9ca5430fd9f8b9a76935f685cd36960ccc", ticket_count: 1, evidence: terminalTrade.evidence }], execution_quality_breakdown: [{ label: "complete", ticket_count: 1, evidence: terminalTrade.evidence }], complete_review_count: 1, incomplete_review_count: 0, strategy_group_samples: [{ strategy_group_id: terminalTrade.strategy_group_id, sample_count: 1, evidence_state: "observe_only", evidence: terminalTrade.evidence }], evidence: terminalTrade.evidence },
 } satisfies components["schemas"]["ApiEnvelope_ReviewCenterSummary_"];
 
 const strategyVersionFixture = {
@@ -243,7 +243,6 @@ const strategyVersionFixture = {
   ticket_count: 4,
   natural_terminal_count: 3,
   confirmed_natural_review_count: 2,
-  confirmed_review_count: 2, selected_terminal_count: 3, safety_exit_count: 0, unknown_exit_count: 0,
   pending_natural_review_count: 1,
   controlled_exit_count: 1,
   tp1_reached_count: 1,
@@ -291,7 +290,6 @@ const tradfiStrategyVersionFixture = {
   ticket_count: 0,
   natural_terminal_count: 0,
   confirmed_natural_review_count: 0,
-  confirmed_review_count: 0, selected_terminal_count: 0, safety_exit_count: 0, unknown_exit_count: 0,
   pending_natural_review_count: 0,
   controlled_exit_count: 0,
   tp1_reached_count: 0,
