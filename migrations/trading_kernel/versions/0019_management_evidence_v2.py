@@ -69,6 +69,7 @@ def upgrade():
             raw.c.received_at_ms,
             raw.c.receive_sequence,
         )
+        sa.Index('ix_brc_management_stream_child',raw.c.scope_key,raw.c.safe_payload['o']['ai'].astext)
         baseline = sa.Table(
             "brc_order_command_baselines",
             metadata,
@@ -137,6 +138,7 @@ def upgrade():
             c.exec_driver_sql(
                 f"CREATE TRIGGER trg_{table.name}_immutable BEFORE UPDATE OR DELETE ON {table.name} FOR EACH ROW EXECUTE FUNCTION brc_management_facts_immutable()"
             )
+    c.exec_driver_sql("CREATE INDEX ix_brc_management_evidence_child ON brc_management_order_evidence (ticket_id,(payload->>'child_exchange_order_id'))")
     op.add_column(
         "brc_management_observation_current",
         sa.Column(

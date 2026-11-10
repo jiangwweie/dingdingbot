@@ -29,6 +29,133 @@ class PostgresManagementRepository(PostgresManagementFeed):
         super().__init__(connection)
         self.new_evidence: dict[str, list[OrderEvidence]] = {}
 
+    async def has_evidence(self, ticket_id, evidence_id):
+        return bool(
+            await self.c.scalar(
+                sa.select(sa.literal(True)).where(
+                    sa.exists(
+                        sa.select(evidence.c.evidence_id).where(
+                            evidence.c.ticket_id == ticket_id,
+                            evidence.c.evidence_id == evidence_id,
+                        )
+                    )
+                )
+            )
+        )
+
+    async def has_conditional_child_link(self, ticket_id, item):
+        from src.trading_kernel.infrastructure.pg_models import management_stream_events
+
+        t = item.terms
+        return bool(
+            await self.c.scalar(
+                sa.select(sa.literal(True)).where(
+                    sa.or_(
+                        sa.exists(
+                            sa.select(evidence.c.evidence_id).where(
+                                evidence.c.ticket_id == ticket_id,
+                                evidence.c.payload["child_exchange_order_id"].astext
+                                == t.exchange_order_id,
+                            )
+                        ),
+                        sa.exists(
+                            sa.select(management_stream_events.c.event_id).where(
+                                management_stream_events.c.scope_key
+                                == f"brc-app-manual-v1:{t.venue_id}:{t.account_id}",
+                                management_stream_events.c.safe_payload["o"][
+                                    "ai"
+                                ].astext
+                                == t.exchange_order_id,
+                            )
+                        ),
+                    )
+                )
+            )
+        )
+
+    async def child_system_intents(self, ticket_id, item):
+        from src.trading_kernel.application.management_intents import system_intents_for
+        from src.trading_kernel.domain.trade_management import (
+            OrderAction,
+            SystemOrderIntent,
+        )
+        from src.trading_kernel.infrastructure.binance_management_observation import (
+            parse_order_update,
+        )
+        from src.trading_kernel.infrastructure.pg_models import management_stream_events
+
+        t = item.terms
+        if t.order_namespace != "regular":
+            return ()
+        parents = (
+            (
+                await self.c.execute(
+                    sa.select(evidence.c.payload)
+                    .where(
+                        evidence.c.ticket_id == ticket_id,
+                        evidence.c.payload["child_exchange_order_id"].astext
+                        == t.exchange_order_id,
+                    )
+                    .limit(9)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        raw = (
+            (
+                await self.c.execute(
+                    sa.select(management_stream_events)
+                    .where(
+                        management_stream_events.c.scope_key
+                        == f"brc-app-manual-v1:{t.venue_id}:{t.account_id}",
+                        management_stream_events.c.safe_payload["e"].astext
+                        == "ALGO_UPDATE",
+                        management_stream_events.c.safe_payload["o"]["ai"].astext
+                        == t.exchange_order_id,
+                    )
+                    .limit(9)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if len(parents) > 8 or len(raw) > 8:
+            raise ValueError("conditional child proof ambiguous")
+        parsed = [OrderEvidence.model_validate(p) for p in parents]
+        parsed.extend(
+            parse_order_update(
+                r["safe_payload"],
+                account_id=t.account_id,
+                received_at_ms=r["received_at_ms"],
+                coverage_complete=True,
+            )
+            for r in raw
+        )
+        for parent in parsed:
+            pt = parent.terms
+            if (
+                pt.identity[:4] != t.identity[:4]
+                or pt.side != t.side
+                or pt.quantity != t.quantity
+            ):
+                continue
+            rows = await self.command_rows_for_order(
+                ticket_id, "conditional", pt.exchange_order_id
+            )
+            matched = system_intents_for(parent, rows)
+            if any(intent.terms == pt for intent in matched):
+                return (
+                    SystemOrderIntent(
+                        command_id=matched[0].command_id,
+                        action=OrderAction.NEW,
+                        terms=t,
+                        exchange_event_at_ms=item.created_at_ms
+                        or item.exchange_event_at_ms,
+                    ),
+                )
+        return ()
+
     async def pending_command_rows(self, ticket_id):
         rows = (
             (

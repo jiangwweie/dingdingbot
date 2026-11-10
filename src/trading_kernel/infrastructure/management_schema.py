@@ -26,6 +26,7 @@ def define_management_tables(metadata):
         raw.c.received_at_ms,
         raw.c.receive_sequence,
     )
+    sa.Index('ix_brc_management_stream_child',raw.c.scope_key,raw.c.safe_payload['o']['ai'].astext)
     baseline = sa.Table(
         "brc_order_command_baselines",
         metadata,

@@ -3163,6 +3163,7 @@ sa.CheckConstraint(
 management_order_evidence = sa.Table("brc_management_order_evidence",metadata,
     _id("evidence_id",primary_key=True),sa.Column("ticket_id",ID,sa.ForeignKey("brc_trade_tickets.ticket_id"),nullable=False),
     _json("payload"),_time("observed_at_ms"))
+sa.Index('ix_brc_management_evidence_child',management_order_evidence.c.ticket_id,management_order_evidence.c.payload['child_exchange_order_id'].astext)
 sa.Index("ix_brc_management_order_evidence_ticket_id_observed_at_ms",management_order_evidence.c.ticket_id,management_order_evidence.c.observed_at_ms)
 management_observation_current = sa.Table("brc_management_observation_current",metadata,
     sa.Column("ticket_id",ID,sa.ForeignKey("brc_trade_tickets.ticket_id"),primary_key=True),

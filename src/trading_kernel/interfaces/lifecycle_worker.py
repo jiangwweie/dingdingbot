@@ -357,5 +357,7 @@ async def _dispatch_lifecycle(
             now_ms=request.now_ms,
             lease_until_ms=request.lease_until_ms,
             timeout_seconds=request.timeout_seconds,
+            runtime_commit=request.runtime_commit,
+            schema_revision=request.schema_revision,
         ),
     )

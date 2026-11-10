@@ -108,7 +108,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                             text(
                                 'SELECT ((to_jsonb(t)' + ("-'current_complete'-'attribution_complete'-'proof_refs'-'continuity_complete') || jsonb_build_object('facts_complete',coalesce(to_jsonb(t)->'facts_complete',to_jsonb(t)->'proof_refs'->'migration'->'legacy_facts_complete'))" if table.name=='brc_management_observation_current' and forward else ')') + ')::text FROM "'
                                 + table.name
-                                + '" t ORDER BY to_jsonb(t)::text LIMIT 100001'
+                                + '" t ORDER BY 1 LIMIT 100001'
                             )
                         )
                     )

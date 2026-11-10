@@ -84,7 +84,6 @@ async def _observe_management_once(
             or a.post_fill_stress_status != "passed"
         ):
             return "initial_handover_pending"
-        commands = await u.management.command_rows(ticket_id)
         if any(
             c["status"] in ("claimed", "dispatch_started", "outcome_unknown")
             for c in await u.management.pending_command_rows(ticket_id)
@@ -134,6 +133,9 @@ async def _observe_management_once(
         if current is None:
             return "ticket_absent"
         for item in batch.evidence:
+            if item.exchange_event_at_ms >= current.ticket.created_at_ms:
+                await u.management.save_evidence(ticket_id,item)
+        for item in batch.evidence:
             if item.exchange_event_at_ms < current.ticket.created_at_ms:
                 continue
             await observe_trade_management(
@@ -157,14 +159,13 @@ async def _observe_management_once(
                     'observed_at_ms':batch.snapshot.observed_at_ms,'valid_until_ms':batch.snapshot.observed_at_ms+30000},
                 'continuity':{'status':'complete' if batch.complete else 'gap','from_ms':since,'through_ms':batch.covered_until_ms,'reason':batch.reason}},
         )
-        decisive = all(
-            classify_order_evidence(
-                item, system_intents=system_intents_for(item, commands)
-            ).decision
-            in (ManagementDecision.SYSTEM, ManagementDecision.NATURAL)
-            for item in batch.evidence
-            if item.exchange_event_at_ms >= current.ticket.created_at_ms
-        )
+        decisive=True
+        for item in batch.evidence:
+            if item.exchange_event_at_ms < current.ticket.created_at_ms:continue
+            exact_rows=await u.management.command_rows_for_order(ticket_id,item.terms.order_namespace,item.terms.exchange_order_id)
+            intents=system_intents_for(item,exact_rows) + await u.management.child_system_intents(ticket_id,item)
+            if classify_order_evidence(item,system_intents=intents).decision not in (ManagementDecision.SYSTEM,ManagementDecision.NATURAL):
+                decisive=False
         # An empty/partial history is not affirmative coverage of our orders.
         required_orders = accepted_order_identities(await u.management.command_rows(ticket_id))
         observed_orders = {(item.terms.order_namespace, item.terms.exchange_order_id) for item in batch.evidence}

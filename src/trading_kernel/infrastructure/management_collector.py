@@ -129,8 +129,6 @@ async def collect_management_scan(
                 ):
                     complete = False
                     reason = "conditional_child_identity_mismatch"
-                else:
-                    continue
             try:
                 e = parse_rest_order(
                     raw,account_id=request.domain.account_id,conditional=conditional,
@@ -266,11 +264,6 @@ async def collect_management_scan(
         for received, raw in stream(
             symbol=symbol, side=request.domain.position_side, start_ms=start, end_ms=now
         ):
-            if (
-                raw.get("e") == "ORDER_TRADE_UPDATE"
-                and str(raw.get("o", {}).get("i")) in triggered_children
-            ):
-                continue
             streamed = parse_order_update(
                 raw,
                 account_id=request.domain.account_id,

@@ -279,6 +279,10 @@ async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_
                     "WHERE capability_key = 'exchange_commands'"
                 )
             )
+        from tests.trading_kernel.support.management_receiver import (
+            ready_management_receiver,
+        )
+        await ready_management_receiver(engine,now_ms=NOW_MS+10000)
     finally:
         if engine is not None:
             await engine.dispose()

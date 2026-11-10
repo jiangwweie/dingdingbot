@@ -145,9 +145,9 @@ def parse_order_update(
     if algo:
         if status == "NEW":
             # Documented trailing activation pushes NEW again with ia=true.
-            if "ia" not in row:
+            if terms.order_type == "TRAILING_STOP_MARKET" and "ia" not in row:
                 raise ValueError("algo activation discriminator missing")
-            action = OrderAction.STATUS if _boolean(row, "ia") else OrderAction.NEW
+            action = OrderAction.STATUS if "ia" in row and _boolean(row, "ia") else OrderAction.NEW
         else:
             actions = {
                 "CANCELED": OrderAction.CANCEL,
@@ -199,6 +199,7 @@ def parse_order_update(
         known_command_outcome_pending=known_command_outcome_pending,
         before_terms=before_terms,
         source_event_at_ms=event_time,
+        child_exchange_order_id=_string(row,"ai") if algo and row.get("ai") not in (None,"",0,"0") else None,
     )
 
 
@@ -281,7 +282,7 @@ def parse_rest_order(row: Mapping[str,object],*,account_id: str,conditional: boo
           'wt':row['workingType'],'pP':row['priceProtect'],'pm':row['priceMatch'],
           'V':row['selfTradePreventionMode'],'gtd':row['goodTillDate'],'O':created,'X':state}
     if conditional:
-        body.update({'aid':row['algoId'],'caid':row['clientAlgoId'],'tp':row['triggerPrice'],'ia':row.get('isActivated',False)})
+        body.update({'aid':row['algoId'],'caid':row['clientAlgoId'],'tp':row['triggerPrice'],'ia':row.get('isActivated',False),'ai':row.get('actualOrderId','')})
         if row.get('actualQty') is not None:body['aq']=row['actualQty']
     else:
         body.update({'i':row['orderId'],'c':row['clientOrderId'],'sp':row['stopPrice'],

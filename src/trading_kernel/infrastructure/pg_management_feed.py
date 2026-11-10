@@ -353,7 +353,9 @@ class PostgresManagementFeed:
             and row["lease_until_ms"] > now_ms
             and row["persisted_watermark"] == row["applied_watermark"]
             and row["last_successful_at_ms"] is not None
-            and row["last_successful_at_ms"] >= now_ms - FEED_LEASE_MS
+            and now_ms - FEED_LEASE_MS <= row["last_successful_at_ms"] <= now_ms
+            and row["connected_at_ms"] is not None
+            and row["connected_at_ms"] <= now_ms
             and row["schema_revision"] == CURRENT_SCHEMA_REVISION
             and (runtime_commit is None or row["runtime_commit"] == runtime_commit)
         )
@@ -391,7 +393,7 @@ class PostgresManagementFeed:
             .mappings()
             .one_or_none()
         )
-        if not row or not await self.feed_ready(scope_key, now_ms=end_ms):
+        if not row or not await self.feed_ready(scope_key, now_ms=max(end_ms,row["last_successful_at_ms"] or end_ms)):
             return False
         intervals = []
         if (

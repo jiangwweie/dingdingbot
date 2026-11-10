@@ -359,3 +359,31 @@ async def test_invalid_preparation_terms_also_freezes_management(head_template_e
     source.read_management_scan.assert_not_awaited()
     async with PostgresKernelUnitOfWork(e) as u:
         assert (await u.aggregates.get(t.identity.ticket_id)).management_mode is ManagementMode.REVIEW_REQUIRED
+
+
+@pytest.mark.asyncio
+async def test_triggered_system_algo_child_is_proven_by_exact_parent_and_baseline(head_template_engine):
+    from src.trading_kernel.application.observe_trade_management import (
+        observe_trade_management,
+    )
+    from src.trading_kernel.domain.trade_management import OrderAction
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t);d=t.identity.netting_domain
+    async with PostgresKernelUnitOfWork(e) as u:
+        rows=await u.management.command_rows(t.identity.ticket_id)
+        row=next(r for r in rows if r['command_kind']=='initial_stop');p=row['request_payload']
+        terms=OrderTerms(venue_id=d.venue_id,account_id=d.account_id,exchange_instrument_id=d.exchange_instrument_id,position_side=d.position_side,
+            order_namespace='conditional',exchange_order_id=row['result_payload']['exchange_order_id'],client_order_id=row['venue_client_order_id'],
+            side=p['side'],order_type='STOP_MARKET',quantity=p['quantity'],price=None,trigger_price=p['stop_price'],close_position=False,
+            reduce_only=True,time_in_force='GTC',working_type='CONTRACT_PRICE',price_protect=False,activation_price=None,callback_rate=None,
+            price_match='NONE',self_trade_prevention_mode='EXPIRE_MAKER',good_till_date_ms=0)
+        creation=OrderEvidence(evidence_id='parent-created',terms=terms,action=OrderAction.NEW,exchange_event_at_ms=2200,received_at_ms=2300,
+            created_at_ms=2200,executed_quantity='0',coverage_complete=True,known_command_outcome_pending=False)
+        await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=creation,now_ms=6000)
+        parent=creation.model_copy(update={'evidence_id':'parent-triggered','action':OrderAction.TRIGGERED,'exchange_event_at_ms':5000,
+            'received_at_ms':6000,'child_exchange_order_id':'child-1'})
+        await u.management.save_evidence(t.identity.ticket_id,parent)
+        child=creation.model_copy(update={'evidence_id':'child-trade','terms':terms.model_copy(update={'order_namespace':'regular',
+            'exchange_order_id':'child-1','client_order_id':'venue-child','order_type':'MARKET','trigger_price':None}),
+            'action':OrderAction.TRADE,'created_at_ms':5000,'exchange_event_at_ms':5000,'received_at_ms':6000,'executed_quantity':t.quantity})
+        state=await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=child,now_ms=6000)
+        assert state.mode is ManagementMode.AUTO

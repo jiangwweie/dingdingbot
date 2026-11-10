@@ -228,7 +228,8 @@ async def test_triggered_algo_child_is_not_an_external_manual_order():
             observed_at_ms=2000,
         ),
     )
-    assert not any(e.terms.client_order_id == "venue-child" for e in b.evidence)
+    assert any(e.child_exchange_order_id == "99" for e in b.evidence)
+    assert any(e.terms.client_order_id == "venue-child" for e in b.evidence)
     assert any(e.terms.exchange_order_id == "12" for e in b.evidence)
 
 

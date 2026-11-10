@@ -585,6 +585,10 @@ async def run_event_chain(
     position_source = CertifiedPositionSource()
     lifecycle_source = CertifiedLifecycleFactsSource()
     review_source = CertifiedReviewEconomicsSource()
+    from tests.trading_kernel.support.management_receiver import (
+        ready_management_receiver,
+    )
+    await ready_management_receiver(six_event_engine,now_ms=NOW_MS+1000)
     entry = await run_entry_worker_once(
         uow_factory,
         venue,
@@ -699,6 +703,7 @@ async def run_event_chain(
         market_facts=None,
         observed_at_ms=NOW_MS + 5_000,
     )
+    await ready_management_receiver(six_event_engine,now_ms=NOW_MS+5000,ticket_id=ticket.identity.ticket_id)
     runner_replacement = await run_lifecycle_worker_once(
         uow_factory,
         venue,

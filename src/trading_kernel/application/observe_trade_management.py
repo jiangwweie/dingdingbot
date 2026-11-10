@@ -74,7 +74,9 @@ async def observe_trade_management(
     )
     from src.trading_kernel.application.management_intents import system_intents_for
     rows=await uow.management.command_rows_for_order(ticket_id,verified.terms.order_namespace,verified.terms.exchange_order_id)
-    intents=system_intents_for(verified,rows)
+    intents=system_intents_for(verified,rows) + await uow.management.child_system_intents(ticket_id,verified)
+    if not intents and verified.terms.order_namespace=='regular' and await uow.management.has_conditional_child_link(ticket_id,verified):
+        verified=verified.model_copy(update={'known_command_outcome_pending':True})
     await uow.management.save_baseline(ticket_id,verified,rows)
     after = transition_management(
         state,

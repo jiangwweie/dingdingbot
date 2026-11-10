@@ -36,3 +36,49 @@ def test_recorded_bnb_rest_evidence_survives_actual_ccxt_decode(filename, condit
     assert evidence.terms.exchange_instrument_id == "binance-usdm:BNBUSDT:perpetual"
     assert evidence.terms.self_trade_prevention_mode == "EXPIRE_MAKER"
     assert evidence.executed_quantity >= 0
+
+
+def test_fixed_algo_new_uses_pinned_ccxt_protocol_without_trailing_activation_field():
+    from src.trading_kernel.infrastructure.binance_management_observation import (
+        parse_order_update,
+    )
+
+    raw = {
+        "e": "ALGO_UPDATE",
+        "E": 2001,
+        "T": 2000,
+        "o": {
+            "caid": "brc-exact",
+            "aid": 201,
+            "at": "CONDITIONAL",
+            "o": "STOP_MARKET",
+            "s": "BNBUSDT",
+            "S": "BUY",
+            "ps": "SHORT",
+            "f": "GTC",
+            "q": "2.82",
+            "X": "NEW",
+            "ai": "",
+            "ap": "0",
+            "aq": "0",
+            "act": "",
+            "tp": "692.26",
+            "p": "0",
+            "V": "EXPIRE_MAKER",
+            "wt": "CONTRACT_PRICE",
+            "pm": "NONE",
+            "cp": False,
+            "pP": False,
+            "R": True,
+            "tt": 0,
+            "gtd": 0,
+        },
+    }
+    x = ccxt.binanceusdm()
+    evidence = parse_order_update(
+        x.on_json_response(json.dumps(raw)),
+        account_id="replay-account",
+        received_at_ms=2002,
+        coverage_complete=True,
+    )
+    assert evidence.action.value == "new" and evidence.terms.exchange_order_id == "201"

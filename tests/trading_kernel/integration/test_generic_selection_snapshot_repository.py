@@ -151,6 +151,9 @@ from tests.trading_kernel.support.generic_selection import (
     qualify_window,
     shift_window,
 )
+from tests.trading_kernel.support.management_receiver import (
+    dispatch_with_recorded_management,
+)
 from tests.trading_kernel.support.owner_roles import (
     apply_owner_control_grants as _apply_owner_control_grants,
 )
@@ -5320,7 +5323,6 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
         assert commands[0]["status"] == "prepared"
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
-        dispatch_one_command,
     )
     from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
     from src.trading_kernel.domain.commands import (
@@ -5371,7 +5373,7 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
             "WHERE capability_key='exchange_commands'"
         ))
     venue = RecordingVenue()
-    dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+    dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
         DispatchCommandRequest(worker_id=f"natural-{group}-dispatch",ticket_id=issued.ticket_id,
             now_ms=issued_at+5,lease_until_ms=issued_at+30_000,timeout_seconds=1,
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
@@ -5440,7 +5442,7 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
                 await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
                     expected_version=pending.version)
         venue.now_ms = issued_at+step
-        result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        result = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
             DispatchCommandRequest(worker_id=f"natural-{group}-lifecycle",ticket_id=issued.ticket_id,
                 now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1), clock_ms=lambda: venue.now_ms)
         assert result.status.value == "accepted", result
@@ -5570,7 +5572,6 @@ async def _assert_natural_sent_entry_drained_by_selection(
 ) -> None:
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
-        dispatch_one_command,
     )
     from src.trading_kernel.domain.aggregate import AggregateStatus
     from src.trading_kernel.domain.commands import ExchangeCommandKind
@@ -5743,7 +5744,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
                 observed_at_ms=now+6,reason="recording_cancel_response_lost")
 
         with patch.object(venue,"execute",new=unknown_execution):
-            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request, clock_ms=lambda: dispatch_request.now_ms)
+            dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request, clock_ms=lambda: dispatch_request.now_ms)
         assert dispatched.status.value == "outcome_unknown", dispatched
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=now+7)):
@@ -5760,7 +5761,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
             assert await uow.instrument_selection.get_generic_materialization_generation(
                 GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
             held_commands = await uow.exchange_commands.list_for_ticket(issued.ticket_id)
-        no_resend = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        no_resend = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
             dispatch_request.model_copy(update={"now_ms":now+7}), clock_ms=lambda: now+7)
         assert no_resend.status.value == "no_command", no_resend
         assert len(venue.calls) == 2
@@ -5783,7 +5784,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
                 visibility_deadline_ms=now+6,timeout_seconds=1))
         assert recovered.status.value == "reconciled_absent", recovered
     else:
-        dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request, clock_ms=lambda: dispatch_request.now_ms)
+        dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,dispatch_request, clock_ms=lambda: dispatch_request.now_ms)
         assert dispatched.status.value == "accepted", dispatched
     flat = PositionSnapshot(netting_domain=ticket.identity.netting_domain,
         quantity=partial_qty,average_entry_price=ticket.entry_reference_price if partial_fill else None,
@@ -5813,7 +5814,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
             assert await uow.instrument_selection.get_generic_materialization_generation(
                 GenericMaterializationGeneration.id_for_snapshot(empty.selection_snapshot_id)) is None
         venue.now_ms = now+10
-        stop = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        stop = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
             dispatch_request.model_copy(update={"now_ms":now+10}), clock_ms=lambda: now+10)
         assert stop.status.value == "accepted", stop
         async with PostgresKernelUnitOfWork(database) as uow:
@@ -6020,7 +6021,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
 
         async def safety_dispatch(offset):
             venue.now_ms = now+offset
-            result = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            result = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                 dispatch_request.model_copy(update={"now_ms":now+offset}), clock_ms=lambda: now+offset)
             assert result.status.value == "accepted", result
 
@@ -9817,7 +9818,6 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     "WHERE ticket_id=:ticket AND command_kind='entry'"),{"ticket":issued.ticket_id}) == 1
             from src.trading_kernel.application.dispatch_exchange_command import (
                 DispatchCommandRequest,
-                dispatch_one_command,
             )
             from src.trading_kernel.application.runtime_facts import (
                 InstrumentRulesFacts,
@@ -9870,7 +9870,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         "SET authority_recovery_revision=authority_recovery_revision+1 "
                         "WHERE episode_domain_key=:key"),
                         {"key":current_recovery.authority.recovery_proof.observation_cursors[0].episode_domain_key})
-            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                 dispatch_request,entry_facts_source=SuccessorEntryFacts(), clock_ms=lambda: dispatch_request.now_ms)
             if resolution == "activate_refusal":
                 assert dispatched.status.value == "superseded", dispatched
@@ -9881,7 +9881,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 return
             assert dispatched.status.value == "accepted", dispatched
             assert len(venue.calls) == 1
-            repeated_dispatch = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            repeated_dispatch = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                 dispatch_request.model_copy(update={"now_ms":issued_at+7}),entry_facts_source=SuccessorEntryFacts(), clock_ms=lambda: issued_at+7)
             assert repeated_dispatch.status.value == "no_command"
             assert len(venue.calls) == 1
@@ -9992,7 +9992,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         await uow.commit_reduction(event=stress,reduction=reduce_event(aggregate,stress),
                             expected_version=aggregate.version)
                 venue.now_ms = now
-                dispatched_safety = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                dispatched_safety = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                     DispatchCommandRequest(worker_id="successor-lifecycle",ticket_id=issued.ticket_id,
                         now_ms=now,lease_until_ms=now+30_000,timeout_seconds=1), clock_ms=lambda: now)
                 assert dispatched_safety.status.value=="accepted", dispatched_safety
@@ -10847,7 +10847,6 @@ async def _assert_terminal_static_owner_reauthorization(database, *, group, at_m
 async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,issued,now_ms,empty,early_resume):
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
-        dispatch_one_command,
     )
     from src.trading_kernel.application.owner_control import (
         set_strategy_entry_state,
@@ -10906,7 +10905,7 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
     class NoVenue:
         async def execute(self,request):
             raise AssertionError("prepared paused ENTRY must never reach venue")
-    refused=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),NoVenue(),DispatchCommandRequest(worker_id="prepared-after-pause",
+    refused=await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),NoVenue(),DispatchCommandRequest(worker_id="prepared-after-pause",
         ticket_id=issued.ticket_id,now_ms=now_ms+7,lease_until_ms=now_ms+30000,timeout_seconds=1), clock_ms=lambda: now_ms+7)
     assert refused.status.value=="no_command",refused
     source=inputs(group).model_copy(update={"selection_epoch_id":original.authority.selection_epoch_id})
@@ -10981,7 +10980,6 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         fault_stage = "static_after_protection"
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
-        dispatch_one_command,
     )
     from src.trading_kernel.application.issue_ready_signal import (
         IssueReadySignalRequest,
@@ -11018,6 +11016,10 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE signal_event_id=:signal"),{"signal":signal_event_id})==0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands c JOIN brc_trade_tickets t USING(ticket_id) WHERE t.signal_event_id=:signal"),{"signal":signal_event_id})==0
 
+    from tests.trading_kernel.support.management_receiver import (
+        ready_management_receiver,
+    )
+    await ready_management_receiver(database,now_ms=now_ms)
     await make_warming_ready(database,universe_version_id=universe_version_id,
         warm_closed_bar_time_ms=closed_at_ms,valid_until_ms=now_ms+60_000)
     risk = AccountRiskSnapshot.create(venue_id="binance-usdm",account_id="generic-snapshot",
@@ -11272,7 +11274,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     if fault_stage in {"switch_before_dispatch","activated_before_dispatch"}:
         await authority_transition()
     venue = Venue()
-    dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+    dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
         DispatchCommandRequest(worker_id=f"hourly-{group}-dispatch",ticket_id=issued.ticket_id,
             now_ms=now_ms+(30 if fault_stage=="activated_before_dispatch" else 5),lease_until_ms=now_ms+30_000,timeout_seconds=1,
             runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
@@ -11309,7 +11311,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
         assert dispatched.status.value==("rejected" if entry_result_fault=="entry_rejected" else "outcome_unknown"),dispatched
         assert len(venue.calls)==1
         await database.dispose()
-        redispatch=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+        redispatch=await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
             DispatchCommandRequest(worker_id="second-epoch-no-resend",ticket_id=issued.ticket_id,now_ms=now_ms+7,lease_until_ms=now_ms+30000,
                 timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=60000),entry_facts_source=ActionFacts(), clock_ms=lambda: now_ms+7)
         assert redispatch.status.value=="no_command" and len(venue.calls)==1
@@ -11423,9 +11425,10 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                 await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
                     expected_version=pending.version)
         venue.now_ms = now_ms+step
-        result = await dispatch_one_command(safety_uow,venue,
+        await ready_management_receiver(database,now_ms=venue.now_ms,ticket_id=issued.ticket_id)
+        result = await dispatch_with_recorded_management(safety_uow,venue,
             DispatchCommandRequest(worker_id=f"hourly-{group}-lifecycle",ticket_id=issued.ticket_id,
-                now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1), clock_ms=lambda: venue.now_ms)
+                now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION), clock_ms=lambda: venue.now_ms)
         assert result.status.value == "accepted", result
 
     await dispatch_safety(200)
@@ -13084,7 +13087,6 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert commands[0]["status"] == "prepared"
             from src.trading_kernel.application.dispatch_exchange_command import (
                 DispatchCommandRequest,
-                dispatch_one_command,
             )
             from src.trading_kernel.application.runtime_facts import (
                 InstrumentRulesFacts,
@@ -13124,7 +13126,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             if failure_case.endswith("dispatch_refusal"):
                 async with database.begin() as conn:
                     await conn.execute(sa.text("UPDATE brc_exposure_episode_current SET authority_recovery_revision=authority_recovery_revision+1 WHERE episode_domain_key=:key"),{"key":proposal.observation_cursors[0].episode_domain_key})
-            dispatched = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+            dispatched = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                 DispatchCommandRequest(worker_id="recovery-dispatch",ticket_id=issued.ticket_id,now_ms=issued_at+5,
                     lease_until_ms=issued_at+30_000,timeout_seconds=1,runtime_commit="a"*40,schema_revision=CURRENT_SCHEMA_REVISION,
                     admission_snapshot_validity_ms=60_000),entry_facts_source=RecoveryEntryFacts(), clock_ms=lambda: issued_at+5)
@@ -13188,7 +13190,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                             await stress_uow.commit_reduction(event=event,
                                 reduction=reduce_event(pending,event),expected_version=pending.version)
                     venue.observed_at_ms = issued_at + step + 1
-                    outcome = await dispatch_one_command(lambda:PostgresKernelUnitOfWork(database),venue,
+                    outcome = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
                         DispatchCommandRequest(worker_id="recovery-lifecycle",ticket_id=issued.ticket_id,
                             now_ms=issued_at+step,lease_until_ms=issued_at+step+30_000,
                             timeout_seconds=1), clock_ms=lambda: issued_at+step)

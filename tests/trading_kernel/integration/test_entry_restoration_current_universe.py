@@ -238,12 +238,17 @@ def test_same_schema_deployment_preserves_actual_22_members_without_batch_or_pol
 
 
 async def _rotate_identity(url: str,commit: str,now_ms: int):
+    from tests.trading_kernel.support.management_receiver import (
+        ready_management_receiver,
+    )
     engine=create_async_engine(url)
     try:
         async with PostgresKernelUnitOfWork(engine) as uow:
-            return await deploy_runtime_identity(uow,RuntimeAuthoritySeedRequest(
+            result=await deploy_runtime_identity(uow,RuntimeAuthoritySeedRequest(
                 account_id="subaccount-entry-promotion-test",runtime_commit=commit,
                 schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=now_ms))
+        await ready_management_receiver(engine,now_ms=now_ms+4000,runtime_commit=commit)
+        return result
     finally:
         await engine.dispose()
 

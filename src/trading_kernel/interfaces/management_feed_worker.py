@@ -69,6 +69,27 @@ async def persist_management_feed_once(
                     for c in commands
                 ):
                     return False
+                from src.trading_kernel.application.management_intents import (
+                    system_intents_for,
+                )
+
+                exact = await u.management.command_rows_for_order(
+                    ticket_id,
+                    evidence.terms.order_namespace,
+                    evidence.terms.exchange_order_id,
+                )
+                own = system_intents_for(
+                    evidence, exact
+                ) or await u.management.child_system_intents(ticket_id, evidence)
+                if (
+                    evidence.terms.order_namespace == "regular"
+                    and not own
+                    and a.management_mode is not ManagementMode.MANUAL
+                    and not await u.management.has_evidence(
+                        ticket_id, evidence.evidence_id
+                    )
+                ):
+                    return False
                 await observe_trade_management(
                     u, ticket_id=ticket_id, evidence=evidence, now_ms=now_ms
                 )
