@@ -88,6 +88,14 @@ Evidence and bounded fix directions:
 order/trades, complete source events, safe exact lifecycle error stack, pure local
 review/flat replay, source baseline classification and host/PG/journal samples.
 
+Owner subsequently requested a repair proposal. The
+[MA-NATURAL-CLOSE-01 repair and validation plan](../superpowers/plans/2026-11-11-manual-natural-exit-closure-repair-plan.md)
+defines shared verified-exit closure, flat fact handling, typed diagnostics and
+an exact same-schema recovery contract for the affected Ticket and causal
+Incident. It is a proposal, not implemented capability or new installation
+authorization. No business parameters are reopened; coding/validation and a
+concrete reviewed production recovery remain separate from this document delivery.
+
 ### Seoul combined operational / exit release — installed and Owner resumed, 2026-11-11
 
 Owner authorized deployment preparation/progression, genuinely paused ENTRY
