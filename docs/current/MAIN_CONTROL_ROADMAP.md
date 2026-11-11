@@ -24,12 +24,36 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
-## Exit publication permissions repair — applied 2026-11-11
+## Owner experiment publication and ENTRY Resume — verified 2026-11-11
+
+**The approved experiment parameters are published and active for new Tickets.
+The Owner separately resumed global ENTRY through genuine TOTP. CPM and MI
+remain paused.** This is the latest activation/control snapshot; dated sections
+below retain earlier deployment and maintenance evidence only.
+
+| Boundary | Direct PostgreSQL/service evidence |
+| --- | --- |
+| Atomic publication | At20:18:06.394 Asia/Shanghai, one genuine TOTP authorization published all six Event ExitBindings/Profile versions2 and all three MA50 control revisions2. Each binding activation timestamp and regime authorization links to that exact same publication; no partial bundle |
+| CPM / MI / MPG / BRF2 exits | Actual-fill price basis, TP1 reward1R, target quantity5%, target_floor_then_minimum_v1 capped at actual50%; exact published values match the approved request. No ENTRY-size increase is authorized by the TP quantity contract |
+| SOR-1H LONG / SHORT exits | Actual-fill price basis, TP1 reward1.2R, original50% quantity fraction, strict floor sizing with no minimum-quantity override |
+| MA50 controls | CPM/MI/MPG LONG enabled/revision2. BTC latest closed4h at20:00 had close73963.2 and SMA5076187.04; btc4h_not_above_ma50. This snapshot therefore filters new MPG LONG; CPM/MI additionally remain Owner-paused. The next fresh market facts continue to own qualification |
+| Owner controls | Policy version `37` has `new_entry_submit_enabled=true`; separate owner_control_entry_resume at20:18:39.435 links to an exact entry_resume TOTP authorization. This was an actual Owner control operation, not an automatic consequence of publication or an agent Resume |
+| Strategy posture | CPM/control4 and MI/control4 remain paused; MPG/control3, BRF2/control1 and SOR-1H/control2 remain enabled. Retired SOR-001/control6 and SOR-US/control3 remain paused. Parameter publication did not change any Strategy control |
+| Runtime posture | Kernel/API/static remain574f5cf3 and schema0016; operational ENTRY fence absent; all five services active at20:20. PG active Tickets/commands/Incidents0 in the publication verification snapshot. Natural new-profile ENTRY/protection/TP/Runner/Review and realized economics remain unclaimed |
+
+Evidence: `.local/exit-publication-repair/owner-publication-verified.json` and
+`owner-resume-verified.json` bind the actual current state and authorizations.
+They are display-only. No agent publication, TOTP generation, strategy Resume,
+risk/position-size expansion or test order was performed in this verification.
+Existing Tickets keep their frozen exit versions; later Owner/membership and
+market changes remain governed by action-time gates.
+
+## Prior exit publication permissions repair — applied 2026-11-11
 
 **The Owner publication permission defect is repaired. The experiment bundle
 is still unpublished; global ENTRY remains paused. Operational maintenance is
-complete:the official preparation returned prepared_owner_paused.** This subsection owns
-the latest control/maintenance posture and supersedes older snapshots below.
+complete:the official preparation returned prepared_owner_paused.** This is
+the earlier repair-completion snapshot, superseded by the activation above.
 
 | Boundary | Verified evidence |
 | --- | --- |
