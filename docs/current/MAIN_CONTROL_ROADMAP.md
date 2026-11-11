@@ -24,7 +24,36 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
-## Strategy exits and MA50 capability — deployed 2026-11-11
+## Exit publication permissions repair — applied 2026-11-11
+
+**The Owner publication permission defect is repaired. The experiment bundle
+is still unpublished; global ENTRY remains paused and an operational ENTRY
+fence remains pending current Selection preparation.** This subsection owns
+the latest control/maintenance posture and supersedes older snapshots below.
+
+| Boundary | Verified evidence |
+| --- | --- |
+| Exact authority asset | Commit `9fca68576822c852f985f55e004a37d5508a2d1c`, focused branch `codex/auto-exit-publish-grants`, pushed annotated tag `tokyo-runtime-2026.11.11.2-owner-grants`. This is a PostgreSQL role asset release, not a Kernel/API/static software switch |
+| Unchanged executable identity | Kernel, Owner API and V2 static remain `574f5cf3642ca652798b552ba1269d0ae3db1b55`; schema remains `0016_exit_regime_v1`. Source comparison confirms no execution code, API, frontend or migration changes |
+| Confirmed defect | Genuine Owner TOTP reached publication, then SELECT FOR UPDATE on `brc_entry_regime_current` failed with InsufficientPrivilegeError/HTTP500. The role also lacked new ExitProfile INSERT. The transaction rolled back before any Owner exit authorization or Profile creation:all six current binding versions1, MA50 disabled, exit-profile-bind authorization count0 |
+| Repair | Applied the exact tracked role asset in one PG transaction with all five writers stopped, operational ENTRY fence and fresh internal/external flatness. Added only INSERT on `brc_exit_policies`/`brc_entry_regime_revisions`, UPDATE on `brc_entry_regime_current`, and SELECT on four migration-created tables. Existing permissions, role attributes and credentials retained |
+| Certification | Exact full R4 PASS:1863 Unit/Architecture,1823 Integration,74 Full-chain;3760 tests total; Ruff/Mypy216/diff and961 Golden/23064 Core parity decisions PASS. Existing HTTP/atomic/idempotence/conflict tests now execute under `brc_owner_control`; forbidden order/Ticket/evidence/market/historical writes asserted. The old test's admin control engine was the original coverage gap |
+| Production-shaped evidence | Complete Tokyo backup restored locally, exact source cleaned and migrated, then restricted Owner role published six exits/three MA50 controls and replayed idempotently. Production real control-login credential used only for read-only current_user/privilege verification:all required and forbidden checks PASS; no TOTP seed read/generated or production publication simulated |
+| Post-application state | Owner API healthz ok; Observation, Lifecycle, Reconciliation and Owner API active, NRestarts0. Entry inactive/disabled and fenced. Fresh exchange positions/open-order domains0, wallet412.64559117USDT; PG Tickets/positions/commands/Incidents0. Owner Policy36/global pause, Strategy/Selection/directional controls, all exit bindings and regime revisions compare exactly unchanged across grant application |
+| Remaining operational preparation | Official `promote_entry.py --prepare-owner-resume` failed its postflight after normal restarted Observation created an MPG STAGED Generation; maintenance fence correctly restored. A fresh readonly verifier has flatness/integrity PASS but entry_recovery_ready=false due one warming target. No fake readiness, direct unfence or policy Resume performed. Current source Generation `generation:b5c233b2581695e08b4e9136da7114425e0bb1cea16b1aa5debe1f861ae8a574` fenced at1794396769262; exact current source coordinator/deadline and fresh promoter gates are required for later operational restoration |
+| Owner publication boundary | Permission error repaired, API available; Owner may log in again and preview/submit the approved bundle using a fresh real TOTP. Parameters remain unpublished until the actual receipt/current bindings prove success. Publication never removes the operational fence or resumes global/strategy controls |
+
+The certified SQL asset is archived at
+`/opt/brc/owner-control-grants/releases/9fca68576822c852f985f55e004a37d5508a2d1c/`;
+`/opt/brc/owner-control-grants/current` identifies only deployment evidence.
+No Worker reads it as runtime authority. Detailed logs, before/after grants,
+actual restricted-login verification, full certificate and the separate Entry
+preparation failure are retained under `.local/exit-publication-repair/`.
+No exchange write, forced close, policy/risk expansion, password/credential
+change or replacement of trading runtime occurred. Software readiness,
+publication success and restored ENTRY remain separate claims.
+
+## Prior strategy exits and MA50 capability — deployed 2026-11-11
 
 **Software deployment is complete; experiment parameter publication remains
 pending authenticated Owner TOTP. Global ENTRY remains Owner-paused.** This
