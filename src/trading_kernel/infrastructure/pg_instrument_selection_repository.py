@@ -4771,13 +4771,40 @@ class PostgresInstrumentSelectionRepository:
             MaterializationGenerationState.PENDING,
             MaterializationGenerationState.DESIRED,
         }:
+            completed_pause = False
+            if (isinstance(generation, (GenericMaterializationGeneration, GenericStaticMaterializationGeneration))
+                and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED
+                and vacuum.source_generation_id is None
+                and vacuum.first_blocker == "OWNER_PAUSED"
+                and vacuum.drained_at_ms is not None
+                and generation.fenced_at_ms is None
+                and generation.created_at_ms <= vacuum.fenced_at_ms <= vacuum.drained_at_ms <= paused_at_ms
+                and not await self.entry_vacuum_has_drain_blockers(strategy_group_id=generation.strategy_group_id)):
+                completed_pause = bool(await self._connection.scalar(sa.text("""
+                    SELECT EXISTS (
+                      SELECT 1 FROM brc_strategy_entry_vacuum_events e
+                      JOIN brc_strategy_entry_controls_current c ON c.strategy_group_id=:group_id
+                      JOIN brc_strategy_entry_control_events p ON p.strategy_entry_control_event_id=c.last_event_id
+                      JOIN brc_owner_authorizations a ON a.authorization_id=p.authorization_id
+                      WHERE e.entry_vacuum_id=:vacuum_id AND e.event_type='OWNER_PAUSED'
+                        AND e.occurred_at_ms=:drained_at
+                        AND e.payload->>'entry_drain_complete'='true'
+                        AND c.entry_state='paused' AND p.target_state='paused'
+                        AND p.control_version=c.control_version
+                        AND p.created_at_ms=:fenced_at AND a.authorized_at_ms=p.created_at_ms
+                        AND a.purpose='strategy_pause'
+                        AND a.target_scope=jsonb_build_object('strategy_group_id',:group_id)
+                        AND a.authentication_strength IN ('session','totp_step_up')
+                    )
+                """), {"group_id": generation.strategy_group_id, "vacuum_id": vacuum.entry_vacuum_id,
+                       "drained_at": vacuum.drained_at_ms, "fenced_at": vacuum.fenced_at_ms}))
             valid_vacuum = bool(
                 vacuum.source_generation_id is None
-                and vacuum.state
+                and (completed_pause or vacuum.state
                 in {
                     StrategyEntryVacuumState.OPEN,
                     StrategyEntryVacuumState.DRAINING_ENTRY,
-                }
+                })
                 and vacuum.first_blocker == "OWNER_PAUSED"
             )
         elif generation.lifecycle_state is MaterializationGenerationState.DRAINING_ENTRY:

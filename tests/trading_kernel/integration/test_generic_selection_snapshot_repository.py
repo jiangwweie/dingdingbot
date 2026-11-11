@@ -169,6 +169,26 @@ from tests.trading_kernel.unit.detectors.fixtures import (
 @pytest_asyncio.fixture
 async def database(request: pytest.FixtureRequest) -> AsyncIterator[AsyncEngine]:
     parameters = getattr(request.node, "callspec", None)
+    if parameters is not None and parameters.params.get("source_revision") == "0015_generic_owner_recovery_v1":
+        from tests.trading_kernel.support.generic_seed_template import (
+            seed_generic_database,
+        )
+        from tests.trading_kernel.support.postgres import (
+            create_empty_database,
+            drop_disposable_database,
+            run_alembic,
+        )
+        name, url = await create_empty_database()
+        engine = create_async_engine(url)
+        try:
+            run_alembic(url, "upgrade", "0015_generic_owner_recovery_v1")
+            with patch("tests.trading_kernel.support.generic_seed_template.CURRENT_SCHEMA_REVISION", "0015_generic_owner_recovery_v1"):
+                await seed_generic_database(engine)
+            yield engine
+        finally:
+            await engine.dispose()
+            await drop_disposable_database(name)
+        return
     excluded = (parameters.params.get("group") if parameters is not None
         and parameters.params.get("target_mode") == "not_installed" else None)
     if request.node.originalname == "test_resource_constrained_resident_soak" or (
@@ -7676,6 +7696,108 @@ async def test_generic_continuity_preserves_event_side_and_comparison(database: 
     assert current.authority.comparison_universe_id==original.authority.comparison_universe_id
     assert current.authority.comparison_transition_revision==original.authority.comparison_transition_revision
     assert current.authority.membership_freshness.source_snapshot_id==snapshot.selection_snapshot_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completion_proof", [True, False])
+@pytest.mark.parametrize("source_revision", ["0015_generic_owner_recovery_v1", CURRENT_SCHEMA_REVISION])
+async def test_owner_pause_cleans_unfenced_generation_after_independent_drain(
+    database: AsyncEngine, completion_proof: bool, source_revision: str,
+) -> None:
+    from src.trading_kernel.application.owner_control import (
+        set_global_entry_state,
+        set_strategy_entry_state,
+    )
+    from src.trading_kernel.domain.owner_control import StrategyEntryState
+
+    group = "CPM-RO-001"
+    source, first, _, uid = await _exercise_generic_generation(
+        database, group, False, durable=True, first_activation=True,
+        natural_selection=True,
+    )
+    shifted = next_input(source)
+    next_source = shifted.model_copy(update={
+        "predecessor_snapshot": first,
+        "member_windows": tuple(
+            qualify_window(window.model_copy(update={"candles": shifted.member_windows[0].candles}),
+                           window.exchange_instrument_id == source.spec.candidate_ids[0])
+            for window in shifted.member_windows
+        ),
+    })
+    snapshot = compute_generic_selection(next_source)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        await uow.instrument_selection.save_generic_snapshot(
+            snapshot, decision_at_ms=next_source.decision_at_ms,
+            source_observed_at_ms=next_source.source_observed_at_ms,
+        )
+        authority = await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id)
+    request = CoordinateGenericSnapshotRequest(selection_snapshot_id=snapshot.selection_snapshot_id, worker_id="drain-race")
+    at = snapshot.effective_from_ms + 1
+    for tick in (at, at + 1):
+        with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=tick)):
+            result = await coordinate_selection_materialization_once(
+                uow_factory=lambda: PostgresKernelUnitOfWork(database), request=request, clock_ms=lambda tick=tick: tick,
+            )
+    async with PostgresKernelUnitOfWork(database) as uow:
+        before = await uow.instrument_selection.get_generic_materialization_generation(result.materialization_generation_id)
+        assert before.lifecycle_state.value == "DESIRED"
+        owner = await uow.owner_controls.get_strategy_control(group)
+        await set_strategy_entry_state(uow, strategy_group_id=group, target_state=StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(expected_version=owner.control_version, reason="drain_before_generation_cleanup",
+                idempotency_key="drain-race-pause", owner_identity="owner", now_ms=at + 2), authentication_strength="session")
+    actual_execute = sa.ext.asyncio.AsyncConnection.execute
+    async def insert_completion(connection, statement, *args, **kwargs):
+        if (not completion_proof and getattr(getattr(statement, "table", None), "name", None) == "brc_strategy_entry_vacuum_events"
+            and getattr(statement, "is_insert", False) and statement.compile().params.get("event_type") == "OWNER_PAUSED"):
+            statement = statement.values(payload={})
+        return await actual_execute(connection, statement, *args, **kwargs)
+    with patch.object(sa.ext.asyncio.AsyncConnection, "execute", new=insert_completion):
+        for _ in range(2):
+            async with PostgresKernelUnitOfWork(database) as uow:
+                await drain_strategy_entry_vacuum_once(uow, DrainStrategyEntryVacuumRequest(
+                    strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id, now_ms=at + 3))
+    async with PostgresKernelUnitOfWork(database) as uow:
+        drained = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id)
+        assert drained.state is StrategyEntryVacuumState.OWNER_PAUSED
+        policy = await uow.entry_admission.get_owner_policy("policy-main", for_update=True)
+        if policy.new_entry_submit_enabled:
+            await set_global_entry_state(uow, owner_policy_id="policy-main", enabled=False,
+                request=ControlMutationRequest(expected_version=policy.policy_version, reason="maintenance_pause",
+                    idempotency_key="drain-race-global-pause", owner_identity="owner", now_ms=at + 3), authentication_strength="session")
+    with patch.object(PostgresInstrumentSelectionRepository, "read_authority_clock_ms", new=AsyncMock(return_value=at + 4)):
+        if completion_proof:
+            if source_revision == "0015_generic_owner_recovery_v1":
+                from scripts.trading_kernel.finish_paused_generation import (
+                    finish_paused_source_generation,
+                )
+                async with database.connect() as connection:
+                    policy_version = await connection.scalar(sa.text("SELECT policy_version FROM brc_owner_policy_current WHERE owner_policy_id='policy-main'"))
+                for wrong in ({"source_commit": "b" * 40}, {"expected_policy_version": policy_version + 1}, {"expected_owner_version": owner.control_version + 2}):
+                    arguments = {"source_commit": "a" * 40, "generation_id": before.materialization_generation_id,
+                                 "expected_policy_version": policy_version, "expected_owner_version": owner.control_version + 1}
+                    with pytest.raises(ValueError):
+                        await finish_paused_source_generation(database, **{**arguments, **wrong})
+                with patch("scripts.trading_kernel.finish_paused_generation.time.time", return_value=(at + 4) / 1000):
+                    outcome = await finish_paused_source_generation(database, source_commit="a" * 40,
+                        generation_id=before.materialization_generation_id, expected_policy_version=policy_version,
+                        expected_owner_version=owner.control_version + 1)
+                assert outcome["disposition"] == "OWNER_PAUSED"
+            else:
+                outcome = await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+                    request=CoordinateGenericGenerationRequest(materialization_generation_id=before.materialization_generation_id, worker_id="drain-race-cleanup"), clock_ms=lambda: at + 4)
+                assert outcome.disposition is MaterializationDisposition.OWNER_PAUSED
+        else:
+            with pytest.raises((ValueError, SelectionJobConflict)):
+                await coordinate_selection_materialization_once(uow_factory=lambda: PostgresKernelUnitOfWork(database),
+                    request=CoordinateGenericGenerationRequest(materialization_generation_id=before.materialization_generation_id, worker_id="drain-race-cleanup"), clock_ms=lambda: at + 4)
+    async with PostgresKernelUnitOfWork(database) as uow:
+        after = await uow.instrument_selection.get_generic_materialization_generation(before.materialization_generation_id)
+        assert after.lifecycle_state.value == ("ABANDONED" if completion_proof else "DESIRED")
+        assert after.semantic_digest == before.semantic_digest
+        assert await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group, selection_spec_id=source.spec.selection_spec_id) == drained
+        assert await uow.instrument_selection.get_current_generic_authority(source.spec.selection_spec_id) == authority
+        assert (await uow.strategy_universes.get_current(source.spec.event_spec_id)).universe_version_id == uid
+        assert await uow.strategy_universes.get_generation_universe_targets(before.materialization_generation_id) == ()
 
 
 @pytest.mark.asyncio

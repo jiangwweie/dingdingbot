@@ -77,6 +77,25 @@ manifests still own initial installation, not later maintenance/restoration.
 
 ## Runtime State Authority
 
+### Stopped source Generation cleanup
+
+If an authenticated Generic Owner pause has already completed its independent
+ENTRY drain before an unfenced Generation is abandoned, the normal coordinator
+must retain that completed Vacuum and close only the Generation. It requires
+the exact current pause event/authorization, immutable drain-complete event,
+matching scope/times and zero drain blockers. It never reopens the Vacuum,
+resumes a strategy, changes membership or creates an exchange command.
+
+`scripts/trading_kernel/finish_paused_generation.py` is an offline deployment
+maintenance entry point for the exact pre-migration source revision it declares.
+All five writers must be stopped and ENTRY fenced; current release/database
+identities, globally paused Policy and strategy control revisions must match.
+It invokes the same coordinator and repository, with no direct state SQL or
+runtime old-schema fallback. Its source-revision path is covered against an
+actual disposable source schema before use. After cleanup, refresh the full
+compatible-source and exchange proofs; a successful cleanup is not permission
+to migrate or restore trading by itself.
+
 Exact production commit, immutable tag, certification, measured resource state,
 and remaining gates belong only to `MAIN_CONTROL_ROADMAP.md`. This contract owns
 the procedure and limits used to deploy and evaluate that state.
