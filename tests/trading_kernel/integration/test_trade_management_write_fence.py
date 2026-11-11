@@ -27,7 +27,6 @@ from tests.trading_kernel.support.lifecycle import (
 @pytest.mark.parametrize("review_only", [False, True])
 async def test_prepared_runner_command_never_dispatched_after_takeover(head_template_engine, review_only, expired_claim):
     engine=head_template_engine;t=registered_sor_long_ticket()
-    engine=head_template_engine;t=registered_sor_long_ticket()
     await reach_position_protected(engine, t)
     async with PostgresKernelUnitOfWork(engine) as uow:
         a = await uow.aggregates.get_for_update(t.identity.ticket_id)
@@ -122,8 +121,6 @@ async def test_feed_loss_defers_prepared_runner_without_unknown_or_venue_write(
     from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
 
     e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
-    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
-    await reach_position_protected(e, t)
     async with PostgresKernelUnitOfWork(e) as u:
         a = await u.aggregates.get_for_update(t.identity.ticket_id)
         fill = TakeProfitFilled(
@@ -148,7 +145,6 @@ async def test_feed_loss_defers_prepared_runner_without_unknown_or_venue_write(
             )
         )
     venue=KindAwareAcceptingVenue();venue.execute=AsyncMock(wraps=venue.execute)
-    venue.execute = AsyncMock(wraps=venue.execute)
     result = await dispatch_one_command(
         lambda: PostgresKernelUnitOfWork(e),
         venue,
