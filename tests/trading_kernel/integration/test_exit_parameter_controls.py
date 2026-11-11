@@ -79,18 +79,23 @@ def _request():
 async def test_bundle_publishes_six_separate_profiles_and_three_regime_controls_atomically(
     issue_engine,
 ):
+    from tests.trading_kernel.support.owner_roles import apply_owner_control_grants
+
     await _seed(issue_engine)
+    await apply_owner_control_grants(issue_engine)
     request = _request()
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         preview = await preview_exit_parameters(uow, request)
         assert len(preview.profiles) == 6
         assert len({p.exit_profile_id for p in preview.profiles}) == 6
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await uow._require_connection().execute(sa.text("SET LOCAL ROLE brc_owner_control"))
         receipt = await publish_exit_parameters(
             uow, request, authentication_strength="totp_step_up"
         )
     assert len(receipt.bindings) == 6
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
+        await uow._require_connection().execute(sa.text("SET LOCAL ROLE brc_owner_control"))
         replay = await publish_exit_parameters(
             uow,
             request.model_copy(update={"now_ms": 3000}),
@@ -115,12 +120,16 @@ async def test_bundle_publishes_six_separate_profiles_and_three_regime_controls_
 async def test_one_stale_binding_rejects_entire_bundle_without_partial_changes(
     issue_engine,
 ):
+    from tests.trading_kernel.support.owner_roles import apply_owner_control_grants
+
     await _seed(issue_engine)
+    await apply_owner_control_grants(issue_engine)
     request = _request()
     bad = request.changes[-1].model_copy(update={"expected_version": 99})
     request = request.model_copy(update={"changes": (*request.changes[:-1], bad)})
     with pytest.raises(OwnerControlConflict):
         async with PostgresKernelUnitOfWork(issue_engine) as uow:
+            await uow._require_connection().execute(sa.text("SET LOCAL ROLE brc_owner_control"))
             await publish_exit_parameters(
                 uow, request, authentication_strength="totp_step_up"
             )
@@ -143,14 +152,17 @@ async def test_http_preview_is_readonly_and_publish_requires_totp(issue_engine):
     import pyotp
     from argon2 import PasswordHasher
     from httpx import ASGITransport, AsyncClient
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     from src.trading_kernel.interfaces.owner_console_http.app import (
         OwnerConsoleSettings,
         create_owner_console_app,
     )
     from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSettings
+    from tests.trading_kernel.support.owner_roles import apply_owner_control_grants
 
     await _seed(issue_engine)
+    await apply_owner_control_grants(issue_engine)
     from src.trading_kernel.infrastructure.pg_owner_read_repository import (
         create_owner_read_engine,
     )
@@ -162,6 +174,23 @@ async def test_http_preview_is_readonly_and_publish_requires_totp(issue_engine):
     read_engine = create_owner_read_engine(
         issue_engine.url.render_as_string(hide_password=False)
     )
+    control_engine = create_async_engine(
+        issue_engine.url,
+        connect_args={"server_settings": {"role": "brc_owner_control", "statement_timeout": "3000"}},
+    )
+    async with control_engine.connect() as connection:
+        assert await connection.scalar(sa.text("SELECT current_user")) == "brc_owner_control"
+        for table, permission in (
+            ("brc_trade_tickets", "INSERT"),
+            ("brc_exchange_commands", "INSERT"),
+            ("brc_entry_regime_evidence", "INSERT"),
+            ("brc_btc_ma50_current", "UPDATE"),
+            ("brc_entry_regime_revisions", "UPDATE"),
+            ("brc_entry_regime_revisions", "DELETE"),
+            ("brc_owner_authorizations", "UPDATE"),
+        ):
+            assert not await connection.scalar(sa.text("SELECT has_table_privilege(current_user,:table,:permission)"),
+                {"table": table, "permission": permission})
     now = 1_800_000_000_000
     seed = "JBSWY3DPEHPK3PXP"
     app = create_owner_console_app(
@@ -181,7 +210,7 @@ async def test_http_preview_is_readonly_and_publish_requires_totp(issue_engine):
             ),
         ),
         engine=read_engine,
-        control_engine=issue_engine,
+        control_engine=control_engine,
         market_data=Market(),
         clock_ms=lambda: now,
     )
@@ -224,5 +253,15 @@ async def test_http_preview_is_readonly_and_publish_requires_totp(issue_engine):
         )
         assert applied.status_code == 200, applied.text
         assert len(applied.json()["bindings"]) == 6
+        replay = await client.post(
+            "/api/owner/v1/controls/exit-parameters/publish",
+            json={**body, "totp_code": pyotp.TOTP(seed).at(now // 1000 + 30)},
+            headers=headers,
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == applied.json()
+        current = await client.get("/api/owner/v1/controls/exit-parameters")
+        assert all(row["binding"]["projection_version"] == 2 for row in current.json()["rows"])
 
     await read_engine.dispose()
+    await control_engine.dispose()

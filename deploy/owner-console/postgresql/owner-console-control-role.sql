@@ -39,6 +39,8 @@ GRANT INSERT ON TABLE
     brc_selection_rollback_baseline_events,
     brc_strategy_entry_vacuums_current,
     brc_strategy_entry_vacuum_events,
+    brc_exit_policies,
+    brc_entry_regime_revisions,
     brc_event_exit_profile_bindings,
     brc_event_exit_profile_binding_events
 TO brc_owner_control;
@@ -60,5 +62,6 @@ GRANT UPDATE ON TABLE
     brc_owner_policy_current,
     brc_strategy_selection_control_current,
     brc_event_exit_profile_binding_current,
+    brc_entry_regime_current,
     brc_exit_policies
 TO brc_owner_control;

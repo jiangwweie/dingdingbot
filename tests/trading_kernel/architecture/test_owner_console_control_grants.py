@@ -13,11 +13,14 @@ def test_owner_control_role_covers_dynamic_selection_and_exit_profile_writes() -
         "brc_strategy_selection_control_current",
         "brc_event_exit_profile_binding_current",
         "brc_exit_policies",
+        "brc_entry_regime_current",
     ):
         assert table in source.split("GRANT UPDATE ON TABLE", 1)[1]
 
     for table in (
         "brc_event_exit_profile_bindings",
         "brc_event_exit_profile_binding_events",
+        "brc_exit_policies",
+        "brc_entry_regime_revisions",
     ):
         assert table in source.split("GRANT INSERT ON TABLE", 1)[1]
