@@ -64,3 +64,5 @@ MANUAL与REVIEW不继承上述AUTO关闭权限。TP提前终态且归属未知�
 首次R4未完成：完整integration记录两项失败并在尾部出现锁等待，未生成Kernel认证manifest，不能用于发布。已删除管理权测试夹具重复初始化；相关23项回归通过，schema尾部37项及Universe相关50项通过。逐项重跑前326项通过后主动停止，以便把修正纳入新SHA并直接运行正式认证；此次中断不作为全量通过证据。Ruff、Mypy（253个源文件）及diff检查通过。
 
 周期性资源审计与标准R4分开：首次并发运行撞到单实例资源锁；串行`four_processes`在本机600秒预算内未完成，由watchdog停止，尚未通过。未扩大预算或绕过锁，不能据此宣称资源审计完成。最终正式认证结果以精确SHA对应的原生manifest及日志为准。
+
+锁等待已由单个`activated_between_claim_ticket-CPM-RO-001`稳定复现：入场fixture在同一事务首次创建Owner配置／EventExitBinding，持有Event FK锁，再同步等待独立Universe事务的`FOR UPDATE`，形成测试自身等待。已将Owner配置作为已提交前置条件移到入场事务之前；四策略claim／Ticket间切换、已激活替换和Owner暂停共20项通过，原竞态断言保留，生产锁和门禁未改。旧失败缓存中仍存在的两项可选正式测试也复跑通过。此前新SHA的R4再次中断且无证书；Owner API／static证书不替代Kernel认证。

@@ -11175,10 +11175,19 @@ async def _issue_and_dispatch_hourly_natural_entry(
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets WHERE signal_event_id=:signal"),{"signal":signal_event_id})==0
             assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands c JOIN brc_trade_tickets t USING(ticket_id) WHERE t.signal_event_id=:signal"),{"signal":signal_event_id})==0
 
+    from tests.trading_kernel.support.exit_configuration import (
+        install_approved_exit_configuration,
+    )
     from tests.trading_kernel.support.management_receiver import (
         ready_management_receiver,
     )
 
+    # Owner configuration is a committed prerequisite, not part of admission.
+    # Otherwise its new Event FK locks block the independent Universe switch
+    # that this test intentionally awaits between claim and Ticket issuance.
+    await install_approved_exit_configuration(
+        database, account_id="generic-snapshot", now_ms=now_ms
+    )
     await ready_management_receiver(database,now_ms=now_ms)
     await make_warming_ready(database,universe_version_id=universe_version_id,
         warm_closed_bar_time_ms=closed_at_ms,valid_until_ms=now_ms+60_000)
