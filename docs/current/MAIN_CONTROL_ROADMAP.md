@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-10
+last_verified: 2026-11-11
 ---
 
 # Main Control Roadmap
@@ -22,11 +22,11 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `65a44c0291ac9e75dd9b53cfc247086294ea095e` |
-| Production tag | `manual-runtime-2026.11.10.1` |
-| Production schema | `0019_management_evidence_v2` |
+| Production commit | `a2b6f747f9ea39fe91e1d30bf16aa63175a4aa76` |
+| Production tag | `manual-runtime-2026.11.11.1` |
+| Production schema | `0021_manual_operational_closure` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `1a5dbf9226c262f96be9bd5c721d9ad9f04d9344` — independent R1 static release; Kernel/API remain above |
+| Static frontend commit | `a2b6f747f9ea39fe91e1d30bf16aa63175a4aa76` — exact certified combined release; prior independent UI changes retained |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
 | Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
@@ -37,7 +37,49 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Manual operational closure repairs — local only, 2026-11-11
+### Seoul combined operational / exit release — installed, Owner paused, 2026-11-11
+
+Owner authorized deployment preparation/progression, genuinely paused ENTRY
+through the Console (Policy9), then manually closed XRP and ADA. Their existing
+source event chains permanently handed both Tickets to MANUAL and naturally
+reached terminal; no agent exit, cancellation or SQL terminalization was used.
+
+At **2026-11-11 14:59 Asia/Shanghai**, the official independent installer completed
+`stage-upgrade` / `activate-upgrade` for the exact production identity above.
+This supersedes all earlier local-only and prior source snapshots below.
+**Installation is complete; configuration activation and ENTRY restoration are not.**
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Exact candidate | R4 / Owner API / static PASS; unit+architecture2155, integration1938, full-chain76; Ruff/Mypy259 files/diff and Golden/core parity961 snapshots/23064 rows PASS |
+| Additional preflight fix | REVIEW_REQUIRED now rereads from exact Ticket creation before requesting full-history clearance; source aggregate replay and RED/GREEN regression, no weaker reducer or fabricated continuity |
+| Source rehearsal | Actual readonly terminal0019 export restored into isolated manual PG;0019→0020→0021 and exact target identity PASS;95 tables/2350 rows and source columns preserved |
+| Action-time source | Exact Seoul product/host/account/PG verified; Policy9 genuine Owner pause; venue positions/regular orders/conditional orders0; PG nonterminal Tickets/unknown commands/open Incidents/positions/reservations0, entry lane idle and exposure0 |
+| Stopped cutover | All five writers stopped, ENTRY disabled and maintenance-fenced; PG/venue rechecked; stopped custom dump verified on host and local with identical SHA256; official preservation comparison PASS |
+| Installed postflight | Runtime/capabilities/schema exact; integrity/flatness/risk-budget/current Entry recovery readonly certification PASS; three safety workers and API active/NRestarts0; Entry inactive, disabled and fenced |
+| Management | New candidate feed ready, persisted/applied0/0 at initial postflight; XRP/ADA remain MANUAL/terminal/qty0; no restoration of AUTO |
+| Owner authority | Policy9/new ENTRY false unchanged; strategy controls/Selection/budget preserved; CPM/SOR-001/US-equity remain paused |
+| Exit activation | Required, not yet activated; configuration current rows0. Genuine Owner preview/TOTP for six exits plus three MA50 bindings is pending; official promoter must follow exact activation/readiness verification |
+| HTTPS | Public index and both JS/CSS assets byte-identical to certified archive; Console200, unauthenticated overview401 |
+| Historical accounting | Four terminal economics gaps remain honestly unavailable; enrichment queue empty, no production Review revision or backfill approval fabricated |
+
+The initial bounded worker-journal sample contains no tick_failed/runtime_fenced/
+facts_unavailable. New diagnostics preserve42 Owner/policy-blocked observations
+and one startup authority-change event at each of its two causal stages; these
+are retained facts, not evidence of a new venue error or a completed natural trade.
+
+Evidence: `.local/manual-operational-deployment-20261111/` — exact certification
+logs, source and stopped preflights, terminal rehearsal, backup checksums,
+official receipts, installed postflight and public asset verification. The private
+restorable source dumps are not committed. No Tokyo application mutation, risk
+expansion, test order, synthetic Signal/Ticket, agent exchange write, genuine
+Owner configuration activation or Resume was performed by this installation.
+
+Remaining: genuine configuration activation/readback, installed Entry-fact probes,
+official promoter while Owner paused, genuine Resume/TOTP and readonly postflight.
+Natural AUTO/App and phone notification acceptance remain separate future facts.
+
+### Manual operational closure repairs — implementation provenance, 2026-11-11
 
 Owner authorized MA-OPS-CLOSURE-01 implementation, including external exit
 attribution, append-only terminal Review enrichment with genuine Owner approval,
@@ -46,9 +88,10 @@ status and append-only diagnostics. Local focused branch is
 `codex/manual-operational-closure-v1`; schema candidate is
 `0021_manual_operational_closure`. The prior decimal semantics repair and
 MA50／TP1 implementation are included. Exact final candidate certification is
-required. No production deployment, policy activation, accounting revision,
-service operation or exchange mutation is authorized by this local status.
-Owner explicitly requires confirmation before deployment and production backfill.
+required. This local implementation record did not itself authorize installation.
+Owner subsequently authorized deployment; the dated installed snapshot above owns
+current production status. Production historical accounting revision still needs
+its own exact preview and genuine Owner approval.
 
 See [implementation evidence](../superpowers/plans/2026-11-11-manual-operational-closure-implementation-evidence.md).
 
