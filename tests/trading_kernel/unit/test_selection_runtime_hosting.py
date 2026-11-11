@@ -262,11 +262,6 @@ async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(
         pass
 
     monkeypatch.setattr(script, "refresh_exit_regime", refresh)
-
-    async def refresh(*args, **kwargs):
-        pass
-
-    monkeypatch.setattr(script, "refresh_exit_regime", refresh)
     monkeypatch.setattr(script,"run_observation_worker_once",observe)
     facts_requests=[]
 

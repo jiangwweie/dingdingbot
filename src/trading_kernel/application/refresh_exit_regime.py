@@ -60,7 +60,9 @@ async def refresh_exit_regime(
         )
 
         await uow.monitors.save_if_changed(
-            MonitorStateRecord(
+            monitor.model_copy(update={"updated_at_ms": now_ms})
+            if monitor is not None
+            else MonitorStateRecord(
                 monitor_key="btc-ma50-refresh",
                 owner_status=MonitorOwnerStatus.PROCESSING,
                 summary="BTC MA50 refresh pending",

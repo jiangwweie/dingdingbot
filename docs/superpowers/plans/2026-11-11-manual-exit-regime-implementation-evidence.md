@@ -66,3 +66,13 @@ MANUAL与REVIEW不继承上述AUTO关闭权限。TP提前终态且归属未知�
 周期性资源审计与标准R4分开：首次并发运行撞到单实例资源锁；串行`four_processes`在本机600秒预算内未完成，由watchdog停止，尚未通过。未扩大预算或绕过锁，不能据此宣称资源审计完成。最终正式认证结果以精确SHA对应的原生manifest及日志为准。
 
 锁等待已由单个`activated_between_claim_ticket-CPM-RO-001`稳定复现：入场fixture在同一事务首次创建Owner配置／EventExitBinding，持有Event FK锁，再同步等待独立Universe事务的`FOR UPDATE`，形成测试自身等待。已将Owner配置作为已提交前置条件移到入场事务之前；四策略claim／Ticket间切换、已激活替换和Owner暂停共20项通过，原竞态断言保留，生产锁和门禁未改。旧失败缓存中仍存在的两项可选正式测试也复跑通过。此前新SHA的R4再次中断且无证书；Owner API／static证书不替代Kernel认证。
+
+### 实际采集与协议补充验证
+
+新增`test_ma50_refresh_lifecycle.py`经实际refresh函数和PG验证50根闭合4h采集、窗口复用、跨边界旧许可失效、不可用30秒节流和恢复。RED显示持续失败每次重试产生2条重复monitor事件（2→4）；修正为保留当前健康语义、只刷新尝试时间，只有实际状态变化才追加事件。相关配置集成13项、采集恢复与调度组合79项通过。
+
+新增`test_actual_fill_protocol.py`：原始USD-M userTrades→当前安装CCXT4.5.56的`parse_trade`→实际适配器→CompleteEntryFills；6项覆盖多笔VWAP、重复／乱序、超过JS安全整数的订单／成交ID、错订单／方向／时间／数量和冲突重复，全部通过。不是直接向kernel提供理想化统一dict。
+
+周期性`capacity_v0_resource_safety`串行两项已通过（MPG／MI，54.41秒）；四进程资源演练仍单独核实，不因这两项通过声称整个资源portfolio通过。发现并停止本工作区早先中断遗留的本地资源容器，保留其有界日志；未操作其他产品PG或服务器。
+
+四进程资源重查补充：当前正式Observation对到期Dynamic交接的旧Static close返回`selection_activation_pending_current_close`并重试；旧资源用例却等待旧Static已经消费close后的`GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED`。普通集成已有`static_observer_first`反例，明确要求旧close不得被消费。因此本次有界重查在采集日志／PG零Ticket、零Command、零开放Incident后主动停止；未放松运行时交接门禁、未扩600秒预算，也未把旧资源断言超时记作通过。该周期性资源用例的合同更新与完整资源认证仍未完成，不能由标准R4替代。
