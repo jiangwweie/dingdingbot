@@ -47,7 +47,8 @@ reached terminal; no agent exit, cancellation or SQL terminalization was used.
 At **2026-11-11 14:59 Asia/Shanghai**, the official independent installer completed
 `stage-upgrade` / `activate-upgrade` for the exact production identity above.
 This supersedes all earlier local-only and prior source snapshots below.
-**Installation is complete; configuration activation and ENTRY restoration are not.**
+**Installation and genuine configuration activation are complete; the official
+promoter has prepared the runtime, while Policy9 still awaits genuine Owner Resume.**
 
 | Boundary | Direct evidence |
 | --- | --- |
@@ -59,7 +60,7 @@ This supersedes all earlier local-only and prior source snapshots below.
 | Installed postflight | Runtime/capabilities/schema exact; integrity/flatness/risk-budget/current Entry recovery readonly certification PASS; three safety workers and API active/NRestarts0; Entry inactive, disabled and fenced |
 | Management | New candidate feed ready, persisted/applied0/0 at initial postflight; XRP/ADA remain MANUAL/terminal/qty0; no restoration of AUTO |
 | Owner authority | Policy9/new ENTRY false unchanged; strategy controls/Selection/budget preserved; CPM/SOR-001/US-equity remain paused |
-| Exit activation | Required, not yet activated; configuration current rows0. Genuine Owner preview/TOTP for six exits plus three MA50 bindings is pending; official promoter must follow exact activation/readiness verification |
+| Exit activation | Genuine Owner preview/TOTP activated revision1 at16:05:40.875; exact six profiles/three MA50 gates and hashes verified; latest promoter prepared_owner_paused, Policy9 still paused |
 | HTTPS | Public index and both JS/CSS assets byte-identical to certified archive; Console200, unauthenticated overview401 |
 | Historical accounting | Four terminal economics gaps remain honestly unavailable; enrichment queue empty, no production Review revision or backfill approval fabricated |
 
@@ -75,8 +76,8 @@ restorable source dumps are not committed. No Tokyo application mutation, risk
 expansion, test order, synthetic Signal/Ticket, agent exchange write, genuine
 Owner configuration activation or Resume was performed by this installation.
 
-Remaining: genuine configuration activation/readback, installed Entry-fact probes,
-official promoter while Owner paused, genuine Resume/TOTP and readonly postflight.
+Remaining: genuine Resume/TOTP and readonly postflight. Configuration activation,
+installed Entry-fact probes and official promoter have completed as recorded below.
 Natural AUTO/App and phone notification acceptance remain separate future facts.
 
 #### Configuration-read incident and declared privilege restoration, 2026-11-11
@@ -105,6 +106,34 @@ installed code remains the exact certified production SHA above. Installed Entry
 fact probe14/14 has also passed; genuine exit activation, promoter and Resume
 remain pending. Evidence: `.local/manual-exit-config-read-20261111/` including
 sanitized source errors, role before/after, regressions and real browser screenshot.
+
+#### Genuine exit activation and official restoration preparation, 2026-11-11
+
+Owner's16:05:40.875 Asia/Shanghai `exit_profile_bind / totp_step_up` activated
+configuration `exit-config:3806f652a51fbb174181ee86ed870ff0`, revision1. Exact
+authorization scope/intent/preview digest and all six current profile hashes /
+binding revisions2 verify. CPM/MI/MPG/BRF2 use complete-entry VWAP1R, target5%,
+minimum lift capped50%; SOR-1H both sides use1.2R and original50% floor rule.
+MA50 is enabled only for CPM/MI/MPG; the latest native closed4h snapshot is
+present with no blocked window. A configured gate is not a claim that future
+market eligibility or a natural trade has passed.
+
+Installed-source14/14 admission/dispatch GET-only fact rounds passed again.
+The official `promote_entry.py --prepare-owner-resume` returned
+`prepared_owner_paused`: ENTRY started through the fenced sequence, final
+certification/venue gates passed, and the maintenance fence was removed.
+At16:10:19 final reads prove all five services active/running/NRestarts0,
+exact installed identity, management ready, no sampled worker faults, venue
+positions/ordinary orders/conditional orders0, and PG nonterminal Tickets /
+unresolved commands/open Incidents0. Policy9/new ENTRY false, all original
+strategy controls/Selection/budget unchanged; no new Resume authority exists.
+
+Only genuine Owner Resume/TOTP remains before ENTRY permission restoration.
+No agent-generated authorization, exchange mutation, historical Review revision,
+additional deployment or trading parameter change occurred during verification.
+The local5412950b prevention code remains undeployed. Evidence:
+`.local/manual-exit-activation-20261111/` configuration readback/verification,
+official promotion receipt and final PG/venue/service checks.
 
 ### Manual operational closure repairs — implementation provenance, 2026-11-11
 
