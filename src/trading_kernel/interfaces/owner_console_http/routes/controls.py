@@ -1245,20 +1245,21 @@ class ExitConfigurationView(BaseModel):
 @router.get("/controls/exit-configuration")
 async def read_exit_configuration(request: Request) -> ExitConfigurationView:
     settings = get_settings(request)
-    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
-        record = await uow.exit_profiles.get_current_configuration(
+    async with owner_read_transaction(get_read_engine(request)) as connection:
+        profiles = PostgresExitProfileAuthorityRepository(connection)
+        record = await profiles.get_current_configuration(
             venue_id=settings.venue_id, account_id=settings.account_id
         )
         parameters = []
         sources = []
         for event in EXIT_EVENTS:
-            current = await uow.exit_profiles.get_current_binding(event)
+            current = await profiles.get_current_binding(event)
             if current is None:
                 raise OwnerControlBlocked("exit_binding_missing")
-            binding = await uow.exit_profiles.get_binding(current.exit_binding_id)
+            binding = await profiles.get_binding(current.exit_binding_id)
             if binding is None:
                 raise OwnerControlBlocked("exit_binding_missing")
-            profile = await uow.exit_profiles.get_profile(
+            profile = await profiles.get_profile(
                 exit_profile_id=binding.exit_profile_id,
                 semantic_hash=binding.exit_profile_semantic_hash,
             )
@@ -1301,7 +1302,7 @@ async def read_exit_configuration(request: Request) -> ExitConfigurationView:
                     "semantic_hash": profile.profile.semantic_hash(),
                 }
             )
-        snapshot = await uow.exit_profiles.get_ma50_snapshot()
+        snapshot = await profiles.get_ma50_snapshot()
     return ExitConfigurationView.model_validate(
         {
             "current": None if record is None else record.model_dump(mode="json"),

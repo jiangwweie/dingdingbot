@@ -51,6 +51,24 @@ def preservation_projection_sql(
     )
 
 
+async def refresh_owner_read_grants(engine) -> None:
+    """Reapply declared SELECT coverage after new tables, never write grants."""
+    from sqlalchemy import text
+
+    async with engine.begin() as connection:
+        for role, filename in (
+            ("brc_owner_console", "owner-console-read-role.sql"),
+            ("brc_owner_control", "owner-console-control-role.sql"),
+        ):
+            statement = f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role};"
+            declared = (
+                REPO_ROOT / "deploy/owner-console/postgresql" / filename
+            ).read_text()
+            if statement not in declared.splitlines():
+                raise ValueError("declared Owner read grant differs")
+            await connection.execute(text(statement))
+
+
 async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     from hashlib import sha256
 
@@ -231,6 +249,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                         raise ValueError(
                             "new exit authority must remain empty before Owner activation"
                         )
+        await refresh_owner_read_grants(engine)
         after = await snapshot(before["preserved_columns"])
         if before != after:
             raise ValueError(

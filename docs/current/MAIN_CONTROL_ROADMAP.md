@@ -79,6 +79,33 @@ Remaining: genuine configuration activation/readback, installed Entry-fact probe
 official promoter while Owner paused, genuine Resume/TOTP and readonly postflight.
 Natural AUTO/App and phone notification acceptance remain separate future facts.
 
+#### Configuration-read incident and declared privilege restoration, 2026-11-11
+
+At15:15 Owner's authenticated browser exposed a500 from the configuration GET:
+`permission denied for table brc_btc_ma50_current`. The route used the control
+connection;0020 granted that role configuration writes but omitted market-snapshot
+SELECT, and the stopped upgrade did not refresh the canonical role script's
+existing `GRANT SELECT ON ALL TABLES` contract. Public static and unauthenticated
+checks had not covered this real role boundary.
+
+The exact installed role declaration and source identity/Policy9 pause were
+verified before restoring **SELECT only on brc_btc_ma50_current** to the existing
+control role. No table contents, configuration, credentials, Owner authorization,
+policy, process or release identity changed. Authenticated browser refresh now
+shows all six parameter rows and the preview button. MA50 writes remain denied,
+all five service PIDs remain unchanged; ENTRY stays inactive/disabled/fenced and
+Policy9 paused. No configuration was activated on the Owner's behalf.
+
+Local prevention changes use the existing read-only connection/transaction for
+the GET and refresh only the two canonical declared SELECT grants during future
+upgrades. Real-role HTTP login/read/preview/TOTP/receipt plus unavailable-control
+and no-write-expansion cases reproduce RED then PASS;68 related integration/HTTP
+checks and Ruff/Mypy/diff PASS. **Those code changes are local and not deployed**;
+installed code remains the exact certified production SHA above. Installed Entry
+fact probe14/14 has also passed; genuine exit activation, promoter and Resume
+remain pending. Evidence: `.local/manual-exit-config-read-20261111/` including
+sanitized source errors, role before/after, regressions and real browser screenshot.
+
 ### Manual operational closure repairs — implementation provenance, 2026-11-11
 
 Owner authorized MA-OPS-CLOSURE-01 implementation, including external exit
