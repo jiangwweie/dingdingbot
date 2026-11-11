@@ -41,3 +41,9 @@ Owner已明确要求修复五项缺陷。本轮在`codex/manual-operational-clos
 ### 精确原因的跨边界回归
 
 将budget_exhausted拆为精确原因后，旧只读Shadow eligibility白名单尚未识别margin／count／stop risk／venue minimum／minimum materialization。新增5个真实调用反例观察RED，补齐同一旧观察收集链的原因映射后unit／PG组合34项通过；不改变Signal、准入或订单权限。早期候选R4主动中断，后续SHA重新完整认证，不沿用旧证书。
+
+### 部署前真实源复核发现：REVIEW全历史请求
+
+现场XRP与ADA在旧0019中曾因collector_gap停在REVIEW_REQUIRED；私有接收ready不代表这两票历史已完整。XRP已保存覆盖水位晚于Ticket创建，worker继续从watermark−1秒增量读取，却向reducer申请“完整Ticket历史”解除，真实aggregate纯本地回放复现`review clearance requires complete Ticket history`。目标候选保留了同一调用路径，因此补充修复为REVIEW时从准确Ticket创建时间重新读取；无证据时仍REVIEW，普通AUTO／MANUAL增量读取保持。新增先RED回归，覆盖已有水位后采集失败、重新完整请求且不误清除未知历史；不放宽reducer，也不改PG管理权或生产订单。
+
+Owner后来通过App真实关闭两仓；程序据真实外部动作永久转MANUAL，交易所无仓无普通／条件残单，风险占用释放。等待源版本原Review宽限正常终态后，才可停止writer／迁移。该历史不作为新增Schema接手活动票的例外。

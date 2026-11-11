@@ -92,7 +92,7 @@ async def _observe_management_once(
         coverage = await u.management.get_coverage(ticket_id)
         since = (
             a.ticket.created_at_ms
-            if coverage is None
+            if coverage is None or a.management_mode is ManagementMode.REVIEW_REQUIRED
             else max(a.ticket.created_at_ms, coverage["covered_until_ms"] - 1000)
         )
         req = ManagementScanRequest(

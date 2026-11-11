@@ -405,3 +405,27 @@ async def test_stale_current_flat_snapshot_cannot_release_manual_position(head_t
     async with PostgresKernelUnitOfWork(e) as u:
         a=await u.aggregates.get(t.identity.ticket_id)
         assert a.position_qty==t.quantity and a.status.value!='settlement_pending'
+
+
+@pytest.mark.asyncio
+async def test_review_recovery_restarts_exact_ticket_history_instead_of_incremental_watermark(head_template_engine):
+    e=head_template_engine;t=registered_sor_long_ticket()
+    await reach_position_protected(e,t)
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u.management.save_coverage(t.identity.ticket_id,through_ms=5000,complete=True,
+            reason=None,observed_at_ms=5000,current_complete=True,attribution_complete=True)
+    failed=AsyncMock();failed.read_management_scan.side_effect=TimeoutError()
+    await observe_management_once(lambda:PostgresKernelUnitOfWork(e),failed,ticket_id=t.identity.ticket_id,now_ms=6000)
+    async def history(request):
+        assert request.since_ms == t.created_at_ms
+        return ManagementScan(ticket_id=t.identity.ticket_id,
+            snapshot=PositionSnapshot(netting_domain=t.identity.netting_domain,quantity=t.quantity,
+                average_entry_price=Decimal(60000),observed_at_ms=7000),
+            orders=(),evidence=(),complete=False,reason='history_still_unproven',covered_until_ms=t.created_at_ms)
+    source=AsyncMock();source.read_management_scan.side_effect=history
+    assert await observe_management_once(lambda:PostgresKernelUnitOfWork(e),source,
+        ticket_id=t.identity.ticket_id,now_ms=7000)=='REVIEW_REQUIRED'
+    request=source.read_management_scan.call_args.args[0]
+    assert request.since_ms==t.created_at_ms
+    async with PostgresKernelUnitOfWork(e) as u:
+        assert (await u.aggregates.get(t.identity.ticket_id)).management_mode is ManagementMode.REVIEW_REQUIRED
