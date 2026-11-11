@@ -37,3 +37,7 @@ Owner已明确要求修复五项缺陷。本轮在`codex/manual-operational-clos
 ## 最终认证
 
 新schema为`0021_manual_operational_closure`，冻结后执行新SHA完整R4、Owner API及static认证。最终状态以原生manifest及本地验收报告为准，早期局部通过不作为完整证书。
+
+### 精确原因的跨边界回归
+
+将budget_exhausted拆为精确原因后，旧只读Shadow eligibility白名单尚未识别margin／count／stop risk／venue minimum／minimum materialization。新增5个真实调用反例观察RED，补齐同一旧观察收集链的原因映射后unit／PG组合34项通过；不改变Signal、准入或订单权限。早期候选R4主动中断，后续SHA重新完整认证，不沿用旧证书。

@@ -31,6 +31,11 @@ from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 _ELIGIBLE_REJECTION_BLOCKERS = frozenset(
     {
         "budget_exhausted",
+        "margin_exhausted",
+        "count_exhausted",
+        "stop_risk_exhausted",
+        "venue_minimum_unmet",
+        "minimum_materialization_unmet",
         "exposure_family_capacity_exhausted",
         "strategy_side_capacity_exhausted",
         "directional_risk_exhausted",

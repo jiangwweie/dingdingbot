@@ -438,3 +438,11 @@ def _candle(
         close=close_price,
         volume=Decimal(1),
     )
+
+
+@pytest.mark.parametrize('reason',['margin_exhausted','count_exhausted','stop_risk_exhausted','venue_minimum_unmet','minimum_materialization_unmet'])
+def test_precise_capacity_reason_preserves_readonly_rejected_outcome_collection(reason):
+    signal = _runtime_signal()
+    snapshot = _admission_snapshot()
+    decision = _decision_for_shadow(signal,snapshot).model_copy(update={'first_blocker':reason,'binding_constraint':reason})
+    assert pending_shadow_spec_for_rejection(decision=decision,signal=signal,admission_snapshot=snapshot) is not None
