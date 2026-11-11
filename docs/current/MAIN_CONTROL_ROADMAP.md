@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-02
+last_verified: 2026-11-11
 ---
 
 # Main Control Roadmap
@@ -24,7 +24,45 @@ Observation
 One PostgreSQL-backed kernel serializes new ENTRY while protected Tickets
 continue concurrently across independent Netting Domains.
 
-## CPM / MPG recovery lineage repair — deployed 2026-11-02
+## Strategy exits and MA50 capability — deployed 2026-11-11
+
+**Software deployment is complete; experiment parameter publication remains
+pending authenticated Owner TOTP. Global ENTRY remains Owner-paused.** This
+section supersedes the deployment/control snapshots in all dated sections below.
+
+| Area | Current direct evidence |
+| --- | --- |
+| Integration branch | `dev` |
+| Focused release branch | `codex/auto-exit-regime-v1`, pushed to origin; no dev merge claimed |
+| Production commit | `574f5cf3642ca652798b552ba1269d0ae3db1b55` |
+| Production tag | `tokyo-runtime-2026.11.11.1`, immutable annotated tag pushed to origin at the exact production SHA |
+| Production-commit certification | Exact R4 PASS:1863 Unit/Architecture,1823 Integration,74 Full-chain;3760 tests total; Ruff, Mypy216 source files, diff,961 Golden snapshots and23064 Core parity member decisions. The official periodic-resource exclusions remain unclaimed. Same-commit Owner API R2 and active V2 static R1 certification PASS |
+| Formal deployment | Official stopped-flat compatible upgrade0015→0016 PASS in232835ms. Kernel, independent Owner API and V2 static all run the exact production commit; formal R2/R1 activation and smoke PASS |
+| Source cleanup | Old CPM unfenced DESIRED could not close after its independently completed Owner-pause drain. The corrected normal repository/coordinator accepts only exact authenticated pause and immutable drain-complete provenance. Actual0015 regression and complete Tokyo-backup restoration/cleanup/migration rehearsal PASS. A stopped-writer maintenance command closed only that Generation; no Owner event, clock, current member or control was forged |
+| Real deadline wait | Two normal MPG/BRF2 STAGED attempts created while source Observation ran during certification could not activate under global pause. Observation was stopped; the exact source coordinator closed both at their real30-minute MATERIALIZATION_TIMEOUT deadlines, after17:31:29 Asia/Shanghai. Original Selection intents and immutable histories remain |
+| Preservation and backup | Final stopped source:90 tables/193545 rows; digest `sha256:bd6f1c1e1126863577f27932da98aa9f2e8b1435fd47ca84f1c8138638fb053a` matched after migration. Owner Policy, Strategy/Selection/directional controls and all original ExitBindings compared exactly equal. Complete local custom dump was restored successfully; a further server backup's custom dump and local copy have equal SHA256 |
+| Owner controls | Policy version `36` has `new_entry_submit_enabled=false`; baseline3%, gross9%, base directional6%, minimum materialization50%, concurrent Tickets3 and same-strategy/side2 retained. Owner direction remains neutral/version12. CPM/control4 and MI/control4 remain paused; BRF2, MPG and SOR-1H retain source enabled states; retired SOR-001 and SOR-US remain paused |
+| Runtime ownership | Observation, Entry, Lifecycle and Reconciliation plus independent Owner API active; all NRestarts0 at17:40–17:41 Asia/Shanghai. Official `promote_entry.py --prepare-owner-resume` returned `prepared_owner_paused`; operational fence absent and Entry enabled, while Policy36 still blocks new ENTRY |
+| Postflight | Fresh readonly certification:database integrity, flatness and current Entry recovery readiness PASS. Internal Tickets/positions/commands/Incidents0; exchange positions and open-order domains0. Wallet412.64559117 USDT. No new trade, forced exit, risk expansion, leverage/credential change or Feishu test was performed |
+| ExitProfile postflight | Capability installed for independent Event/direction configuration, actual-fill TP plans, bounded minimum quantity, partial-TP protection and full-target confirmation before BE/Runner. Six-event approved bundle and three MA50 controls passed a production readonly preview; **not published**. Existing bindings remain effective; three installed MA50 controls remain disabled |
+| Required authenticated operation | Owner Console → controls → strategy exit parameters → fill approved experiment → preview → TOTP publish. This atomically publishes four1R/target5%/minimum-executable-up-to50% exits, SOR-1H LONG/SHORT1.2R with retained quantity fractions, and CPM/MI/MPG LONG BTC closed4h close>SMA50 filters. Only later new Tickets use those versions. Parameter publication never resumes global ENTRY or paused strategies |
+
+The deployment-discovered repair remains in the shared Kernel boundary; the
+maintenance command is offline, exact-source and stopped-writer only. No
+runtime old-schema reader, direct state SQL, new execution chain or exchange
+write was introduced. The live economic effect and natural new-Profile Ticket
+lifecycle remain unclaimed while parameter publication and Owner Resume are
+pending. The already approved business parameters do not require re-selection.
+
+Evidence: `.local/tokyo-exit-regime-deploy-20261111/`, exact worktree-local
+R4/R2/R1 manifests and the source/target readonly proofs. Full backup directory:
+`/Users/jiangwei/Documents/production_db_export_2026-11-11_pre_exit_regime/`;
+server additional backup is root-readable under
+`/var/lib/brc/deployment-backups/20261111-exit-regime-precutover.dump`.
+Research/design handoff remains in the separate Strategy Research workspace.
+Generated evidence is display-only, never runtime authority.
+
+## Prior CPM / MPG recovery lineage repair — deployed 2026-11-02
 
 Owner authorized deployment after reporting flatness. Kernel, Owner API and V2
 static now run **`e86b55278e2ac49be79d75909d6203c64a74d2b8`**, schema
