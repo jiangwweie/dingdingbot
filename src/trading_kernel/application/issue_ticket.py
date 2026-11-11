@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from src.trading_kernel.application.exit_regime import check_exit_regime
 from src.trading_kernel.application.ingest_signal import (
     SelectionEntryAuthorityStatus,
     resolve_selection_entry_authority,
@@ -34,8 +35,13 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class IssueTicketStatus(StrEnum):
+    EXIT_CONFIGURATION_NOT_ACTIVATED = "exit_configuration_not_activated"
+    EXIT_CONFIGURATION_BINDING_DRIFT = "exit_configuration_binding_drift"
     DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
+    MA50_UNAVAILABLE = "ma50_unavailable"
+    MA50_STALE = "ma50_stale"
+    MA50_NOT_BULLISH = "ma50_not_bullish"
     ISSUED = "issued"
     NO_READY_SIGNAL = "no_ready_signal"
     SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
@@ -98,8 +104,25 @@ async def issue_ticket(
     uow: KernelUnitOfWork,
     request: IssueTicketRequest,
 ) -> IssueTicketResult:
+    await uow.exit_profiles.acquire_authority_write_lock()
     claim = request.capacity_claim
     ticket = claim.to_ticket()
+    regime_reason, proof = await check_exit_regime(
+        uow,
+        venue_id=ticket.identity.netting_domain.venue_id,
+        account_id=ticket.identity.netting_domain.account_id,
+        event_spec_id=ticket.identity.runtime.event_spec_id,
+        now_ms=request.now_ms,
+    )
+    if regime_reason is not None:
+        return IssueTicketResult(
+            status=IssueTicketStatus(regime_reason), ticket_id=None
+        )
+    if proof != claim.regime_admission:
+        return IssueTicketResult(
+            status=IssueTicketStatus.SCOPE_OR_POLICY_MISMATCH,
+            ticket_id=None,
+        )
     await uow.directional_risk.lock(
         ticket.identity.netting_domain.venue_id,
         ticket.identity.netting_domain.account_id,

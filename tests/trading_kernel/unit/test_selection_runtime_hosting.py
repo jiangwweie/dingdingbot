@@ -216,39 +216,60 @@ async def test_generic_materialization_tick_uses_effective_period_not_current_se
 
 
 @pytest.mark.asyncio
-async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(monkeypatch):
+async def test_resident_script_hosts_all_strategy_planes_without_serial_wait(
+    monkeypatch,
+):
     import scripts.trading_kernel.run_observation_worker_once as script
+
     args=script._parser().parse_args(["--database-url","postgresql+asyncpg://unused/test",
         "--market-source-factory","unused:source","--worker-id","observation","--run-forever",
         "--runtime-commit","test-runtime","--schema-revision","test-schema"])
+
     class Source:
         async def fetch_closed_candles(self,*_): raise AssertionError("no live network")
+
     class Engine:
         async def dispose(self): pass
     monkeypatch.setattr(script,"_load_factory",lambda _:Source)
     monkeypatch.setattr(script,"create_async_engine",lambda _:Engine())
     calls=[]
     observation=asyncio.Event()
+
     async def selection(**kwargs):
         calls.append(("selection",kwargs["request"].strategy_group_id))
         await asyncio.wait_for(observation.wait(),timeout=1)
         return SimpleNamespace(status="not_due")
+
     async def materialization(**kwargs):
         calls.append(("materialization",kwargs["request"].strategy_group_id))
         return SimpleNamespace(status="not_due")
+
     async def observe(*args):
         calls.append(("observation",None))
         observation.set()
         return SimpleNamespace(status="no_work", shadow_outcome_id=None, runtime_scope_id=None)
+
     async def group(loops,**kwargs):
         assert len({loop.component_id for loop in loops})==len(loops)
         await asyncio.gather(*(loop.tick() for loop in loops))
         await asyncio.gather(*(loop.tick() for loop in loops if ":facts:" in loop.component_id))
         return 0
+
     monkeypatch.setattr(script,"run_selection_runtime_once",selection)
     monkeypatch.setattr(script,"run_materialization_runtime_once",materialization)
+
+    async def refresh(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(script, "refresh_exit_regime", refresh)
+
+    async def refresh(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(script, "refresh_exit_regime", refresh)
     monkeypatch.setattr(script,"run_observation_worker_once",observe)
     facts_requests=[]
+
     async def refresh(**kwargs):
         request=kwargs["request"]
         facts_requests.append(request)

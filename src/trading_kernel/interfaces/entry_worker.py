@@ -269,6 +269,7 @@ async def run_entry_worker_once(
         await uow.signals.upsert_instrument_rules(
             venue_id=profile.venue_id,
             exchange_instrument_id=instrument_rules.exchange_instrument_id,
+            exit_order_rules=instrument_rules.exit_order_rules,
             quantity_step=instrument_rules.quantity_step,
             price_tick=instrument_rules.price_tick,
             min_quantity=instrument_rules.min_quantity,

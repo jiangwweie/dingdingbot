@@ -281,6 +281,8 @@ def test_stopped_upgrade_requires_fence_before_any_database_read(tmp_path, monke
 
 @pytest.mark.parametrize('source,target,allowed',[
     ('0017_app_management_observation','0018_notice_outbox_v1',True),
+    ('0019_management_evidence_v2','0020_manual_exit_regime_v1',True),
+    ('0020_manual_exit_regime_v1','0019_management_evidence_v2',False),
     ('0018_notice_outbox_v1','0018_notice_outbox_v1',True),
     ('0016_app_manual_takeover_v1','0018_notice_outbox_v1',False),
     ('0018_notice_outbox_v1','0017_app_management_observation',False),

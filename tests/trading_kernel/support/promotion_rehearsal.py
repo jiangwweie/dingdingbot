@@ -214,7 +214,7 @@ class RecordingPromotionBackend:
         self.entry_active = False
 
 
-async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_hourly: bool = True) -> None:
+async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_hourly: bool = True,prepare_exit_configuration: bool=True) -> None:
     admin = await asyncpg.connect(ADMIN_DSN)
     engine = None
     try:
@@ -230,6 +230,14 @@ async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_
                     schema_revision=CURRENT_SCHEMA_REVISION,
                     seeded_at_ms=NOW_MS - 10_000,
                 ),
+            )
+        from tests.trading_kernel.support.exit_configuration import (
+            install_approved_exit_configuration,
+        )
+
+        if prepare_exit_configuration:
+            await install_approved_exit_configuration(
+                engine, account_id="subaccount-entry-promotion-test", now_ms=NOW_MS - 9999
             )
         await _advance_to_r4_certification_authority(engine)
         clock = VirtualClock()

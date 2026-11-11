@@ -139,3 +139,20 @@ def test_tp1_reports_actual_fill_and_risk_increase_has_amount():
     assert "TP1 成交 0.002 BTC" in message and "68,000" in message
     message = render_notice(snapshot(kind=NoticeKind.RISK, risk_at_stop=Decimal("9.2")))
     assert "止损风险 9.2U" in message
+
+
+def test_minimum_lift_notice_displays_actual_fraction_and_partial_stage():
+    text = render_notice(
+        snapshot(
+            kind=NoticeKind.TP1,
+            tp_target_fraction=Decimal(".05"),
+            tp_actual_fraction=Decimal(1) / 7,
+            tp_minimum_lifted=True,
+            tp_filled_quantity=Decimal(".0004"),
+            tp_target_quantity=Decimal(".001"),
+            tp_complete=False,
+        )
+    )
+    assert "目标 5%" in text and "实际 14.286%" in text
+    assert "最小量提升" in text and "部分成交" in text
+    assert "95%" not in text

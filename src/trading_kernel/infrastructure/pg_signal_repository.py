@@ -38,6 +38,7 @@ from src.trading_kernel.domain.authority_recovery_rebase import (
 )
 from src.trading_kernel.domain.cross_margin_stress import MaintenanceMarginBracket
 from src.trading_kernel.domain.detector import DetectorStatus
+from src.trading_kernel.domain.exit_execution import ExitOrderRules
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBindingEpisodeState,
@@ -1496,6 +1497,7 @@ class PostgresSignalRepository:
         notional_coefficient_certified: bool,
         observed_at_ms: int,
         valid_until_ms: int,
+        exit_order_rules: ExitOrderRules | None = None,
     ) -> InstrumentRulesSnapshot:
         result = await self._connection.execute(
             sa.select(instrument_rules_current)
@@ -1511,6 +1513,9 @@ class PostgresSignalRepository:
         values = {
             "venue_id": venue_id,
             "exchange_instrument_id": exchange_instrument_id,
+            "exit_order_rules": None
+            if exit_order_rules is None
+            else exit_order_rules.model_dump(mode="json"),
             "quantity_step": quantity_step,
             "price_tick": price_tick,
             "min_quantity": min_quantity,

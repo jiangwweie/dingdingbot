@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Literal, cast
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.application.ports import ExitProfileAuthorityConflict
+from src.trading_kernel.domain.exit_configuration import ExitConfigurationRecord
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     EventExitBinding,
@@ -15,11 +17,16 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfile,
     ExitProfileRecord,
 )
+from src.trading_kernel.domain.exit_regime import BtcMa50Snapshot
 from src.trading_kernel.infrastructure.pg_models import (
+    btc_ma50_current,
+    btc_ma50_snapshots,
     event_exit_profile_binding_current,
     event_exit_profile_binding_events,
     event_exit_profile_bindings,
     event_specs,
+    exit_configuration_current,
+    exit_configurations,
     exit_policies,
 )
 
@@ -29,6 +36,226 @@ EXIT_PROFILE_AUTHORITY_WRITE_LOCK = 0x455850524F46494C
 class PostgresExitProfileAuthorityRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
+
+    async def get_configuration(
+        self, configuration_id: str
+    ) -> ExitConfigurationRecord | None:
+        payload = await self._connection.scalar(
+            sa.select(exit_configurations.c.record).where(
+                exit_configurations.c.configuration_id == configuration_id
+            )
+        )
+        return (
+            None if payload is None else ExitConfigurationRecord.model_validate(payload)
+        )
+
+    async def get_current_configuration(
+        self, *, venue_id: str, account_id: str
+    ) -> ExitConfigurationRecord | None:
+        payload = await self._connection.scalar(
+            sa.select(exit_configurations.c.record)
+            .join(
+                exit_configuration_current,
+                exit_configurations.c.configuration_id
+                == exit_configuration_current.c.configuration_id,
+            )
+            .where(
+                exit_configuration_current.c.product_id == "brc-app-manual-v1",
+                exit_configuration_current.c.venue_id == venue_id,
+                exit_configuration_current.c.account_id == account_id,
+            )
+        )
+        return (
+            None if payload is None else ExitConfigurationRecord.model_validate(payload)
+        )
+
+    async def activate_configuration(self, record: ExitConfigurationRecord) -> None:
+        await self.acquire_authority_write_lock()
+        current = await self.get_current_configuration(
+            venue_id=record.intent.venue_id, account_id=record.intent.account_id
+        )
+        if (
+            0 if current is None else current.revision
+        ) != record.intent.expected_revision:
+            raise ExitProfileAuthorityConflict("EXIT_CONFIGURATION_REVISION_CONFLICT")
+        await self._connection.execute(
+            sa.insert(exit_configurations).values(
+                configuration_id=record.configuration_id,
+                product_id=record.intent.product_id,
+                venue_id=record.intent.venue_id,
+                account_id=record.intent.account_id,
+                revision=record.revision,
+                owner_authorization_id=record.owner_authorization_id,
+                record=record.model_dump(mode="json"),
+                created_at_ms=record.created_at_ms,
+            )
+        )
+        for lineage in record.profiles:
+            profile = lineage.profile
+            await self._connection.execute(
+                sa.insert(exit_policies).values(
+                    exit_policy_id=profile.exit_profile_id,
+                    exit_policy_version=str(profile.exit_profile_version),
+                    event_spec_id=None,
+                    profile_schema_version=profile.profile_schema_version,
+                    position_side=profile.position_side,
+                    policy=profile.model_dump(mode="json"),
+                    semantic_hash=profile.semantic_hash(),
+                    status="active",
+                    created_at_ms=record.created_at_ms,
+                )
+            )
+            current_binding = await self.get_current_binding(
+                lineage.event_spec_id, for_update=True
+            )
+            parameters = next(
+                e
+                for e in record.intent.events
+                if e.event_spec_id == lineage.event_spec_id
+            )
+            if (
+                current_binding is None
+                or current_binding.exit_binding_id != parameters.expected_binding_id
+                or current_binding.projection_version
+                != parameters.expected_binding_revision
+            ):
+                raise ExitProfileAuthorityConflict("EXIT_BINDING_VERSION_CONFLICT")
+            previous = await self.get_binding(current_binding.exit_binding_id)
+            if previous is None:
+                raise ExitProfileAuthorityConflict("EXIT_BINDING_MISSING")
+            from src.trading_kernel.domain.exit_policy import build_event_exit_binding
+
+            binding = build_event_exit_binding(
+                exit_binding_id=f"exit-binding:{record.configuration_id}:{lineage.event_spec_id}",
+                binding_version=previous.binding_version + 1,
+                event_spec_id=lineage.event_spec_id,
+                exit_profile_id=profile.exit_profile_id,
+                exit_profile_semantic_hash=profile.semantic_hash(),
+                activation_reason=f"owner configuration {record.configuration_id}",
+                created_at_ms=record.created_at_ms,
+            )
+            await self.switch_current_binding(
+                expected_current=current_binding,
+                new_binding=binding,
+                owner_authorization_id=record.owner_authorization_id,
+                reason=binding.activation_reason,
+                switched_at_ms=record.created_at_ms,
+            )
+        statement = pg_insert(exit_configuration_current).values(
+            product_id=record.intent.product_id,
+            venue_id=record.intent.venue_id,
+            account_id=record.intent.account_id,
+            configuration_id=record.configuration_id,
+            revision=record.revision,
+        )
+        await self._connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=[
+                    exit_configuration_current.c.product_id,
+                    exit_configuration_current.c.venue_id,
+                    exit_configuration_current.c.account_id,
+                ],
+                set_={
+                    "configuration_id": record.configuration_id,
+                    "revision": record.revision,
+                },
+            )
+        )
+
+    async def get_ma50_snapshot(self) -> BtcMa50Snapshot | None:
+        row = (
+            (
+                await self._connection.execute(
+                    sa.select(btc_ma50_current).where(
+                        btc_ma50_current.c.venue_id == "binance-usdm"
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None or row["blocked_window_close_ms"] is not None:
+            return None
+        return BtcMa50Snapshot.model_validate(row["snapshot"])
+
+    async def save_ma50_snapshot(self, snapshot: BtcMa50Snapshot) -> bool:
+        await self._connection.execute(
+            sa.text("SELECT pg_advisory_xact_lock(73184651031)")
+        )
+        current = (
+            (
+                await self._connection.execute(
+                    sa.select(btc_ma50_current)
+                    .where(btc_ma50_current.c.venue_id == snapshot.venue_id)
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            current is not None
+            and current["blocked_window_close_ms"] is not None
+            and snapshot.latest_close_time_ms <= current["blocked_window_close_ms"]
+        ):
+            return False
+        await self._connection.execute(
+            pg_insert(btc_ma50_snapshots)
+            .values(
+                window_digest=snapshot.window_digest,
+                venue_id=snapshot.venue_id,
+                latest_close_time_ms=snapshot.latest_close_time_ms,
+                snapshot=snapshot.model_dump(mode="json"),
+                observed_at_ms=snapshot.observed_at_ms,
+            )
+            .on_conflict_do_nothing()
+        )
+        stored = await self._connection.scalar(
+            sa.select(btc_ma50_snapshots.c.snapshot)
+            .where(
+                btc_ma50_snapshots.c.venue_id == snapshot.venue_id,
+                btc_ma50_snapshots.c.latest_close_time_ms
+                == snapshot.latest_close_time_ms,
+            )
+            .order_by(
+                btc_ma50_snapshots.c.observed_at_ms, btc_ma50_snapshots.c.window_digest
+            )
+            .limit(1)
+        )
+        canonical = BtcMa50Snapshot.model_validate(stored)
+        if (
+            canonical.window_digest != snapshot.window_digest
+            or canonical.latest_close != snapshot.latest_close
+            or canonical.sma50 != snapshot.sma50
+        ):
+            await self._connection.execute(
+                sa.update(btc_ma50_current)
+                .where(btc_ma50_current.c.venue_id == snapshot.venue_id)
+                .values(blocked_window_close_ms=snapshot.latest_close_time_ms)
+            )
+            return False
+        snapshot = canonical
+        statement = pg_insert(btc_ma50_current).values(
+            venue_id=snapshot.venue_id,
+            blocked_window_close_ms=None,
+            snapshot=snapshot.model_dump(mode="json"),
+            latest_close_time_ms=snapshot.latest_close_time_ms,
+            observed_at_ms=snapshot.observed_at_ms,
+        )
+        await self._connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=[btc_ma50_current.c.venue_id],
+                set_={
+                    "snapshot": statement.excluded.snapshot,
+                    "blocked_window_close_ms": None,
+                    "latest_close_time_ms": snapshot.latest_close_time_ms,
+                    "observed_at_ms": snapshot.observed_at_ms,
+                },
+                where=btc_ma50_current.c.observed_at_ms < snapshot.observed_at_ms,
+            )
+        )
+
+        return True
 
     async def acquire_authority_write_lock(self) -> None:
         await self._connection.execute(
@@ -81,7 +308,9 @@ class PostgresExitProfileAuthorityRepository:
                     .where(
                         exit_policies.c.exit_policy_id == exit_profile_id,
                         exit_policies.c.semantic_hash == semantic_hash,
-                        exit_policies.c.profile_schema_version == "exit_profile_v1",
+                        exit_policies.c.profile_schema_version.in_(
+                            ("exit_profile_v1", "exit_profile_v2")
+                        ),
                     )
                     .limit(1)
                 )
@@ -272,13 +501,21 @@ class PostgresExitProfileAuthorityRepository:
         if not 1 <= limit <= 32:
             raise ValueError("ExitProfile readonly limit must be in [1, 32]")
         rows = (
-            await self._connection.execute(
-                sa.select(exit_policies)
-                .where(exit_policies.c.profile_schema_version == "exit_profile_v1")
-                .order_by(exit_policies.c.exit_policy_id)
-                .limit(limit)
+            (
+                await self._connection.execute(
+                    sa.select(exit_policies)
+                    .where(
+                        exit_policies.c.profile_schema_version.in_(
+                            ("exit_profile_v1", "exit_profile_v2")
+                        )
+                    )
+                    .order_by(exit_policies.c.exit_policy_id)
+                    .limit(limit)
+                )
             )
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
         records = []
         for row in rows:
             profile = ExitProfile.model_validate(row["policy"])

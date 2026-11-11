@@ -115,7 +115,14 @@ def promote_entry(backend: EntryPromotionBackend, *, prepare_owner_resume: bool 
     return "prepared_owner_paused" if prepare_owner_resume else "promoted"
 
 
-def _authority_matches(certification: Mapping[str, object], *, prepare_owner_resume: bool = False) -> bool:
+def _authority_matches(
+    certification: Mapping[str, object], *, prepare_owner_resume: bool = False
+) -> bool:
+    if (
+        certification.get("exit_configuration_required")
+        and certification.get("exit_configuration_activated") is not True
+    ):
+        return False
     owner_policy = certification.get("owner_policy")
     capabilities = certification.get("capabilities")
     return bool(

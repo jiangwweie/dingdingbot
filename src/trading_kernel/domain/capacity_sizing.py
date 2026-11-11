@@ -8,6 +8,13 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exit_execution import (
+    ExitExecutionPolicy,
+    ExitOrderRules,
+    ExitPlanUnexecutable,
+    calculate_exit_quantities,
+)
+
 FIXED_EXCHANGE_CONFIGURED_LEVERAGE: Final[int] = 5
 
 
@@ -52,6 +59,9 @@ class CapacitySizingRequest(BaseModel):
     min_quantity: Decimal
     min_notional: Decimal
     tp1_quantity_fraction: Decimal
+    exit_execution: ExitExecutionPolicy | None = None
+    exit_order_rules: ExitOrderRules | None = None
+    evaluated_at_ms: int | None = None
 
     @field_validator(
         "total_wallet_balance",
@@ -157,6 +167,7 @@ class CapacitySizingSelection(BaseModel):
 class CapacitySizingDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    refusal_reason: str | None = None
     status: CapacitySizingStatus
     selected: CapacitySizingSelection | None
 
@@ -244,21 +255,27 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
     candidates: list[CapacitySizingSelection] = []
     venue_minimum_unmet = False
     exit_plan_unexecutable = False
+    exit_refusal_reason = None
     for leverage in leverages:
-        candidate = _evaluate_candidate(
-            request=request,
-            remaining_slots=remaining_slots,
-            ticket_stop_risk_budget=ticket_stop_risk_budget,
-            remaining_gross_stop_risk=remaining_gross_stop_risk,
-            remaining_directional_stop_risk=(remaining_directional_stop_risk),
-            minimum_stop_risk_budget=minimum_stop_risk_budget,
-            remaining_gross_margin=remaining_gross_margin,
-            remaining_executable_margin=remaining_executable_margin,
-            ticket_margin_budget=ticket_margin_budget,
-            risk_quantity=risk_quantity,
-            required_leverage=required_leverage,
-            leverage=leverage,
-        )
+        try:
+            candidate = _evaluate_candidate(
+                request=request,
+                remaining_slots=remaining_slots,
+                ticket_stop_risk_budget=ticket_stop_risk_budget,
+                remaining_gross_stop_risk=remaining_gross_stop_risk,
+                remaining_directional_stop_risk=(remaining_directional_stop_risk),
+                minimum_stop_risk_budget=minimum_stop_risk_budget,
+                remaining_gross_margin=remaining_gross_margin,
+                remaining_executable_margin=remaining_executable_margin,
+                ticket_margin_budget=ticket_margin_budget,
+                risk_quantity=risk_quantity,
+                required_leverage=required_leverage,
+                leverage=leverage,
+            )
+        except ExitPlanUnexecutable as exc:
+            exit_plan_unexecutable = True
+            exit_refusal_reason = str(exc)
+            continue
         if isinstance(candidate, CapacitySizingSelection):
             candidates.append(candidate)
         elif candidate is CapacitySizingStatus.VENUE_MINIMUM_UNMET:
@@ -267,7 +284,9 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
             exit_plan_unexecutable = True
     if not candidates:
         if exit_plan_unexecutable:
-            return _refused(CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE)
+            return _refused(
+                CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE, reason=exit_refusal_reason
+            )
         if venue_minimum_unmet:
             return _refused(CapacitySizingStatus.VENUE_MINIMUM_UNMET)
         return _refused(CapacitySizingStatus.INVALID_FACTS)
@@ -324,19 +343,34 @@ def _evaluate_candidate(
         or planned_stop_risk <= 0
     ):
         return CapacitySizingStatus.VENUE_MINIMUM_UNMET
-    tp1_quantity = _floor_to_step(
-        quantity * request.tp1_quantity_fraction,
-        request.quantity_step,
-    )
-    runner_quantity = quantity - tp1_quantity
-    if tp1_quantity <= 0 or runner_quantity < request.min_quantity:
-        return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
-    if (
-        tp1_quantity < request.min_quantity
-        or tp1_quantity * request.take_profit_price < request.min_notional
-        or runner_quantity * request.initial_stop_price < request.min_notional
-    ):
-        return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+    if request.exit_execution is not None:
+        if request.exit_order_rules is None or request.evaluated_at_ms is None:
+            raise ExitPlanUnexecutable("rule_unavailable")
+        split = calculate_exit_quantities(
+            quantity=quantity,
+            tp_price=request.take_profit_price,
+            stop_price=request.initial_stop_price,
+            target_fraction=request.tp1_quantity_fraction,
+            policy=request.exit_execution.quantity_policy,
+            max_fraction=request.exit_execution.max_actual_fraction,
+            rules=request.exit_order_rules,
+            now_ms=request.evaluated_at_ms,
+        )
+        tp1_quantity, runner_quantity = split.tp_quantity, split.runner_quantity
+    else:
+        tp1_quantity = _floor_to_step(
+            quantity * request.tp1_quantity_fraction,
+            request.quantity_step,
+        )
+        runner_quantity = quantity - tp1_quantity
+        if tp1_quantity <= 0 or runner_quantity < request.min_quantity:
+            return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
+        if (
+            tp1_quantity < request.min_quantity
+            or tp1_quantity * request.take_profit_price < request.min_notional
+            or runner_quantity * request.initial_stop_price < request.min_notional
+        ):
+            return CapacitySizingStatus.EXIT_PLAN_UNEXECUTABLE
     return CapacitySizingSelection(
         remaining_slots=remaining_slots,
         ticket_stop_risk_budget=ticket_stop_risk_budget,
@@ -370,5 +404,7 @@ def _floor_to_step(value: Decimal, step: Decimal) -> Decimal:
     return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
 
 
-def _refused(status: CapacitySizingStatus) -> CapacitySizingDecision:
-    return CapacitySizingDecision(status=status, selected=None)
+def _refused(
+    status: CapacitySizingStatus, *, reason: str | None = None
+) -> CapacitySizingDecision:
+    return CapacitySizingDecision(status=status, selected=None, refusal_reason=reason)

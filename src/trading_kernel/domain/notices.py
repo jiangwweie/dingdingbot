@@ -46,6 +46,16 @@ class NoticeSnapshot(BaseModel):
     mode: Literal["AUTO", "MANUAL", "REVIEW_REQUIRED"]
     quantity: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     entry_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tp_target_fraction: Decimal | None = Field(
+        default=None, gt=0, lt=1, allow_inf_nan=False
+    )
+    tp_actual_fraction: Decimal | None = Field(
+        default=None, gt=0, lt=1, allow_inf_nan=False
+    )
+    tp_target_quantity: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tp_filled_quantity: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    tp_minimum_lifted: bool = False
+    tp_complete: bool = False
     fill_role: Literal["TP1", "止损"] | None = None
     fill_quantity: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
     fill_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)

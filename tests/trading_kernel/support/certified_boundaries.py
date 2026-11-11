@@ -104,7 +104,15 @@ class CertifiedEntryAdmissionFactsSource:
         self,
         request: InstrumentRulesRequest,
     ) -> InstrumentRulesFacts:
+        from tests.trading_kernel.support.exit_configuration import (
+            executable_fixture_rules,
+        )
+
         return InstrumentRulesFacts(
+            exit_order_rules=executable_fixture_rules(
+                now_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             exchange_instrument_id=request.exchange_instrument_id,
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
@@ -275,7 +283,15 @@ class CertifiedPostFillFactsSource:
         self,
         request: InstrumentRulesRequest,
     ) -> InstrumentRulesFacts:
+        from tests.trading_kernel.support.exit_configuration import (
+            executable_fixture_rules,
+        )
+
         return InstrumentRulesFacts(
+            exit_order_rules=executable_fixture_rules(
+                now_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             exchange_instrument_id=request.exchange_instrument_id,
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),

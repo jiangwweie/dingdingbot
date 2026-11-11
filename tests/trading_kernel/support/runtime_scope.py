@@ -240,15 +240,32 @@ async def seed_ticket_registry(connection, ticket) -> None:
             },
         )
     )
+    from src.trading_kernel.domain.exit_policy import registered_exit_profiles
+
+    frozen_profile = next(
+        (
+            p
+            for p in registered_exit_profiles()
+            if p.exit_profile_id == exit_profile_id
+            and p.semantic_hash() == exit_profile_semantic_hash
+        ),
+        None,
+    )
     await connection.execute(
         pg_insert(exit_policies)
         .values(
             exit_policy_id=exit_profile_id,
-            exit_policy_version="test-v1",
-            event_spec_id=runtime.event_spec_id,
-            profile_schema_version=None,
+            exit_policy_version="test-v1"
+            if frozen_profile is None
+            else str(frozen_profile.exit_profile_version),
+            event_spec_id=runtime.event_spec_id if frozen_profile is None else None,
+            profile_schema_version=None
+            if frozen_profile is None
+            else frozen_profile.profile_schema_version,
             position_side=identity.netting_domain.position_side,
-            policy={},
+            policy={}
+            if frozen_profile is None
+            else frozen_profile.model_dump(mode="json"),
             semantic_hash=exit_profile_semantic_hash,
             status="active",
             created_at_ms=ticket.created_at_ms,

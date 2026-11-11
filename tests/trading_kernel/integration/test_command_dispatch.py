@@ -582,6 +582,8 @@ async def test_selection_vacuum_does_not_block_initial_stop_for_existing_ticket(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="lifecycle-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_200,
@@ -820,6 +822,8 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="lifecycle-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_400,
@@ -846,6 +850,8 @@ async def test_prepared_command_is_superseded_before_venue_write_when_state_move
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="lifecycle-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_500,
@@ -977,6 +983,8 @@ async def test_tp1_rejection_is_persisted_without_losing_initial_protection(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="tp1-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_300,
@@ -1043,6 +1051,8 @@ async def test_replacement_rejection_preserves_the_prior_active_stop(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="replacement-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_400,
@@ -1169,6 +1179,8 @@ async def test_dispatch_claims_then_calls_venue_outside_transaction_and_records_
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="dispatcher-2",
             now_ms=2_100,
             lease_until_ms=7_100,
@@ -1231,6 +1243,8 @@ async def test_authoritative_entry_rejection_releases_lane_and_budget_without_re
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="dispatcher-2",
             now_ms=2_100,
             lease_until_ms=7_100,
@@ -1288,6 +1302,8 @@ async def test_timeout_becomes_unknown_outcome_incident_and_is_never_redispatche
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         SlowVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="dispatcher-2",
             now_ms=7_000,
             lease_until_ms=12_000,
@@ -1319,6 +1335,8 @@ async def test_restart_conserves_expired_claim_as_unknown_without_redispatch(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="restart-worker",
             now_ms=1_300,
             lease_until_ms=6_300,
@@ -1386,6 +1404,8 @@ async def test_initial_stop_rejection_is_persisted_and_prepares_controlled_exit(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="stop-dispatcher",
             now_ms=2_200,
             lease_until_ms=7_200,
@@ -1459,6 +1479,8 @@ async def test_initial_stop_timeout_waits_for_truth_without_duplicate_exit(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         SlowVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="stop-dispatcher",
             now_ms=2_200,
             lease_until_ms=7_200,
@@ -1531,6 +1553,8 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         accepting,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="stop-dispatcher",
             now_ms=2_200,
             lease_until_ms=7_200,
@@ -1557,6 +1581,8 @@ async def test_exit_rejection_is_persisted_and_explicit_retry_uses_new_generatio
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="exit-dispatcher",
             now_ms=3_100,
             lease_until_ms=8_100,
@@ -1606,6 +1632,8 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="cancel-dispatcher",
             now_ms=3_300,
             lease_until_ms=8_300,
@@ -1673,6 +1701,8 @@ async def test_cancel_rejection_is_persisted_and_blocks_settlement(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         accepting,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="retry-cancel-dispatcher",
             now_ms=3_500,
             lease_until_ms=8_500,
@@ -1705,6 +1735,8 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         SlowVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="cancel-dispatcher",
             now_ms=3_300,
             lease_until_ms=8_300,
@@ -1736,6 +1768,8 @@ async def test_cancel_timeout_is_conserved_without_retry_and_blocks_settlement(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         CountingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="repeat-dispatcher",
             now_ms=8_500,
             lease_until_ms=13_500,
@@ -1958,6 +1992,8 @@ async def _reach_cancel_pending(
         lambda: PostgresKernelUnitOfWork(engine),
         accepting,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="stop-dispatcher",
             now_ms=2_200,
             lease_until_ms=7_200,
@@ -1979,6 +2015,8 @@ async def _reach_cancel_pending(
         lambda: PostgresKernelUnitOfWork(engine),
         accepting,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="exit-dispatcher",
             now_ms=3_100,
             lease_until_ms=8_100,

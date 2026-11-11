@@ -1,3 +1,4 @@
+import { TicketExitPlan } from '../trades/TicketExitPlan';
 import { priceFacts } from '../../mapping/tradeTruth';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -376,6 +377,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
 
           {/* 3. Main Body */}
           <div className="flex-1 overflow-y-auto p-5">
+            {effectiveTicketId && <TicketExitPlan ticketId={effectiveTicketId} />}
             {isLoading ? (
               <div className="py-20 text-center">
                 <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-3" />

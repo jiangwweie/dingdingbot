@@ -8,8 +8,15 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
+from src.trading_kernel.domain.exit_execution import ExitExecutionPolicy
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     registered_strategy_contracts,
@@ -185,7 +192,10 @@ class ExitProfile(BaseModel):
 
     exit_profile_id: str
     exit_profile_version: int
-    profile_schema_version: Literal["exit_profile_v1"]
+    profile_schema_version: Literal["exit_profile_v1", "exit_profile_v2"]
+    execution: ExitExecutionPolicy | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     position_side: PositionSide
     tp1: TakeProfitRule
     break_even_floor: BreakEvenFloorRule
@@ -203,6 +213,12 @@ class ExitProfile(BaseModel):
 
     @model_validator(mode="after")
     def _validate_profile(self) -> ExitProfile:
+        if (self.profile_schema_version == "exit_profile_v2") != (
+            self.execution is not None
+        ):
+            raise ValueError(
+                "profile schema requires exact explicit execution contract"
+            )
         if self.exit_profile_version <= 0:
             raise ValueError("ExitProfile version must be positive")
         canonical_guards = tuple(

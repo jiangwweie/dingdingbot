@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Literal
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncTransaction
 from typing_extensions import Self
 
@@ -74,6 +75,10 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
+    PostFillStressAssessed,
+    TakeProfitCompletedForExit,
+    TakeProfitFilled,
+    TakeProfitProgressed,
     TicketIssued,
     TradeEvent,
 )
@@ -96,6 +101,7 @@ from src.trading_kernel.infrastructure.pg_instrument_selection_repository import
 from src.trading_kernel.infrastructure.pg_management_repository import (
     PostgresManagementRepository,
 )
+from src.trading_kernel.infrastructure.pg_models import post_fill_exit_plans
 from src.trading_kernel.infrastructure.pg_notice_outbox import enqueue_notice
 from src.trading_kernel.infrastructure.pg_repositories import (
     PostgresAdmissionDecisionRepository,
@@ -282,7 +288,83 @@ class PostgresKernelUnitOfWork:
         if _event_ticket_id(event) != ticket_id:
             raise AggregateVersionConflict("event Ticket differs from reduction")
 
+        if isinstance(event, PostFillStressAssessed):
+            profile_record = await self.exit_profiles.get_profile(
+                exit_profile_id=aggregate.ticket.exit_policy_id,
+                semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
+            )
+            if profile_record is None:
+                raise UnsupportedKernelEffect("post-fill exact profile missing")
+            if (
+                profile_record.profile.execution is not None
+                and event.status == "passed"
+                and event.exit_plan is None
+                and event.exit_plan_failure is None
+            ):
+                raise UnsupportedKernelEffect(
+                    "v2 post-fill requires explicit plan or safe failure"
+                )
+            if event.exit_plan is not None and (
+                profile_record.profile.execution != event.exit_plan.execution
+                or profile_record.profile.tp1.reward_multiple
+                != event.exit_plan.target_multiple
+                or profile_record.profile.tp1.quantity_fraction
+                != event.exit_plan.target_fraction
+            ):
+                raise UnsupportedKernelEffect(
+                    "post-fill plan differs from frozen execution profile"
+                )
+        if (
+            isinstance(
+                event,
+                (TakeProfitFilled, TakeProfitProgressed, TakeProfitCompletedForExit),
+            )
+            and aggregate.post_fill_exit_plan is not None
+        ):
+            proof = event.tp_fill_evidence
+            filled = (
+                event.cumulative_filled_qty
+                if isinstance(event, TakeProfitProgressed)
+                else event.filled_qty
+            )
+            if (
+                proof is None
+                or proof.quantity != filled
+                or current is None
+                or proof.exchange_order_id != current.tp1_exchange_order_id
+            ):
+                raise UnsupportedKernelEffect(
+                    "TP1 cumulative fill lacks exact durable trade proof"
+                )
+            reference = next(
+                (
+                    r
+                    for r in await self.exchange_commands.list_order_references(
+                        ticket_id
+                    )
+                    if r.command_id == proof.command_id
+                    and r.command_kind is ExchangeCommandKind.TAKE_PROFIT
+                ),
+                None,
+            )
+            if (
+                reference is None
+                or reference.submitted_exchange_order_id != proof.exchange_order_id
+                or proof.vwap != event.average_fill_price
+            ):
+                raise UnsupportedKernelEffect(
+                    "TP1 trade proof differs from frozen command"
+                )
         await self.events.append(event)
+        if isinstance(event, PostFillStressAssessed) and event.exit_plan is not None:
+            await self._require_connection().execute(
+                sa.insert(post_fill_exit_plans).values(
+                    ticket_id=ticket_id,
+                    source_event_id=event.event_id,
+                    plan=event.exit_plan.model_dump(mode="json"),
+                    created_at_ms=event.occurred_at_ms,
+                )
+            )
         if ticket_id not in self._notice_changes:
             self._notice_changes[ticket_id] = (current, [])
         self._notice_changes[ticket_id][1].append(event)
@@ -842,7 +924,7 @@ def _take_profit_command(
             order_type="limit",
             reduce_only=True,
             limit_price=effect.limit_price,
-            time_in_force="GTX",
+            time_in_force="GTC" if aggregate.post_fill_exit_plan is not None else "GTX",
         ),
         occurred_at_ms=occurred_at_ms,
     )
@@ -907,6 +989,7 @@ def _cancel_protection_command(
     return ExchangeCommand(
         command_id=command_id,
         ticket_identity=aggregate.identity,
+        management_revision=aggregate.management_revision,
         kind=ExchangeCommandKind.CANCEL_ORDER,
         generation=generation,
         idempotency_key=command_id,
@@ -939,6 +1022,7 @@ def _order_command(
     return ExchangeCommand(
         command_id=command_id,
         ticket_identity=aggregate.identity,
+        management_revision=aggregate.management_revision,
         kind=kind,
         generation=generation,
         idempotency_key=command_id,

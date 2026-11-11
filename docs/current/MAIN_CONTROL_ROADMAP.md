@@ -37,6 +37,21 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Manual MA50／configurable TP1 implementation — local only, 2026-11-11
+
+Owner authorized implementation of MA-EXIT-REGIME-01. The focused local branch
+is `codex/manual-exit-regime-v1`; schema candidate is
+`0020_manual_exit_regime_v1`. Quantity policy, actual-fill exit plans, cumulative
+TP evidence, management-aware lifecycle／transport checks, three MA50 gates,
+Owner atomic revisions／Console and a preservation-gated forward migration are
+implemented locally. Exact local certification is required before installation; no production
+installation, binding activation, service change or exchange write occurred in
+this coding phase. Production references in the table above remain historical
+last-verification facts until refreshed at action time.
+
+See [implementation evidence and conservative partial-fill boundary](../superpowers/plans/2026-11-11-manual-exit-regime-implementation-evidence.md).
+Natural AUTO, real App handover and phone delivery stay separate acceptance.
+
 ### Seoul independent frontend optimization — live static release2026-11-10
 
 **At2026-11-10 14:54 Asia/Shanghai**, frontend static commit

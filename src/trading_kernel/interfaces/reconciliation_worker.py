@@ -66,6 +66,8 @@ from src.trading_kernel.application.runtime_facts import (
     AccountPositionAuditSource,
     AccountRiskSnapshotRequest,
     AccountRiskSnapshotSource,
+    CompleteEntryFillsRequest,
+    CompleteEntryFillsSource,
     FeeDiscountCapabilitySource,
     InstrumentRulesRequest,
     InstrumentRulesSource,
@@ -1113,6 +1115,40 @@ async def _run_reconciliation_worker_once_core_impl(
                 ticket_id=ticket_id,
                 detail=f"post_fill_stress:{type(exc).__name__}",
             )
+        entry_fills = None
+        async with uow_factory() as uow:
+            exact_profile = await uow.exit_profiles.get_profile(
+                exit_profile_id=aggregate.ticket.exit_policy_id,
+                semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
+            )
+            references = await uow.exchange_commands.list_order_references(ticket_id)
+        if (
+            exact_profile is not None
+            and exact_profile.profile.execution is not None
+            and isinstance(position_source, CompleteEntryFillsSource)
+        ):
+            reference = next((r for r in references if r.role is OrderRole.ENTRY), None)
+            if reference is not None:
+                try:
+                    entry_fills = await asyncio.wait_for(
+                        position_source.read_complete_entry_fills(
+                            CompleteEntryFillsRequest(
+                                netting_domain=domain,
+                                reference=reference,
+                                expected_quantity=aggregate.position_qty,
+                                observed_at_ms=request.now_ms,
+                            )
+                        ),
+                        timeout=request.timeout_seconds,
+                    )
+                except Exception as exc:  # noqa: BLE001 - protected AUTO failure converges via exact plan-failure path.
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "complete_entry_fill_proof_unavailable error_type=%s",
+                        type(exc).__name__,
+                    )
+                    entry_fills = None
         if not await _runtime_writer_is_certified(uow_factory, request):
             return _runtime_fenced_result(ticket_id=ticket_id)
         async with uow_factory() as uow:
@@ -1122,6 +1158,7 @@ async def _run_reconciliation_worker_once_core_impl(
                     ticket_id=ticket_id,
                     account_snapshot=account_snapshot,
                     instrument_rules=instrument_rules,
+                    entry_fills=entry_fills,
                     assessed_at_ms=request.now_ms,
                 ),
             )

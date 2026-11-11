@@ -42,6 +42,11 @@ from src.trading_kernel.domain.events import (
     TradeEvent,
     UnownedOrderDetected,
 )
+from src.trading_kernel.domain.exit_execution import (
+    CompleteEntryFills,
+    ExitPlanUnexecutable,
+    build_post_fill_exit_plan,
+)
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
@@ -124,6 +129,7 @@ class PostFillStressReconcileRequest(BaseModel):
     account_snapshot: AccountRiskSnapshot
     instrument_rules: InstrumentRulesFacts
     assessed_at_ms: int
+    entry_fills: CompleteEntryFills | None = None
 
 
 class PostFillStressReconcileResult(BaseModel):
@@ -515,6 +521,7 @@ async def reconcile_post_fill_stress(
         await uow.signals.upsert_instrument_rules(
             venue_id=domain.venue_id,
             exchange_instrument_id=rules.exchange_instrument_id,
+            exit_order_rules=rules.exit_order_rules,
             quantity_step=rules.quantity_step,
             price_tick=rules.price_tick,
             min_quantity=rules.min_quantity,
@@ -567,7 +574,69 @@ async def reconcile_post_fill_stress(
         result_status = PostFillStressReconcileStatus.FAILED
         event_status = "failed"
     assert aggregate.initial_stop_exchange_order_id is not None
+    profile_record = await uow.exit_profiles.get_profile(
+        exit_profile_id=aggregate.ticket.exit_policy_id,
+        semantic_hash=aggregate.ticket.exit_policy_semantic_hash,
+    )
+    if profile_record is None:
+        return PostFillStressReconcileResult(
+            status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE
+        )
+    exit_plan = None
+    exit_plan_failure = None
+    if profile_record.profile.execution is not None and event_status == "passed":
+        try:
+            if rules.exit_order_rules is None or request.entry_fills is None:
+                raise ExitPlanUnexecutable("exact_rules_or_entry_fills_unavailable")
+            if (
+                aggregate.ticket.exit_binding_id is None
+                or aggregate.ticket.exit_binding_authority_version is None
+            ):
+                raise ExitPlanUnexecutable("binding_missing")
+            commands = await uow.exchange_commands.list_for_ticket(request.ticket_id)
+            entry_command = next((c for c in commands if c.kind.value == "entry"), None)
+            if (
+                entry_command is None
+                or entry_command.command_id != request.entry_fills.command_id
+            ):
+                raise ExitPlanUnexecutable("entry_command_conflict")
+            references = await uow.exchange_commands.list_order_references(
+                request.ticket_id
+            )
+            reference = next(
+                (
+                    r
+                    for r in references
+                    if r.command_id == request.entry_fills.command_id
+                ),
+                None,
+            )
+            if (
+                reference is None
+                or reference.submitted_exchange_order_id
+                != request.entry_fills.exchange_order_id
+            ):
+                raise ExitPlanUnexecutable("entry_order_conflict")
+            exit_plan = build_post_fill_exit_plan(
+                ticket_id=request.ticket_id,
+                entry_fills=request.entry_fills,
+                quantity=aggregate.position_qty,
+                initial_stop=aggregate.ticket.initial_stop_price,
+                profile=profile_record.profile,
+                binding_id=aggregate.ticket.exit_binding_id,
+                binding_revision=aggregate.ticket.exit_binding_authority_version,
+                management_revision=aggregate.management_revision,
+                rules=rules.exit_order_rules,
+                now_ms=request.assessed_at_ms,
+            )
+            if exit_plan.initial_r_quote > aggregate.ticket.post_fill_stop_risk_limit:
+                raise ExitPlanUnexecutable("actual_fill_risk_exceeds_frozen_limit")
+        except ExitPlanUnexecutable as exc:
+            exit_plan_failure = str(exc)
+            exit_plan = None
     event = PostFillStressAssessed(
+        exit_plan=exit_plan,
+        exit_plan_failure=exit_plan_failure,
         event_id=_event_id(aggregate),
         ticket_id=request.ticket_id,
         sequence=aggregate.last_event_sequence + 1,

@@ -35,6 +35,7 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfileRecord,
     PreTp1GuardKind,
 )
+from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.identities import (
     NettingDomain,
     RuntimeIdentity,
@@ -68,6 +69,7 @@ def build_capacity_claim(
     exit_profile: ExitProfileRecord,
     netting_domain_occupied: bool,
     now_ms: int,
+    regime_admission: RegimeAdmissionProof | None = None,
     directional_overlay_limit: Decimal | None = None,
 ) -> CapacityClaimDecision:
     account_risk = admission_snapshot.account_risk_snapshot
@@ -239,10 +241,17 @@ def build_capacity_claim(
             min_quantity=instrument_rules.min_quantity,
             min_notional=instrument_rules.min_notional,
             tp1_quantity_fraction=profile.tp1.quantity_fraction,
+            exit_execution=profile.execution,
+            exit_order_rules=instrument_rules.exit_order_rules,
+            evaluated_at_ms=now_ms,
         )
     )
     if sizing.status is not CapacitySizingStatus.SELECTED or sizing.selected is None:
-        return _refused(_sizing_refusal(sizing.status))
+        return CapacityClaimDecision(
+            status=_sizing_refusal(sizing.status),
+            claim=None,
+            refusal_reason=sizing.refusal_reason,
+        )
     selected = sizing.selected
     projected_positions = tuple(
         StressPosition(
@@ -400,6 +409,7 @@ def build_capacity_claim(
         exposure_session_end_ms=exposure_session_end_ms,
         take_profit_prices=(take_profit_price,),
         take_profit_quantities=(selected.tp1_quantity,),
+        regime_admission=regime_admission,
     )
     return CapacityClaimDecision(status=CapacityClaimStatus.CLAIMED, claim=claim)
 

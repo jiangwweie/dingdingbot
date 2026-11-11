@@ -4,7 +4,7 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 97 张业务表、1155 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **96 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 102 张业务表、1188 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **104 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
@@ -42,6 +42,7 @@
 | **[准入、容量、执行与生命周期](#catalog-trade)** | **11** | 交易主链路的准入结果、资金占用、订单意图和执行事实。 |
 | **[只读路径研究与采集配额](#catalog-research)** | **4** | 研究记录与真实成交、资金及净收益分开。 |
 | **[事故、Owner 投影与维护记录](#catalog-health)** | **5** | 记录安全阻断、可读状态和显式维护操作。 |
+| **退出计划与配置** | **5** | 实际成交计划、Owner原子配置及BTC门槛事实。 |
 | **[迁移与切换运维](#catalog-operations)** | **3** | Alembic 版本及 cutover run/phase journal；独立于业务 metadata |
 
 <a id="catalog-registry"></a>
@@ -224,7 +225,7 @@
 <details>
 <summary>完整字段（15 列）</summary>
 
-**字段清单**：`venue_id`、`exchange_instrument_id`、`quantity_step`、`price_tick`、`min_quantity`、`min_notional`、`exchange_max_leverage`、`maintenance_margin_brackets`、`maintenance_margin_brackets_digest`、`notional_coefficient`、`notional_coefficient_certified`、`session_and_settlement`、`observed_at_ms`、`valid_until_ms`、`projection_version`
+**字段清单**：`venue_id`、`exchange_instrument_id`、`exit_order_rules`、`quantity_step`、`price_tick`、`min_quantity`、`min_notional`、`exchange_max_leverage`、`maintenance_margin_brackets`、`maintenance_margin_brackets_digest`、`notional_coefficient`、`notional_coefficient_certified`、`session_and_settlement`、`observed_at_ms`、`valid_until_ms`、`projection_version`
 
 </details>
 
@@ -1270,7 +1271,7 @@
 <details>
 <summary>完整字段（86 列）</summary>
 
-**字段清单**：`capacity_claim_id`、`ticket_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`fact_digest`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_admission_snapshot_digest`、`account_entry_health_digest`、`instrument_entry_health_digest`、`instrument_rules_projection_version`、`account_capacity_domain_key`、`leverage_domain_key`、`total_wallet_balance_at_claim`、`total_margin_balance_at_claim`、`total_initial_margin_at_claim`、`total_maintenance_margin_at_claim`、`available_margin_at_claim`、`mark_price_at_claim`、`position_mode_at_claim`、`margin_mode_at_claim`、`active_ticket_count_at_claim`、`remaining_slots_at_claim`、`active_strategy_group_ticket_count_at_claim`、`max_strategy_group_concurrent_tickets`、`remaining_strategy_group_slots_at_claim`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`max_same_strategy_side`、`active_strategy_side_ticket_count_at_claim`、`gross_risk_at_stop_at_claim`、`directional_risk_at_stop_at_claim`、`current_reserved_margin_at_claim`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`directional_stop_risk_limit_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`planned_stop_risk_budget`、`max_post_fill_stop_risk_overrun_fraction`、`post_fill_stop_risk_limit`、`post_stop_stress_multiple`、`ticket_margin_budget`、`required_leverage`、`selected_leverage`、`configured_leverage_at_claim`、`leverage_change_required`、`exchange_max_leverage`、`reserved_margin`、`cross_margin_stress_evidence`、`entry_reference_price`、`quantity`、`notional`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`decision_digest`、`created_at_ms`、`expires_at_ms`
+**字段清单**：`capacity_claim_id`、`ticket_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`fact_digest`、`regime_admission`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_admission_snapshot_digest`、`account_entry_health_digest`、`instrument_entry_health_digest`、`instrument_rules_projection_version`、`account_capacity_domain_key`、`leverage_domain_key`、`total_wallet_balance_at_claim`、`total_margin_balance_at_claim`、`total_initial_margin_at_claim`、`total_maintenance_margin_at_claim`、`available_margin_at_claim`、`mark_price_at_claim`、`position_mode_at_claim`、`margin_mode_at_claim`、`active_ticket_count_at_claim`、`remaining_slots_at_claim`、`active_strategy_group_ticket_count_at_claim`、`max_strategy_group_concurrent_tickets`、`remaining_strategy_group_slots_at_claim`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`max_same_strategy_side`、`active_strategy_side_ticket_count_at_claim`、`gross_risk_at_stop_at_claim`、`directional_risk_at_stop_at_claim`、`current_reserved_margin_at_claim`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`directional_stop_risk_limit_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`planned_stop_risk_budget`、`max_post_fill_stop_risk_overrun_fraction`、`post_fill_stop_risk_limit`、`post_stop_stress_multiple`、`ticket_margin_budget`、`required_leverage`、`selected_leverage`、`configured_leverage_at_claim`、`leverage_change_required`、`exchange_max_leverage`、`reserved_margin`、`cross_margin_stress_evidence`、`entry_reference_price`、`quantity`、`notional`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`decision_digest`、`created_at_ms`、`expires_at_ms`
 
 </details>
 
@@ -1287,7 +1288,7 @@
 <details>
 <summary>完整字段（60 列）</summary>
 
-**字段清单**：`ticket_id`、`exposure_episode_id`、`signal_event_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`active_netting_domain_key`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`directional_risk_at_stop_at_claim`、`directional_stop_risk_limit_fraction`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_reference_price`、`quantity`、`notional`、`capacity_claim_id`、`planned_stop_risk_budget`、`post_fill_stop_risk_limit`、`selected_leverage`、`leverage_change_required`、`reserved_margin`、`risk_reservation_basis`、`margin_mode`、`cross_margin_stress_model_id`、`post_stop_stress_multiple`、`claim_stress_proof_digest`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`fact_digest`、`decision_digest`、`status`、`created_at_ms`、`expires_at_ms`、`terminal_at_ms`
+**字段清单**：`ticket_id`、`exposure_episode_id`、`signal_event_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`active_netting_domain_key`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`directional_risk_at_stop_at_claim`、`directional_stop_risk_limit_fraction`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`regime_admission`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_reference_price`、`quantity`、`notional`、`capacity_claim_id`、`planned_stop_risk_budget`、`post_fill_stop_risk_limit`、`selected_leverage`、`leverage_change_required`、`reserved_margin`、`risk_reservation_basis`、`margin_mode`、`cross_margin_stress_model_id`、`post_stop_stress_multiple`、`claim_stress_proof_digest`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`fact_digest`、`decision_digest`、`status`、`created_at_ms`、`expires_at_ms`、`terminal_at_ms`
 
 </details>
 
@@ -1304,7 +1305,7 @@
 <details>
 <summary>完整字段（43 列）</summary>
 
-**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
+**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`post_fill_exit_plan`、`partial_tp_protection`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
 </details>
 
@@ -1338,7 +1339,7 @@
 <details>
 <summary>完整字段（15 列）</summary>
 
-**字段清单**：`command_id`、`ticket_id`、`command_kind`、`generation`、`idempotency_key`、`venue_client_order_id`、`status`、`quantity`、`request_payload`、`result_payload`、`claim_owner`、`lease_until_ms`、`created_at_ms`、`deadline_at_ms`、`completed_at_ms`
+**字段清单**：`command_id`、`ticket_id`、`management_revision`、`command_kind`、`generation`、`idempotency_key`、`venue_client_order_id`、`status`、`quantity`、`request_payload`、`result_payload`、`claim_owner`、`lease_until_ms`、`created_at_ms`、`deadline_at_ms`、`completed_at_ms`
 
 </details>
 
@@ -1631,7 +1632,7 @@
 
 **主键**：`rule_id`
 
-**字段清单**：`rule_id`, `rule_digest`, `limits`, `budget_contract`, `event_spec_ids`
+**字段清单**：`rule_id`、`rule_digest`、`limits`、`budget_contract`、`event_spec_ids`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1643,7 +1644,7 @@
 
 **主键**：`venue_id`, `account_id`
 
-**字段清单**：`venue_id`, `account_id`, `version`, `view`, `rule_id`, `rule_digest`, `effective_at_ms`, `pending_view`, `pending_baseline`, `pending_budget_request_id`, `pending_policy_version`, `pending_request_id`, `requested_at_ms`
+**字段清单**：`venue_id`、`account_id`、`version`、`view`、`rule_id`、`rule_digest`、`effective_at_ms`、`pending_view`、`pending_baseline`、`pending_budget_request_id`、`pending_policy_version`、`pending_request_id`、`requested_at_ms`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1655,7 +1656,7 @@
 
 **主键**：`event_id`
 
-**字段清单**：`event_id`, `venue_id`, `account_id`, `event_kind`, `payload`, `occurred_at_ms`
+**字段清单**：`event_id`、`venue_id`、`account_id`、`event_kind`、`payload`、`occurred_at_ms`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1667,7 +1668,7 @@
 
 **主键**：`signal_event_id`
 
-**字段清单**：`signal_event_id`, `ticket_id`, `control`, `directional_risk`, `effective_limit`, `wallet_balance`, `outcome`, `observed_at_ms`
+**字段清单**：`signal_event_id`、`ticket_id`、`control`、`directional_risk`、`effective_limit`、`wallet_balance`、`outcome`、`observed_at_ms`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1679,7 +1680,7 @@
 
 **主键**：`command_id`
 
-**字段清单**：`command_id`, `venue_id`, `account_id`, `worker_id`, `authorized_at_ms`, `expires_at_ms`, `control`, `completed_at_ms`
+**字段清单**：`command_id`、`venue_id`、`account_id`、`worker_id`、`authorized_at_ms`、`expires_at_ms`、`control`、`completed_at_ms`
 
 **维护与用途**：正式 Owner API 和 Kernel 用例通过 PostgreSQL 仓储维护；控制台只读状态不物化权威。
 
@@ -1798,3 +1799,58 @@ COMMIT;
 **主键**：`scope_key`
 
 **字段清单**：`scope_key`、`epoch_id`、`owner_worker_id`、`runtime_commit`、`schema_revision`、`lease_until_ms`、`connection_state`、`persisted_watermark`、`applied_watermark`、`connected_at_ms`、`last_successful_at_ms`、`health_reason`、`revision`
+
+
+### `brc_post_fill_exit_plans`
+
+**职责**：完整入场成交后的一票唯一不可变退出计划。
+
+**主键**：`ticket_id`
+
+**维护与用途**：现有 Kernel 仓储维护；配置需真实 Owner TOTP，行情不授予交易权限。
+
+**字段清单**：`ticket_id`、`source_event_id`、`plan`、`created_at_ms`
+
+
+### `brc_exit_configurations`
+
+**职责**：Owner 授权的六退出与三MA50原子配置包及继承审计。
+
+**主键**：`configuration_id`
+
+**维护与用途**：现有 Kernel 仓储维护；配置需真实 Owner TOTP，行情不授予交易权限。
+
+**字段清单**：`configuration_id`、`product_id`、`venue_id`、`account_id`、`revision`、`owner_authorization_id`、`record`、`created_at_ms`
+
+
+### `brc_exit_configuration_current`
+
+**职责**：独立人工产品账户的当前配置版本指针。
+
+**主键**：`product_id`、`venue_id`、`account_id`
+
+**维护与用途**：现有 Kernel 仓储维护；配置需真实 Owner TOTP，行情不授予交易权限。
+
+**字段清单**：`product_id`、`venue_id`、`account_id`、`configuration_id`、`revision`
+
+
+### `brc_btc_ma50_current`
+
+**职责**：BTC 原生闭合4h的最新SMA50有界事实。
+
+**主键**：`venue_id`
+
+**维护与用途**：现有 Kernel 仓储维护；配置需真实 Owner TOTP，行情不授予交易权限。
+
+**字段清单**：`venue_id`、`blocked_window_close_ms`、`snapshot`、`latest_close_time_ms`、`observed_at_ms`
+
+
+### `brc_btc_ma50_snapshots`
+
+**职责**：保留BTC闭合4h/SMA50不可变窗口快照。
+
+**主键**：`window_digest`
+
+**维护与用途**：Observation按已激活MA50配置维护；用于审计，不替代Owner权限。
+
+**字段清单**：`window_digest`、`venue_id`、`latest_close_time_ms`、`snapshot`、`observed_at_ms`

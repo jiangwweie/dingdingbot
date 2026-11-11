@@ -204,8 +204,8 @@ async def test_elapsed_time_and_control_changes_never_refresh_stale_send_authori
                 "clock_backwards": "dispatch_preflight:stale_snapshot",
                 "pause": "dispatch_preflight:new_entry_disabled",
                 "runtime_fence": "dispatch_preflight:runtime_fenced",
-                "after_send_commit": "entry_send_window_expired",
-                "facts_expire_after_commit": "entry_send_window_expired",
+                "after_send_commit": "dispatch_preflight:runtime_fenced",
+                "facts_expire_after_commit": "dispatch_preflight:runtime_fenced",
             }[boundary]
         )
         count = await c.scalar(

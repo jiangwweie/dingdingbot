@@ -78,6 +78,8 @@ async def test_directional_mutation_never_accepts_arbitrary_scope_or_limits(owne
         json={"view": "bearish", "expected_version": 1, "reason": "outlook", "idempotency_key": "direction-test", "long_limit": "0.10", "account_id": "other"},
     )
     assert response.status_code == 422
+
+
 PASSWORD_HASHER = PasswordHasher(
     time_cost=3,
     memory_cost=65536,
@@ -729,6 +731,11 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
     paths = set(owner_console_app.openapi()["paths"])
 
     assert paths == {
+        "/api/owner/v1/controls/exit-configuration",
+        "/api/owner/v1/controls/exit-configuration/preview",
+        "/api/owner/v1/controls/exit-configuration/sizing-preview",
+        "/api/owner/v1/controls/exit-configuration/requests/{idempotency_key}",
+        "/api/owner/v1/tickets/{ticket_id}/exit-plan",
         "/api/owner/v1/controls/risk-budget",
         "/api/owner/v1/controls/risk-budget/preview",
         "/api/owner/v1/controls/risk-budget/requests/{idempotency_key}",
@@ -1198,3 +1205,49 @@ async def test_performance_endpoint_is_get_only_and_carries_complete_window(
     assert (
         await owner_console_client.post("/api/owner/v1/performance", json={})
     ).status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_exit_configuration_mutation_requires_step_up_before_any_authority_write(
+    owner_console_client, owner_console_app, monkeypatch
+):
+    from src.trading_kernel.domain.exit_configuration import EXIT_EVENTS, MA50_EVENTS
+    from src.trading_kernel.interfaces.owner_console_http.routes import (
+        controls as routes,
+    )
+
+    def no_uow(*args, **kwargs):
+        raise AssertionError("unauthorized request reached PG writer")
+
+    monkeypatch.setattr(routes, "PostgresKernelUnitOfWork", no_uow)
+    client = owner_console_client
+    intent = {
+        "account_id": "owner-account",
+        "expected_revision": 0,
+        "events": [
+            {
+                "event_spec_id": e,
+                "expected_binding_id": "binding:" + str(i),
+                "expected_binding_revision": 1,
+                "reward_multiple": "1.2" if i >= 4 else "1",
+                "target_fraction": ".5" if i >= 4 else ".05",
+                "minimum_lift": i < 4,
+                "max_actual_fraction": "1" if i >= 4 else ".5",
+                "ma50_enabled": e in MA50_EVENTS,
+            }
+            for i, e in enumerate(EXIT_EVENTS)
+        ],
+    }
+    response = await client.post(
+        "/api/owner/v1/controls/exit-configuration",
+        headers={"Origin": "https://owner.example.test"},
+        json={
+            "expected_version": 0,
+            "intent": intent,
+            "preview_digest": "sha256:" + "a" * 64,
+            "preview_valid_until_ms": BASE_MS + 60000,
+            "reason": "approved parameters",
+            "idempotency_key": "exit-request-http",
+        },
+    )
+    assert response.status_code == 403

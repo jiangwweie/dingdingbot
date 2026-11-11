@@ -96,9 +96,11 @@ from src.trading_kernel.domain.events import (
     ReviewRevised,
     RunnerStopRequested,
     TakeProfitAbsenceConfirmed,
+    TakeProfitCompletedForExit,
     TakeProfitConfirmed,
     TakeProfitFilled,
     TakeProfitOutcomeUnknown,
+    TakeProfitProgressed,
     TakeProfitRejected,
     TicketIssued,
     TradeEvent,
@@ -1007,7 +1009,7 @@ def reduce_event(
             "post_fill_stress_status": event.status,
             "post_fill_stress_proof_digest": event.evidence.proof.proof_digest,
         }
-        if event.status == "failed":
+        if event.status == "failed" or event.exit_plan_failure is not None:
             return _transition(
                 current,
                 event,
@@ -1016,7 +1018,9 @@ def reduce_event(
                 effects=(
                     OpenIncident(
                         ticket_id=current.identity.ticket_id,
-                        incident_kind="post_fill_stress_failed",
+                        incident_kind="exit_plan_unexecutable"
+                        if event.exit_plan_failure
+                        else "post_fill_stress_failed",
                     ),
                     PrepareControlledFlattenCommand(
                         ticket_id=current.identity.ticket_id,
@@ -1024,9 +1028,35 @@ def reduce_event(
                     ),
                 ),
             )
-        tp_prices = current.ticket.take_profit_prices
+        if event.exit_plan is not None:
+            plan = event.exit_plan
+            if (
+                plan.ticket_id != current.identity.ticket_id
+                or plan.entry_quantity != current.position_qty
+                or plan.initial_stop != current.ticket.initial_stop_price
+                or plan.profile_id != current.ticket.exit_policy_id
+                or plan.profile_hash != current.ticket.exit_policy_semantic_hash
+                or plan.binding_id != current.ticket.exit_binding_id
+                or plan.binding_revision
+                != current.ticket.exit_binding_authority_version
+                or plan.management_revision != current.management_revision
+                or plan.created_at_ms != event.occurred_at_ms
+            ):
+                raise InvalidLifecycleTransition(
+                    "post-fill exit plan differs from frozen authority"
+                )
+            stress_updates["post_fill_exit_plan"] = plan
+            stress_updates["average_fill_price"] = plan.entry_price
+            stress_updates["actual_stop_risk"] = plan.initial_r_quote
+        tp_prices = (
+            (event.exit_plan.tp_price,)
+            if event.exit_plan
+            else current.ticket.take_profit_prices
+        )
         tp_quantities = (
-            (current.tp1_target_qty,)
+            (event.exit_plan.quantities.tp_quantity,)
+            if event.exit_plan
+            else (current.tp1_target_qty,)
             if current.tp1_target_qty > 0
             else current.ticket.take_profit_quantities
         )
@@ -1192,6 +1222,23 @@ def reduce_event(
         _require_status(current, AggregateStatus.TP1_PENDING)
         if not str(event.reason or "").strip():
             raise InvalidLifecycleTransition("TP1 rejection requires reason")
+        if current.post_fill_exit_plan is not None or current.partial_tp_protection:
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.EXIT_PENDING,
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="take_profit_rejected",
+                    ),
+                    PrepareExitCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                        reason="take_profit_rejected",
+                    ),
+                ),
+            )
         return _transition(
             current,
             event,
@@ -1240,7 +1287,100 @@ def reduce_event(
                 PrepareTakeProfitCommand(
                     ticket_id=current.identity.ticket_id,
                     quantity=current.tp1_target_qty,
-                    limit_price=current.ticket.take_profit_prices[0],
+                    limit_price=current.post_fill_exit_plan.tp_price
+                    if current.post_fill_exit_plan
+                    else current.ticket.take_profit_prices[0],
+                ),
+            ),
+        )
+
+    if isinstance(event, TakeProfitCompletedForExit):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        if (
+            event.filled_qty != current.tp1_target_qty
+            or event.filled_qty < current.tp1_filled_qty
+        ):
+            raise InvalidLifecycleTransition("exit TP completion differs from target")
+        remaining = current.position_qty - (event.filled_qty - current.tp1_filled_qty)
+        if remaining <= 0:
+            raise InvalidLifecycleTransition(
+                "exit TP completion must preserve remainder"
+            )
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "position_qty": remaining,
+                "tp1_filled_qty": event.filled_qty,
+                "tp1_exchange_order_id": None,
+            },
+        )
+
+    if isinstance(event, TakeProfitProgressed):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        filled = event.cumulative_filled_qty
+        if (
+            not current.tp1_filled_qty < filled < current.tp1_target_qty
+            or event.average_fill_price <= 0
+        ):
+            raise InvalidLifecycleTransition(
+                "partial TP progress must increase below target"
+            )
+        remaining = current.position_qty - (filled - current.tp1_filled_qty)
+        if (
+            remaining <= 0
+            or current.active_stop_exchange_order_id is None
+            or current.active_stop_price is None
+        ):
+            raise InvalidLifecycleTransition(
+                "partial TP requires positive protected remainder"
+            )
+        progress_updates: dict[str, object] = {
+            "position_qty": remaining,
+            "tp1_filled_qty": filled,
+        }
+        if event.exit_reason is not None:
+            if not event.exit_reason.strip():
+                raise InvalidLifecycleTransition("partial TP exit requires reason")
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.EXIT_PENDING,
+                updates=progress_updates,
+                effects=(
+                    PrepareExitCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=remaining,
+                        reason=event.exit_reason,
+                    ),
+                ),
+            )
+        if event.protection_covers_remainder:
+            return _transition(
+                current, event, status=current.status, updates=progress_updates
+            )
+        if not event.replacement_safety_verified:
+            return _transition(current,event,status=AggregateStatus.EXIT_PENDING,updates=progress_updates,
+                effects=(OpenIncident(ticket_id=current.identity.ticket_id,incident_kind="partial_tp_protection_unproven"),
+                    PrepareExitCommand(ticket_id=current.identity.ticket_id,quantity=remaining,reason="partial_tp_protection_unproven")))
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            updates={
+                **progress_updates,
+                "partial_tp_protection": True,
+                "pending_stop_price": current.active_stop_price,
+                "pending_stop_watermark_ms": event.occurred_at_ms,
+            },
+            effects=(
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=remaining,
+                    stop_price=current.active_stop_price,
+                    replaces_exchange_order_id=current.active_stop_exchange_order_id,
+                    source_watermark_ms=event.occurred_at_ms,
                 ),
             ),
         )
@@ -1253,7 +1393,7 @@ def reduce_event(
             raise InvalidLifecycleTransition("TP1 fill and runner floor must be positive")
         if current.active_stop_exchange_order_id is None:
             raise InvalidLifecycleTransition("TP1 fill has no active stop to replace")
-        runner_qty = current.position_qty - event.filled_qty
+        runner_qty = current.position_qty - (event.filled_qty - current.tp1_filled_qty)
         if runner_qty <= 0:
             raise InvalidLifecycleTransition("TP1 fill must preserve runner exposure")
         return _transition(
@@ -1379,6 +1519,23 @@ def reduce_event(
         if not str(event.reason or "").strip():
             raise InvalidLifecycleTransition(
                 "protection replacement rejection requires reason"
+            )
+        if current.post_fill_exit_plan is not None or current.partial_tp_protection:
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.EXIT_PENDING,
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="protection_replacement_rejected",
+                    ),
+                    PrepareExitCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=current.position_qty,
+                        reason="protection_replacement_rejected",
+                    ),
+                ),
             )
         return _transition(
             current,
@@ -1781,8 +1938,10 @@ def reduce_event(
             return _transition(
                 current,
                 event,
-                status=AggregateStatus.RUNNER_PROTECTED,
-                updates=runner_cancel_updates,
+                status=AggregateStatus.POSITION_PROTECTED
+                if current.partial_tp_protection
+                else AggregateStatus.RUNNER_PROTECTED,
+                updates={**runner_cancel_updates, "partial_tp_protection": False},
             )
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
         if event.exchange_order_id != current.pending_cancel_exchange_order_id:
@@ -1847,8 +2006,10 @@ def reduce_event(
         return _transition(
             current,
             event,
-            status=AggregateStatus.RUNNER_PROTECTED,
-            updates=absence_updates,
+            status=AggregateStatus.POSITION_PROTECTED
+            if current.partial_tp_protection
+            else AggregateStatus.RUNNER_PROTECTED,
+            updates={**absence_updates, "partial_tp_protection": False},
             effects=(
                 MarkCancelCommandReconciledAbsent(
                     ticket_id=current.identity.ticket_id,

@@ -62,7 +62,7 @@ async def test_management_upgrade_preserves_history_and_exits_recovery_only_mode
                 return result
 
         before = await snapshot()
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", "0019_management_evidence_v2")
         async with PostgresKernelUnitOfWork(e) as u:
             await deploy_compatible_upgrade_identity(
                 u,

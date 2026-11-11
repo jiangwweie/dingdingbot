@@ -109,6 +109,8 @@ _TP_RUNNER_EVENTS = {
     "TakeProfitOutcomeUnknown",
     "TakeProfitAbsenceConfirmed",
     "TakeProfitFilled",
+    "TakeProfitProgressed",
+    "TakeProfitCompletedForExit",
     "RunnerStopRequested",
     "ProtectionReplacementConfirmed",
     "ProtectionReplacementRejected",

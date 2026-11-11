@@ -70,7 +70,7 @@ sequenceDiagram
 
 ## 为什么暂停后还有动作
 
-**`new_entry_submit_enabled` 只控制新 ENTRY**。AUTO 的保护与退出、各管理模式允许的对账/结算/Review 继续执行；MANUAL 不会恢复自动写权限；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
+**`new_entry_submit_enabled` 只控制新 ENTRY**。AUTO 的保护与退出、各管理模式允许的对账/结算/Review 继续执行；MANUAL 不会恢复自动写权限；关闭新入场不是关闭所有 Worker。（来源：[ENTRY preflight](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L158)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py#L100)、[P0 设计](../current/P0_TRADING_KERNEL_REBUILD_DESIGN.md)）
 
 在数据库中，“配置允许”与“此时有效允许”也不同：Policy 开启之后仍可能被 runtime fence、策略暂停、Vacuum、Authority 到期、账户或容量门槛阻断。读取控制页时要看具体 blocker，而非只看按钮状态。（来源：[read_controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py#L420)、[entry_scope](../../src/trading_kernel/application/owner_console/entry_scope.py)）
 

@@ -58,6 +58,18 @@ def render_notice(facts: NoticeSnapshot) -> str:
         entry += f"｜{facts.fill_role or 'TP1'} {label} {format_number(facts.fill_quantity)} {facts.symbol}"
         if facts.fill_price is not None:
             entry += f" @ {format_number(facts.fill_price)}"
+    if facts.tp_actual_fraction is not None and facts.tp_target_fraction is not None:
+        target = format_number(
+            (facts.tp_target_fraction * 100).quantize(Decimal(".001"))
+        )
+        actual = format_number(
+            (facts.tp_actual_fraction * 100).quantize(Decimal(".001"))
+        )
+        entry += f"｜TP目标 {target}% · 实际 {actual}%"
+        if facts.tp_minimum_lifted:
+            entry += "（最小量提升）"
+        if facts.kind is NoticeKind.TP1:
+            entry += "｜完整成交" if facts.tp_complete else "｜部分成交，尚未启动保本"
     if facts.quantity == 0:
         stop = "仓位已归零"
         if facts.residual_order_count is not None:

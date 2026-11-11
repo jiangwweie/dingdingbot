@@ -1632,17 +1632,59 @@ async def _certified_0002_capabilities(
     }
 
 
-_APP_MANAGEMENT_SOURCE_COLUMNS = frozenset({
-    "management_mode", "management_revision", "management_evidence_id",
-    "management_reason", "manual_takeover_at_ms",
-    "management_orders", "manual_risk_reason", "manual_risk_at_stop", "management_observed_at_ms",
-})
+_APP_MANAGEMENT_SOURCE_COLUMNS = frozenset(
+    {
+        "post_fill_exit_plan",
+        "partial_tp_protection",
+        "management_mode",
+        "management_revision",
+        "management_evidence_id",
+        "management_reason",
+        "manual_takeover_at_ms",
+        "management_orders",
+        "manual_risk_reason",
+        "manual_risk_at_stop",
+        "management_observed_at_ms",
+    }
+)
 
 
-def _without_app_management_columns(tables: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+def _without_app_management_columns(
+    tables: dict[str, tuple[str, ...]],
+) -> dict[str, tuple[str, ...]]:
     """Deployment-only exact inventory for pre-0016 source preservation."""
-    return {name: tuple(c for c in columns if name != "brc_trade_aggregates" or c not in _APP_MANAGEMENT_SOURCE_COLUMNS)
-            for name, columns in tables.items() if name not in {"brc_management_order_evidence","brc_management_observation_current","brc_notice_outbox","brc_management_stream_events","brc_order_command_baselines","brc_management_coverage_events","brc_management_feed_current"}}
+    return {
+        name: tuple(
+            c
+            for c in columns
+            if (
+                name != "brc_trade_aggregates"
+                or c not in _APP_MANAGEMENT_SOURCE_COLUMNS
+            )
+            and not (
+                name in {"brc_capacity_claims", "brc_trade_tickets"}
+                and c == "regime_admission"
+            )
+            and not (name == "brc_instrument_rules_current" and c == "exit_order_rules")
+            and not (name == "brc_exchange_commands" and c == "management_revision")
+        )
+        for name, columns in tables.items()
+        if name
+        not in {
+            "brc_post_fill_exit_plans",
+            "brc_exit_configurations",
+            "brc_exit_configuration_current",
+            "brc_btc_ma50_current",
+            "brc_btc_ma50_snapshots",
+            "brc_management_order_evidence",
+            "brc_management_observation_current",
+            "brc_notice_outbox",
+            "brc_management_stream_events",
+            "brc_order_command_baselines",
+            "brc_management_coverage_events",
+            "brc_management_feed_current",
+        }
+    }
 
 
 def _source_0002_table_columns() -> dict[str, tuple[str, ...]]:
@@ -2886,7 +2928,6 @@ def _summary_payload(payload: dict[str, object]) -> dict[str, object]:
     return summary
 
 
-
 _DIRECTIONAL_NEW_TABLES = {
     "brc_directional_risk_rules",
     "brc_directional_risk_controls",
@@ -3038,7 +3079,6 @@ async def _dynamic_intent_source_preservation_manifest(connection: AsyncConnecti
     return {**payload, "digest": _sha256_json(payload)}
 
 
-
 # Exact stopped-upgrade evidence only; never used by runtime readers.
 def _source_0013_table_columns() -> dict[str, tuple[str, ...]]:
     additions = {"pending_baseline", "pending_budget_request_id", "pending_policy_version"}
@@ -3075,17 +3115,31 @@ async def _risk_budget_source_preservation_manifest(connection: AsyncConnection)
     return {**payload,"digest":_sha256_json(payload)}
 
 
-
-
-async def _generic_owner_recovery_preservation_manifest(connection: AsyncConnection) -> dict[str, object]:
+async def _generic_owner_recovery_preservation_manifest(
+    connection: AsyncConnection,
+) -> dict[str, object]:
     """Function-only 0014->0015 upgrade preserves every source table and row."""
     revision=await _alembic_revision(connection)
     if revision not in {"0014_dynamic_risk_budget_v1","0015_generic_owner_recovery_v1","0016_app_manual_takeover_v1"}:
         raise ValueError("Generic owner recovery requires exact source/target")
     tables=[]
     count=0
-    for name,table in sorted(metadata.tables.items()):
-        if name in {"brc_management_order_evidence","brc_management_observation_current","brc_notice_outbox","brc_management_stream_events","brc_order_command_baselines","brc_management_coverage_events","brc_management_feed_current"}:continue
+    for name, table in sorted(metadata.tables.items()):
+        if name in {
+            "brc_post_fill_exit_plans",
+            "brc_exit_configurations",
+            "brc_exit_configuration_current",
+            "brc_btc_ma50_current",
+            "brc_btc_ma50_snapshots",
+            "brc_management_order_evidence",
+            "brc_management_observation_current",
+            "brc_notice_outbox",
+            "brc_management_stream_events",
+            "brc_order_command_baselines",
+            "brc_management_coverage_events",
+            "brc_management_feed_current",
+        }:
+            continue
         columns=_without_app_management_columns({name:tuple(table.c.keys())})[name]
         rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
         canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))

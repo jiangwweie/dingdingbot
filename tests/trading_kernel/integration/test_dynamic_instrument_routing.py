@@ -320,6 +320,8 @@ async def test_pending_certification_alone_creates_no_ticket_command_or_venue_wr
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="entry-dispatcher",
             now_ms=1_100,
             lease_until_ms=6_100,
@@ -651,6 +653,8 @@ async def _dispatch_ticket_command(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id=f"lifecycle-{now_ms}",
             ticket_id=ticket_id,
             now_ms=now_ms,

@@ -109,13 +109,25 @@ def build_notices(
     if not flat and not takeover:
         if (
             any(
-                isinstance(e, ev.PostFillStressAssessed) and e.status == "passed"
+                isinstance(e, ev.PostFillStressAssessed)
+                and e.status == "passed"
+                and e.exit_plan_failure is None
                 for e in events
             )
             and final.management_mode is ManagementMode.AUTO
         ):
             kinds.append(NoticeKind.OPENED)
-        if any(isinstance(e, ev.TakeProfitFilled) for e in events):
+        if any(
+            isinstance(
+                e,
+                (
+                    ev.TakeProfitFilled,
+                    ev.TakeProfitProgressed,
+                    ev.TakeProfitCompletedForExit,
+                ),
+            )
+            for e in events
+        ):
             kinds.append(NoticeKind.TP1)
         if manual and before is not None and known_manual:
             if final.manual_risk_reason is not None and (
@@ -141,6 +153,7 @@ def build_notices(
                 (
                     ev.EntryOutcomeUnknown,
                     ev.EntryPartiallyFilled,
+                    ev.TakeProfitRejected,
                     ev.InitialStopRejected,
                     ev.InitialStopOutcomeUnknown,
                     ev.ProtectionReplacementRejected,
@@ -154,6 +167,9 @@ def build_notices(
             for e in events
         ):
             kinds.append(NoticeKind.RISK)
+        if any(isinstance(e,ev.PostFillStressAssessed) and (e.status=="failed" or e.exit_plan_failure is not None) for e in events):
+            kinds.append(NoticeKind.RISK)
+
     manual_fills = tuple(
         item
         for item in order_evidence
@@ -251,11 +267,33 @@ def build_notices(
         "策略",
     )
     fill = next(
-        (e for e in reversed(events) if isinstance(e, ev.TakeProfitFilled)), None
+        (
+            e
+            for e in reversed(events)
+            if isinstance(e, (ev.TakeProfitFilled, ev.TakeProfitProgressed))
+        ),
+        None,
     )
     snapshots = tuple(
         NoticeSnapshot(
-            fill_quantity=fill.filled_qty
+            tp_target_fraction=None
+            if final.post_fill_exit_plan is None
+            else final.post_fill_exit_plan.target_fraction,
+            tp_actual_fraction=None
+            if final.post_fill_exit_plan is None
+            else final.post_fill_exit_plan.quantities.actual_fraction,
+            tp_minimum_lifted=False
+            if final.post_fill_exit_plan is None
+            else final.post_fill_exit_plan.quantities.minimum_lifted,
+            tp_target_quantity=final.tp1_target_qty or None,
+            tp_filled_quantity=final.tp1_filled_qty,
+            tp_complete=final.tp1_target_qty > 0
+            and final.tp1_filled_qty == final.tp1_target_qty,
+            fill_quantity=(
+                fill.cumulative_filled_qty
+                if isinstance(fill, ev.TakeProfitProgressed)
+                else fill.filled_qty
+            )
             if fill is not None and kind is NoticeKind.TP1
             else None,
             fill_price=fill.average_fill_price

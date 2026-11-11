@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, JsonValue
 
+from src.trading_kernel.domain.exit_execution import PostFillExitPlan
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
@@ -137,6 +138,8 @@ class TradeAggregate(BaseModel):
     active_stop_exchange_order_id: str | None = None
     active_stop_price: Decimal | None = None
     tp1_exchange_order_id: str | None = None
+    post_fill_exit_plan: PostFillExitPlan | None = None
+    partial_tp_protection: bool = False
     tp1_target_qty: Decimal = Decimal(0)
     tp1_filled_qty: Decimal = Decimal(0)
     break_even_floor_price: Decimal | None = None

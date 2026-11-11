@@ -221,6 +221,25 @@ async def run_lifecycle_worker_once(
         entry_quantity=aggregate.ticket.quantity,
         expected_position_quantity=aggregate.position_qty,
         entry_order_reference=entry_order_reference,
+        tp1_order_reference=next(
+            (
+                r
+                for r in order_references
+                if r.command_kind is ExchangeCommandKind.TAKE_PROFIT
+                and r.submitted_exchange_order_id == aggregate.tp1_exchange_order_id
+            ),
+            None,
+        ),
+        active_stop_reference=next(
+            (
+                r
+                for r in order_references
+                if r.submitted_exchange_order_id
+                == aggregate.active_stop_exchange_order_id
+            ),
+            None,
+        ),
+        exact_tp_fills_required=profile.execution is not None,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entry_fill_window_started_at_ms=(
             entry_order_reference.command_created_at_ms
@@ -265,11 +284,15 @@ async def run_lifecycle_worker_once(
 
     expected_position_quantity: Decimal | None = aggregate.position_qty
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
-        if facts.tp1_filled_quantity == aggregate.tp1_target_qty:
-            expected_position_quantity = (
-                aggregate.position_qty - aggregate.tp1_target_qty
+        if (
+            aggregate.tp1_filled_qty
+            <= facts.tp1_filled_quantity
+            <= aggregate.tp1_target_qty
+        ):
+            expected_position_quantity = aggregate.position_qty - (
+                facts.tp1_filled_quantity - aggregate.tp1_filled_qty
             )
-        elif facts.tp1_filled_quantity != 0:
+        else:
             expected_position_quantity = None
     if facts.position_quantity != expected_position_quantity:
         async with uow_factory() as uow:

@@ -202,7 +202,11 @@ def re_full_ticket(value: str) -> bool:
 def require_upgrade_schema(source: str, target: str) -> None:
     if source == target:
         return
-    if (source,target) not in {("0017_app_management_observation","0018_notice_outbox_v1"),("0018_notice_outbox_v1","0019_management_evidence_v2")}:
+    if (source, target) not in {
+        ("0017_app_management_observation", "0018_notice_outbox_v1"),
+        ("0018_notice_outbox_v1", "0019_management_evidence_v2"),
+        ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),
+    }:
         raise ValueError("manual upgrade requires same schema or exact 0017-to-0018 transition")
 
 

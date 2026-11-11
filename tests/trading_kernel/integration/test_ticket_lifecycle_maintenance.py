@@ -951,3 +951,178 @@ async def _dispatch(engine, venue, ticket_id: str, *, now_ms: int) -> None:
         engine,
         ticket_id,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("full", [False, True])
+async def test_partial_or_full_tp_at_absolute_expiry_exits_only_true_remainder(
+    lifecycle_engine, full
+):
+    ticket = _registered_sor_long_ticket()
+    await _reach_position_protected(lifecycle_engine, ticket)
+    filled = (
+        ticket.take_profit_quantities[0]
+        if full
+        else ticket.take_profit_quantities[0] / 2
+    )
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        result = await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity - filled,
+                    tp1_filled_quantity=filled,
+                    tp1_average_fill_price=ticket.take_profit_prices[0],
+                    allocated_entry_fee_quote=Decimal(".01"),
+                    exit_taker_fee_rate=Decimal(".001"),
+                    price_tick=Decimal(".1"),
+                    market_facts=LifecycleMarketFacts(
+                        watermark_ms=2500,
+                        is_final_closed_candle=True,
+                        latest_close=Decimal(61000),
+                        structure_reference=Decimal(60000),
+                        atr=Decimal(100),
+                        holding_bars=100,
+                    ),
+                    observed_at_ms=2500,
+                ),
+                now_ms=2500,
+            ),
+        )
+    assert result.status is LifecycleMaintenanceStatus.EXIT_REQUESTED
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        assert aggregate.position_qty == ticket.quantity - filled
+        assert aggregate.break_even_floor_price is None
+        exit_cmd = next(c for c in commands if c.kind is ExchangeCommandKind.EXIT)
+        assert exit_cmd.payload.quantity == ticket.quantity - filled
+        assert not any(
+            c.kind is ExchangeCommandKind.REPLACE_PROTECTION for c in commands
+        )
+
+
+@pytest.mark.asyncio
+async def test_manual_takeover_during_venue_wait_supersedes_unsent_replacement(
+    lifecycle_engine,
+):
+    from src.trading_kernel.application.dispatch_exchange_command import (
+        DispatchCommandStatus,
+    )
+    from src.trading_kernel.domain.events import ManualTakeoverConfirmed
+    from src.trading_kernel.domain.reducer import reduce_event
+    from src.trading_kernel.domain.trade_management import ManagementMode
+
+    ticket = _registered_sor_long_ticket()
+    await _reach_position_protected(lifecycle_engine, ticket)
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity
+                    - ticket.take_profit_quantities[0],
+                    tp1_filled_quantity=ticket.take_profit_quantities[0],
+                    tp1_average_fill_price=ticket.take_profit_prices[0],
+                    allocated_entry_fee_quote=Decimal(".01"),
+                    exit_taker_fee_rate=Decimal(".001"),
+                    price_tick=Decimal(".1"),
+                    market_facts=None,
+                    observed_at_ms=2500,
+                ),
+                now_ms=2500,
+            ),
+        )
+
+    class WaitingVenue:
+        writes = 0
+
+        async def execute(self, request):
+            # Simulate load_markets/throttle await after dispatcher's first check.
+            async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+                a = await uow.aggregates.get(ticket.identity.ticket_id)
+                event = ManualTakeoverConfirmed(
+                    event_id="takeover-during-wait",
+                    ticket_id=ticket.identity.ticket_id,
+                    sequence=a.last_event_sequence + 1,
+                    occurred_at_ms=2600,
+                    evidence_id="app-action-proof",
+                    reason="external_amendment",
+                )
+                await uow.commit_reduction(
+                    event=event,
+                    reduction=reduce_event(a, event),
+                    expected_version=a.version,
+                )
+            await request.before_send()
+            self.writes += 1
+            raise AssertionError("MANUAL cannot reach mutation")
+
+    venue = WaitingVenue()
+    result = await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(lifecycle_engine),
+        venue,
+        DispatchCommandRequest(
+            worker_id="late-dispatch",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=2700,
+            lease_until_ms=7700,
+            timeout_seconds=2,
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+        ),
+        clock_ms=lambda: 2700,
+    )
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    assert venue.writes == 0
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        a = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert a.management_mode is ManagementMode.MANUAL
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        assert not any(c.kind is ExchangeCommandKind.CANCEL_ORDER for c in commands)
+
+
+@pytest.mark.asyncio
+async def test_unattributed_terminal_partial_tp_enters_review_without_automatic_exit(
+    lifecycle_engine,
+):
+    from src.trading_kernel.domain.trade_management import ManagementMode
+
+    ticket = _registered_sor_long_ticket()
+    await _reach_position_protected(lifecycle_engine, ticket)
+    filled = ticket.take_profit_quantities[0] / 2
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await maintain_ticket_lifecycle(
+            uow,
+            LifecycleMaintenanceRequest(
+                ticket_id=ticket.identity.ticket_id,
+                facts=TicketLifecycleFacts(
+                    position_quantity=ticket.quantity - filled,
+                    tp1_filled_quantity=filled,
+                    tp1_average_fill_price=ticket.take_profit_prices[0],
+                    tp1_order_terminal=True,
+                    allocated_entry_fee_quote=Decimal(".01"),
+                    exit_taker_fee_rate=Decimal(".001"),
+                    price_tick=Decimal(".1"),
+                    market_facts=None,
+                    observed_at_ms=2500,
+                ),
+                now_ms=2500,
+            ),
+        )
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        aggregate = await uow.aggregates.get(ticket.identity.ticket_id)
+        commands = await uow.exchange_commands.list_for_ticket(
+            ticket.identity.ticket_id
+        )
+        assert aggregate.management_mode is ManagementMode.REVIEW_REQUIRED
+        assert not any(
+            c.kind in {ExchangeCommandKind.EXIT, ExchangeCommandKind.REPLACE_PROTECTION}
+            for c in commands
+        )

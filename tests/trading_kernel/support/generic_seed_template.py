@@ -53,6 +53,16 @@ async def seed_generic_database(engine: AsyncEngine, *, excluded_group: str | No
                     sor_golden="PASS", spec_cert="PASS",
                 ))
 
+    # Frozen baseline migrations seed reference TradFi rows with their wall
+    # clock. Concurrent head-template rebuilds may legitimately have different
+    # migration times for identical source. This disposable Selection fixture
+    # owns one deterministic setup clock; runtime code is not changed.
+    import sqlalchemy as sa
+    async with engine.begin() as connection:
+        await connection.execute(sa.text("UPDATE brc_instrument_product_profiles SET updated_at_ms=:at"),{"at":CUTOFF-HOUR})
+        await connection.execute(sa.text("UPDATE brc_instrument_product_current SET observed_at_ms=:at,valid_until_ms=:valid"),
+            {"at":CUTOFF-HOUR,"valid":CUTOFF-HOUR+900000})
+
 
 class GenericSeedTemplateHarness(HeadTemplateCloneHarness):
     """Every test still owns its own database, transactions and disposal."""

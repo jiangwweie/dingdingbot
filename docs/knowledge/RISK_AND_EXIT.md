@@ -20,7 +20,7 @@
 
 ## 风险分布在哪些边界
 
-**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L52)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L97)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L153)）
+**风险控制跨越观察、Claim、签发、派发和成交后管理**。不能因为某个 Signal ready 或 Claim 曾经合法，就跳过下一阶段的当前事实重查。（来源：[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L53)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L103)、[revalidate_entry_dispatch](../../src/trading_kernel/application/revalidate_entry_dispatch.py#L158)）
 
 | 边界 | 输入 | 关键判断 | 拒绝或后续处理 |
 | --- | --- | --- | --- |
@@ -35,7 +35,7 @@
 
 ### 已从代码验证的公式
 
-所有金融量使用 **Decimal**。下列是 [select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L172) 的可读展开；数量还必须满足交易所步长、最小量与双腿退出约束。
+所有金融量使用 **Decimal**。下列是 [select_capacity_candidate](../../src/trading_kernel/domain/capacity_sizing.py#L183) 的可读展开；数量还必须满足交易所步长、最小量与双腿退出约束。
 
 ```text
 剩余总止损风险 = max(wallet × gross_stop_fraction − 已占总风险, 0)
@@ -80,7 +80,7 @@ stateDiagram-v2
     review_pending --> terminal: ReviewRecorded
 ```
 
-这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L20) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L130) 为准。
+这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L21) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L132) 为准。
 
 ### 冻结退出规则怎样使用
 
@@ -90,7 +90,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L117)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L628)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L716)、[Reducer](../../src/trading_kernel/domain/reducer.py#L130)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L127)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L644)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L732)、[Reducer](../../src/trading_kernel/domain/reducer.py#L132)。
 
 ## 成交后风险与部分成交
 
@@ -110,8 +110,8 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | ENTRY authoritative reject | 不能自动另发一代 ENTRY | 终结拒绝，释放其资源 | [commands](../../src/trading_kernel/domain/commands.py)、[reducer](../../src/trading_kernel/domain/reducer.py) |
 | 网络超时 / 结果未知 | 不能当作交易所未收到 | 按精确命令身份查询，保留 unknown | [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py#L95) |
-| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L135) |
-| 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L737) |
+| 外部手动平仓 | 不能立刻宣告 Ticket 终态 | external-flat 事件、清理自有保护、对账结算 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L141) |
+| 非本 Kernel 订单 | 不能根据相似币种擅自取消 | 记录归属异常并阻断相应准入 | [unowned order 测试](../../tests/trading_kernel/full_chain/test_ticket_lifecycle.py#L739) |
 | Worker 身份不符 | 不能以“为了保护”跳过 fence | 错误写者停止；精确认证写者恢复安全工作 | [runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L16) |
 | 退出事实过期或缺失 | 不能编造市场判定 | 记录健康/重试并保持现有事实边界 | [lifecycle_facts_health](../../src/trading_kernel/application/lifecycle_facts_health.py)、[Lifecycle Worker](../../src/trading_kernel/interfaces/lifecycle_worker.py) |
 

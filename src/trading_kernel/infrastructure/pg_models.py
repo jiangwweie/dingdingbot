@@ -186,7 +186,7 @@ exit_policies = sa.Table(
     ),
     sa.CheckConstraint(
         "(event_spec_id IS NOT NULL AND profile_schema_version IS NULL) OR "
-        "(event_spec_id IS NULL AND profile_schema_version = 'exit_profile_v1')",
+        "(event_spec_id IS NULL AND profile_schema_version IN ('exit_profile_v1','exit_profile_v2'))",
         name="profile_schema_shape_valid",
     ),
 )
@@ -1632,6 +1632,7 @@ instrument_rules_current = sa.Table(
     metadata,
     sa.Column("venue_id", SHORT_TEXT, primary_key=True),
     _id("exchange_instrument_id", primary_key=True),
+    sa.Column("exit_order_rules", JSONB(none_as_null=True), nullable=True),
     sa.Column("quantity_step", MONEY, nullable=False),
     sa.Column("price_tick", MONEY, nullable=False),
     sa.Column("min_quantity", MONEY, nullable=False),
@@ -2468,6 +2469,7 @@ capacity_claims = sa.Table(
     sa.Column("position_side", SHORT_TEXT, nullable=False),
     sa.Column("netting_domain_key", LONG_TEXT, nullable=False),
     sa.Column("fact_digest", LONG_TEXT, nullable=False),
+    sa.Column("regime_admission", JSONB(none_as_null=True), nullable=True),
     _id("exit_policy_id"),
     sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
     _id("exit_binding_id", nullable=True),
@@ -2648,6 +2650,7 @@ trade_tickets = sa.Table(
     sa.Column("directional_stop_risk_limit_fraction", MONEY, nullable=False),
     sa.Column("min_materialization_ratio", MONEY, nullable=False),
     sa.Column("minimum_stop_risk_budget", MONEY, nullable=False),
+    sa.Column("regime_admission", JSONB(none_as_null=True), nullable=True),
     _id("exit_policy_id"),
     sa.Column("exit_policy_semantic_hash", LONG_TEXT, nullable=False),
     _id("exit_binding_id", nullable=True),
@@ -2770,13 +2773,21 @@ trade_aggregates = sa.Table(
     _time("management_observed_at_ms", nullable=True),
     sa.Column("manual_risk_at_stop", MONEY),
     sa.Column("manual_risk_reason", LONG_TEXT),
-    sa.Column("management_orders", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
+    sa.Column(
+        "management_orders",
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    ),
     sa.Column("management_mode", SHORT_TEXT, nullable=False, server_default="AUTO"),
     sa.Column("management_revision", sa.BigInteger, nullable=False, server_default="1"),
     _id("management_evidence_id", nullable=True),
     sa.Column("management_reason", LONG_TEXT, nullable=True),
     _time("manual_takeover_at_ms", nullable=True),
-    sa.CheckConstraint("COALESCE(management_revision>0 AND ((management_mode='AUTO' AND management_evidence_id IS NULL AND management_reason IS NULL AND manual_takeover_at_ms IS NULL) OR (management_mode='REVIEW_REQUIRED' AND length(management_evidence_id)>0 AND length(management_reason)>0 AND manual_takeover_at_ms IS NULL) OR (management_mode='MANUAL' AND length(management_evidence_id)>0 AND length(management_reason)>0 AND manual_takeover_at_ms>0)),false)",name="management_shape"),
+    sa.CheckConstraint(
+        "COALESCE(management_revision>0 AND ((management_mode='AUTO' AND management_evidence_id IS NULL AND management_reason IS NULL AND manual_takeover_at_ms IS NULL) OR (management_mode='REVIEW_REQUIRED' AND length(management_evidence_id)>0 AND length(management_reason)>0 AND manual_takeover_at_ms IS NULL) OR (management_mode='MANUAL' AND length(management_evidence_id)>0 AND length(management_reason)>0 AND manual_takeover_at_ms>0)),false)",
+        name="management_shape",
+    ),
     sa.Column("entry_lane_held", sa.Boolean, nullable=False),
     sa.Column("position_qty", MONEY, nullable=False),
     sa.Column("average_fill_price", MONEY, nullable=True),
@@ -2792,6 +2803,10 @@ trade_aggregates = sa.Table(
     _id("active_stop_exchange_order_id", nullable=True),
     sa.Column("active_stop_price", MONEY, nullable=True),
     _id("tp1_exchange_order_id", nullable=True),
+    sa.Column("post_fill_exit_plan", JSONB(none_as_null=True), nullable=True),
+    sa.Column(
+        "partial_tp_protection", sa.Boolean, nullable=False, server_default=sa.false()
+    ),
     sa.Column("tp1_target_qty", MONEY, nullable=False),
     sa.Column("tp1_filled_qty", MONEY, nullable=False),
     sa.Column("break_even_floor_price", MONEY, nullable=True),
@@ -2851,6 +2866,7 @@ exchange_commands = sa.Table(
     metadata,
     _id("command_id", primary_key=True),
     _id("ticket_id"),
+    sa.Column("management_revision", sa.BigInteger, nullable=True),
     sa.Column("command_kind", SHORT_TEXT, nullable=False),
     sa.Column("generation", sa.Integer, nullable=False),
     sa.Column("idempotency_key", LONG_TEXT, nullable=False),
@@ -3209,3 +3225,86 @@ management_stream_events,order_command_baselines,management_coverage_events,mana
 management_observation_current.append_column(sa.Column('current_complete',sa.Boolean,nullable=False,server_default=sa.false()))
 management_observation_current.append_column(sa.Column('attribution_complete',sa.Boolean,nullable=False,server_default=sa.false()))
 management_observation_current.append_column(sa.Column('proof_refs',JSONB,nullable=False,server_default=sa.text("'{}'::jsonb")))
+
+
+post_fill_exit_plans = sa.Table(
+    "brc_post_fill_exit_plans",
+    metadata,
+    sa.Column(
+        "ticket_id",
+        sa.String(160),
+        sa.ForeignKey("brc_trade_tickets.ticket_id"),
+        primary_key=True,
+    ),
+    sa.Column(
+        "source_event_id",
+        sa.String(160),
+        sa.ForeignKey("brc_trade_events.event_id"),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column("plan", JSONB, nullable=False),
+    sa.Column("created_at_ms", sa.BigInteger, nullable=False),
+)
+
+
+exit_configurations = sa.Table(
+    "brc_exit_configurations",
+    metadata,
+    sa.Column("configuration_id", ID, primary_key=True),
+    sa.Column("product_id", SHORT_TEXT, nullable=False),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    sa.Column("account_id", ID, nullable=False),
+    sa.Column("revision", sa.BigInteger, nullable=False),
+    sa.Column(
+        "owner_authorization_id",
+        ID,
+        sa.ForeignKey("brc_owner_authorizations.authorization_id"),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column("record", JSONB, nullable=False),
+    sa.Column("created_at_ms", sa.BigInteger, nullable=False),
+    sa.UniqueConstraint("product_id", "venue_id", "account_id", "revision"),
+)
+exit_configuration_current = sa.Table(
+    "brc_exit_configuration_current",
+    metadata,
+    sa.Column("product_id", SHORT_TEXT, primary_key=True),
+    sa.Column("venue_id", SHORT_TEXT, primary_key=True),
+    sa.Column("account_id", ID, primary_key=True),
+    sa.Column(
+        "configuration_id",
+        ID,
+        sa.ForeignKey("brc_exit_configurations.configuration_id"),
+        nullable=False,
+    ),
+    sa.Column("revision", sa.BigInteger, nullable=False),
+)
+btc_ma50_current = sa.Table(
+    "brc_btc_ma50_current",
+    metadata,
+    sa.Column("venue_id", SHORT_TEXT, primary_key=True),
+    sa.Column("blocked_window_close_ms", sa.BigInteger, nullable=True),
+    sa.Column("snapshot", JSONB, nullable=False),
+    sa.Column("latest_close_time_ms", sa.BigInteger, nullable=False),
+    sa.Column("observed_at_ms", sa.BigInteger, nullable=False),
+)
+
+
+btc_ma50_snapshots = sa.Table(
+    "brc_btc_ma50_snapshots",
+    metadata,
+    sa.Column("window_digest", sa.String(71), primary_key=True),
+    sa.Column("venue_id", SHORT_TEXT, nullable=False),
+    sa.Column("latest_close_time_ms", sa.BigInteger, nullable=False),
+    sa.Column("snapshot", JSONB, nullable=False),
+    sa.Column("observed_at_ms", sa.BigInteger, nullable=False),
+)
+
+sa.Index(
+    "ix_brc_btc_ma50_snapshot_window",
+    btc_ma50_snapshots.c.venue_id,
+    btc_ma50_snapshots.c.latest_close_time_ms,
+    btc_ma50_snapshots.c.observed_at_ms,
+)

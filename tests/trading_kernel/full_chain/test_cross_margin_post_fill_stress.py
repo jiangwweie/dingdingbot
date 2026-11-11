@@ -478,6 +478,8 @@ async def test_failed_stress_materializes_one_flatten_and_keeps_lane_blocked(
         lambda: PostgresKernelUnitOfWork(stress_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="controlled-flatten-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=3_100,
@@ -518,6 +520,8 @@ async def test_failed_stress_materializes_one_flatten_and_keeps_lane_blocked(
         lambda: PostgresKernelUnitOfWork(stress_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="stop-cleanup-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=3_300,
@@ -624,6 +628,8 @@ async def _reach_post_fill_pending(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="initial-stop-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=2_200,

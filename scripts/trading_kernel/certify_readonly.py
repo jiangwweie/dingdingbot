@@ -84,6 +84,8 @@ _DECIMAL_POLICY_FIELDS = frozenset(
         "max_post_fill_stop_risk_overrun_fraction",
     }
 )
+
+
 def _canonical_decimal(value: object) -> str:
     return format(Decimal(str(value)).normalize(), "f")
 
@@ -549,19 +551,23 @@ async def _certify(
             )
             live_registry_manifest = await _live_registry_manifest(connection)
             exit_profile_rows = (
-                await connection.execute(
-                    text(
-                        """
+                (
+                    await connection.execute(
+                        text(
+                            """
                         SELECT exit_policy_id, exit_policy_version,
                                profile_schema_version, position_side, policy,
                                semantic_hash, status
                           FROM brc_exit_policies
-                         WHERE profile_schema_version = 'exit_profile_v1'
+                         WHERE profile_schema_version IN ('exit_profile_v1','exit_profile_v2')
                          ORDER BY exit_policy_id
                         """
+                        )
                     )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
             exit_binding_rows = (
                 await connection.execute(
                     text(
@@ -616,6 +622,39 @@ async def _certify(
                     )
                 )
             ).mappings().all()
+            exit_configuration_rows = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT record FROM brc_exit_configurations ORDER BY revision,configuration_id"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            exit_configuration_current_rows = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT product_id,venue_id,account_id,configuration_id,revision FROM brc_exit_configuration_current"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            exit_configuration_auth_rows = (
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT auth.* FROM brc_owner_authorizations auth JOIN brc_exit_configurations configuration ON auth.authorization_id=configuration.owner_authorization_id"
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
             runtime_profile_row = (
                 await connection.execute(
                     text(
@@ -663,6 +702,13 @@ async def _certify(
             preserved_runtime = await read_preserved_runtime_state(connection)
             entry_restoration = await read_entry_restoration_state(
                 connection, now_ms=effective_now_ms,
+            )
+            exit_configuration_required = bool(
+                await connection.scalar(
+                    text(
+                        "SELECT certification->>'exit_configuration_required'='true' FROM brc_runtime_capabilities_current WHERE capability_key='exchange_commands'"
+                    )
+                )
             )
             management_feed_required=bool(await connection.scalar(text("SELECT certification->>'management_feed_required'='true' FROM brc_runtime_capabilities_current WHERE capability_key='exchange_commands'")))
             management_feed_pass=True
@@ -1271,6 +1317,12 @@ async def _certify(
         binding_rows=exit_binding_rows,
         current_rows=exit_current_rows,
         event_rows=exit_binding_event_rows,
+        configuration_rows=exit_configuration_rows,
+        configuration_current_rows=exit_configuration_current_rows,
+        authorization_rows=exit_configuration_auth_rows,
+        account_id=None
+        if runtime_profile_row is None
+        else str(runtime_profile_row["account_id"]),
     )
     release_counts = {
         "budget_reservations": budget_reservations,
@@ -1648,8 +1700,12 @@ async def _certify(
         "certified_at_ms": effective_now_ms,
         "alembic_revision": revision,
         "runtime_identity": runtime_identity,
-        "product_identity": {"product_id": PRODUCT_ID, "status": "pass"
-            if capability_products == (PRODUCT_ID, PRODUCT_ID) else "fail"},
+        "product_identity": {
+            "product_id": PRODUCT_ID,
+            "status": "pass"
+            if capability_products == (PRODUCT_ID, PRODUCT_ID)
+            else "fail",
+        },
         "table_allowlist": table_allowlist,
         "runtime_scope_count": runtime_scope_count,
         "strategy_universe": strategy_universe,
@@ -1662,11 +1718,20 @@ async def _certify(
         "flatness_pass": flatness_pass,
         "universe_bootstrap_pass": universe_bootstrap_pass,
         "entry_promotion_pass": entry_promotion_pass,
-        "entry_recovery_ready": bool(database_integrity_pass and entry_current_universe_identity_pass
-            and seed_identity["status"] == "pass" and registry_identity["status"] == "pass"
-            and warming_scope_count == 0 and not warming_universe_manifest and entry_restoration.ready and management_feed_pass),
-        "management_feed_required":management_feed_required,
-        "management_feed_pass":management_feed_pass,
+        "entry_recovery_ready": bool(
+            database_integrity_pass
+            and entry_current_universe_identity_pass
+            and seed_identity["status"] == "pass"
+            and registry_identity["status"] == "pass"
+            and warming_scope_count == 0
+            and not warming_universe_manifest
+            and entry_restoration.ready
+            and management_feed_pass
+        ),
+        "exit_configuration_required": exit_configuration_required,
+        "exit_configuration_activated": bool(exit_configuration_current_rows),
+        "management_feed_required": management_feed_required,
+        "management_feed_pass": management_feed_pass,
         "owner_entry_resume_authorized": entry_restoration.owner_resume_authorized,
         "entry_current_universe_identity_pass":entry_current_universe_identity_pass,
         "entry_enabled_event_spec_ids":list(entry_restoration.enabled_event_spec_ids),
@@ -1720,13 +1785,17 @@ def _exit_profile_authority_manifest(
     binding_rows: Sequence[RowMapping],
     current_rows: Sequence[RowMapping],
     event_rows: Sequence[RowMapping],
+    configuration_rows: Sequence[RowMapping] = (),
+    configuration_current_rows: Sequence[RowMapping] = (),
+    authorization_rows: Sequence[RowMapping] = (),
+    account_id: str | None = None,
 ) -> dict[str, object]:
     expected_profiles = {
         item.exit_profile_id: item for item in registered_exit_profiles()
     }
     actual_profiles = {str(row["exit_policy_id"]): row for row in profile_rows}
     profiles_pass = bool(
-        set(actual_profiles) == set(expected_profiles)
+        set(expected_profiles) <= set(actual_profiles)
         and all(
             str(actual_profiles[profile_id]["exit_policy_version"])
             == str(profile.exit_profile_version)
@@ -1742,6 +1811,17 @@ def _exit_profile_authority_manifest(
             for profile_id, profile in expected_profiles.items()
         )
     )
+    owner_profiles_pass = _validate_owner_exit_revisions(
+        actual_profiles=actual_profiles,
+        seed_profiles=expected_profiles,
+        configuration_rows=configuration_rows,
+        current_rows=configuration_current_rows,
+        authorization_rows=authorization_rows,
+        binding_rows=binding_rows,
+        active_binding_rows=current_rows,
+        account_id=account_id,
+    )
+    profiles_pass = profiles_pass and owner_profiles_pass
     expected_bindings = {
         item.exit_binding_id: item for item in registered_event_exit_bindings()
     }
@@ -1785,6 +1865,8 @@ def _exit_profile_authority_manifest(
         "status": "pass" if passed else "fail",
         "catalog_digest": build_exit_profile_catalog_digest(),
         "profile_count": len(profile_rows),
+        "owner_revisions_verified":owner_profiles_pass,
+        "owner_revision_profile_count":len(actual_profiles)-len(expected_profiles),
         "binding_fact_count": len(binding_rows),
         "current_binding_count": len(current_rows),
         "binding_event_count": len(event_rows),
@@ -1793,6 +1875,184 @@ def _exit_profile_authority_manifest(
         "current_bindings_pass": current_pass,
         "binding_events_pass": events_pass,
     }
+
+
+def _validate_owner_exit_revisions(
+    *,
+    actual_profiles,
+    seed_profiles,
+    configuration_rows,
+    current_rows,
+    authorization_rows,
+    binding_rows,
+    active_binding_rows,
+    account_id,
+) -> bool:
+    """Seed hashes stay exact; extra Profiles need supported derivation and Owner audit."""
+    from src.trading_kernel.domain.exit_configuration import (
+        ExitConfigurationRecord,
+        derive_exit_profile,
+    )
+    from src.trading_kernel.domain.exit_policy import ExitProfile
+    from src.trading_kernel.domain.owner_control import OwnerAuthorization
+
+    known = dict(seed_profiles)
+    authorizations = {
+        str(r["authorization_id"]): OwnerAuthorization.model_validate(dict(r))
+        for r in authorization_rows
+    }
+    records: dict[str, ExitConfigurationRecord] = {}
+    try:
+        for row in configuration_rows:
+            record = ExitConfigurationRecord.model_validate(row["record"])
+            intent = record.intent
+            if (
+                intent.product_id != PRODUCT_ID
+                or intent.venue_id != "binance-usdm"
+                or intent.account_id != account_id
+            ):
+                return False
+            auth = authorizations.get(record.owner_authorization_id)
+            if (
+                auth is None
+                or auth.authentication_strength != "totp_step_up"
+                or auth.purpose != "exit_profile_bind"
+                or auth.target_scope.get("configuration_id") != record.configuration_id
+                or auth.target_scope.get("intent_digest") != intent.digest()
+                or auth.target_scope.get("product_id") != PRODUCT_ID
+                or auth.target_scope.get("account_id") != account_id
+                or auth.target_scope.get("venue_id") != "binance-usdm"
+            ):
+                return False
+            from src.trading_kernel.application.owner_control import (
+                ControlMutationRequest,
+                _authorization_digest,
+            )
+            from src.trading_kernel.domain.entry_admission_snapshot import (
+                canonical_digest,
+            )
+
+            preview_digest = canonical_digest(
+                {
+                    "intent": intent.model_dump(mode="json"),
+                    "profiles": [p.model_dump(mode="json") for p in record.profiles],
+                    "valid_until_ms": record.preview_valid_until_ms,
+                }
+            )
+            request = ControlMutationRequest(
+                expected_version=intent.expected_revision,
+                reason=record.activation_reason,
+                idempotency_key=auth.idempotency_key,
+                owner_identity=auth.owner_identity,
+                now_ms=auth.authorized_at_ms,
+            )
+            if (
+                auth.authorized_at_ms != record.created_at_ms
+                or preview_digest != record.preview_digest
+                or auth.target_scope.get("preview_digest") != record.preview_digest
+                or auth.target_scope.get("preview_valid_until_ms")
+                != record.preview_valid_until_ms
+                or auth.request_digest
+                != _authorization_digest(
+                    purpose="exit_profile_bind",
+                    request=request,
+                    target_scope=auth.target_scope,
+                )
+            ):
+                return False
+            if record.revision > 1 and not any(
+                r.revision == record.revision - 1
+                and r.intent.account_id == intent.account_id
+                for r in records.values()
+            ):
+                return False
+            for lineage in record.profiles:
+                parameters = next(
+                    e for e in intent.events if e.event_spec_id == lineage.event_spec_id
+                )
+                source_binding = next(
+                    (
+                        b
+                        for b in binding_rows
+                        if b["exit_binding_id"] == parameters.expected_binding_id
+                    ),
+                    None,
+                )
+                if (
+                    source_binding is None
+                    or source_binding["event_spec_id"] != lineage.event_spec_id
+                    or source_binding["exit_profile_id"] != lineage.source_profile_id
+                    or source_binding["exit_profile_semantic_hash"]
+                    != lineage.source_profile_hash
+                ):
+                    return False
+                source = known.get(lineage.source_profile_id)
+                if (
+                    source is None
+                    or source.semantic_hash() != lineage.source_profile_hash
+                ):
+                    return False
+                parameters = next(
+                    e for e in intent.events if e.event_spec_id == lineage.event_spec_id
+                )
+                expected = derive_exit_profile(
+                    source=source,
+                    parameters=parameters,
+                    revision_id=lineage.profile.exit_profile_id,
+                )
+                stored = actual_profiles.get(expected.exit_profile_id)
+                if (
+                    stored is None
+                    or expected != lineage.profile
+                    or ExitProfile.model_validate(stored["policy"]) != expected
+                ):
+                    return False
+                if (
+                    stored["semantic_hash"] != expected.semantic_hash()
+                    or stored["profile_schema_version"]
+                    != expected.profile_schema_version
+                    or stored["position_side"] != expected.position_side
+                    or str(stored["exit_policy_version"])
+                    != str(expected.exit_profile_version)
+                    or stored["status"] not in {"active", "retired"}
+                ):
+                    return False
+                known[expected.exit_profile_id] = expected
+            records[record.configuration_id] = record
+        if set(known) != set(actual_profiles) or len(current_rows) > 1:
+            return False
+        if bool(records) != bool(current_rows):
+            return False
+        for row in current_rows:
+            current_record = records.get(str(row["configuration_id"]))
+            if (
+                current_record is None
+                or row["product_id"] != PRODUCT_ID
+                or row["account_id"] != account_id
+                or int(row["revision"]) != current_record.revision
+            ):
+                return False
+            if current_record.revision != max(r.revision for r in records.values()):
+                return False
+            for lineage in current_record.profiles:
+                active = next(
+                    (
+                        r
+                        for r in active_binding_rows
+                        if r["event_spec_id"] == lineage.event_spec_id
+                    ),
+                    None,
+                )
+                if (
+                    active is None
+                    or active["exit_profile_id"] != lineage.profile.exit_profile_id
+                    or active["exit_profile_semantic_hash"]
+                    != lineage.profile.semantic_hash()
+                ):
+                    return False
+        return True
+    except (ValueError, KeyError, StopIteration, TypeError):
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:

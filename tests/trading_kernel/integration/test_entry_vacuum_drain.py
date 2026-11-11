@@ -1908,6 +1908,8 @@ async def _assert_unknown_cancel(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         UnknownCancelVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="vacuum-cancel-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=vacuum.fenced_at_ms + 2,
@@ -1932,9 +1934,19 @@ async def _assert_unknown_cancel(
             raise AssertionError("unknown cancel must not be blindly resent")
 
     no_resend = await dispatch_one_command(
-        lambda: PostgresKernelUnitOfWork(dispatch_engine),MustNotDispatch(),
-        DispatchCommandRequest(worker_id="unknown-retry",ticket_id=ticket.identity.ticket_id,
-            now_ms=vacuum.fenced_at_ms+3,lease_until_ms=vacuum.fenced_at_ms+5_003,timeout_seconds=1), clock_ms=lambda: vacuum.fenced_at_ms+3)
+        lambda: PostgresKernelUnitOfWork(dispatch_engine),
+        MustNotDispatch(),
+        DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            worker_id="unknown-retry",
+            ticket_id=ticket.identity.ticket_id,
+            now_ms=vacuum.fenced_at_ms + 3,
+            lease_until_ms=vacuum.fenced_at_ms + 5_003,
+            timeout_seconds=1,
+        ),
+        clock_ms=lambda: vacuum.fenced_at_ms + 3,
+    )
     assert no_resend.status == DispatchCommandStatus.NO_COMMAND
 
     commands_before = await _commands(dispatch_engine, ticket)
@@ -2107,6 +2119,8 @@ async def test_retained_partial_initial_stop_rejection_requires_controlled_flatt
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
         RejectingVenue(),
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="vacuum-retained-stop-dispatcher",
             ticket_id=ticket.identity.ticket_id,
             now_ms=vacuum.fenced_at_ms + 5,

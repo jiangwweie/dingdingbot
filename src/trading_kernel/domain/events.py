@@ -12,6 +12,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressEvidence,
     CrossMarginStressStatus,
 )
+from src.trading_kernel.domain.exit_execution import PostFillExitPlan, TpFillEvidence
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 from src.trading_kernel.domain.trade_management import OrderEvidence
@@ -350,6 +351,8 @@ class InitialStopConfirmed(_TicketEvent):
 
 
 class PostFillStressAssessed(_TicketEvent):
+    exit_plan: PostFillExitPlan | None = None
+    exit_plan_failure: str | None = None
     status: Literal["passed", "failed"]
     evidence: CrossMarginStressEvidence
     owner_policy_id: str
@@ -411,7 +414,23 @@ class TakeProfitAbsenceConfirmed(_TicketEvent):
     command_id: str
 
 
+class TakeProfitCompletedForExit(_TicketEvent):
+    tp_fill_evidence: TpFillEvidence | None = None
+    average_fill_price: Decimal
+    filled_qty: Decimal
+
+
+class TakeProfitProgressed(_TicketEvent):
+    tp_fill_evidence: TpFillEvidence | None = None
+    cumulative_filled_qty: Decimal
+    average_fill_price: Decimal
+    protection_covers_remainder: bool
+    replacement_safety_verified: bool = False
+    exit_reason: str | None = None
+
+
 class TakeProfitFilled(_TicketEvent):
+    tp_fill_evidence: TpFillEvidence | None = None
     filled_qty: Decimal
     average_fill_price: Decimal
     runner_floor_price: Decimal
@@ -585,7 +604,6 @@ class ManagedCommandOutcomeObserved(_TicketEvent):
     outcome: dict[str, JsonValue]
 
 
-
 class ManualPositionObserved(_TicketEvent):
     risk_at_stop: Decimal | None = None
     risk_reason: str | None = None
@@ -601,7 +619,6 @@ class ManualPositionObserved(_TicketEvent):
             raise ValueError("manual quantities must be finite and nonnegative")
         if self.protected_quantity>self.quantity:raise ValueError("protection exceeds position")
         return self
-
 
 
 TradeEvent = (
@@ -644,6 +661,8 @@ TradeEvent = (
     | TakeProfitOutcomeUnknown
     | TakeProfitAbsenceConfirmed
     | TakeProfitFilled
+    | TakeProfitProgressed
+    | TakeProfitCompletedForExit
     | RunnerStopRequested
     | ProtectionReplacementConfirmed
     | ProtectionReplacementRejected

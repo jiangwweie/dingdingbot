@@ -81,6 +81,21 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         self.management_receive_gap = None
         self.management_closed_batches = deque(maxlen=8)
 
+    async def fetch(self, url, method="GET", headers=None, body=None):
+        from src.trading_kernel.infrastructure.mutation_send_guard import (
+            current_mutation_guard,
+        )
+
+        guard = current_mutation_guard.get()
+        if method.upper() in {"POST", "PUT", "DELETE"} and guard is not None:
+            from src.trading_kernel.application.ports import VenueMutationFailure
+
+            if guard.attempted:
+                raise VenueMutationFailure("transport_retry_forbidden_after_send")
+            await guard.before_send()
+            guard.attempted = True
+        return await super().fetch(url, method, headers, body)
+
     def _is_management_client(self, client):
         key = self.options.get("future", {}).get("listenKey")
         return bool(key and client.url == self.get_private_ws_url("future", key))

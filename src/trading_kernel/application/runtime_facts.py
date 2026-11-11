@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -16,6 +16,7 @@ from src.trading_kernel.domain.cross_margin_stress import (
     MaintenanceMarginBracket,
 )
 from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSnapshot
+from src.trading_kernel.domain.exit_execution import CompleteEntryFills, ExitOrderRules
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
     OrderRole,
@@ -168,6 +169,7 @@ class InstrumentRulesFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exchange_instrument_id: str
+    exit_order_rules: ExitOrderRules | None = None
     quantity_step: Decimal
     price_tick: Decimal
     min_quantity: Decimal
@@ -379,6 +381,9 @@ class LifecycleFactsRequest(BaseModel):
     entry_quantity: Decimal
     expected_position_quantity: Decimal
     entry_order_reference: TicketOrderReference
+    tp1_order_reference: TicketOrderReference | None = None
+    active_stop_reference: TicketOrderReference | None = None
+    exact_tp_fills_required: bool = False
     tp1_exchange_order_id: str | None
     entry_fill_window_started_at_ms: int
     price_tick: Decimal
@@ -512,3 +517,19 @@ class ReviewEconomicsSource(Protocol):
         self,
         request: ReviewEconomicsRequest,
     ) -> ReviewEconomicsFacts: ...
+
+
+class CompleteEntryFillsRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    netting_domain: NettingDomain
+    reference: TicketOrderReference
+    expected_quantity: Decimal
+    observed_at_ms: int
+
+
+@runtime_checkable
+class CompleteEntryFillsSource(Protocol):
+    async def read_complete_entry_fills(
+        self, request: CompleteEntryFillsRequest
+    ) -> CompleteEntryFills: ...

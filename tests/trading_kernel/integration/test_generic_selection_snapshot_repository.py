@@ -141,6 +141,15 @@ from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_RE
 from tests.trading_kernel.integration.universe_activation_support import (
     make_warming_ready,
 )
+from tests.trading_kernel.support.exit_configuration import (
+    declared_postfill_exit_event,
+)
+from tests.trading_kernel.support.exit_configuration import (
+    issue_ready_signal_with_exit_fixture as issue_ready_signal,
+)
+from tests.trading_kernel.support.exit_configuration import (
+    maintain_ticket_lifecycle_with_exact_tp_fixture as maintain_ticket_lifecycle,
+)
 from tests.trading_kernel.support.generic_seed_template import (
     GenericSeedTemplateHarness,
 )
@@ -5165,19 +5174,73 @@ async def test_generic_activation_commits_and_restarts_through_real_uow(database
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("group,cancel_before_fill", [
-    ("CPM-RO-001",False),("MPG-001",False),("MI-001",False),("BRF2-001",False),
-    ("CPM-RO-001",True),("BRF2-001",True),
-    ("CPM-RO-001","latest_nonempty"),("BRF2-001","latest_nonempty"),
-    ("CPM-RO-001","latest_nonempty_unknown"),("BRF2-001","latest_nonempty_unknown"),
-    ("CPM-RO-001","latest_nonempty_partial"),("BRF2-001","latest_nonempty_partial"),
-    *((group,"latest_nonempty_pause"+suffix) for group in ("CPM-RO-001","BRF2-001") for suffix in ("","_unknown","_partial","_false","_string","_recover","_unknown_recover","_partial_recover","_early_resume","_early_resume_unknown","_early_resume_partial","_early_resume_recover","_early_resume_unknown_recover","_early_resume_partial_recover")),
-    *((group,"entry_fault:"+fault) for group in ("CPM-RO-001","BRF2-001")
-        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch","stale_before_claim","pending_static_between_claim_ticket","static_after_protection","static_timeout_after_protection","static_close_boundary_after_protection")),
-    *((group,"entry_fault:prepared_pause:"+fault) for group in ("CPM-RO-001","BRF2-001") for fault in ("empty","nonempty","early_empty","early_nonempty")),
-    *((group,"entry_fault:static_new_entry:"+fault) for group in ("CPM-RO-001","BRF2-001")
-        for fault in ("before_issue","between_claim_ticket","before_dispatch","stale_before_dispatch")),
-])
+@pytest.mark.parametrize(
+    "group,cancel_before_fill",
+    [
+        ("CPM-RO-001", False),
+        ("MPG-001", False),
+        ("MI-001", False),
+        ("BRF2-001", False),
+        ("CPM-RO-001", True),
+        ("BRF2-001", True),
+        ("CPM-RO-001", "latest_nonempty"),
+        ("BRF2-001", "latest_nonempty"),
+        ("CPM-RO-001", "latest_nonempty_unknown"),
+        ("BRF2-001", "latest_nonempty_unknown"),
+        ("CPM-RO-001", "latest_nonempty_partial"),
+        ("BRF2-001", "latest_nonempty_partial"),
+        *(
+            (group, "latest_nonempty_pause" + suffix)
+            for group in ("CPM-RO-001", "BRF2-001")
+            for suffix in (
+                "",
+                "_unknown",
+                "_partial",
+                "_false",
+                "_string",
+                "_recover",
+                "_unknown_recover",
+                "_partial_recover",
+                "_early_resume",
+                "_early_resume_unknown",
+                "_early_resume_partial",
+                "_early_resume_recover",
+                "_early_resume_unknown_recover",
+                "_early_resume_partial_recover",
+            )
+        ),
+        *(
+            (group, "entry_fault:" + fault)
+            for group in ("CPM-RO-001", "BRF2-001")
+            for fault in (
+                "before_issue",
+                "between_claim_ticket",
+                "before_dispatch",
+                "stale_before_dispatch",
+                "stale_before_claim",
+                "pending_static_between_claim_ticket",
+                "static_after_protection",
+                "static_timeout_after_protection",
+                "static_close_boundary_after_protection",
+            )
+        ),
+        *(
+            (group, "entry_fault:prepared_pause:" + fault)
+            for group in ("CPM-RO-001", "BRF2-001")
+            for fault in ("empty", "nonempty", "early_empty", "early_nonempty")
+        ),
+        *(
+            (group, "entry_fault:static_new_entry:" + fault)
+            for group in ("CPM-RO-001", "BRF2-001")
+            for fault in (
+                "before_issue",
+                "between_claim_ticket",
+                "before_dispatch",
+                "stale_before_dispatch",
+            )
+        ),
+    ],
+)
 async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     database: AsyncEngine, group: str, cancel_before_fill: bool | str,
 ) -> None:
@@ -5244,7 +5307,6 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets")) == 0
     from src.trading_kernel.application.issue_ready_signal import (
         IssueReadySignalRequest,
-        issue_ready_signal,
     )
     from src.trading_kernel.domain.cross_margin_stress import (
         AccountRiskSnapshot,
@@ -5399,7 +5461,6 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
-        maintain_ticket_lifecycle,
     )
     from src.trading_kernel.application.reconcile_ticket import (
         ReconcileTicketRequest,
@@ -5428,7 +5489,10 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
     async def dispatch_safety(step):
         async with PostgresKernelUnitOfWork(database) as uow:
             pending = await uow.aggregates.get(issued.ticket_id)
-            if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
+            if (
+                pending is not None
+                and pending.status is AggregateStatus.POST_FILL_RISK_PENDING
+            ):
                 event = PostFillStressAssessed(
                     event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                     ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
@@ -5439,12 +5503,24 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
                     filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
                     initial_stop_price=pending.ticket.initial_stop_price,
                     initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+                event = await declared_postfill_exit_event(uow, pending, event)
                 await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
                     expected_version=pending.version)
         venue.now_ms = issued_at+step
-        result = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
-            DispatchCommandRequest(worker_id=f"natural-{group}-lifecycle",ticket_id=issued.ticket_id,
-                now_ms=venue.now_ms,lease_until_ms=venue.now_ms+30_000,timeout_seconds=1), clock_ms=lambda: venue.now_ms)
+        result = await dispatch_with_recorded_management(
+            lambda: PostgresKernelUnitOfWork(database),
+            venue,
+            DispatchCommandRequest(
+                runtime_commit="a"*40,
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                worker_id=f"natural-{group}-lifecycle",
+                ticket_id=issued.ticket_id,
+                now_ms=venue.now_ms,
+                lease_until_ms=venue.now_ms + 30_000,
+                timeout_seconds=1,
+            ),
+            clock_ms=lambda: venue.now_ms,
+        )
         assert result.status.value == "accepted", result
 
     await dispatch_safety(200)
@@ -5590,6 +5666,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
     empty_source = empty_source.model_copy(update={"member_windows":tuple(
         qualify_window(window.model_copy(update={"candles":empty_source.member_windows[0].candles}),supersede_with_nonempty and window.exchange_instrument_id==replacement_member)
         for window in empty_source.member_windows)})
+
     class EmptyMarket:
         async def fetch_generic_selection_qualifications(self, *, event_spec_id, product_profiles, observed_at_ms):
             assert event_spec_id==empty_source.spec.event_spec_id and len(product_profiles)==24
@@ -5599,11 +5676,14 @@ async def _assert_natural_sent_entry_drained_by_selection(
         async def fetch_generic_selection_klines(self, request):
             return next(window.candles for window in empty_source.member_windows
                 if window.exchange_instrument_id==request.exchange_instrument_id)
+
     tick = empty_source.feature_cutoff_at_ms
+
     def selection_clock():
         nonlocal tick
         tick += 1
         return tick
+
     selected = await run_instrument_selection_once(
         uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=EmptyMarket(),
         request=RunInstrumentSelectionRequest(selection_spec_id=empty_source.spec.selection_spec_id,
@@ -5721,8 +5801,15 @@ async def _assert_natural_sent_entry_drained_by_selection(
         if not pause_owner or early_resume:
             assert waiting_cancel.reason_code == "VACUUM_CANCEL_NOT_DISPATCHED"
     venue.now_ms = now+6
-    dispatch_request = DispatchCommandRequest(worker_id=f"natural-{group}-cancel-dispatch",
-        ticket_id=issued.ticket_id,now_ms=now+6,lease_until_ms=now+30_000,timeout_seconds=1)
+    dispatch_request = DispatchCommandRequest(
+        runtime_commit="a"*40,
+        schema_revision=CURRENT_SCHEMA_REVISION,
+        worker_id=f"natural-{group}-cancel-dispatch",
+        ticket_id=issued.ticket_id,
+        now_ms=now + 6,
+        lease_until_ms=now + 30_000,
+        timeout_seconds=1,
+    )
     if unknown_cancel:
         from src.trading_kernel.application.recover_unknown_command import (
             RecoverUnknownCommandRequest,
@@ -5854,6 +5941,7 @@ async def _assert_natural_sent_entry_drained_by_selection(
                 filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
                 initial_stop_price=pending.ticket.initial_stop_price,
                 initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+            stress = await declared_postfill_exit_event(uow, pending, stress)
             await uow.commit_reduction(event=stress,reduction=reduce_event(pending,stress),expected_version=pending.version)
             assert not await uow.instrument_selection.entry_vacuum_has_drain_blockers(strategy_group_id=group)
     else:
@@ -6006,7 +6094,6 @@ async def _assert_natural_sent_entry_drained_by_selection(
         from src.trading_kernel.application.maintain_ticket_lifecycle import (
             LifecycleMaintenanceRequest,
             TicketLifecycleFacts,
-            maintain_ticket_lifecycle,
         )
         from src.trading_kernel.application.reconcile_ticket import (
             ReconcileTicketRequest,
@@ -9158,14 +9245,29 @@ async def test_latest_nonempty_snapshot_supersedes_unfinished_warming_target(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("group","resolution"),(
-    ("CPM-RO-001","fallback"),("MPG-001","activate"),("MPG-001","activate_refusal"),("MPG-001","empty"),
-    ("MI-001","activate"),("MI-001","activate_refusal"),("MI-001","empty"),("BRF2-001","fallback"),
-    ("MPG-001","activate_change_guard"),("MI-001","activate_change_guard"),
-    ("MPG-001","activate_change_after_arm"),("MI-001","activate_change_after_arm"),
-    ("MPG-001","activate_direct_change_after_arm"),("MI-001","activate_direct_change_after_arm"),
-    ("CPM-RO-001","fallback_armed_static"),("BRF2-001","fallback_armed_static"),
-    ("CPM-RO-001","fallback_continued_static"),("BRF2-001","fallback_continued_static")))
+@pytest.mark.parametrize(
+    ("group", "resolution"),
+    (
+        ("CPM-RO-001", "fallback"),
+        ("MPG-001", "activate"),
+        ("MPG-001", "activate_refusal"),
+        ("MPG-001", "empty"),
+        ("MI-001", "activate"),
+        ("MI-001", "activate_refusal"),
+        ("MI-001", "empty"),
+        ("BRF2-001", "fallback"),
+        ("MPG-001", "activate_change_guard"),
+        ("MI-001", "activate_change_guard"),
+        ("MPG-001", "activate_change_after_arm"),
+        ("MI-001", "activate_change_after_arm"),
+        ("MPG-001", "activate_direct_change_after_arm"),
+        ("MI-001", "activate_direct_change_after_arm"),
+        ("CPM-RO-001", "fallback_armed_static"),
+        ("BRF2-001", "fallback_armed_static"),
+        ("CPM-RO-001", "fallback_continued_static"),
+        ("BRF2-001", "fallback_continued_static"),
+    ),
+)
 async def test_failed_second_dynamic_generation_respects_previous_freshness(
     database: AsyncEngine,group: str,resolution: str,
 ) -> None:
@@ -9255,7 +9357,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
             else:
                 proposal = await uow.instrument_selection.prepare_generic_recovery_grant_proof(generation_id)
-    if group in {"MPG-001","MI-001"}:
+    if group in {"MPG-001", "MI-001"}:
         with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
             new=AsyncMock(return_value=fail_at+1)):
             refused = await coordinate_selection_materialization_once(
@@ -9400,7 +9502,13 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             still_previous = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
         assert still_previous is not None
         assert still_previous.authority.selection_authority_id == previous_authority.authority.selection_authority_id
-        if resolution in {"activate","activate_refusal","activate_change_guard","activate_change_after_arm","activate_direct_change_after_arm"}:
+        if resolution in {
+            "activate",
+            "activate_refusal",
+            "activate_change_guard",
+            "activate_change_after_arm",
+            "activate_direct_change_after_arm",
+        }:
             if resolution in {"activate","activate_refusal"}:
                 @asynccontextmanager
                 async def interrupted_recovered_activation():
@@ -9477,11 +9585,13 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 warm_closed_bar_time_ms=first_close,valid_until_ms=first_close+HOUR)
             template = mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot()
             shift = first_close-template.trigger_candle_close_time_ms
+
             class RecoveredTargetMarket:
                 async def fetch_closed_candles(self, request):
                     candles = template.candles_1h if request.timeframe=="1h" else template.candles_4h
                     return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
                         "close_time_ms":c.close_time_ms+shift}) for c in candles)
+
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=first_close+1)):
                 first_observation = await observe_strategy_scope(
@@ -9525,8 +9635,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             template = (mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()) if (
                 resolution=="activate_change_after_arm") else (mpg_long_snapshot() if group=="MPG-001" else mi_long_snapshot())
             shift = following_at//HOUR*HOUR-template.trigger_candle_close_time_ms
-            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
-                "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
             comparison_projection = build_comparative_universe_projection(event_spec_id=first_source.spec.event_spec_id,
                 universe_version_id=target_uid,strategy_group_id=group,
                 exchange_instrument_ids=first_source.spec.candidate_ids,closed_bar_time_ms=following_at//HOUR*HOUR,
@@ -9681,11 +9790,13 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     observed_close_time_ms=following_at//HOUR*HOUR,now_ms=following_at+1,
                     allow_current_as_birth=False,lock_current=True)
                 assert not unarmed.allowed and unarmed.reason_code == "RECOVERY_REBASE_REQUIRED"
+
             class ContinuedRecoveryMarket:
                 async def fetch_closed_candles(self, request):
                     path = template.candles_1h if request.timeframe=="1h" else template.candles_4h
                     return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
                         "close_time_ms":c.close_time_ms+shift}) for c in path)
+
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=following_at+1)):
                 second_trigger = await observe_strategy_scope(
@@ -9760,7 +9871,6 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_signal_events")) == 1
             from src.trading_kernel.application.issue_ready_signal import (
                 IssueReadySignalRequest,
-                issue_ready_signal,
             )
             from src.trading_kernel.domain.cross_margin_stress import (
                 AccountRiskSnapshot,
@@ -9769,6 +9879,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             from src.trading_kernel.domain.entry_admission_snapshot import (
                 EntryAdmissionSnapshot,
             )
+
             assert result.signal_event_id is not None
             issued_at = close+3
             admission = EntryAdmissionSnapshot(account_risk_snapshot=AccountRiskSnapshot.create(
@@ -9826,6 +9937,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 ExchangeCommandResult,
                 ExchangeCommandStatus,
             )
+
             class SuccessorEntryFacts:
                 async def read_entry_admission_snapshot(self, request):
                     fresh_risk = AccountRiskSnapshot.create(**{
@@ -9844,6 +9956,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         notional_coefficient=Decimal(1),notional_coefficient_certified=True,
                         observed_at_ms=request.observed_at_ms,
                         valid_until_ms=request.observed_at_ms+request.valid_for_ms)
+
             class SuccessorVenue:
                 def __init__(self):
                     self.calls = []
@@ -9856,9 +9969,10 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     self.calls.append(request)
                     return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,
                         observed_at_ms=self.now_ms+1,exchange_order_id=f"successor-{len(self.calls)}")
+
             async with database.begin() as conn:
-                await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true "
-                    "WHERE capability_key='exchange_commands'"))
+                # Local capability prerequisite only; no production promotion.
+                await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
             venue = SuccessorVenue()
             dispatch_request = DispatchCommandRequest(worker_id="recovery-successor-dispatch",
                 ticket_id=issued.ticket_id,now_ms=issued_at+5,lease_until_ms=issued_at+30_000,
@@ -9891,8 +10005,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                 warm_closed_bar_time_ms=continuity_close,valid_until_ms=continuity_close+HOUR)
             template = mpg_flat_snapshot() if group=="MPG-001" else mi_flat_snapshot()
             shift = continuity_close-template.trigger_candle_close_time_ms
-            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
-                "close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
+            candles = tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,"close_time_ms":c.close_time_ms+shift}) for c in template.candles_1h)
             async with PostgresKernelUnitOfWork(database) as uow:
                 before_continuity = await uow.instrument_selection.get_current_generic_authority(first_source.spec.selection_spec_id)
             assert before_continuity is not None
@@ -9935,6 +10048,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                     path = template.candles_1h if request.timeframe=="1h" else template.candles_4h
                     return tuple(c.model_copy(update={"open_time_ms":c.open_time_ms+shift,
                         "close_time_ms":c.close_time_ms+shift}) for c in path)
+
             with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",
                 new=AsyncMock(return_value=at+2)):
                 preserved = await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(database),RecoveryOriginMarket(),
@@ -9949,7 +10063,6 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             from src.trading_kernel.application.maintain_ticket_lifecycle import (
                 LifecycleMaintenanceRequest,
                 TicketLifecycleFacts,
-                maintain_ticket_lifecycle,
             )
             from src.trading_kernel.application.reconcile_ticket import (
                 ReconcileTicketRequest,
@@ -9976,11 +10089,15 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                         venue_reported_liquidation_price=Decimal(0),open_orders=(),
                         observed_at_ms=lifecycle_at)))
             assert filled.status.value=="entry_fill_recorded"
+
             async def dispatch_safety(offset):
                 now = lifecycle_at+offset
                 async with PostgresKernelUnitOfWork(database) as uow:
                     aggregate = await uow.aggregates.get(issued.ticket_id)
-                    if aggregate is not None and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING:
+                    if (
+                        aggregate is not None
+                        and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+                    ):
                         stress = PostFillStressAssessed(event_id=f"event:{issued.ticket_id}:{aggregate.last_event_sequence+1}",
                             ticket_id=issued.ticket_id,sequence=aggregate.last_event_sequence+1,
                             occurred_at_ms=now-1,status="passed",evidence=make_stress_evidence(aggregate.ticket),
@@ -9989,13 +10106,28 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
                             filled_qty=aggregate.position_qty,average_fill_price=aggregate.average_fill_price,
                             initial_stop_price=aggregate.ticket.initial_stop_price,
                             initial_stop_exchange_order_id=aggregate.initial_stop_exchange_order_id)
+                        stress = await declared_postfill_exit_event(
+                            uow, aggregate, stress
+                        )
                         await uow.commit_reduction(event=stress,reduction=reduce_event(aggregate,stress),
                             expected_version=aggregate.version)
                 venue.now_ms = now
-                dispatched_safety = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
-                    DispatchCommandRequest(worker_id="successor-lifecycle",ticket_id=issued.ticket_id,
-                        now_ms=now,lease_until_ms=now+30_000,timeout_seconds=1), clock_ms=lambda: now)
+                dispatched_safety = await dispatch_with_recorded_management(
+                    lambda: PostgresKernelUnitOfWork(database),
+                    venue,
+                    DispatchCommandRequest(
+                        runtime_commit="a"*40,
+                        schema_revision=CURRENT_SCHEMA_REVISION,
+                        worker_id="successor-lifecycle",
+                        ticket_id=issued.ticket_id,
+                        now_ms=now,
+                        lease_until_ms=now + 30_000,
+                        timeout_seconds=1,
+                    ),
+                    clock_ms=lambda: now,
+                )
                 assert dispatched_safety.status.value=="accepted", dispatched_safety
+
             await dispatch_safety(100)
             await dispatch_safety(200)
             async with PostgresKernelUnitOfWork(database) as uow:
@@ -10053,7 +10185,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
             failed_again = await coordinate_selection_materialization_once(
                 uow_factory=lambda:PostgresKernelUnitOfWork(database),request=next_request,
                 clock_ms=lambda:second_failure_at)
-        assert failed_again.reason_code == "MATERIALIZATION_TIMEOUT"
+        assert failed_again.reason_code=="MATERIALIZATION_TIMEOUT"
         empty_input = next_input(next_source)
         empty_input = empty_input.model_copy(update={
             "predecessor_snapshot":next_snapshot,
@@ -10848,11 +10980,10 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
     from src.trading_kernel.application.dispatch_exchange_command import (
         DispatchCommandRequest,
     )
-    from src.trading_kernel.application.owner_control import (
-        set_strategy_entry_state,
-    )
+    from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.domain.owner_control import StrategyEntryState
-    spec=inputs(group).spec
+
+    spec = inputs(group).spec
     async with PostgresKernelUnitOfWork(database) as uow:
         original=await uow.instrument_selection.get_current_generic_authority(spec.selection_spec_id)
         before_commands=await uow.exchange_commands.list_for_ticket(issued.ticket_id)
@@ -10862,15 +10993,17 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
             request=ControlMutationRequest(expected_version=owner.control_version,reason="pause_prepared_natural_entry",
                 idempotency_key=f"prepared-pause:{group}:{empty}:{early_resume}",owner_identity="owner",now_ms=now_ms+1),authentication_strength="totp_step_up")
         vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=spec.selection_spec_id)
+
     async def resume(at):
         async with PostgresKernelUnitOfWork(database) as uow:
             owner=await uow.owner_controls.get_strategy_control(group)
             await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
                 request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_prepared_natural_entry",
                     idempotency_key=f"prepared-resume:{group}:{empty}:{early_resume}",owner_identity="owner",now_ms=at),authentication_strength="totp_step_up")
+
     if early_resume:
         await resume(now_ms+2)
-    outcomes=[]
+    outcomes = []
     for offset in (3,4,5):
         if offset==4:
             with pytest.raises(RuntimeError,match="prepared pause drain rollback"):
@@ -10905,8 +11038,21 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
     class NoVenue:
         async def execute(self,request):
             raise AssertionError("prepared paused ENTRY must never reach venue")
-    refused=await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),NoVenue(),DispatchCommandRequest(worker_id="prepared-after-pause",
-        ticket_id=issued.ticket_id,now_ms=now_ms+7,lease_until_ms=now_ms+30000,timeout_seconds=1), clock_ms=lambda: now_ms+7)
+
+    refused = await dispatch_with_recorded_management(
+        lambda: PostgresKernelUnitOfWork(database),
+        NoVenue(),
+        DispatchCommandRequest(
+            runtime_commit="a"*40,
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            worker_id="prepared-after-pause",
+            ticket_id=issued.ticket_id,
+            now_ms=now_ms + 7,
+            lease_until_ms=now_ms + 30000,
+            timeout_seconds=1,
+        ),
+        clock_ms=lambda: now_ms + 7,
+    )
     assert refused.status.value=="no_command",refused
     source=inputs(group).model_copy(update={"selection_epoch_id":original.authority.selection_epoch_id})
     async with PostgresKernelUnitOfWork(database) as uow:
@@ -10916,16 +11062,20 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
     source=next_input(source).model_copy(update={"predecessor_snapshot":parent})
     member=spec.candidate_ids[int(parent.selected_members==(spec.candidate_ids[0],))]
     source=source.model_copy(update={"member_windows":tuple(qualify_window(w.model_copy(update={"candles":source.member_windows[0].candles}),not empty and w.exchange_instrument_id==member) for w in source.member_windows)})
+
     class SelectionMarket:
         async def fetch_generic_selection_qualifications(self,*,event_spec_id,product_profiles,observed_at_ms):
             return tuple(w.qualification.model_copy(update={"observed_at_ms":observed_at_ms}) for w in source.member_windows)
         async def fetch_generic_selection_klines(self,request):
             return next(w.candles for w in source.member_windows if w.exchange_instrument_id==request.exchange_instrument_id)
+
     tick=source.feature_cutoff_at_ms
+
     def clock():
         nonlocal tick
         tick+=1
         return tick
+
     selected=await run_instrument_selection_once(uow_factory=lambda:PostgresKernelUnitOfWork(database),market_source=SelectionMarket(),
         request=RunInstrumentSelectionRequest(selection_spec_id=spec.selection_spec_id,selection_epoch_id=source.selection_epoch_id,period_anchor_ms=source.feature_cutoff_at_ms,worker_id="prepared-latest-selector"),clock_ms=clock)
     assert selected.outcome=="SNAPSHOT_READY",selected
@@ -10960,9 +11110,19 @@ async def _assert_natural_prepared_entry_owner_pause(database,*,group,ticket,iss
         assert await conn.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"))==0
 
 
-async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_event_id,
-    selection_authority_id, member, universe_version_id, closed_at_ms, now_ms,
-    fault_stage: str | None, authority_transition=None):
+async def _issue_and_dispatch_hourly_natural_entry(
+    database,
+    *,
+    group,
+    signal_event_id,
+    selection_authority_id,
+    member,
+    universe_version_id,
+    closed_at_ms,
+    now_ms,
+    fault_stage: str | None,
+    authority_transition=None,
+):
     entry_result_fault=fault_stage if fault_stage in {"entry_rejected","entry_unknown"} else None
     if entry_result_fault is not None:
         fault_stage=None
@@ -10983,7 +11143,6 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     )
     from src.trading_kernel.application.issue_ready_signal import (
         IssueReadySignalRequest,
-        issue_ready_signal,
     )
     from src.trading_kernel.application.owner_control import set_strategy_entry_state
     from src.trading_kernel.application.runtime_facts import InstrumentRulesFacts
@@ -11019,6 +11178,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     from tests.trading_kernel.support.management_receiver import (
         ready_management_receiver,
     )
+
     await ready_management_receiver(database,now_ms=now_ms)
     await make_warming_ready(database,universe_version_id=universe_version_id,
         warm_closed_bar_time_ms=closed_at_ms,valid_until_ms=now_ms+60_000)
@@ -11164,6 +11324,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             async with PostgresKernelUnitOfWork(database) as uow:
                 assert await uow.capacity_claims.get_for_signal(signal_event_id) is None
         return
+
     async def issue_natural_signal():
         async with PostgresKernelUnitOfWork(database) as uow:
             return await issue_ready_signal(uow,IssueReadySignalRequest(
@@ -11220,6 +11381,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
             now_ms=now_ms,empty=prepared_pause_fault.endswith("empty") and not prepared_pause_fault.endswith("nonempty"),
             early_resume=prepared_pause_fault.startswith("early_"))
         return
+
     class ActionFacts:
         async def read_entry_admission_snapshot(self, request):
             if fault_stage=="switch_during_dispatch_facts":
@@ -11371,7 +11533,6 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
-        maintain_ticket_lifecycle,
     )
     from src.trading_kernel.application.reconcile_ticket import (
         ReconcileTicketRequest,
@@ -11397,6 +11558,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     assert filled.status.value == "entry_fill_recorded"
 
     static_cutover_finished = False
+
     class SelectionReadsForbidden:
         def __getattr__(self,name):
             raise AssertionError(f"frozen Ticket lifecycle read Selection repository: {name}")
@@ -11411,7 +11573,10 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     async def dispatch_safety(step):
         async with PostgresKernelUnitOfWork(database) as uow:
             pending = await uow.aggregates.get(issued.ticket_id)
-            if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
+            if (
+                pending is not None
+                and pending.status is AggregateStatus.POST_FILL_RISK_PENDING
+            ):
                 event = PostFillStressAssessed(
                     event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                     ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
@@ -11422,6 +11587,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
                     filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
                     initial_stop_price=pending.ticket.initial_stop_price,
                     initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+                event = await declared_postfill_exit_event(uow, pending, event)
                 await uow.commit_reduction(event=event,reduction=reduce_event(pending,event),
                     expected_version=pending.version)
         venue.now_ms = now_ms+step
@@ -11633,6 +11799,7 @@ async def _issue_and_dispatch_hourly_natural_entry(database, *, group, signal_ev
     from src.trading_kernel.domain.live_trade_evidence import (
         build_review_execution_evidence,
     )
+
     # This historical local fixture has a manual PnL Review, not venue fills.
     # The immutable chain is traceable but exact execution timing is incomplete.
     execution=build_review_execution_evidence(ticket=ticket,review_id=review.review_id,review_ticket_id=review.ticket_id,metrics=review.metrics,commands=commands)
@@ -13030,7 +13197,6 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 assert await conn.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands")) == 0
             from src.trading_kernel.application.issue_ready_signal import (
                 IssueReadySignalRequest,
-                issue_ready_signal,
             )
             from src.trading_kernel.domain.cross_margin_stress import (
                 AccountRiskSnapshot,
@@ -13095,6 +13261,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 ExchangeCommandResult,
                 ExchangeCommandStatus,
             )
+
             class RecoveryEntryFacts:
                 async def read_entry_admission_snapshot(self, request):
                     risk = AccountRiskSnapshot.create(**{**admission.account_risk_snapshot.model_dump(exclude={"snapshot_digest"}),
@@ -13108,6 +13275,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                         maintenance_margin_brackets=brackets,maintenance_margin_brackets_digest=canonical_digest(brackets),
                         notional_coefficient=Decimal(1),notional_coefficient_certified=True,
                         observed_at_ms=request.observed_at_ms,valid_until_ms=request.observed_at_ms+request.valid_for_ms)
+
             class RecoveryVenue:
                 def __init__(self):
                     self.calls = []
@@ -13119,6 +13287,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                         assert durable.status is ExchangeCommandStatus.CLAIMED
                     self.calls.append(request)
                     return ExchangeCommandResult(status=ExchangeCommandStatus.ACCEPTED,observed_at_ms=self.observed_at_ms,exchange_order_id=f"recovery-{request.kind.value}-{len(self.calls)}")
+
             async with database.begin() as conn:
                 # Local capability prerequisite only; no production promotion.
                 await conn.execute(sa.text("UPDATE brc_runtime_capabilities_current SET enabled=true WHERE capability_key='exchange_commands'"))
@@ -13143,7 +13312,6 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                 from src.trading_kernel.application.maintain_ticket_lifecycle import (
                     LifecycleMaintenanceRequest,
                     TicketLifecycleFacts,
-                    maintain_ticket_lifecycle,
                 )
                 from src.trading_kernel.application.reconcile_ticket import (
                     ReconcileTicketRequest,
@@ -13173,10 +13341,14 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                             observed_at_ms=issued_at+100),
                     ))
                 assert filled.status.value == "entry_fill_recorded"
+
                 async def dispatch_safety(step):
                     async with PostgresKernelUnitOfWork(database) as stress_uow:
                         pending = await stress_uow.aggregates.get(issued.ticket_id)
-                        if pending is not None and pending.status is AggregateStatus.POST_FILL_RISK_PENDING:
+                        if (
+                            pending is not None
+                            and pending.status is AggregateStatus.POST_FILL_RISK_PENDING
+                        ):
                             event = PostFillStressAssessed(
                                 event_id=f"event:{issued.ticket_id}:{pending.last_event_sequence+1}",
                                 ticket_id=issued.ticket_id,sequence=pending.last_event_sequence+1,
@@ -13187,13 +13359,26 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
                                 filled_qty=pending.position_qty,average_fill_price=pending.average_fill_price,
                                 initial_stop_price=pending.ticket.initial_stop_price,
                                 initial_stop_exchange_order_id=pending.initial_stop_exchange_order_id)
+                            event = await declared_postfill_exit_event(
+                                stress_uow, pending, event
+                            )
                             await stress_uow.commit_reduction(event=event,
                                 reduction=reduce_event(pending,event),expected_version=pending.version)
                     venue.observed_at_ms = issued_at + step + 1
-                    outcome = await dispatch_with_recorded_management(lambda:PostgresKernelUnitOfWork(database),venue,
-                        DispatchCommandRequest(worker_id="recovery-lifecycle",ticket_id=issued.ticket_id,
-                            now_ms=issued_at+step,lease_until_ms=issued_at+step+30_000,
-                            timeout_seconds=1), clock_ms=lambda: issued_at+step)
+                    outcome = await dispatch_with_recorded_management(
+                        lambda: PostgresKernelUnitOfWork(database),
+                        venue,
+                        DispatchCommandRequest(
+                            runtime_commit="a"*40,
+                            schema_revision=CURRENT_SCHEMA_REVISION,
+                            worker_id="recovery-lifecycle",
+                            ticket_id=issued.ticket_id,
+                            now_ms=issued_at + step,
+                            lease_until_ms=issued_at + step + 30_000,
+                            timeout_seconds=1,
+                        ),
+                        clock_ms=lambda: issued_at + step,
+                    )
                     assert outcome.status.value == "accepted", outcome
                     return outcome
 
@@ -13263,8 +13448,10 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
         from src.trading_kernel.application.ingest_signal import (
             resolve_selection_observation_authority,
         )
+
         template = {"MPG-001":mpg_long_snapshot,"MI-001":mi_long_snapshot,"BRF2-001":brf2_short_snapshot}[source.spec.strategy_group_id]()
         delta = first_close-template.trigger_candle_close_time_ms
+
         class FirstRecoveryMarket:
             def __init__(self):
                 self.calls = []

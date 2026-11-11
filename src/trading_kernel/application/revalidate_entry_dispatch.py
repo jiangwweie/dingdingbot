@@ -52,6 +52,11 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class EntryDispatchPreflightStatus(StrEnum):
+    EXIT_CONFIGURATION_NOT_ACTIVATED = "exit_configuration_not_activated"
+    EXIT_CONFIGURATION_BINDING_DRIFT = "exit_configuration_binding_drift"
+    MA50_UNAVAILABLE = "ma50_unavailable"
+    MA50_STALE = "ma50_stale"
+    MA50_NOT_BULLISH = "ma50_not_bullish"
     DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"
     DIRECTIONAL_RISK_EXHAUSTED = "directional_risk_exhausted"
     ALLOWED = "allowed"

@@ -183,9 +183,11 @@ async def test_active_generation_routes_directly_but_first_activation_keeps_cont
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('baseline', benchmark_variants())
-@pytest.mark.parametrize('service_ms', [100, 1500])
-async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, service_ms):
+@pytest.mark.parametrize("baseline", benchmark_variants())
+@pytest.mark.parametrize("service_ms", [100, 1500])
+async def test_reproducible_106_scope_queue_benchmark(
+    monkeypatch, baseline, service_ms
+):
     import scripts.trading_kernel.run_observation_worker_once as current_script
     from tests.trading_kernel.support.efficiency_baseline import load_baseline
 
@@ -206,10 +208,13 @@ async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, ser
         raise TimeoutError
 
     monkeypatch.setattr(runner.asyncio, 'wait_for', wait)
+
     class Source:
         async def fetch_closed_candles(self, _): raise AssertionError('no external I/O')
+
     class Engine:
         async def dispose(self): pass
+
     monkeypatch.setattr(script, '_load_factory', lambda _: Source)
     monkeypatch.setattr(script, 'create_async_engine', lambda _: Engine())
 
@@ -227,12 +232,18 @@ async def test_reproducible_106_scope_queue_benchmark(monkeypatch, baseline, ser
             stop.set()
         return observation.ObservationWorkerResult(status='no_work')
 
+    async def regime_refresh(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(script, "refresh_exit_regime", regime_refresh)
     monkeypatch.setattr(script, 'run_observation_worker_once', tick)
     output = []
+
     async def group(loops, **kwargs):
         selected = tuple(loop for loop in loops if loop.component_id == 'benchmark')
         return await runner.run_worker_process_group(selected, run_forever=True,
             idle_log_interval_ms=300_000, emit=lambda row: (output.append(row), stop.set() if 'tick_failed' in row else None))
+
     monkeypatch.setattr(script, 'run_worker_process_group', group)
     args = script._parser().parse_args(['--database-url', 'postgresql+asyncpg://unused/test',
         '--market-source-factory', 'unused:source', '--worker-id', 'benchmark',
@@ -317,12 +328,16 @@ async def test_alpha_research_backlog_keeps_106_live_scopes_moving(monkeypatch):
     scopes=[]
     research=[]
     failures=[]
+
     class Source:
         async def fetch_closed_candles(self,_): raise AssertionError('fake tick owns no exchange I/O')
+
     class Engine:
         async def dispose(self): pass
+
     monkeypatch.setattr(script,'_load_factory',lambda _:Source)
     monkeypatch.setattr(script,'create_async_engine',lambda _:Engine())
+
     async def fake_tick(_uow,_source,request):
         elapsed[0]+=10
         if request.prefer_shadow and len(research)<200:
@@ -340,19 +355,28 @@ async def test_alpha_research_backlog_keeps_106_live_scopes_moving(monkeypatch):
             return observation.ObservationWorkerResult(status='shadow_completed',shadow_outcome_id=str(len(research)))
         stop.set()
         return observation.ObservationWorkerResult(status='no_work')
+
+    async def regime_refresh(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(script, "refresh_exit_regime", regime_refresh)
     monkeypatch.setattr(script,'run_observation_worker_once',fake_tick)
     real_wait=asyncio.wait_for
+
     async def virtual_wait(awaitable,*,timeout):
         if timeout==5:
             elapsed[0]+=5000
             awaitable.close()
             raise TimeoutError
         return await real_wait(awaitable,timeout=timeout)
+
     monkeypatch.setattr(process.asyncio,'wait_for',virtual_wait)
+
     async def group(loops,**_):
         selected=tuple(loop for loop in loops if loop.component_id=='alpha-benchmark')
         return await process.run_worker_process_group(selected,run_forever=True,idle_log_interval_ms=300_000,
             emit=lambda _:None)
+
     monkeypatch.setattr(script,'run_worker_process_group',group)
     args=script._parser().parse_args(['--database-url','postgresql+asyncpg://unused/test',
         '--market-source-factory','unused:source','--worker-id','alpha-benchmark',

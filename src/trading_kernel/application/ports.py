@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from decimal import Decimal
 from enum import StrEnum
@@ -83,6 +83,8 @@ from src.trading_kernel.domain.dynamic_selection_timing import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import AdmissionOwnership
 from src.trading_kernel.domain.events import TradeEvent
+from src.trading_kernel.domain.exit_configuration import ExitConfigurationRecord
+from src.trading_kernel.domain.exit_execution import ExitOrderRules
 from src.trading_kernel.domain.exit_policy import (
     CurrentEventExitBinding,
     EventExitBinding,
@@ -90,6 +92,7 @@ from src.trading_kernel.domain.exit_policy import (
     ExitProfile,
     ExitProfileRecord,
 )
+from src.trading_kernel.domain.exit_regime import BtcMa50Snapshot
 from src.trading_kernel.domain.exposure_episode import (
     ComparisonBindingEpisodeCheckpoint,
     ComparisonBoundExposureEpisodeTransition,
@@ -600,6 +603,7 @@ class InstrumentRulesSnapshot(BaseModel):
 
     venue_id: str
     exchange_instrument_id: str
+    exit_order_rules: ExitOrderRules | None = None
     quantity_step: Decimal
     price_tick: Decimal
     min_quantity: Decimal
@@ -795,6 +799,10 @@ class ExchangeCommandRepository(Protocol):
         worker_id: str,
         result: SetLeverageCommandResult,
     ) -> None: ...
+
+    async def claimed_by(
+        self, *, command_id: str, worker_id: str, now_ms: int
+    ) -> bool: ...
 
     async def release_unstarted_claim(self, *, command_id: str, worker_id: str) -> None: ...
 
@@ -1429,6 +1437,7 @@ class SignalRepository(Protocol):
         notional_coefficient_certified: bool,
         observed_at_ms: int,
         valid_until_ms: int,
+        exit_order_rules: ExitOrderRules | None = None,
     ) -> InstrumentRulesSnapshot: ...
 
     async def get_runtime_capability(
@@ -2261,6 +2270,20 @@ class InstrumentSelectionRepository(Protocol):
 
 
 class ExitProfileAuthorityRepository(Protocol):
+    async def get_configuration(
+        self, configuration_id: str
+    ) -> ExitConfigurationRecord | None: ...
+
+    async def get_current_configuration(
+        self, *, venue_id: str, account_id: str
+    ) -> ExitConfigurationRecord | None: ...
+
+    async def activate_configuration(self, record: ExitConfigurationRecord) -> None: ...
+
+    async def get_ma50_snapshot(self) -> BtcMa50Snapshot | None: ...
+
+    async def save_ma50_snapshot(self, snapshot: BtcMa50Snapshot) -> bool: ...
+
     async def acquire_authority_write_lock(self) -> None: ...
 
     async def get_current_binding(
@@ -2361,6 +2384,9 @@ class VenueCommandRequest(BaseModel):
     venue_client_order_id: str | None
     payload: CommandPayload
     deadline_at_ms: int
+    before_send: Callable[[], Awaitable[None]] | None = Field(
+        default=None, exclude=True
+    )
     entry_authorized_at_ms: int | None = None
 
 
@@ -2424,7 +2450,9 @@ class VenueMutationRejected(RuntimeError):
 class VenueMutationFailure(RuntimeError):
     """A sanitized non-order venue failure whose outcome remains unresolved."""
 
-    _REASON = re.compile(r"^exchange_code_-?[0-9]{1,6}$")
+    _REASON = re.compile(
+        r"^(exchange_code_-?[0-9]{1,6}|transport_retry_forbidden_after_send)$"
+    )
 
     def __init__(self, reason: str) -> None:
         if self._REASON.fullmatch(reason) is None:
@@ -2538,3 +2566,12 @@ class KernelUnitOfWork(Protocol):
         reduction: Reduction,
         expected_version: int,
     ) -> None: ...
+
+
+class VenueSendBlocked(RuntimeError):
+    """Transport guard proved no request was sent; this is not unknown outcome."""
+
+    def __init__(self, reason: str, *, superseded: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.superseded = superseded

@@ -1,4 +1,5 @@
 """Production-shaped local Event producer and terminal lifecycle certification harness."""
+
 from __future__ import annotations
 
 import re
@@ -237,7 +238,15 @@ class CertifiedEntryAdmissionFactsSource:
         self,
         request: InstrumentRulesRequest,
     ) -> InstrumentRulesFacts:
+        from tests.trading_kernel.support.exit_configuration import (
+            executable_fixture_rules,
+        )
+
         return InstrumentRulesFacts(
+            exit_order_rules=executable_fixture_rules(
+                now_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             exchange_instrument_id=request.exchange_instrument_id,
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
@@ -351,6 +360,25 @@ class CertifiedPositionSource:
         self.average_entry_price = None
         self.liquidation_price = None
 
+    async def read_complete_entry_fills(self, request):
+        from src.trading_kernel.domain.exit_execution import (
+            CompleteEntryFills,
+            EntryFill,
+        )
+
+        return CompleteEntryFills(
+            command_id=request.reference.command_id,
+            exchange_order_id=request.reference.submitted_exchange_order_id,
+            fills=(
+                EntryFill(
+                    trade_id="exact-fixture-entry",
+                    quantity=request.expected_quantity,
+                    price=self.average_entry_price,
+                ),
+            ),
+            observed_at_ms=request.observed_at_ms,
+        )
+
     async def read_position_snapshot(
         self,
         request: PositionSnapshotRequest,
@@ -408,7 +436,15 @@ class CertifiedPostFillFactsSource:
         self,
         request: InstrumentRulesRequest,
     ) -> InstrumentRulesFacts:
+        from tests.trading_kernel.support.exit_configuration import (
+            executable_fixture_rules,
+        )
+
         return InstrumentRulesFacts(
+            exit_order_rules=executable_fixture_rules(
+                now_ms=request.observed_at_ms,
+                valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+            ),
             exchange_instrument_id=request.exchange_instrument_id,
             quantity_step=Decimal("0.001"),
             price_tick=Decimal("0.1"),
@@ -436,6 +472,30 @@ class CertifiedLifecycleFactsSource:
     ) -> TicketLifecycleFacts:
         if self.facts is None:
             raise AssertionError("lifecycle facts requested before TP1 fill")
+        if request.exact_tp_fills_required and self.facts.tp1_filled_quantity > 0:
+            from src.trading_kernel.domain.exit_execution import (
+                EntryFill,
+                TpFillEvidence,
+            )
+
+            reference = request.tp1_order_reference
+            assert reference is not None
+            return self.facts.model_copy(
+                update={
+                    "tp_fill_evidence": TpFillEvidence(
+                        command_id=reference.command_id,
+                        exchange_order_id=reference.submitted_exchange_order_id,
+                        fills=(
+                            EntryFill(
+                                trade_id="fixture-tp-trade",
+                                quantity=self.facts.tp1_filled_quantity,
+                                price=self.facts.tp1_average_fill_price,
+                            ),
+                        ),
+                        observed_at_ms=request.observed_at_ms,
+                    )
+                }
+            )
         return self.facts.model_copy(
             update={"observed_at_ms": request.observed_at_ms}
         )
@@ -551,6 +611,7 @@ async def run_event_chain(
         contract=contract,
         instrument_id=instrument_id,
     ))
+
     def uow_factory() -> PostgresKernelUnitOfWork:
         return PostgresKernelUnitOfWork(six_event_engine)
 
@@ -588,6 +649,13 @@ async def run_event_chain(
         str(next(fact.value for fact in signal.facts if fact.role == "protection_reference"))
     )
 
+    from tests.trading_kernel.support.exit_configuration import (
+        install_approved_exit_configuration,
+    )
+
+    await install_approved_exit_configuration(
+        six_event_engine, account_id="account-certification", now_ms=NOW_MS
+    )
     venue = CertifiedVenue()
     position_source = CertifiedPositionSource()
     lifecycle_source = CertifiedLifecycleFactsSource()
@@ -688,6 +756,9 @@ async def run_event_chain(
     )
     assert post_fill.status is ReconciliationWorkerStatus.POSITION_RECONCILED
     assert post_fill.detail == "post_fill_stress:passed"
+    await ready_management_receiver(
+        six_event_engine, now_ms=NOW_MS + 4000, ticket_id=ticket.identity.ticket_id
+    )
     take_profit = await _run_lifecycle_at_virtual_time(
         uow_factory,
         venue,
@@ -696,7 +767,7 @@ async def run_event_chain(
             update={"now_ms": NOW_MS + 4_000, "lease_until_ms": NOW_MS + 9_000}
         ),
     )
-    assert take_profit.status is LifecycleWorkerStatus.DISPATCHED
+    assert take_profit.status is LifecycleWorkerStatus.DISPATCHED, take_profit
 
     tp1_quantity = ticket.take_profit_quantities[0]
     runner_quantity = ticket.quantity - tp1_quantity

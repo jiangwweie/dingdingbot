@@ -269,6 +269,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/exit-configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Exit Configuration */
+        get: operations["read_exit_configuration_api_owner_v1_controls_exit_configuration_get"];
+        put?: never;
+        /** Activate Exit Configuration Route */
+        post: operations["activate_exit_configuration_route_api_owner_v1_controls_exit_configuration_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exit-configuration/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Exit Configuration Route */
+        post: operations["preview_exit_configuration_route_api_owner_v1_controls_exit_configuration_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exit-configuration/requests/{idempotency_key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Exit Configuration Receipt */
+        get: operations["read_exit_configuration_receipt_api_owner_v1_controls_exit_configuration_requests__idempotency_key__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/exit-configuration/sizing-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Exit Sizing */
+        post: operations["preview_exit_sizing_api_owner_v1_controls_exit_configuration_sizing_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/exit-profiles": {
         parameters: {
             query?: never;
@@ -796,6 +865,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/tickets/{ticket_id}/exit-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Ticket Exit Plan */
+        get: operations["read_ticket_exit_plan_api_owner_v1_tickets__ticket_id__exit_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -1110,6 +1196,33 @@ export interface components {
             /** Slippage Buffer Ticks */
             slippage_buffer_ticks: number;
         };
+        /** BtcMa50Snapshot */
+        BtcMa50Snapshot: {
+            /**
+             * Exchange Instrument Id
+             * @default binance-usdm:BTCUSDT:perpetual
+             * @constant
+             */
+            exchange_instrument_id: "binance-usdm:BTCUSDT:perpetual";
+            /** Latest Close */
+            latest_close: string;
+            /** Latest Close Time Ms */
+            latest_close_time_ms: number;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            /** Sma50 */
+            sma50: string;
+            /** Valid Until Ms */
+            valid_until_ms: number;
+            /**
+             * Venue Id
+             * @default binance-usdm
+             * @constant
+             */
+            venue_id: "binance-usdm";
+            /** Window Digest */
+            window_digest: string;
+        };
         /** CandleSeries */
         CandleSeries: {
             /** Candles */
@@ -1158,6 +1271,17 @@ export interface components {
             occurred_at_ms: number;
             /** Price */
             price: string;
+        };
+        /** CompleteEntryFills */
+        CompleteEntryFills: {
+            /** Command Id */
+            command_id: string;
+            /** Exchange Order Id */
+            exchange_order_id: string;
+            /** Fills */
+            fills: components["schemas"]["EntryFill"][];
+            /** Observed At Ms */
+            observed_at_ms: number;
         };
         /**
          * ContinuitySourceKind
@@ -1393,6 +1517,15 @@ export interface components {
         };
         /** EmptyControlBody */
         EmptyControlBody: Record<string, never>;
+        /** EntryFill */
+        EntryFill: {
+            /** Price */
+            price: string;
+            /** Quantity */
+            quantity: string;
+            /** Trade Id */
+            trade_id: string;
+        };
         /** EventExitBinding */
         EventExitBinding: {
             /** Activation Reason */
@@ -1439,6 +1572,44 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** EventExitParameters */
+        "EventExitParameters-Input": {
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Expected Binding Id */
+            expected_binding_id: string;
+            /** Expected Binding Revision */
+            expected_binding_revision: number;
+            /** Ma50 Enabled */
+            ma50_enabled: boolean;
+            /** Max Actual Fraction */
+            max_actual_fraction: number | string;
+            /** Minimum Lift */
+            minimum_lift: boolean;
+            /** Reward Multiple */
+            reward_multiple: number | string;
+            /** Target Fraction */
+            target_fraction: number | string;
+        };
+        /** EventExitParameters */
+        "EventExitParameters-Output": {
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Expected Binding Id */
+            expected_binding_id: string;
+            /** Expected Binding Revision */
+            expected_binding_revision: number;
+            /** Ma50 Enabled */
+            ma50_enabled: boolean;
+            /** Max Actual Fraction */
+            max_actual_fraction: string;
+            /** Minimum Lift */
+            minimum_lift: boolean;
+            /** Reward Multiple */
+            reward_multiple: string;
+            /** Target Fraction */
+            target_fraction: string;
+        };
         /** EvidenceGap */
         EvidenceGap: {
             /** Code */
@@ -1479,9 +1650,150 @@ export interface components {
              */
             source: "exit_event" | "review_fills" | "unavailable" | "not_applicable";
         };
+        /** ExitConfigurationBody */
+        ExitConfigurationBody: {
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            intent: components["schemas"]["ExitConfigurationIntent-Input"];
+            /** Preview Digest */
+            preview_digest: string;
+            /** Preview Valid Until Ms */
+            preview_valid_until_ms: number;
+            /** Reason */
+            reason: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
+        /** ExitConfigurationIntent */
+        "ExitConfigurationIntent-Input": {
+            /** Account Id */
+            account_id: string;
+            /** Events */
+            events: components["schemas"]["EventExitParameters-Input"][];
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Product Id
+             * @default brc-app-manual-v1
+             * @constant
+             */
+            product_id: "brc-app-manual-v1";
+            /**
+             * Venue Id
+             * @default binance-usdm
+             * @constant
+             */
+            venue_id: "binance-usdm";
+        };
+        /** ExitConfigurationIntent */
+        "ExitConfigurationIntent-Output": {
+            /** Account Id */
+            account_id: string;
+            /** Events */
+            events: components["schemas"]["EventExitParameters-Output"][];
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Product Id
+             * @default brc-app-manual-v1
+             * @constant
+             */
+            product_id: "brc-app-manual-v1";
+            /**
+             * Venue Id
+             * @default binance-usdm
+             * @constant
+             */
+            venue_id: "binance-usdm";
+        };
+        /** ExitConfigurationPreview */
+        ExitConfigurationPreview: {
+            intent: components["schemas"]["ExitConfigurationIntent-Output"];
+            /** Preview Digest */
+            preview_digest: string;
+            /** Profiles */
+            profiles: components["schemas"]["ProfileRevisionLineage"][];
+            /** Source Configuration Revision */
+            source_configuration_revision: number;
+            /** Valid Until Ms */
+            valid_until_ms: number;
+        };
+        /** ExitConfigurationPreviewBody */
+        ExitConfigurationPreviewBody: {
+            intent: components["schemas"]["ExitConfigurationIntent-Input"];
+        };
+        /** ExitConfigurationRecord */
+        ExitConfigurationRecord: {
+            /** Activation Reason */
+            activation_reason: string;
+            /** Configuration Id */
+            configuration_id: string;
+            /** Created At Ms */
+            created_at_ms: number;
+            intent: components["schemas"]["ExitConfigurationIntent-Output"];
+            /** Owner Authorization Id */
+            owner_authorization_id: string;
+            /** Preview Digest */
+            preview_digest: string;
+            /** Preview Valid Until Ms */
+            preview_valid_until_ms: number;
+            /** Profiles */
+            profiles: components["schemas"]["ProfileRevisionLineage"][];
+            /** Revision */
+            revision: number;
+        };
+        /** ExitConfigurationView */
+        ExitConfigurationView: {
+            current: components["schemas"]["ExitConfigurationRecord"] | null;
+            intent: components["schemas"]["ExitConfigurationIntent-Output"];
+            ma50_snapshot: components["schemas"]["BtcMa50Snapshot"] | null;
+            /** Sources */
+            sources: components["schemas"]["ExitProfileSourceView"][];
+        };
+        /** ExitExecutionPolicy */
+        ExitExecutionPolicy: {
+            /** Max Actual Fraction */
+            max_actual_fraction: string;
+            /**
+             * Price Basis
+             * @constant
+             */
+            price_basis: "complete_entry_vwap";
+            quantity_policy: components["schemas"]["TpQuantityPolicy"];
+        };
+        /** ExitOrderRules */
+        ExitOrderRules: {
+            /** Max Price */
+            max_price: string;
+            /** Max Quantity */
+            max_quantity: string;
+            /** Min Notional */
+            min_notional: string;
+            /** Min Price */
+            min_price: string;
+            /** Min Quantity */
+            min_quantity: string;
+            /** Observed At Ms */
+            observed_at_ms: number;
+            /** Price Tick */
+            price_tick: string;
+            /** Quantity Step */
+            quantity_step: string;
+            /** Runner Max Quantity */
+            runner_max_quantity: string;
+            /** Runner Min Quantity */
+            runner_min_quantity: string;
+            /** Runner Quantity Step */
+            runner_quantity_step: string;
+            /** Valid Until Ms */
+            valid_until_ms: number;
+        };
         /** ExitProfile */
         ExitProfile: {
             break_even_floor: components["schemas"]["BreakEvenFloorRule"];
+            execution?: components["schemas"]["ExitExecutionPolicy"] | null;
             /** Exit Profile Id */
             exit_profile_id: string;
             /** Exit Profile Version */
@@ -1495,9 +1807,9 @@ export interface components {
             pre_tp1_guards: components["schemas"]["PreTp1GuardKind"][];
             /**
              * Profile Schema Version
-             * @constant
+             * @enum {string}
              */
-            profile_schema_version: "exit_profile_v1";
+            profile_schema_version: "exit_profile_v1" | "exit_profile_v2";
             runner: components["schemas"]["RollingExtremeAtrRunnerRule"];
             time_stop: components["schemas"]["TimeStopRule"] | null;
             tp1: components["schemas"]["TakeProfitRule"];
@@ -1555,6 +1867,57 @@ export interface components {
             reason: string;
             /** Totp Code */
             totp_code?: string | null;
+        };
+        /** ExitProfileSourceView */
+        ExitProfileSourceView: {
+            /** Event Spec Id */
+            event_spec_id: string;
+            profile: components["schemas"]["ExitProfile"];
+            /** Semantic Hash */
+            semantic_hash: string;
+        };
+        /** ExitQuantities */
+        ExitQuantities: {
+            /** Actual Fraction */
+            actual_fraction: string;
+            /** Minimum Lifted */
+            minimum_lifted: boolean;
+            /** Minimum Quantity */
+            minimum_quantity: string;
+            /** Runner Quantity */
+            runner_quantity: string;
+            /** Target Floor Quantity */
+            target_floor_quantity: string;
+            /** Tp Quantity */
+            tp_quantity: string;
+        };
+        /** ExitSizingBody */
+        ExitSizingBody: {
+            /** Entry Price */
+            entry_price: number | string;
+            /** Event Spec Id */
+            event_spec_id: string;
+            /** Exchange Instrument Id */
+            exchange_instrument_id: string;
+            /** Initial Stop */
+            initial_stop: number | string;
+            parameters: components["schemas"]["EventExitParameters-Input"];
+            /** Quantity */
+            quantity: number | string;
+        };
+        /** ExitSizingView */
+        ExitSizingView: {
+            /** Blocker */
+            blocker: string | null;
+            quantities: components["schemas"]["ExitQuantities"] | null;
+            /** Quantity */
+            quantity: string;
+            /** Rules Observed At Ms */
+            rules_observed_at_ms: number | null;
+            /** Rules Valid Until Ms */
+            rules_valid_until_ms: number | null;
+            /** Tp Price */
+            tp_price: string | null;
         };
         /** FlattenBody */
         FlattenBody: {
@@ -2295,11 +2658,63 @@ export interface components {
             /** Win Count */
             win_count: number;
         };
+        /** PostFillExitPlan */
+        PostFillExitPlan: {
+            /** Actual Multiple */
+            actual_multiple: string;
+            /** Binding Id */
+            binding_id: string;
+            /** Binding Revision */
+            binding_revision: number;
+            /** Created At Ms */
+            created_at_ms: number;
+            entry_fills: components["schemas"]["CompleteEntryFills"];
+            /** Entry Price */
+            entry_price: string;
+            /** Entry Quantity */
+            entry_quantity: string;
+            execution: components["schemas"]["ExitExecutionPolicy"];
+            /** Initial R Quote */
+            initial_r_quote: string;
+            /** Initial Stop */
+            initial_stop: string;
+            /** Management Revision */
+            management_revision: number;
+            /**
+             * Position Side
+             * @enum {string}
+             */
+            position_side: "long" | "short";
+            /** Profile Hash */
+            profile_hash: string;
+            /** Profile Id */
+            profile_id: string;
+            quantities: components["schemas"]["ExitQuantities"];
+            rules: components["schemas"]["ExitOrderRules"];
+            /** Target Fraction */
+            target_fraction: string;
+            /** Target Multiple */
+            target_multiple: string;
+            /** Ticket Id */
+            ticket_id: string;
+            /** Tp Price */
+            tp_price: string;
+        };
         /**
          * PreTp1GuardKind
          * @enum {string}
          */
         PreTp1GuardKind: "reclaim_reference" | "session_expiry";
+        /** ProfileRevisionLineage */
+        ProfileRevisionLineage: {
+            /** Event Spec Id */
+            event_spec_id: string;
+            profile: components["schemas"]["ExitProfile"];
+            /** Source Profile Hash */
+            source_profile_hash: string;
+            /** Source Profile Id */
+            source_profile_id: string;
+        };
         /** ProgrammaticTradeReview */
         ProgrammaticTradeReview: {
             /** Attention Items */
@@ -3351,6 +3766,31 @@ export interface components {
             /** Reward Multiple */
             reward_multiple: string;
         };
+        /** TicketExitPlanView */
+        TicketExitPlanView: {
+            /** Active Stop Price */
+            active_stop_price: string | null;
+            /** Aggregate Status */
+            aggregate_status: string;
+            /** Current Quantity */
+            current_quantity: string;
+            /**
+             * Management Mode
+             * @enum {string}
+             */
+            management_mode: "AUTO" | "MANUAL" | "REVIEW_REQUIRED";
+            /** Observed At Ms */
+            observed_at_ms: number | null;
+            plan: components["schemas"]["PostFillExitPlan"] | null;
+            /** Protected Quantity */
+            protected_quantity: string;
+            /** Ticket Id */
+            ticket_id: string;
+            /** Tp1 Filled Quantity */
+            tp1_filled_quantity: string;
+            /** Tp1 Target Quantity */
+            tp1_target_quantity: string;
+        };
         /**
          * TimeStopMode
          * @enum {string}
@@ -3363,6 +3803,11 @@ export interface components {
             /** @default absolute */
             mode: components["schemas"]["TimeStopMode"];
         };
+        /**
+         * TpQuantityPolicy
+         * @enum {string}
+         */
+        TpQuantityPolicy: "target_floor" | "target_floor_then_minimum";
         /** TradeCausalityDetail */
         TradeCausalityDetail: {
             /** Annotations */
@@ -4043,6 +4488,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GlobalMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_exit_configuration_api_owner_v1_controls_exit_configuration_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitConfigurationView"];
+                };
+            };
+        };
+    };
+    activate_exit_configuration_route_api_owner_v1_controls_exit_configuration_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitConfigurationBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitConfigurationRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_exit_configuration_route_api_owner_v1_controls_exit_configuration_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitConfigurationPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitConfigurationPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_exit_configuration_receipt_api_owner_v1_controls_exit_configuration_requests__idempotency_key__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                idempotency_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitConfigurationRecord"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_exit_sizing_api_owner_v1_controls_exit_configuration_sizing_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExitSizingBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExitSizingView"];
                 };
             };
             /** @description Validation Error */
@@ -5035,6 +5630,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiEnvelope_TradeCausalityDetail_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_ticket_exit_plan_api_owner_v1_tickets__ticket_id__exit_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketExitPlanView"];
                 };
             };
             /** @description Validation Error */

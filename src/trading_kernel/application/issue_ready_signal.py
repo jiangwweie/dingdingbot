@@ -7,6 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.trading_kernel.application.build_capacity_claim import build_capacity_claim
+from src.trading_kernel.application.exit_regime import check_exit_regime
 from src.trading_kernel.application.ingest_signal import (
     SignalAuthorityStatus,
     validate_signal_authority,
@@ -111,6 +112,7 @@ async def issue_ready_signal(
     uow: KernelUnitOfWork,
     request: IssueReadySignalRequest,
 ) -> IssueTicketResult:
+    await uow.exit_profiles.acquire_authority_write_lock()
     candidates = rank_candidates(
         await uow.signals.list_ready_candidates(
             now_ms=request.now_ms,
@@ -444,6 +446,23 @@ async def issue_ready_signal(
         exchange_instrument_id=signal.exchange_instrument_id,
         position_side=signal.position_side,
     )
+    regime_reason, regime_proof = await check_exit_regime(
+        uow,
+        venue_id=domain.venue_id,
+        account_id=domain.account_id,
+        event_spec_id=signal.event_spec_id,
+        now_ms=request.now_ms,
+    )
+    if regime_reason is not None:
+        return await _refuse(
+            uow,
+            signal,
+            IssueTicketStatus(regime_reason),
+            request.now_ms,
+            admission_context=admission_context,
+            entry_admission_snapshot_digest=request.admission_snapshot.digest(),
+            binding_constraint=regime_reason,
+        )
     decision = build_capacity_claim(
         directional_overlay_limit=directional_limit,
         signal=signal,
@@ -477,7 +496,9 @@ async def issue_ready_signal(
             ),
         ),
         usage=usage,
+        regime_admission=regime_proof,
         instrument_rules=CapacityInstrumentRules(
+            exit_order_rules=rules.exit_order_rules,
             venue_id=rules.venue_id,
             exchange_instrument_id=rules.exchange_instrument_id,
             quantity_step=rules.quantity_step,
@@ -516,7 +537,7 @@ async def issue_ready_signal(
             request.now_ms,
             admission_context=admission_context,
             entry_admission_snapshot_digest=(request.admission_snapshot.digest()),
-            binding_constraint=decision.status.value,
+            binding_constraint=decision.refusal_reason or decision.status.value,
             admission_snapshot=request.admission_snapshot,
         )
 

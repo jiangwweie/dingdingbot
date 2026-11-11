@@ -28,6 +28,29 @@ from scripts.trading_kernel.manual_host_bootstrap import (
 )
 
 
+def preservation_projection_sql(
+    table: str, columns: list[str], *, legacy_management: bool = False
+) -> str:
+    quoted_table = '"' + table.replace('"', '""') + '"'
+    if legacy_management:
+        expression = "(to_jsonb(t)-'current_complete'-'attribution_complete'-'proof_refs'-'continuity_complete') || jsonb_build_object('facts_complete',coalesce(to_jsonb(t)->'facts_complete',to_jsonb(t)->'proof_refs'->'migration'->'legacy_facts_complete'))"
+        return (
+            "SELECT ("
+            + expression
+            + ")::text FROM "
+            + quoted_table
+            + " t ORDER BY 1 LIMIT 100001"
+        )
+    selected = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
+    return (
+        "SELECT to_jsonb(t)::text FROM (SELECT "
+        + selected
+        + " FROM "
+        + quoted_table
+        + ") t ORDER BY 1 LIMIT 100001"
+    )
+
+
 async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     from hashlib import sha256
 
@@ -85,36 +108,55 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
 
     engine = create_async_engine(dsn)
 
-    async def snapshot():
+    async def snapshot(source_columns=None):
         async with engine.connect() as c:
             await c.execute(text("SET TRANSACTION READ ONLY"))
             await c.execute(text("SET LOCAL statement_timeout='5s'"))
             result = await read_preserved_runtime_state(c)
             history = {}
+            all_columns = {}
+            available = {
+                r[0]
+                for r in (
+                    await c.execute(
+                        text(
+                            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+                        )
+                    )
+                )
+            }
             for table in metadata.sorted_tables:
                 if table.name in {
                     "brc_schema_metadata",
                     "brc_runtime_capabilities_current",
                 }:
                     continue
-                if table.name in {"brc_management_stream_events","brc_order_command_baselines","brc_management_coverage_events","brc_management_feed_current"} and forward:
+                if table.name not in available:
+                    # Exact forward target additions are empty until activation.
                     continue
-                if table.name == "brc_notice_outbox" and forward and source["schema"]=="0017_app_management_observation":
-                    continue
-                # One-off stopped fresh-account deployment audit, never runtime cadence.
-                rows = (
-                    (
+                columns = [
+                    str(r[0])
+                    for r in (
                         await c.execute(
                             text(
-                                'SELECT ((to_jsonb(t)' + ("-'current_complete'-'attribution_complete'-'proof_refs'-'continuity_complete') || jsonb_build_object('facts_complete',coalesce(to_jsonb(t)->'facts_complete',to_jsonb(t)->'proof_refs'->'migration'->'legacy_facts_complete'))" if table.name=='brc_management_observation_current' and forward else ')') + ')::text FROM "'
-                                + table.name
-                                + '" t ORDER BY 1 LIMIT 100001'
-                            )
+                                "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=:table ORDER BY ordinal_position"
+                            ),
+                            {"table": table.name},
                         )
                     )
-                    .scalars()
-                    .all()
+                ]
+                if source_columns is not None and table.name not in source_columns:
+                    continue
+                if source_columns is not None:
+                    columns = source_columns[table.name]
+                statement = preservation_projection_sql(
+                    table.name,
+                    columns,
+                    legacy_management=source["schema"] == "0018_notice_outbox_v1"
+                    and table.name == "brc_management_observation_current",
                 )
+                rows = (await c.execute(text(statement))).scalars().all()
+                all_columns[table.name] = columns
                 if len(rows) > 100000:
                     raise ValueError(
                         "fresh-account preservation exceeds bounded upgrade scope"
@@ -126,6 +168,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                     ).hexdigest(),
                 }
             result["preserved_table_rows"] = history
+            result["preserved_columns"] = all_columns
             for key, table in [
                 ("policy", "brc_owner_policy_current"),
                 ("controls", "brc_strategy_entry_controls_current"),
@@ -175,7 +218,20 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                     raise ValueError(
                         "new notice outbox must be empty before writers start"
                     )
-        after = await snapshot()
+        if forward and source["schema"] == "0019_management_evidence_v2":
+            async with engine.connect() as c:
+                for name in (
+                    "brc_post_fill_exit_plans",
+                    "brc_exit_configurations",
+                    "brc_exit_configuration_current",
+                    "brc_btc_ma50_current",
+                    "brc_btc_ma50_snapshots",
+                ):
+                    if await c.scalar(text('SELECT count(*) FROM "' + name + '"')):
+                        raise ValueError(
+                            "new exit authority must remain empty before Owner activation"
+                        )
+        after = await snapshot(before["preserved_columns"])
         if before != after:
             raise ValueError(
                 "current Universe/history or Owner controls changed during upgrade"
@@ -221,7 +277,11 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
     run(["nginx", "-t"])
     # Notification routing has no trading authority. Use the existing startup-only
     # environment boundary, keeping runtime cadence free of file reads.
-    if receipt["schema_revision"] in {"0018_notice_outbox_v1","0019_management_evidence_v2"}:
+    if receipt["schema_revision"] in {
+        "0018_notice_outbox_v1",
+        "0019_management_evidence_v2",
+        "0020_manual_exit_regime_v1",
+    }:
         credential = Path("/etc/brc/notification-credentials/feishu_webhook")
         private_env = Path("/etc/brc/notification-credentials/feishu.env")
         if credential.is_file():

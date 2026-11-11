@@ -1,3 +1,4 @@
+import { ExitConfigurationPanel } from './ExitConfigurationPanel';
 import { IncomeSummary, IncomeScopeBar } from '../common/IncomeSummary';
 import React, { useState, useMemo } from 'react';
 import { useStrategiesData } from '../../hooks/useStrategiesData.ts';
@@ -86,6 +87,7 @@ export const StrategiesPage: React.FC = () => {
 
   return (
     <div id="strategies-page" className="space-y-6 animate-in fade-in-50 duration-200">
+      <ExitConfigurationPanel />
       {/* 1. Header Bar (Always mounted) */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-border pb-4">
         <div>

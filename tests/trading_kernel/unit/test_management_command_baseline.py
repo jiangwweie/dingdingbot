@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from src.trading_kernel.application.management_intents import system_intents_for
 from src.trading_kernel.domain.trade_management import (
     OrderAction,
@@ -138,4 +140,55 @@ def test_algo_creation_without_order_create_time_is_bound_to_exact_acceptance_wi
             event, system_intents=system_intents_for(event, [row()])
         ).decision.value
         == "system"
+    )
+
+
+@pytest.mark.parametrize("quantity", ["0.001", "0.014", "0.5"])
+def test_exact_command_terms_recognize_all_lifted_tp_sizes_and_partial_trades(quantity):
+    current = terms().model_copy(
+        update={
+            "order_namespace": "regular",
+            "order_type": "LIMIT",
+            "quantity": Decimal(quantity),
+            "price": Decimal(66000),
+            "trigger_price": None,
+            "time_in_force": "GTC",
+        }
+    )
+    command = row()
+    command["command_kind"] = "take_profit"
+    command["request_payload"].update(
+        quantity=quantity,
+        order_type="limit",
+        limit_price="66000",
+        stop_price=None,
+        time_in_force="GTC",
+    )
+    command["result_payload"]["management_baseline"] = current.model_dump(mode="json")
+    evidence = OrderEvidence(
+        evidence_id="exact-partial",
+        terms=current,
+        action=OrderAction.TRADE,
+        exchange_event_at_ms=2000,
+        received_at_ms=2001,
+        created_at_ms=1050,
+        executed_quantity=Decimal(quantity) / 2,
+        coverage_complete=True,
+        known_command_outcome_pending=False,
+    )
+    assert classify_order_evidence(
+        evidence, system_intents=system_intents_for(evidence, [command])
+    ).decision.value in {"system", "natural"}
+    changed = evidence.model_copy(
+        update={
+            "action": OrderAction.AMENDMENT,
+            "before_terms": current,
+            "terms": current.model_copy(update={"price": Decimal(66001)}),
+        }
+    )
+    assert (
+        classify_order_evidence(
+            changed, system_intents=system_intents_for(changed, [command])
+        ).decision.value
+        == "external"
     )

@@ -2759,3 +2759,34 @@ def _entry_order_reference() -> TicketOrderReference:
         submitted_exchange_order_id="venue-entry-1",
         command_created_at_ms=1_000,
     )
+
+
+@pytest.mark.asyncio
+async def test_v2_lifecycle_keeps_exact_tp_trade_ids_and_current_market_price():
+    from src.trading_kernel.domain.order_attribution import (
+        OrderNamespace,
+        OrderRole,
+        TicketOrderReference,
+    )
+    class ExactLifecycle(LifecycleFactsExchange):
+        async def fetch_positions(self,symbols,params):
+            rows=await super().fetch_positions(symbols,params)
+            for row in rows:row['markPrice']='60500'
+            return rows
+        async def fetch_my_trades(self,symbol,since,limit,params):
+            if params['orderId']=='venue-tp1-1':
+                trade={'id':'tp-trade-1','order':'venue-tp1-1','amount':'.005','price':'61000','timestamp':3000,'info':{'positionSide':'LONG'}}
+                return [trade,dict(trade)]
+            return await super().fetch_my_trades(symbol,since,limit,params)
+    exchange=ExactLifecycle()
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20_000_000)
+    tp=TicketOrderReference(command_id='tp-command',command_kind=ExchangeCommandKind.TAKE_PROFIT,role=OrderRole.EXIT,namespace=OrderNamespace.REGULAR,
+        venue_client_order_id='tp-client',submitted_exchange_order_id='venue-tp1-1',command_created_at_ms=2000)
+    request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),
+        event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id='venue-tp1-1',tp1_order_reference=tp,exact_tp_fills_required=True,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,observed_at_ms=20_000_000)
+    facts=await adapter.read_lifecycle_facts(request)
+    assert facts.tp_fill_evidence.quantity==Decimal('.005')
+    assert len(facts.tp_fill_evidence.fills)==1
+    assert facts.tp_fill_evidence.command_id=='tp-command'
+    assert facts.current_market_price==Decimal(60500)

@@ -16,6 +16,8 @@ from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressStatus,
     MaintenanceMarginBracket,
 )
+from src.trading_kernel.domain.exit_execution import ExitOrderRules
+from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import TicketIdentity
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
@@ -187,6 +189,7 @@ class CapacityInstrumentRules(BaseModel):
 
     venue_id: str
     exchange_instrument_id: str
+    exit_order_rules: ExitOrderRules | None = None
     quantity_step: Decimal
     price_tick: Decimal
     min_quantity: Decimal
@@ -242,6 +245,7 @@ class CapacityClaim(BaseModel):
     universe_version_id: str
     universe_semantic_digest: str
     fact_digest: str
+    regime_admission: RegimeAdmissionProof | None = None
     exit_policy_id: str
     exit_policy_semantic_hash: str
     exit_binding_id: str | None = None
@@ -644,6 +648,7 @@ class CapacityClaim(BaseModel):
             ),
             min_materialization_ratio=self.min_materialization_ratio,
             minimum_stop_risk_budget=self.minimum_stop_risk_budget,
+            regime_admission=self.regime_admission,
             exit_policy_id=self.exit_policy_id,
             exit_policy_semantic_hash=self.exit_policy_semantic_hash,
             exit_binding_id=self.exit_binding_id,
@@ -681,6 +686,7 @@ class CapacityClaim(BaseModel):
 
 
 class CapacityClaimDecision(BaseModel):
+    refusal_reason: str | None = None
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: CapacityClaimStatus
@@ -763,6 +769,7 @@ def freeze_capacity_claim(
     exposure_session_end_ms: int | None,
     take_profit_prices: tuple[Decimal, ...],
     take_profit_quantities: tuple[Decimal, ...],
+    regime_admission: RegimeAdmissionProof | None = None,
     selection_authority_id: str | None = None,
     max_same_strategy_side: int | None = None,
     active_strategy_side_ticket_count_at_claim: int | None = None,
@@ -842,6 +849,7 @@ def freeze_capacity_claim(
         "exposure_session_end_ms": exposure_session_end_ms,
         "take_profit_prices": take_profit_prices,
         "take_profit_quantities": take_profit_quantities,
+        "regime_admission": regime_admission,
         "decision_digest": "sha256:" + "0" * 64,
     }
     _normalize_claim_decimals_for_storage(payload)
@@ -863,6 +871,8 @@ def build_capacity_claim_digest(claim: CapacityClaim) -> str:
         mode="python",
         exclude={"capacity_claim_id", "decision_digest"},
     )
+    if payload["regime_admission"] is None:
+        payload.pop("regime_admission")
     if payload["selection_authority_id"] is None:
         payload.pop("selection_authority_id")
     if (

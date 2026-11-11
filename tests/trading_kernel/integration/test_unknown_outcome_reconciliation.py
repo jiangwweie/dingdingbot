@@ -672,7 +672,6 @@ async def test_unknown_tp1_visible_and_absent_paths_are_both_exact_visible(
     assert aggregate.tp1_exchange_order_id == "venue-take-profit-recovered"
 
 
-
 @pytest.mark.asyncio
 async def test_unknown_tp1_visible_and_absent_paths_are_both_exact_absent(
     dispatch_engine,
@@ -753,7 +752,6 @@ async def test_unknown_replacement_visible_and_absent_paths_preserve_old_stop_vi
     assert aggregate.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING
     assert aggregate.active_stop_exchange_order_id == "venue-runner-stop-recovered"
     assert any(item.kind is ExchangeCommandKind.CANCEL_ORDER for item in commands)
-
 
 
 @pytest.mark.asyncio
@@ -1171,8 +1169,8 @@ async def _dispatch(
             now_ms=now_ms,
             lease_until_ms=now_ms + 5_000,
             timeout_seconds=timeout_seconds,
-            runtime_commit="kernel-test-head" if entry else None,
-            schema_revision=(CURRENT_SCHEMA_REVISION if entry else None),
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             admission_snapshot_validity_ms=1_000 if entry else None,
         ),
         entry_facts_source=PreflightFacts() if entry else None,

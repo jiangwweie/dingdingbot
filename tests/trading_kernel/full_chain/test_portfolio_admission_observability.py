@@ -355,6 +355,25 @@ class ReplayEntryAdmissionFactsSource(CertifiedEntryAdmissionFactsSource):
         account_risk = _with_fixed_leverage(snapshot.account_risk_snapshot)
         return snapshot.model_copy(update={"account_risk_snapshot": account_risk})
 
+    async def read_instrument_rules(self, request):
+        from tests.trading_kernel.support.exit_configuration import (
+            executable_fixture_rules,
+        )
+
+        rules = await super().read_instrument_rules(request)
+        return rules.model_copy(
+            update={
+                "exit_order_rules": executable_fixture_rules(
+                    now_ms=rules.observed_at_ms,
+                    valid_until_ms=rules.valid_until_ms,
+                    step=rules.quantity_step,
+                    minimum=rules.min_quantity,
+                    notional=rules.min_notional,
+                    tick=rules.price_tick,
+                )
+            }
+        )
+
     async def read_account_risk_snapshot(
         self,
         request: AccountRiskSnapshotRequest,
@@ -388,6 +407,30 @@ class ReplayLifecycleFactsSource(CertifiedLifecycleFactsSource):
 class ReplayPositionSource:
     def __init__(self, tickets) -> None:
         self._tickets = {ticket.identity.ticket_id: ticket for ticket in tickets}
+
+    async def read_complete_entry_fills(self, request):
+        from src.trading_kernel.domain.exit_execution import (
+            CompleteEntryFills,
+            EntryFill,
+        )
+
+        ticket = next(
+            t
+            for t in self._tickets.values()
+            if t.identity.netting_domain == request.netting_domain
+        )
+        return CompleteEntryFills(
+            command_id=request.reference.command_id,
+            exchange_order_id=request.reference.submitted_exchange_order_id,
+            fills=(
+                EntryFill(
+                    trade_id="replay-entry",
+                    quantity=request.expected_quantity,
+                    price=ticket.entry_reference_price,
+                ),
+            ),
+            observed_at_ms=request.observed_at_ms,
+        )
 
     async def read_position_snapshot(self, request) -> PositionSnapshot:
         ticket = self._tickets[request.ticket_id]
@@ -898,6 +941,13 @@ async def _install_capacity_then_upgrade(engine, request):
     async with PostgresKernelUnitOfWork(engine) as uow:
         await deploy_compatible_upgrade_identity(uow,request.model_copy(update={
             "schema_revision":CURRENT_SCHEMA_REVISION,"seeded_at_ms":NOW_MS-8_000_000+1}))
+    from tests.trading_kernel.support.exit_configuration import (
+        install_approved_exit_configuration,
+    )
+
+    await install_approved_exit_configuration(
+        engine, account_id=request.account_id, now_ms=NOW_MS - 8_000_000 + 2
+    )
 
 
 @pytest.mark.asyncio
@@ -1356,6 +1406,10 @@ async def _observe_and_admit(
             )
         )
     )
+    from tests.trading_kernel.support.exit_configuration import refresh_bullish_ma50
+
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await refresh_bullish_ma50(uow, now_ms=observed_at_ms + 1000)
     entry = await run_entry_worker_once(
         lambda: PostgresKernelUnitOfWork(engine),
         venue,
@@ -1534,7 +1588,15 @@ async def _release_entry_lane(
         aggregate = await uow.aggregates.get(ticket_id)
         lane = await uow.entry_admission.get_global_lane()
     assert aggregate is not None
-    assert aggregate.status is AggregateStatus.POSITION_PROTECTED
+    if aggregate.status is not AggregateStatus.POSITION_PROTECTED:
+        async with PostgresKernelUnitOfWork(engine) as uow:
+            failure_events = await uow.events.list_for_ticket(ticket_id)
+        raise AssertionError(
+            [
+                (type(e).__name__, getattr(e, "exit_plan_failure", None))
+                for e in failure_events
+            ]
+        )
     assert lane is not None
     assert lane.status == "idle"
     return positions
@@ -1584,8 +1646,10 @@ async def _refresh_instrument_certification(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('action', ['new', 'amendment', 'cancel', 'trade'])
-async def test_observation_to_manual_partial_flat_residual_and_terminal(replay_engine, action):
+@pytest.mark.parametrize("action", ["new", "amendment", "cancel", "trade"])
+async def test_observation_to_manual_partial_flat_residual_and_terminal(
+    replay_engine, action
+):
     engine = replay_engine
     market = RecordingReplayMarketSource()
     await _seed_replay_runtime(engine, market)
@@ -1619,11 +1683,13 @@ async def test_observation_to_manual_partial_flat_residual_and_terminal(replay_e
         position_side=d.position_side, reduce_only=False, order_namespace='regular', terms=terms,
         remaining_quantity=t.quantity/2)
     source = AsyncMock()
+
     def scan(q, orders, now, events=()):
         return ManagementScan(ticket_id=tid, snapshot=PositionSnapshot(netting_domain=d,
             quantity=q, average_entry_price=before.average_fill_price if q else None,
             open_orders=orders, observed_at_ms=now), orders=tuple(o.terms for o in orders),
             evidence=events, complete=True, covered_until_ms=now)
+
     source.read_management_scan.return_value = scan(t.quantity, (residual,), at, (evidence,))
     assert await observe_management_once(lambda:PostgresKernelUnitOfWork(engine), source,
         ticket_id=tid, now_ms=at) == 'MANUAL'
@@ -1636,9 +1702,19 @@ async def test_observation_to_manual_partial_flat_residual_and_terminal(replay_e
         skipped = await request_exit(u, ExitTicketRequest(ticket_id=tid, reason='owner-flatten', requested_at_ms=at+1))
         assert skipped.status.value == 'manual_management_skipped'
     call_count = len(venue.calls)
-    await dispatch_one_command(lambda:PostgresKernelUnitOfWork(engine), venue,
-        DispatchCommandRequest(worker_id='post-takeover', now_ms=at+2, lease_until_ms=at+5002,
-            timeout_seconds=1, ticket_id=tid))
+    await dispatch_one_command(
+        lambda: PostgresKernelUnitOfWork(engine),
+        venue,
+        DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
+            worker_id="post-takeover",
+            now_ms=at + 2,
+            lease_until_ms=at + 5002,
+            timeout_seconds=1,
+            ticket_id=tid,
+        ),
+    )
     assert len(venue.calls) == call_count
     for offset, q, orders in [(1000, t.quantity/2, (residual,)), (2000, Decimal(0), (residual,))]:
         source.read_management_scan.return_value = scan(q, orders, at+offset)

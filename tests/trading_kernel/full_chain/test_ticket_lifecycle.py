@@ -607,6 +607,8 @@ async def test_exit_timeout_is_conserved_as_unknown_and_never_redispatched(
         lambda: PostgresKernelUnitOfWork(lifecycle_engine),
         venue,
         DispatchCommandRequest(
+            runtime_commit="kernel-test-head",
+            schema_revision=CURRENT_SCHEMA_REVISION,
             worker_id="dispatch-exit",
             now_ms=3_100,
             lease_until_ms=8_100,

@@ -24,6 +24,7 @@ from src.trading_kernel.application.market_ports import (
     InstrumentSelectionMarketSource,
     PublicMarketSource,
 )
+from src.trading_kernel.application.refresh_exit_regime import refresh_exit_regime
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
 from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
@@ -130,6 +131,14 @@ async def _run(args: argparse.Namespace) -> int:
             nonlocal observations_since_shadow
             prefer_shadow = observations_since_shadow >= 8
             now_ms = args.now_ms or int(time.time() * 1_000)
+            await refresh_exit_regime(
+                uow_factory,
+                cast(PublicMarketSource, source),
+                now_ms=now_ms,
+                timeout_seconds=args.timeout_seconds,
+                runtime_commit=args.runtime_commit,
+                schema_revision=args.schema_revision,
+            )
             result = await run_observation_worker_once(
                 uow_factory,
                 cast(PublicMarketSource, source),

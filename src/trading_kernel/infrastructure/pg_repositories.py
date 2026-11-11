@@ -59,6 +59,8 @@ from src.trading_kernel.domain.events import (
     TicketIssued,
     TradeEvent,
 )
+from src.trading_kernel.domain.exit_execution import PostFillExitPlan
+from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import (
     NettingDomain,
@@ -749,6 +751,7 @@ class PostgresExchangeCommandRepository:
                 command_id=command.command_id,
                 ticket_id=command.ticket_identity.ticket_id,
                 command_kind=command.kind.value,
+                management_revision=command.management_revision,
                 generation=command.generation,
                 idempotency_key=command.idempotency_key,
                 venue_client_order_id=command.venue_client_order_id,
@@ -979,6 +982,20 @@ class PostgresExchangeCommandRepository:
             raise AggregateVersionConflict(
                 "leverage command claim changed before result"
             )
+
+    async def claimed_by(self, *, command_id: str, worker_id: str, now_ms: int) -> bool:
+        return bool(
+            await self._connection.scalar(
+                sa.select(
+                    sa.exists().where(
+                        exchange_commands.c.command_id == command_id,
+                        exchange_commands.c.status == "claimed",
+                        exchange_commands.c.claim_owner == worker_id,
+                        exchange_commands.c.lease_until_ms > now_ms,
+                    )
+                )
+            )
+        )
 
     async def release_unstarted_claim(self, *, command_id: str, worker_id: str) -> None:
         result=await self._connection.execute(sa.update(exchange_commands).where(
@@ -1243,6 +1260,7 @@ class PostgresExchangeCommandRepository:
             command_id=str(row["command_id"]),
             ticket_identity=ticket.identity,
             kind=ExchangeCommandKind(str(row["command_kind"])),
+            management_revision=row["management_revision"],
             generation=int(row["generation"]),
             idempotency_key=str(row["idempotency_key"]),
             venue_client_order_id=(
@@ -3077,6 +3095,9 @@ def _ticket_values(ticket: TradeTicket) -> dict[str, object]:
             str(quantity) for quantity in ticket.take_profit_quantities
         ],
         "fact_digest": ticket.fact_digest,
+        "regime_admission": None
+        if ticket.regime_admission is None
+        else ticket.regime_admission.model_dump(mode="json"),
         "exit_policy_id": ticket.exit_policy_id,
         "exit_policy_semantic_hash": ticket.exit_policy_semantic_hash,
         "exit_binding_id": ticket.exit_binding_id,
@@ -3136,6 +3157,9 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
         ),
         min_materialization_ratio=Decimal(row["min_materialization_ratio"]),
         minimum_stop_risk_budget=Decimal(row["minimum_stop_risk_budget"]),
+        regime_admission=None
+        if row["regime_admission"] is None
+        else RegimeAdmissionProof.model_validate(row["regime_admission"]),
         exit_policy_id=str(row["exit_policy_id"]),
         exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
         exit_binding_id=row["exit_binding_id"],
@@ -3214,6 +3238,9 @@ def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
         "position_side": identity.netting_domain.position_side,
         "netting_domain_key": identity.netting_domain.key(),
         "fact_digest": claim.fact_digest,
+        "regime_admission": None
+        if claim.regime_admission is None
+        else claim.regime_admission.model_dump(mode="json"),
         "exit_policy_id": claim.exit_policy_id,
         "exit_policy_semantic_hash": claim.exit_policy_semantic_hash,
         "exit_binding_id": claim.exit_binding_id,
@@ -3331,6 +3358,9 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
         selection_authority_id=row["selection_authority_id"],
         universe_semantic_digest=str(row["universe_semantic_digest"]),
         fact_digest=str(row["fact_digest"]),
+        regime_admission=None
+        if row["regime_admission"] is None
+        else RegimeAdmissionProof.model_validate(row["regime_admission"]),
         exit_policy_id=str(row["exit_policy_id"]),
         exit_policy_semantic_hash=str(row["exit_policy_semantic_hash"]),
         exit_binding_id=row["exit_binding_id"],
@@ -3490,6 +3520,10 @@ def _aggregate_values(
         "active_stop_exchange_order_id": aggregate.active_stop_exchange_order_id,
         "active_stop_price": aggregate.active_stop_price,
         "tp1_exchange_order_id": aggregate.tp1_exchange_order_id,
+        "post_fill_exit_plan": None
+        if aggregate.post_fill_exit_plan is None
+        else aggregate.post_fill_exit_plan.model_dump(mode="json"),
+        "partial_tp_protection": aggregate.partial_tp_protection,
         "tp1_target_qty": aggregate.tp1_target_qty,
         "tp1_filled_qty": aggregate.tp1_filled_qty,
         "break_even_floor_price": aggregate.break_even_floor_price,
@@ -3759,6 +3793,10 @@ def _aggregate_from_row(
             if row["tp1_exchange_order_id"] is None
             else str(row["tp1_exchange_order_id"])
         ),
+        post_fill_exit_plan=None
+        if row["post_fill_exit_plan"] is None
+        else PostFillExitPlan.model_validate(row["post_fill_exit_plan"]),
+        partial_tp_protection=bool(row["partial_tp_protection"]),
         tp1_target_qty=Decimal(row["tp1_target_qty"]),
         tp1_filled_qty=Decimal(row["tp1_filled_qty"]),
         break_even_floor_price=(

@@ -118,7 +118,7 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
     from tests.trading_kernel.unit.detectors.fixtures import NOW_MS
     name = 'brc_kernel_test_'+uuid4().hex[:12]
     url = async_database_url(name)
-    await _seed_and_bootstrap(name, url, prepare_hourly=False)
+    await _seed_and_bootstrap(name, url, prepare_hourly=False,prepare_exit_configuration=False)
     try:
         from src.trading_kernel.domain.orb_session_selection import (
             OrbSessionSelectionSpec,
@@ -143,12 +143,20 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
                         target_exit_profile_semantic_hash=profile.semantic_hash()), authentication_strength='totp_step_up')
         finally:
             await installing_engine.dispose()
+        from tests.trading_kernel.support.exit_configuration import (
+            install_approved_exit_configuration,
+        )
+        current_engine=create_async_engine(url)
+        try:
+            await install_approved_exit_configuration(current_engine,account_id="subaccount-entry-promotion-test",now_ms=NOW_MS+2)
+        finally:
+            await current_engine.dispose()
         facts = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
-        assert facts['status'] == 'pass'
+        assert facts['status'] == 'pass', {k:v for k,v in facts.items() if isinstance(v,dict) and v.get('status')=='fail'}
         assert facts['hourly_pair_preparation']['status'] == 'pass'
         assert facts['entry_recovery_ready'] is True
         assert facts['exit_profile_authority']['current_binding_count'] == 10
-        assert facts['exit_profile_authority']['binding_fact_count'] == 11
+        assert facts['exit_profile_authority']['binding_fact_count'] == 17
         _require_dynamic_selection_postflight(facts, seed_identity=facts['runtime_identity']['seed_identity'],
             preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
         engine = create_async_engine(url)

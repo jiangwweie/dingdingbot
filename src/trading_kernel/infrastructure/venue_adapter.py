@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import itertools
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from typing import Literal, Protocol, cast
@@ -29,12 +29,14 @@ from src.trading_kernel.application.ports import (
     VenueCommandRequest,
     VenueMutationFailure,
     VenueMutationRejected,
+    VenueSendBlocked,
     VenueSetLeverageRequest,
     VenueTruthRequest,
 )
 from src.trading_kernel.application.runtime_facts import (
     AccountPositionAuditSnapshot,
     AccountRiskSnapshotRequest,
+    CompleteEntryFillsRequest,
     EntryAdmissionSnapshotRequest,
     FeeDiscountCapabilityFacts,
     InstrumentRulesFacts,
@@ -62,6 +64,12 @@ from src.trading_kernel.domain.entry_admission_snapshot import (
     AdmissionOrder,
     EntryAdmissionSnapshot,
     canonical_digest,
+)
+from src.trading_kernel.domain.exit_execution import (
+    CompleteEntryFills,
+    EntryFill,
+    ExitOrderRules,
+    TpFillEvidence,
 )
 from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
 from src.trading_kernel.domain.fee_valuation import (
@@ -99,6 +107,10 @@ from src.trading_kernel.infrastructure.binance_order_attribution import (
 )
 from src.trading_kernel.infrastructure.binance_product_snapshot import (
     parse_binance_product_snapshots,
+)
+from src.trading_kernel.infrastructure.mutation_send_guard import (
+    MutationSendContext,
+    current_mutation_guard,
 )
 
 CcxtNetworkError = ccxt_errors.NetworkError
@@ -540,6 +552,7 @@ class CcxtVenueAdapter:
         )
         return InstrumentRulesFacts(
             exchange_instrument_id=request.exchange_instrument_id,
+            exit_order_rules=_exit_order_rules(market, request),
             quantity_step=quantity_step,
             price_tick=price_tick,
             min_quantity=min_quantity,
@@ -858,6 +871,68 @@ class CcxtVenueAdapter:
             observed_at_ms=request.observed_at_ms,
         )
 
+    async def read_complete_entry_fills(
+        self, request: CompleteEntryFillsRequest
+    ) -> CompleteEntryFills:
+        domain = request.netting_domain
+        exchange, symbol = self._resolve_exchange_and_symbol(
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id,
+        )
+        resolved = await resolve_binance_order_identity(
+            exchange=exchange,
+            reference=request.reference,
+            observed_at_ms=request.observed_at_ms,
+        )
+        if resolved.actual_order_id is None:
+            raise RuntimeError("complete entry order identity unavailable")
+        rows = _require_list(
+            await _call_raw_exchange(
+                exchange.fetch_my_trades,
+                symbol,
+                None,
+                1000,
+                {"orderId": resolved.actual_order_id},
+            ),
+            name="complete entry fills",
+        )
+        if len(rows) >= 1000:
+            raise RuntimeError("complete entry fills truncated")
+        fills: dict[str, EntryFill] = {}
+        for row in rows:
+            metric = _exact_order_fill_notional(
+                row,
+                resolved=resolved,
+                position_side=domain.position_side,
+                entry_time_ms=request.reference.command_created_at_ms,
+                exit_time_ms=request.observed_at_ms,
+            )
+            if metric is None:
+                raise RuntimeError("complete entry fill identity or time mismatch")
+            mapping = _require_mapping(row, name="complete entry fill")
+            info = mapping.get("info")
+            raw = info if isinstance(info, Mapping) else {}
+            fill = EntryFill(
+                trade_id=str(
+                    mapping.get("id") or raw.get("id") or raw.get("tradeId") or ""
+                ),
+                quantity=Decimal(str(mapping.get("amount") or raw.get("qty"))),
+                price=Decimal(str(mapping.get("price") or raw.get("price"))),
+            )
+            if fill.trade_id in fills and fills[fill.trade_id] != fill:
+                raise RuntimeError("complete entry duplicate fill conflict")
+            fills[fill.trade_id] = fill
+        facts = CompleteEntryFills(
+            command_id=request.reference.command_id,
+            exchange_order_id=resolved.actual_order_id,
+            fills=tuple(sorted(fills.values(), key=lambda f: f.trade_id)),
+            observed_at_ms=request.observed_at_ms,
+        )
+        if facts.quantity != request.expected_quantity:
+            raise RuntimeError("complete entry quantity differs from frozen entry")
+        return facts
+
     async def read_lifecycle_facts(
         self,
         request: LifecycleFactsRequest,
@@ -987,6 +1062,157 @@ class CcxtVenueAdapter:
             Decimal(0),
         ) + bnb_entry_fee_upper_quote
         tp1_quantity, tp1_average_price = _order_fill_metrics(tp1_order)
+        current_market_price = None
+        for position_row in _require_list(positions, name="positions"):
+            mapping = _require_mapping(position_row, name="position market price")
+            raw = mapping.get("info")
+            info = raw if isinstance(raw, Mapping) else {}
+            if (
+                str(mapping.get("symbol") or "") == symbol
+                and str(info.get("positionSide") or mapping.get("side") or "").lower()
+                == domain.position_side
+            ):
+                raw_price = mapping.get("markPrice") or info.get("markPrice")
+                if raw_price is not None:
+                    current_market_price = Decimal(str(raw_price))
+                    if (
+                        not current_market_price.is_finite()
+                        or current_market_price <= 0
+                    ):
+                        raise RuntimeError("current protective market price invalid")
+        if request.exact_tp_fills_required and current_market_price is None:
+            raise RuntimeError("current protective market price unavailable")
+        active_stop_quantity = None
+        tp1_order_terminal = False
+        tp1_terminal_attribution: Literal["own_failure","unknown"] = "unknown"
+        tp_fill_evidence = None
+        if request.exact_tp_fills_required:
+            if request.tp1_order_reference is not None:
+                resolved_tp = await resolve_binance_order_identity(
+                    exchange=exchange,
+                    reference=request.tp1_order_reference,
+                    observed_at_ms=request.observed_at_ms,
+                )
+                if resolved_tp.actual_order_id != request.tp1_exchange_order_id:
+                    raise RuntimeError("TP1 exact identity differs from command")
+                tp_rows = _require_list(
+                    await _call_raw_exchange(
+                        exchange.fetch_my_trades,
+                        symbol,
+                        None,
+                        100,
+                        {"orderId": resolved_tp.actual_order_id},
+                    ),
+                    name="TP1 exact fills",
+                )
+                for trade_row in tp_rows:
+                    if (
+                        _exact_order_fill_notional(
+                            trade_row,
+                            resolved=resolved_tp,
+                            position_side=domain.position_side,
+                            entry_time_ms=request.tp1_order_reference.command_created_at_ms,
+                            exit_time_ms=request.observed_at_ms,
+                        )
+                        is None
+                    ):
+                        raise RuntimeError(
+                            "TP1 trade identity differs from exact command"
+                        )
+                metrics = _matching_fill_facts(
+                    tp_rows, exchange_order_id=resolved_tp.actual_order_id
+                )
+                if not metrics.complete or metrics.quantity != tp1_quantity:
+                    raise RuntimeError("TP1 order and exact trade fills disagree")
+                if metrics.quantity > 0:
+                    fill_rows: dict[str, EntryFill] = {}
+                    for trade_row in tp_rows:
+                        row = _require_mapping(trade_row, name="TP1 trade")
+                        tp_raw = row.get("info")
+                        tp_info = tp_raw if isinstance(tp_raw, Mapping) else {}
+                        item = EntryFill(
+                            trade_id=str(
+                                row.get("id")
+                                or tp_info.get("id")
+                                or tp_info.get("tradeId")
+                                or ""
+                            ),
+                            quantity=Decimal(
+                                str(row.get("amount") or tp_info.get("qty"))
+                            ),
+                            price=Decimal(
+                                str(row.get("price") or tp_info.get("price"))
+                            ),
+                        )
+                        if (
+                            item.trade_id in fill_rows
+                            and fill_rows[item.trade_id] != item
+                        ):
+                            raise RuntimeError("TP1 duplicate trade conflict")
+                        fill_rows[item.trade_id] = item
+                    tp_fill_evidence = TpFillEvidence(
+                        command_id=request.tp1_order_reference.command_id,
+                        exchange_order_id=request.tp1_order_reference.submitted_exchange_order_id,
+                        fills=tuple(
+                            sorted(fill_rows.values(), key=lambda f: f.trade_id)
+                        ),
+                        observed_at_ms=request.observed_at_ms,
+                    )
+                tp1_average_price = metrics.average_price
+                row = _require_mapping(tp1_order, name="TP1 current order")
+                tp1_order_terminal = str(row.get("status") or "").lower() in {
+                    "closed",
+                    "canceled",
+                    "cancelled",
+                    "expired",
+                    "rejected",
+                }
+            elif request.tp1_exchange_order_id is not None:
+                raise RuntimeError("TP1 exact durable command reference missing")
+            if request.active_stop_reference is not None:
+                stop_reference = request.active_stop_reference
+                stop_rows = _require_list(
+                    await _call_raw_exchange(
+                        exchange.fetch_open_orders,
+                        symbol,
+                        None,
+                        100,
+                        {"conditional": True},
+                    ),
+                    name="active protection orders",
+                )
+                if len(stop_rows) >= 100:
+                    raise RuntimeError("active protection orders truncated")
+                stops = _position_open_orders(
+                    stop_rows,
+                    expected_symbol=symbol,
+                    position_side=domain.position_side,
+                    order_namespace="conditional",
+                )
+                stop_order = next(
+                    (
+                        o
+                        for o in stops
+                        if o.exchange_order_id
+                        == stop_reference.submitted_exchange_order_id
+                    ),
+                    None,
+                )
+                expectation = stop_reference.conditional_expectation
+                if (
+                    stop_order is not None
+                    and stop_order.terms is not None
+                    and expectation is not None
+                ):
+                    terms = stop_order.terms
+                    if (
+                        terms.client_order_id == stop_reference.venue_client_order_id
+                        and terms.quantity == expectation.quantity
+                        and terms.side == expectation.side
+                        and terms.position_side == expectation.position_side
+                        and terms.order_type == expectation.order_type.upper()
+                    ):
+                        active_stop_quantity = terms.quantity
         allocated_entry_fee = (
             entry_fee_quote * position_quantity / request.entry_quantity
         )
@@ -1004,6 +1230,11 @@ class CcxtVenueAdapter:
             else None
         )
         return TicketLifecycleFacts(
+            tp_fill_evidence=tp_fill_evidence,
+            current_market_price=current_market_price,
+            active_stop_quantity=active_stop_quantity,
+            tp1_terminal_attribution=tp1_terminal_attribution,
+            tp1_order_terminal=tp1_order_terminal,
             position_quantity=position_quantity,
             tp1_filled_quantity=tp1_quantity,
             tp1_average_fill_price=tp1_average_price,
@@ -1200,6 +1431,7 @@ class CcxtVenueAdapter:
                     "conditional": request.payload.order_namespace == "conditional",
                 },
                 clock_ms=self._clock_ms,
+                guard=request.before_send,
             )
             if isinstance(response, ExchangeCommandResult):
                 return response
@@ -1232,6 +1464,7 @@ class CcxtVenueAdapter:
             request.payload.limit_price,
             params,
             clock_ms=self._clock_ms,
+            guard=request.before_send,
         )
         if isinstance(response, ExchangeCommandResult):
             return response
@@ -1569,8 +1802,14 @@ async def _call_exchange(
     operation: Callable[..., object],
     *args: object,
     clock_ms: Callable[[], int],
+    guard: Callable[[], Awaitable[None]] | None = None,
 ) -> object | ExchangeCommandResult:
+    token = current_mutation_guard.set(
+        None if guard is None else MutationSendContext(guard)
+    )
     try:
+        if guard is not None:
+            await guard()
         if inspect.iscoroutinefunction(operation):
             response = await operation(*args)
         else:
@@ -1578,6 +1817,10 @@ async def _call_exchange(
         if inspect.isawaitable(response):
             response = await response
         return response
+    except VenueSendBlocked:
+        raise
+    except VenueMutationFailure:
+        raise
     except Exception as exc:
         error_type = type(exc).__name__
         if error_type in _AUTHORITATIVE_REJECTION_TYPES:
@@ -1587,6 +1830,9 @@ async def _call_exchange(
                 reason=f"venue_rejected:{error_type}",
             )
         raise
+
+    finally:
+        current_mutation_guard.reset(token)
 
 
 async def _call_raw_exchange(
@@ -3037,3 +3283,38 @@ def _safe_response_payload(response: Mapping[object, object]) -> dict[str, JsonV
         for key in ("status", "clientOrderId")
         if isinstance((value := response.get(key)), (str, int, float, bool))
     }
+
+
+def _exit_order_rules(
+    market: Mapping[str, object], request: InstrumentRulesRequest
+) -> ExitOrderRules | None:
+    """Keep missing protocol bounds unavailable; never guess a maximum or market lot."""
+    info = market.get("info")
+    if not isinstance(info, Mapping) or not isinstance(info.get("filters"), list):
+        return None
+    filters = {
+        str(row.get("filterType")): row
+        for row in info["filters"]
+        if isinstance(row, Mapping)
+    }
+    try:
+        lot, market_lot = filters["LOT_SIZE"], filters["MARKET_LOT_SIZE"]
+        notional = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
+        return ExitOrderRules(
+            quantity_step=Decimal(str(lot["stepSize"])),
+            min_quantity=Decimal(str(lot["minQty"])),
+            max_quantity=Decimal(str(lot["maxQty"])),
+            price_tick=Decimal(str(filters["PRICE_FILTER"]["tickSize"])),
+            min_notional=Decimal(
+                str(notional.get("notional") or notional.get("minNotional"))
+            ),
+            min_price=Decimal(str(filters["PRICE_FILTER"]["minPrice"])),
+            max_price=Decimal(str(filters["PRICE_FILTER"]["maxPrice"])),
+            runner_quantity_step=Decimal(str(market_lot["stepSize"])),
+            runner_min_quantity=Decimal(str(market_lot["minQty"])),
+            runner_max_quantity=Decimal(str(market_lot["maxQty"])),
+            observed_at_ms=request.observed_at_ms,
+            valid_until_ms=request.observed_at_ms + request.valid_for_ms,
+        )
+    except (KeyError, ValueError, ArithmeticError):
+        return None

@@ -197,6 +197,7 @@ CommandPayload = OrderCommandPayload | CancelCommandPayload | SetLeverageCommand
 class ExchangeCommand(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    management_revision: int | None = 1
     command_id: str
     ticket_identity: TicketIdentity
     kind: ExchangeCommandKind

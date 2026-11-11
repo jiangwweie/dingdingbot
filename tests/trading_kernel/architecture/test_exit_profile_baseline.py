@@ -55,17 +55,24 @@ def test_lifecycle_request_uses_entry_command_as_fill_window_lower_bound() -> No
     assert "_earliest_nonzero_exposure_started_at_ms" not in worker
 
 
-def test_exit_profile_authority_lock_is_absent_from_trading_hot_paths() -> None:
+def test_exit_authority_lock_serializes_new_admission_and_keeps_lifecycle_independent() -> (
+    None
+):
     for relative_path in (
         "src/trading_kernel/application/build_capacity_claim.py",
-        "src/trading_kernel/application/issue_ready_signal.py",
-        "src/trading_kernel/application/issue_ticket.py",
         "src/trading_kernel/application/maintain_ticket_lifecycle.py",
         "src/trading_kernel/application/reconcile_ticket.py",
     ):
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         assert "acquire_authority_write_lock" not in source
         assert "EXIT_PROFILE_AUTHORITY_WRITE_LOCK" not in source
+    for relative_path in (
+        "src/trading_kernel/application/issue_ready_signal.py",
+        "src/trading_kernel/application/issue_ticket.py",
+        "src/trading_kernel/application/dispatch_exchange_command.py",
+        "src/trading_kernel/application/exit_configuration.py",
+    ):
+        assert "acquire_authority_write_lock" in (REPO_ROOT / relative_path).read_text()
 
 
 def test_application_runtime_has_no_legacy_event_exit_policy_resolution() -> None:

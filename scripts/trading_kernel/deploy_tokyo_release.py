@@ -1103,6 +1103,13 @@ def _require_dynamic_selection_postflight(
     extended_orb = hourly_upgrade or orb_already_installed
     expected_profiles = len(registered_exit_profiles()) if extended_orb else 8
     expected_bindings = len(registered_event_exit_bindings()) if extended_orb else 8
+    if (certification.get("exit_configuration_required") is True and certification.get("exit_configuration_activated") is True
+        and isinstance(exit_profile_authority,Mapping) and exit_profile_authority.get("owner_revisions_verified") is True):
+        audited_count=exit_profile_authority.get("owner_revision_profile_count")
+        if type(audited_count) is not int or audited_count<0 or audited_count%6:
+            raise DeploymentBlocked("Owner exit revision audit count differs")
+        expected_profiles+=audited_count
+
     if (
         not isinstance(exit_profile_authority, Mapping)
         or exit_profile_authority.get("status") != "pass"

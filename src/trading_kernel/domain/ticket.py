@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import (
     NettingDomain,
@@ -55,6 +56,7 @@ class TradeTicket(BaseModel):
     directional_stop_risk_limit_fraction: Decimal
     min_materialization_ratio: Decimal
     minimum_stop_risk_budget: Decimal
+    regime_admission: RegimeAdmissionProof | None = None
     exit_policy_id: str
     exit_policy_semantic_hash: str
     exit_binding_id: str | None = None
@@ -271,6 +273,8 @@ class TradeTicket(BaseModel):
 
     def decision_digest(self) -> str:
         payload = self.model_dump(mode="json", exclude={"status"})
+        if payload["regime_admission"] is None:
+            payload.pop("regime_admission")
         if payload["selection_authority_id"] is None:
             payload.pop("selection_authority_id")
         if payload["exit_binding_id"] is None:

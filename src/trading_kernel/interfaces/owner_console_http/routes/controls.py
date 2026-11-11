@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Literal
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from src.trading_kernel.application.owner_control import (
@@ -816,6 +816,14 @@ async def bind_event_exit_profile(
     await _require_step_up(body, request)
     settings = get_settings(request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        if (
+            event_spec_id in EXIT_EVENTS
+            and await uow.exit_profiles.get_current_configuration(
+                venue_id=settings.venue_id, account_id=settings.account_id
+            )
+            is not None
+        ):
+            raise OwnerControlBlocked("exit_configuration_bundle_required")
         return await switch_event_exit_profile(
             uow,
             strategy_group_id=strategy_group_id,
@@ -1180,3 +1188,352 @@ async def get_risk_budget_receipt(
             settings.venue_id, settings.account_id, idempotency_key
         )
     return None if result is None else RiskBudgetReceipt.model_validate(result)
+
+
+# Supported TP fields only; the server inherits Runner/BE/guards from exact authority.
+from src.trading_kernel.application.exit_configuration import (
+    ActivateExitConfigurationRequest,
+    ExitConfigurationPreview,
+    activate_exit_configuration,
+    preview_exit_configuration,
+)
+from src.trading_kernel.domain.exit_configuration import (
+    EXIT_EVENTS,
+    MA50_EVENTS,
+    EventExitParameters,
+    ExitConfigurationIntent,
+    ExitConfigurationRecord,
+)
+from src.trading_kernel.domain.exit_policy import ExitProfile
+from src.trading_kernel.domain.exit_regime import BtcMa50Snapshot
+
+
+class ExitConfigurationPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    intent: ExitConfigurationIntent
+
+
+class ExitConfigurationBody(ControlWriteBody):
+    intent: ExitConfigurationIntent
+    preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    preview_valid_until_ms: int = Field(gt=0)
+
+
+def _require_exit_configuration_scope(
+    intent: ExitConfigurationIntent, request: Request
+) -> None:
+    settings = get_settings(request)
+    if intent.venue_id != settings.venue_id or intent.account_id != settings.account_id:
+        raise OwnerControlBlocked("exit_configuration_account_scope_mismatch")
+
+
+class ExitProfileSourceView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    event_spec_id: str
+    profile: ExitProfile
+    semantic_hash: str
+
+
+class ExitConfigurationView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    current: ExitConfigurationRecord | None
+    intent: ExitConfigurationIntent
+    sources: tuple[ExitProfileSourceView, ...]
+    ma50_snapshot: BtcMa50Snapshot | None
+
+
+@router.get("/controls/exit-configuration")
+async def read_exit_configuration(request: Request) -> ExitConfigurationView:
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        record = await uow.exit_profiles.get_current_configuration(
+            venue_id=settings.venue_id, account_id=settings.account_id
+        )
+        parameters = []
+        sources = []
+        for event in EXIT_EVENTS:
+            current = await uow.exit_profiles.get_current_binding(event)
+            if current is None:
+                raise OwnerControlBlocked("exit_binding_missing")
+            binding = await uow.exit_profiles.get_binding(current.exit_binding_id)
+            if binding is None:
+                raise OwnerControlBlocked("exit_binding_missing")
+            profile = await uow.exit_profiles.get_profile(
+                exit_profile_id=binding.exit_profile_id,
+                semantic_hash=binding.exit_profile_semantic_hash,
+            )
+            if profile is None:
+                raise OwnerControlBlocked("exit_profile_missing")
+            previous = (
+                None
+                if record is None
+                else next(e for e in record.intent.events if e.event_spec_id == event)
+            )
+            sor = event in EXIT_EVENTS[4:]
+            parameters.append(
+                EventExitParameters(
+                    event_spec_id=event,
+                    expected_binding_id=current.exit_binding_id,
+                    expected_binding_revision=current.projection_version,
+                    reward_multiple=profile.profile.tp1.reward_multiple
+                    if record
+                    else Decimal("1.2")
+                    if sor
+                    else Decimal(1),
+                    target_fraction=profile.profile.tp1.quantity_fraction
+                    if record or sor
+                    else Decimal(".05"),
+                    minimum_lift=previous.minimum_lift if previous else not sor,
+                    max_actual_fraction=previous.max_actual_fraction
+                    if previous
+                    else Decimal(1)
+                    if sor
+                    else Decimal(".5"),
+                    ma50_enabled=previous.ma50_enabled
+                    if previous
+                    else event in MA50_EVENTS,
+                ).model_dump(mode="json")
+            )
+            sources.append(
+                {
+                    "event_spec_id": event,
+                    "profile": profile.profile.model_dump(mode="json"),
+                    "semantic_hash": profile.profile.semantic_hash(),
+                }
+            )
+        snapshot = await uow.exit_profiles.get_ma50_snapshot()
+    return ExitConfigurationView.model_validate(
+        {
+            "current": None if record is None else record.model_dump(mode="json"),
+            "intent": {
+                "product_id": "brc-app-manual-v1",
+                "venue_id": settings.venue_id,
+                "account_id": settings.account_id,
+                "expected_revision": 0 if record is None else record.revision,
+                "events": parameters,
+            },
+            "sources": sources,
+            "ma50_snapshot": None
+            if snapshot is None
+            else snapshot.model_dump(mode="json"),
+        }
+    )
+
+
+@router.post("/controls/exit-configuration/preview")
+async def preview_exit_configuration_route(
+    body: ExitConfigurationPreviewBody, request: Request
+) -> ExitConfigurationPreview:
+    _validate_write_request(request)
+    _require_exit_configuration_scope(body.intent, request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        return await preview_exit_configuration(
+            uow, intent=body.intent, now_ms=get_clock_ms(request)
+        )
+
+
+@router.post("/controls/exit-configuration")
+async def activate_exit_configuration_route(
+    body: ExitConfigurationBody, request: Request
+) -> ExitConfigurationRecord:
+    _validate_write_request(request)
+    _require_exit_configuration_scope(body.intent, request)
+    await _require_step_up(body, request)
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        await uow.exit_profiles.acquire_authority_write_lock()
+        return await activate_exit_configuration(
+            uow,
+            request=ActivateExitConfigurationRequest(
+                expected_version=body.expected_version,
+                intent=body.intent,
+                preview_digest=body.preview_digest,
+                preview_valid_until_ms=body.preview_valid_until_ms,
+                reason=body.reason,
+                idempotency_key=body.idempotency_key,
+                owner_identity=settings.auth.username,
+                now_ms=get_clock_ms(request),
+            ),
+            authentication_strength="totp_step_up",
+        )
+
+
+@router.get("/controls/exit-configuration/requests/{idempotency_key}")
+async def read_exit_configuration_receipt(
+    idempotency_key: str, request: Request
+) -> ExitConfigurationRecord | None:
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        await uow.exit_profiles.acquire_authority_write_lock()
+        auth = await uow.owner_controls.get_authorization_by_idempotency_key(
+            idempotency_key
+        )
+        if auth is None:
+            return None
+        if (
+            auth.purpose != "exit_profile_bind"
+            or auth.target_scope.get("account_id") != settings.account_id
+            or auth.target_scope.get("venue_id") != settings.venue_id
+        ):
+            raise OwnerControlBlocked("exit_configuration_receipt_scope_mismatch")
+        configuration_id = auth.target_scope.get("configuration_id")
+        if not isinstance(configuration_id, str):
+            raise OwnerControlBlocked("exit_configuration_receipt_missing")
+        return await uow.exit_profiles.get_configuration(configuration_id)
+
+
+from src.trading_kernel.domain.exit_execution import PostFillExitPlan
+
+
+class TicketExitPlanView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    ticket_id: str
+    management_mode: Literal["AUTO", "MANUAL", "REVIEW_REQUIRED"]
+    aggregate_status: str
+    plan: PostFillExitPlan | None
+    tp1_target_quantity: Decimal
+    tp1_filled_quantity: Decimal
+    current_quantity: Decimal
+    active_stop_price: Decimal | None
+    protected_quantity: Decimal
+    observed_at_ms: int | None
+
+
+@router.get("/tickets/{ticket_id}/exit-plan")
+async def read_ticket_exit_plan(ticket_id: str, request: Request) -> TicketExitPlanView:
+    settings = get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        aggregate = await uow.aggregates.get(ticket_id)
+        if aggregate is None:
+            raise HTTPException(status_code=404, detail="ticket_not_found")
+        domain = aggregate.identity.netting_domain
+        if (
+            domain.venue_id != settings.venue_id
+            or domain.account_id != settings.account_id
+        ):
+            raise HTTPException(status_code=404, detail="ticket_not_found")
+        return TicketExitPlanView(
+            ticket_id=ticket_id,
+            management_mode=aggregate.management_mode.value,
+            aggregate_status=aggregate.status.value,
+            plan=aggregate.post_fill_exit_plan,
+            tp1_target_quantity=aggregate.tp1_target_qty,
+            tp1_filled_quantity=aggregate.tp1_filled_qty,
+            current_quantity=aggregate.position_qty,
+            active_stop_price=aggregate.active_stop_price,
+            protected_quantity=aggregate.protected_qty,
+            observed_at_ms=aggregate.management_observed_at_ms,
+        )
+
+
+from src.trading_kernel.domain.exit_execution import (
+    ExitPlanUnexecutable,
+    ExitQuantities,
+    calculate_exit_quantities,
+    calculate_tp_price,
+)
+
+
+class ExitSizingBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_spec_id: str
+    exchange_instrument_id: str
+    quantity: Decimal = Field(gt=0, allow_inf_nan=False)
+    entry_price: Decimal = Field(gt=0, allow_inf_nan=False)
+    initial_stop: Decimal = Field(gt=0, allow_inf_nan=False)
+    parameters: EventExitParameters
+
+
+class ExitSizingView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    quantity: Decimal
+    tp_price: Decimal | None
+    quantities: ExitQuantities | None
+    blocker: str | None
+    rules_observed_at_ms: int | None
+    rules_valid_until_ms: int | None
+
+
+@router.post("/controls/exit-configuration/sizing-preview")
+async def preview_exit_sizing(body: ExitSizingBody, request: Request) -> ExitSizingView:
+    _validate_write_request(request)
+    settings = get_settings(request)
+    from src.trading_kernel.domain.instrument_identity import (
+        parse_binance_usdm_instrument_id,
+    )
+
+    parse_binance_usdm_instrument_id(body.exchange_instrument_id)
+    if (
+        body.event_spec_id != body.parameters.event_spec_id
+        or body.event_spec_id not in EXIT_EVENTS
+    ):
+        raise OwnerControlBlocked("exit_sizing_event_scope_mismatch")
+    now=get_clock_ms(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        current = await uow.exit_profiles.get_current_binding(body.event_spec_id)
+        if (
+            current is None
+            or current.exit_binding_id != body.parameters.expected_binding_id
+            or current.projection_version != body.parameters.expected_binding_revision
+        ):
+            raise OwnerControlConflict("exit_sizing_binding_changed")
+        binding = await uow.exit_profiles.get_binding(current.exit_binding_id)
+        source = (
+            None
+            if binding is None
+            else await uow.exit_profiles.get_profile(
+                exit_profile_id=binding.exit_profile_id,
+                semantic_hash=binding.exit_profile_semantic_hash,
+            )
+        )
+        rules = await uow.signals.get_instrument_rules(
+            settings.venue_id, body.exchange_instrument_id
+        )
+    if source is None:
+        raise OwnerControlBlocked("exit_profile_missing")
+    if rules is None or rules.exit_order_rules is None:
+        return ExitSizingView(
+            quantity=body.quantity,
+            tp_price=None,
+            quantities=None,
+            blocker="rule_unavailable",
+            rules_observed_at_ms=None,
+            rules_valid_until_ms=None,
+        )
+    from src.trading_kernel.domain.exit_configuration import derive_exit_profile
+
+    profile = derive_exit_profile(
+        source=source.profile, parameters=body.parameters, revision_id="sizing-preview"
+    )
+    assert profile.execution is not None
+    price = None
+    try:
+        price = calculate_tp_price(
+            side=profile.position_side,
+            entry_price=body.entry_price,
+            initial_stop=body.initial_stop,
+            multiple=profile.tp1.reward_multiple,
+            price_tick=rules.exit_order_rules.price_tick,
+        )
+        quantities = calculate_exit_quantities(
+            quantity=body.quantity,
+            tp_price=price,
+            stop_price=body.initial_stop,
+            target_fraction=profile.tp1.quantity_fraction,
+            policy=profile.execution.quantity_policy,
+            max_fraction=profile.execution.max_actual_fraction,
+            rules=rules.exit_order_rules,
+            now_ms=now,
+        )
+        blocker = None
+    except ExitPlanUnexecutable as exc:
+        quantities = None
+        blocker = str(exc)
+    return ExitSizingView(
+        quantity=body.quantity,
+        tp_price=price,
+        quantities=quantities,
+        blocker=blocker,
+        rules_observed_at_ms=rules.exit_order_rules.observed_at_ms,
+        rules_valid_until_ms=rules.exit_order_rules.valid_until_ms,
+    )

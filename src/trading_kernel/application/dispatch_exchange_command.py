@@ -15,6 +15,7 @@ from src.trading_kernel.application.entry_fact_collection import (
     collect_entry_facts,
     record_entry_fact_health,
 )
+from src.trading_kernel.application.exit_regime import check_exit_regime
 from src.trading_kernel.application.ingest_signal import (
     resolve_selection_entry_authority,
 )
@@ -25,6 +26,7 @@ from src.trading_kernel.application.ports import (
     VenueMutationFailure,
     VenueMutationRejected,
     VenuePort,
+    VenueSendBlocked,
     VenueSetLeverageRequest,
 )
 from src.trading_kernel.application.revalidate_entry_dispatch import (
@@ -266,6 +268,13 @@ async def dispatch_one_command(
             aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("claimed command has no Ticket aggregate")
+            if aggregate.management_mode is ManagementMode.REVIEW_REQUIRED:
+                await uow.exchange_commands.release_unstarted_claim(
+                    command_id=command.command_id, worker_id=request.worker_id
+                )
+                return DispatchCommandResult(
+                    status=DispatchCommandStatus.DEFERRED, command_id=command.command_id
+                )
             if aggregate.management_mode is not ManagementMode.AUTO:
                 await uow.exchange_commands.mark_claimed_superseded(
                     command_id=command.command_id,worker_id=request.worker_id,
@@ -400,6 +409,108 @@ async def dispatch_one_command(
             await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
             return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
 
+    expected_management_revision = command.management_revision
+
+    async def before_send() -> None:
+        async with uow_factory() as gate_uow:
+            await gate_uow.exit_profiles.acquire_authority_write_lock()
+            latest = await gate_uow.aggregates.get_for_update(
+                command.ticket_identity.ticket_id
+            )
+            actual = await gate_uow.exchange_commands.get(command.command_id)
+            sampled = clock_ms()
+            if latest is None or actual is None:
+                raise VenueSendBlocked("command_or_aggregate_missing")
+            if latest.management_mode is ManagementMode.MANUAL:
+                raise VenueSendBlocked("trade_management:MANUAL", superseded=True)
+            if (
+                latest.management_mode is not ManagementMode.AUTO
+                or latest.management_revision != expected_management_revision
+            ):
+                raise VenueSendBlocked("trade_management:review_or_revision_changed")
+            if not await gate_uow.exchange_commands.claimed_by(
+                command_id=command.command_id,
+                worker_id=request.worker_id,
+                now_ms=sampled,
+            ):
+                raise VenueSendBlocked("command_claim_changed")
+            if sampled >= actual.deadline_at_ms:
+                raise VenueSendBlocked("command_send_window_expired")
+            if not _command_is_applicable(actual, latest.status):
+                raise VenueSendBlocked("command_no_longer_applicable", superseded=True)
+            capability = await gate_uow.signals.get_runtime_capability(
+                "exchange_commands"
+            )
+            if (
+                capability is None
+                or not capability.enabled
+                or capability.certified_commit != request.runtime_commit
+                or capability.schema_revision != request.schema_revision
+            ):
+                raise VenueSendBlocked("runtime_identity_changed")
+            if capability.certification.get(
+                "management_feed_required"
+            ) and _requires_management_feed(actual):
+                from src.trading_kernel.application.management_health import (
+                    management_feed_is_current,
+                )
+
+                domain = actual.ticket_identity.netting_domain
+                if not await management_feed_is_current(
+                    gate_uow,
+                    venue_id=domain.venue_id,
+                    account_id=domain.account_id,
+                    runtime_commit=request.runtime_commit,
+                    now_ms=sampled,
+                ):
+                    raise VenueSendBlocked("management_feed_not_ready")
+                if (
+                    actual.kind is not ExchangeCommandKind.ENTRY
+                    and not await gate_uow.management.ticket_stream_is_applied(
+                        latest.identity.ticket_id
+                    )
+                ):
+                    raise VenueSendBlocked("management_stream_not_applied")
+            if actual.kind is ExchangeCommandKind.ENTRY:
+                domain = actual.ticket_identity.netting_domain
+                policy = await gate_uow.entry_admission.get_owner_policy(
+                    latest.ticket.owner_policy_id
+                )
+                if (
+                    policy is None
+                    or not policy.enabled
+                    or not policy.new_entry_submit_enabled
+                    or policy.policy_version != latest.ticket.owner_policy_version
+                ):
+                    raise VenueSendBlocked("new_entry_disabled", superseded=True)
+                strategy_control = await gate_uow.owner_controls.get_strategy_control(
+                    latest.identity.runtime.strategy_group_id
+                )
+                if not strategy_entry_is_enabled(strategy_control):
+                    raise VenueSendBlocked("strategy_paused", superseded=True)
+                reason, latest_regime = await check_exit_regime(
+                    gate_uow,
+                    venue_id=domain.venue_id,
+                    account_id=domain.account_id,
+                    event_spec_id=latest.identity.runtime.event_spec_id,
+                    now_ms=sampled,
+                )
+                if reason is not None:
+                    raise VenueSendBlocked(reason, superseded=True)
+                if (
+                    latest_regime is not None
+                    and latest_regime.enabled
+                    and latest_regime.snapshot is not None
+                    and entry_send_expires_at_ms is not None
+                    and entry_send_expires_at_ms > latest_regime.snapshot.valid_until_ms
+                ):
+                    raise VenueSendBlocked("ma50_stale", superseded=True)
+                if (
+                    entry_send_expires_at_ms is None
+                    or sampled >= entry_send_expires_at_ms
+                ):
+                    raise VenueSendBlocked("entry_send_window_expired", superseded=True)
+
     try:
         if command.kind is ExchangeCommandKind.SET_LEVERAGE:
             if not isinstance(command.payload, SetLeverageCommandPayload):
@@ -439,11 +550,45 @@ async def dispatch_one_command(
                     else command.deadline_at_ms
                 ),
                 entry_authorized_at_ms=entry_authorized_at_ms,
+                before_send=before_send,
             )
+            await before_send()
             dispatch_result = await asyncio.wait_for(
                 venue.execute(venue_request),
                 timeout=request.timeout_seconds,
             )
+    except VenueSendBlocked as exc:
+        if exc.superseded and command.kind is ExchangeCommandKind.ENTRY:
+            try:
+                refusal = EntryDispatchPreflightStatus(exc.reason)
+            except ValueError:
+                refusal = EntryDispatchPreflightStatus.RUNTIME_FENCED
+            await _record_preflight_refusal(
+                uow_factory,
+                command=command,
+                worker_id=request.worker_id,
+                now_ms=clock_ms(),
+                status=refusal,
+            )
+            return DispatchCommandResult(status=DispatchCommandStatus.SUPERSEDED,command_id=command.command_id)
+        async with uow_factory() as gate_uow:
+            if exc.superseded:
+                await gate_uow.exchange_commands.mark_claimed_superseded(
+                    command_id=command.command_id,
+                    worker_id=request.worker_id,
+                    observed_at_ms=clock_ms(),
+                    reason=exc.reason,
+                )
+            else:
+                await gate_uow.exchange_commands.release_unstarted_claim(
+                    command_id=command.command_id, worker_id=request.worker_id
+                )
+        return DispatchCommandResult(
+            status=DispatchCommandStatus.SUPERSEDED
+            if exc.superseded
+            else DispatchCommandStatus.DEFERRED,
+            command_id=command.command_id,
+        )
     except VenueMutationRejected as exc:
         dispatch_result = ExchangeCommandResult(
             status=ExchangeCommandStatus.REJECTED,
@@ -592,6 +737,7 @@ async def _preflight_new_entry_mutation(
         observed_at_ms=facts_requested_at_ms,
     )
     async with uow_factory() as uow:
+        await uow.exit_profiles.acquire_authority_write_lock()
         product_profile = await uow.signals.get_product_profile(
             domain.exchange_instrument_id
         )
@@ -758,6 +904,15 @@ async def _preflight_new_entry_mutation(
         evaluated_at_ms = clock_ms()
         if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
             return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
+        regime_reason, regime_send_proof = await check_exit_regime(
+            uow,
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            event_spec_id=aggregate.identity.runtime.event_spec_id,
+            now_ms=evaluated_at_ms,
+        )
+        if regime_reason is not None:
+            return refused(EntryDispatchPreflightStatus(regime_reason))
         product_entry_decision = evaluate_event_product_entry(
             compatibility=product_compatibility,
             profile=current_product_profile,
@@ -805,6 +960,11 @@ async def _preflight_new_entry_mutation(
         ):
             return refused(decision.status)
         valid_until_ms = min(
+            regime_send_proof.snapshot.valid_until_ms
+            if regime_send_proof is not None
+            and regime_send_proof.enabled
+            and regime_send_proof.snapshot is not None
+            else command.deadline_at_ms,
             snapshot.valid_until_ms,
             snapshot.account_risk_snapshot.valid_until_ms,
             rules.valid_until_ms,
@@ -919,7 +1079,12 @@ async def _record_preflight_refusal(
 
 
 def _requires_management_feed(command: ExchangeCommand) -> bool:
-    if command.kind in {ExchangeCommandKind.ENTRY,ExchangeCommandKind.REPLACE_PROTECTION,ExchangeCommandKind.EXIT}:
+    if command.kind in {
+        ExchangeCommandKind.ENTRY,
+        ExchangeCommandKind.TAKE_PROFIT,
+        ExchangeCommandKind.REPLACE_PROTECTION,
+        ExchangeCommandKind.EXIT,
+    }:
         return True
     return command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload,CancelCommandPayload) and command.payload.purpose in {'runner_old_stop','reconciliation_cleanup'}
 
