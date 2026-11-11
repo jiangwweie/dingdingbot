@@ -803,7 +803,15 @@ async def test_reconciliation_worker_selects_ticket_and_reads_venue_snapshot(
 @pytest.mark.asyncio
 async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     runtime_fact_worker_engine,
+    monkeypatch,
 ) -> None:
+    # The recorded lifecycle uses a synthetic clock. The final transport gate
+    # must sample that same advancing clock instead of today's wall time.
+    action_at_ms = 1_008
+    monkeypatch.setattr(
+        "src.trading_kernel.application.dispatch_exchange_command.action_clock_ms",
+        lambda: action_at_ms,
+    )
     await _seed_runtime_authority(runtime_fact_worker_engine)
     await _enable_exchange_commands(runtime_fact_worker_engine)
     signal = _signal(signal_event_id="signal-lifecycle-worker-owned")
@@ -912,6 +920,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
         runtime_fact_worker_engine,
         ticket.identity.ticket_id,
     )
+    action_at_ms = 1_009
     tp1 = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -932,6 +941,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             observed_at_ms=1_010,
         )
     )
+    action_at_ms = 1_010
     mismatch = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -940,6 +950,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     )
     assert mismatch.status is LifecycleWorkerStatus.RECONCILIATION_REQUIRED
 
+    action_at_ms = 3_010
     unavailable = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -993,6 +1004,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             observed_at_ms=5_011,
         )
     )
+    action_at_ms = 5_011
     replacement = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -1032,6 +1044,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
     assert aggregate is not None
     assert aggregate.status.value == "runner_old_stop_cancel_pending"
 
+    action_at_ms = 5_012
     old_stop_cancel = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
@@ -1066,6 +1079,7 @@ async def test_lifecycle_worker_reads_tp1_facts_and_replaces_runner_protection(
             observed_at_ms=3_600_000,
         )
     )
+    action_at_ms = 3_600_000
     runner_move = await run_lifecycle_worker_once(
         lambda: PostgresKernelUnitOfWork(runtime_fact_worker_engine),
         venue,
