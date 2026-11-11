@@ -149,6 +149,10 @@ from src.trading_kernel.domain.product import (
     ProductSessionSnapshot,
 )
 from src.trading_kernel.domain.reducer import Reduction
+from src.trading_kernel.domain.review_enrichment import (
+    ReviewEnrichmentPreview,
+    ReviewEnrichmentRequest,
+)
 from src.trading_kernel.domain.risk_budget import (
     RiskBudgetChangeRequest,
     RiskBudgetReceipt,
@@ -315,6 +319,10 @@ class MonitorStateRecord(BaseModel):
     incident_id: str | None = None
     updated_at_ms: int
     projection_version: int = 0
+    first_wait_at_ms: int | None = None
+    last_checked_at_ms: int | None = None
+    escalated_at_ms: int | None = None
+    resolved_at_ms: int | None = None
 
 
 class GenericSelectionMemberRuntimeStatus(BaseModel):
@@ -943,6 +951,14 @@ class PositionRepository(Protocol):
 
 
 class ReviewRepository(Protocol):
+    async def approve_enrichment(self, request_id: str, *, digest: str, authorization_id: str, now_ms: int) -> None: ...
+    async def enqueue_enrichment(self, *, request_id: str, ticket_id: str, expected_review_id: str, now_ms: int) -> None: ...
+    async def get_enrichment(self, request_id: str, *, for_update: bool = False) -> ReviewEnrichmentRequest | None: ...
+    async def claim_enrichment(self, *, now_ms: int) -> ReviewEnrichmentRequest | None: ...
+    async def retry_enrichment(self, request_id: str, *, reason: str, now_ms: int) -> None: ...
+    async def save_enrichment_preview(self, request_id: str, *, preview: ReviewEnrichmentPreview, digest: str, now_ms: int) -> None: ...
+    async def finish_enrichment(self, request_id: str, *, state: str, now_ms: int, owner_authorization_id: str | None = None) -> None: ...
+
     async def add(self, review: TradeReviewRecord) -> None: ...
 
     async def get(self, review_id: str) -> TradeReviewRecord | None: ...
@@ -1024,6 +1040,7 @@ class OwnerControlRepository(Protocol):
 
     async def list_strategy_controls(self) -> tuple[StrategyEntryControl, ...]: ...
 
+    async def get_authorization(self, authorization_id: str) -> OwnerAuthorization | None: ...
     async def add_authorization(self, authorization: OwnerAuthorization) -> None: ...
 
     async def get_authorization_by_idempotency_key(
@@ -1211,6 +1228,7 @@ class GenericCloseAlreadyConsumed(RuntimeError):
 
 
 class SignalRepository(Protocol):
+    async def record_operational_failure(self, diagnostic: object) -> None: ...
     async def advance_static_recovery_observation(self, *, runtime_scope_id: str, observed_at_ms: int,
         detector_status: DetectorStatus, occurred_at_ms: int | None,
     ) -> RecoveryBoundExposureEpisodeTransition: ...
@@ -2504,6 +2522,7 @@ UnitOfWorkFactory = Callable[[], "KernelUnitOfWork"]
 
 
 class ManagementRepository(Protocol):
+    async def verified_exit_references(self, ticket_id: str, *, entry_time_ms: int, exit_time_ms: int, system_references: tuple) -> tuple: ...
     async def has_conditional_child_link(self, ticket_id: str, item: OrderEvidence) -> bool: ...
     async def has_evidence(self, ticket_id: str, evidence_id: str) -> bool: ...
     async def child_system_intents(self, ticket_id: str, item: OrderEvidence) -> tuple: ...

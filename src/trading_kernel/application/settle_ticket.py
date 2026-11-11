@@ -111,6 +111,11 @@ async def record_trade_review(
         reduction=reduce_event(aggregate, event),
         expected_version=aggregate.version,
     )
+    if request.metrics.get('economics_completeness') == 'external_exit_unavailable':
+        from src.trading_kernel.application.review_enrichment import (
+            request_review_enrichment,
+        )
+        await request_review_enrichment(uow,ticket_id=request.ticket_id,now_ms=request.recorded_at_ms)
     return SettleTicketResult(status=SettleTicketStatus.REVIEW_RECORDED)
 
 

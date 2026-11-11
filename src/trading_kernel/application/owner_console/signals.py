@@ -169,6 +169,7 @@ def build_signal_detail(facts: SignalDetailFacts) -> SignalAdmissionDetail:
         for snapshot in facts.fact_snapshots
     )
     return SignalAdmissionDetail(
+        failure_basis=facts.signal.failure_basis,
         signal=signal,
         what_happened=what_happened,
         why_no_ticket=why_no_ticket,

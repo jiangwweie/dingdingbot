@@ -28,11 +28,11 @@
 | **StrategySignal** | 冻结 Event、币种、方向、时间、Episode、事实与出生权限的机会记录 | [StrategySignal](../../src/trading_kernel/domain/signal.py#L80) |
 | **Readiness / first_blocker** | 当前 scope 的可准入判断及第一个阻断解释，随当前事实变化 | [ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806) |
 | **AdmissionDecision** | 某个 Signal 的最终准入或拒绝事实，记录当时组合占用与原因 | [admission_decision](../../src/trading_kernel/domain/admission_decision.py) |
-| **CapacityClaim** | 在当时账户快照、规则、风险和权限下冻结的一次容量声明 | [CapacityClaim](../../src/trading_kernel/domain/capacity.py#L236) |
+| **CapacityClaim** | 在当时账户快照、规则、风险和权限下冻结的一次容量声明 | [CapacityClaim](../../src/trading_kernel/domain/capacity.py#L244) |
 | **Ticket** | 不可变执行合同，冻结资金、入场与退出规则及来源身份；不是订单回执 | [TradeTicket](../../src/trading_kernel/domain/ticket.py#L39) |
 | **Netting Domain** | `venue + account + instrument + position_side`；同方向同域最多一个活动 Ticket | [NettingDomain](../../src/trading_kernel/domain/identities.py#L24) |
 | **Exposure Family / Capacity B** | 跨策略风险家族与策略侧容量政策；成员数量不等于可持仓数量 | [exposure_family](../../src/trading_kernel/domain/exposure_family.py)、[capacity](../../src/trading_kernel/domain/capacity.py) |
-| **ENTRY lane** | 全局新入场串行所有权；保护完成前不能按“已发请求”提前释放 | [Reducer](../../src/trading_kernel/domain/reducer.py#L132)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L103) |
+| **ENTRY lane** | 全局新入场串行所有权；保护完成前不能按“已发请求”提前释放 | [Reducer](../../src/trading_kernel/domain/reducer.py#L132)、[issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L111) |
 
 ## 执行、保护与闭合
 

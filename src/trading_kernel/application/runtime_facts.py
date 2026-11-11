@@ -19,6 +19,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import EntryAdmissionSna
 from src.trading_kernel.domain.exit_execution import CompleteEntryFills, ExitOrderRules
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
     OrderRole,
     TicketOrderReference,
 )
@@ -455,7 +456,7 @@ class ReviewEconomicsRequest(BaseModel):
     netting_domain: NettingDomain
     expected_entry_quantity: Decimal
     entry_order_reference: TicketOrderReference
-    exit_order_references: tuple[TicketOrderReference, ...]
+    exit_order_references: tuple[TicketOrderReference | ExternalExitOrderReference, ...]
     entry_time_ms: int
     exit_time_ms: int
     funding_attribution_exact: bool
@@ -477,17 +478,17 @@ class ReviewEconomicsRequest(BaseModel):
     def _normalize_exit_references(
         cls,
         value: object,
-    ) -> tuple[TicketOrderReference, ...]:
+    ) -> tuple[TicketOrderReference | ExternalExitOrderReference, ...]:
         if not isinstance(value, (list, tuple)):
             raise ValueError(  # noqa: TRY004 - Pydantic must surface a ValidationError.
                 "review exit order references must be a sequence"
             )
         normalized = tuple(value)
-        if not normalized:
-            raise ValueError("review requires exit order references")
-        if any(not isinstance(item, TicketOrderReference) for item in normalized):
+        if not normalized or len(normalized) > 384:
+            raise ValueError("review requires bounded exit order references")
+        if any(not isinstance(item, (TicketOrderReference, ExternalExitOrderReference)) for item in normalized):
             raise ValueError("review exit order references must be typed")
-        if len({item.command_id for item in normalized}) != len(normalized):
+        if len({(item.namespace,item.submitted_exchange_order_id) for item in normalized}) != len(normalized):
             raise ValueError("review exit order commands must be unique")
         return normalized
 
@@ -497,6 +498,12 @@ class ReviewEconomicsRequest(BaseModel):
             raise ValueError("review expected entry quantity must be positive")
         if self.entry_order_reference.role is not OrderRole.ENTRY:
             raise ValueError("review entry order reference must be an ENTRY")
+        for reference in self.exit_order_references:
+            if isinstance(reference, ExternalExitOrderReference) and (
+                reference.ticket_id != self.ticket_id
+                or reference.terms.identity[:4] != (self.netting_domain.venue_id,self.netting_domain.account_id,self.netting_domain.exchange_instrument_id,self.netting_domain.position_side)
+                or not self.entry_time_ms <= reference.order_created_at_ms <= reference.evidence_at_ms <= self.observed_at_ms):
+                raise ValueError("external exit reference differs from Ticket scope or window")
         if any(reference.role is not OrderRole.EXIT for reference in self.exit_order_references):
             raise ValueError("review exit order references must be EXIT commands")
         if self.entry_order_reference.command_id in {

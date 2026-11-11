@@ -90,6 +90,9 @@ from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
 )
+from src.trading_kernel.domain.review_enrichment import (
+    ReviewEnrichmentRequest,
+)
 from src.trading_kernel.domain.shadow_outcome import (
     ShadowOutcomeClaim,
     ShadowOutcomeProjection,
@@ -1407,6 +1410,19 @@ class PostgresAdmissionDecisionRepository:
         await self._connection.execute(
             sa.insert(admission_decisions).values(_admission_decision_values(decision))
         )
+        if decision.first_blocker is not None:
+            from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+            from src.trading_kernel.infrastructure.pg_operational_evidence import (
+                record_failure,
+            )
+            await record_failure(self._connection, FailureDiagnostic(stage='admission',
+                subject_id=decision.signal_event_id, reason_code=decision.first_blocker,
+                basis={'source_reason_code':decision.binding_constraint,
+                    'account_id':decision.account_id,'instrument':decision.exchange_instrument_id,
+                    'policy_version':decision.owner_policy_version,
+                    'runtime_scope_id':decision.runtime_scope_id,
+                    'failure_basis':decision.failure_basis}, occurred_at_ms=decision.decided_at_ms))
+
 
     async def get_for_signal(
         self,
@@ -1990,6 +2006,69 @@ class PostgresReviewRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def enqueue_enrichment(self, *, request_id, ticket_id, expected_review_id, now_ms):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        await self._connection.execute(pg_insert(queue).values(request_id=request_id,ticket_id=ticket_id,
+            expected_review_id=expected_review_id,state='pending',created_at_ms=now_ms,next_check_at_ms=now_ms)
+            .on_conflict_do_nothing())
+
+    async def get_enrichment(self, request_id, *, for_update=False):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        query=sa.select(queue).where(queue.c.request_id==request_id)
+        if for_update:
+            query=query.with_for_update()
+        row=(await self._connection.execute(query)).mappings().one_or_none()
+        return None if row is None else ReviewEnrichmentRequest.model_validate(row)
+
+    async def claim_enrichment(self, *, now_ms):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        row=(await self._connection.execute(sa.select(queue).where(queue.c.state.in_(['pending','approved']),
+            queue.c.next_check_at_ms<=now_ms).order_by(queue.c.next_check_at_ms,queue.c.request_id)
+            .limit(1).with_for_update(skip_locked=True))).mappings().one_or_none()
+        if row is not None:
+            await self._connection.execute(sa.update(queue).where(queue.c.request_id==row['request_id'])
+                .values(next_check_at_ms=now_ms+60_000))
+        return None if row is None else ReviewEnrichmentRequest.model_validate(row)
+
+    async def approve_enrichment(self, request_id, *, digest, authorization_id, now_ms):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        result=await self._connection.execute(sa.update(queue).where(queue.c.request_id==request_id,
+            queue.c.preview_digest==digest,queue.c.state=='preview_ready').values(state='approved',
+            owner_authorization_id=authorization_id,next_check_at_ms=now_ms))
+        if result.rowcount != 1:
+            row=await self.get_enrichment(request_id)
+            if row is None or row.state not in {'approved','applied'} or row.owner_authorization_id!=authorization_id:
+                raise ValueError('enrichment approval state changed')
+
+    async def retry_enrichment(self, request_id, *, reason, now_ms):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        await self._connection.execute(sa.update(queue).where(queue.c.request_id==request_id,queue.c.state=='pending',queue.c.next_check_at_ms==now_ms+60_000)
+            .values(last_reason=reason,next_check_at_ms=now_ms+300_000))
+
+    async def save_enrichment_preview(self, request_id, *, preview, digest, now_ms):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        await self._connection.execute(sa.update(queue).where(queue.c.request_id==request_id,queue.c.state=='pending',queue.c.next_check_at_ms==now_ms+60_000)
+            .values(state='preview_ready',preview=preview.model_dump(mode="json"),preview_digest=digest,last_reason=None,next_check_at_ms=now_ms))
+
+    async def finish_enrichment(self, request_id, *, state, now_ms, owner_authorization_id=None):
+        from src.trading_kernel.infrastructure.pg_models import (
+            review_enrichment_requests as queue,
+        )
+        await self._connection.execute(sa.update(queue).where(queue.c.request_id==request_id)
+            .values(state=state,completed_at_ms=now_ms,owner_authorization_id=owner_authorization_id if owner_authorization_id else queue.c.owner_authorization_id))
+
     async def add(self, review: TradeReviewRecord) -> None:
         await self._connection.execute(
             sa.insert(trade_reviews).values(**review.model_dump(mode="json"))
@@ -2043,14 +2122,18 @@ class PostgresMonitorRepository:
         current_row = result.mappings().one_or_none()
         if current_row is not None and _same_monitor_state(current_row, state):
             current = MonitorStateRecord.model_validate(current_row)
-            if state.updated_at_ms <= current.updated_at_ms:
+            if state.updated_at_ms <= current.updated_at_ms and state.last_checked_at_ms == current.last_checked_at_ms:
                 return current
             await self._connection.execute(
                 sa.update(monitor_current)
                 .where(monitor_current.c.monitor_key == state.monitor_key)
-                .values(updated_at_ms=state.updated_at_ms)
+                .values(updated_at_ms=state.updated_at_ms,
+                    first_wait_at_ms=state.first_wait_at_ms,
+                    last_checked_at_ms=state.last_checked_at_ms,
+                    escalated_at_ms=state.escalated_at_ms,
+                    resolved_at_ms=state.resolved_at_ms)
             )
-            return current.model_copy(update={"updated_at_ms": state.updated_at_ms})
+            return state.model_copy(update={"projection_version": current.projection_version})
 
         version = (
             1 if current_row is None else int(current_row["projection_version"]) + 1
@@ -2077,6 +2160,10 @@ class PostgresMonitorRepository:
                     "ticket_id": state.ticket_id,
                     "incident_id": state.incident_id,
                     "projection_version": version,
+                    "first_wait_at_ms": state.first_wait_at_ms,
+                    "last_checked_at_ms": state.last_checked_at_ms,
+                    "escalated_at_ms": state.escalated_at_ms,
+                    "resolved_at_ms": state.resolved_at_ms,
                 },
                 created_at_ms=state.updated_at_ms,
             )
@@ -2117,6 +2204,11 @@ class PostgresOwnerControlRepository(OwnerControlRepository):
             )
         ).mappings()
         return tuple(_strategy_control_from_row(row) for row in rows)
+
+    async def get_authorization(self, authorization_id: str) -> OwnerAuthorization | None:
+        row=(await self._connection.execute(sa.select(owner_authorizations).where(
+            owner_authorizations.c.authorization_id==authorization_id))).mappings().one_or_none()
+        return None if row is None else OwnerAuthorization.model_validate(row)
 
     async def add_authorization(self, authorization: OwnerAuthorization) -> None:
         await self._connection.execute(
@@ -3550,6 +3642,7 @@ def _admission_decision_values(
     candidate_set = decision.candidate_set.model_dump(mode="json")
     return {
         "admission_decision_id": decision.admission_decision_id,
+        "failure_basis": decision.failure_basis,
         "signal_event_id": decision.signal_event_id,
         "exposure_episode_id": decision.exposure_episode_id,
         "strategy_group_id": decision.strategy_group_id,

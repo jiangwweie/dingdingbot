@@ -731,6 +731,9 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
     paths = set(owner_console_app.openapi()["paths"])
 
     assert paths == {
+        "/api/owner/v1/controls/review-enrichment/{ticket_id}/request",
+        "/api/owner/v1/controls/review-enrichment/requests/{request_id}",
+        "/api/owner/v1/controls/review-enrichment/apply",
         "/api/owner/v1/controls/exit-configuration",
         "/api/owner/v1/controls/exit-configuration/preview",
         "/api/owner/v1/controls/exit-configuration/sizing-preview",

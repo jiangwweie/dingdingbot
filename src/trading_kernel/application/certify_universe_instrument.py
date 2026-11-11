@@ -93,7 +93,9 @@ class InstrumentCertificationSnapshotContradiction(RuntimeError):
             "projected_position_exceeds_venue",
             "projected_position_domain_unowned",
         ],
+        *, basis: dict | None = None,
     ) -> None:
+        self.basis = basis or {}
         super().__init__(reason)
         self.reason = reason
 
@@ -185,6 +187,7 @@ async def certify_universe_instrument(
         certification = InstrumentCertification(
             status="temporarily_unavailable",
             blocker_code=exc.reason,
+            diagnostic_basis={"error_type":type(exc).__name__,**exc.basis},
             facts_digest=canonical_digest(
                 {
                     "runtime_profile_id": target.runtime_profile_id,
@@ -202,10 +205,11 @@ async def certify_universe_instrument(
         TimeoutError,
         ConnectionError,
         InstrumentCertificationTransientFailure,
-    ):
+    ) as exc:
         certification = InstrumentCertification(
             status="temporarily_unavailable",
             blocker_code="readonly_facts_unavailable",
+            diagnostic_basis={"error_type":type(exc).__name__},
             facts_digest=canonical_digest(
                 {
                     "runtime_profile_id": target.runtime_profile_id,
@@ -218,6 +222,15 @@ async def certify_universe_instrument(
             valid_until_ms=request.now_ms + request.transient_retry_interval_ms,
         )
         snapshot = None
+    except (ValueError, TypeError) as exc:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        async with uow_factory() as uow:
+            await uow.signals.record_operational_failure(FailureDiagnostic(stage='certification',
+                subject_id=target.runtime_profile_id+':'+target.exchange_instrument_id,
+                reason_code='readonly_facts_invalid',basis={'error_type':type(exc).__name__,
+                    'account_id':target.account_id,'instrument':target.exchange_instrument_id,
+                    'runtime_profile_id':target.runtime_profile_id},occurred_at_ms=request.now_ms))
+        raise
 
     next_check_at_ms = request.now_ms + _check_interval_ms(
         certification=certification,

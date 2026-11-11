@@ -243,7 +243,27 @@ def build_warm_readiness(
     )
 
 
-async def observe_strategy_scope(
+async def observe_strategy_scope(uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
+    request: ObservationRequest) -> ObservationResult:
+    result=await _observe_strategy_scope(uow_factory,market_source,request)
+    if result.status is ObservationStatus.INVALID:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        async with uow_factory() as uow:
+            scope=await uow.signals.get_runtime_scope(request.runtime_scope_id)
+            if scope is not None and scope.lifecycle_state in {'active','warming','staged'}:
+                profile=await uow.signals.get_runtime_profile(scope.runtime_profile_id)
+                await uow.signals.record_operational_failure(FailureDiagnostic(stage='observation',
+                    subject_id=request.runtime_scope_id,reason_code=result.detector_reason,
+                    basis={'runtime_commit':request.runtime_commit,'schema_revision':request.schema_revision,
+                        'operation':request.operation,'instrument':scope.exchange_instrument_id,
+                        'runtime_profile_id':scope.runtime_profile_id,
+                        'account_id':None if profile is None else profile.account_id,
+                        'close_time_ms':request.trigger_candle_close_time_ms},
+                    occurred_at_ms=request.attempted_at_ms or request.trigger_candle_close_time_ms))
+    return result
+
+
+async def _observe_strategy_scope(
     uow_factory: UnitOfWorkFactory,
     market_source: PublicMarketSource,
     request: ObservationRequest,
@@ -834,7 +854,7 @@ async def observe_strategy_scope(
             status=status,
             runtime_scope_id=scope.runtime_scope_id,
             event_spec_id=contract.event_spec_id,
-            detector_reason=detector_result.reason_code,
+            detector_reason=ingest_result.status.value if status is ObservationStatus.INVALID else detector_result.reason_code,
             signal_event_id=signal.signal_event_id,
             current_fact_count=len(persisted_facts),
         )

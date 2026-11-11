@@ -614,6 +614,7 @@ class SignalListPage(FrozenModel):
 
 
 class SignalAdmissionDetail(FrozenModel):
+    failure_basis: dict[str, JsonValue] | None = None
     signal: SignalListItem
     what_happened: str
     why_no_ticket: str | None
@@ -652,6 +653,8 @@ class MetricCoverage(FrozenModel):
 
 
 class TradeListItem(FrozenModel):
+    protection_status: Literal["full", "partial", "none", "unknown"] = "unknown"
+    stop_present: bool = False
     management_mode: Literal["AUTO","REVIEW_REQUIRED","MANUAL"] = "AUTO"
     management_reason: str | None = None
     manual_takeover_at_ms: int | None = None
@@ -1243,6 +1246,7 @@ class OverviewFacts(FrozenModel):
 
 
 class SignalItemFacts(FrozenModel):
+    failure_basis: dict[str, JsonValue] | None = None
     signal_event_id: str
     exposure_episode_id: str
     strategy_group_id: str

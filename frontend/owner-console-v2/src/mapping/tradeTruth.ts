@@ -24,3 +24,16 @@ export function activeCoverage(loaded:string[], overview:{active_ticket_ids:stri
   const complete=!!overview && fresh && overview.active_ticket_count===ids.length && new Set(ids).size===ids.length && missing.length===0 && extra.length===0;
   return {complete,missing,extra,count:overview?.active_ticket_count??null};
 }
+export function manualProtectionLabel(reason?:string|null, stopPresent?:boolean, status?:string) {
+  if (reason === 'manual_stop_quantity_exceeds_position') return '止损订单存在 · 数量不匹配 · 覆盖待核实';
+  if (status === 'unknown' && stopPresent) return '止损订单存在 · 覆盖待核实';
+  if (reason) return '人工管理 · 保护待核实';
+  return '人工管理 · 以 App 当前订单为准';
+}
+export function admissionReasonLabel(code?:string|null) {
+  const labels:Record<string,string>={account_health_blocked:'账户管理或事实门禁',instrument_health_blocked:'品种持仓或订单门禁',
+    manual_management_risk_unavailable:'人工持仓风险待核实',count_exhausted:'并发名额不足',stop_risk_exhausted:'止损风险额度不足',
+    margin_exhausted:'保证金额度不足',venue_minimum_unmet:'交易所最小下单量不足',minimum_materialization_unmet:'低于最小风险执行量',
+    directional_risk_exhausted:'方向风险额度不足',budget_exhausted:'旧记录未留具体限制原因'};
+  return code ? labels[code] ?? code : '原因未留存';
+}

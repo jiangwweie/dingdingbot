@@ -406,6 +406,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/owner/v1/controls/review-enrichment/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Review Enrichment Route */
+        post: operations["apply_review_enrichment_route_api_owner_v1_controls_review_enrichment_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/review-enrichment/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Enrichment Preview Route */
+        get: operations["review_enrichment_preview_route_api_owner_v1_controls_review_enrichment_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/owner/v1/controls/review-enrichment/{ticket_id}/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Review Enrichment Route */
+        post: operations["request_review_enrichment_route_api_owner_v1_controls_review_enrichment__ticket_id__request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/owner/v1/controls/risk-budget": {
         parameters: {
             query?: never;
@@ -2905,6 +2956,21 @@ export interface components {
             net_pnl: components["schemas"]["MoneyMetric"];
             net_r: components["schemas"]["MoneyMetric"];
         };
+        /** ReviewEnrichmentApplyBody */
+        ReviewEnrichmentApplyBody: {
+            /** Approved Preview Digest */
+            approved_preview_digest: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Reason */
+            reason: string;
+            /** Request Id */
+            request_id: string;
+            /** Totp Code */
+            totp_code?: string | null;
+        };
         /** ReviewSentence */
         ReviewSentence: {
             /** Evidence */
@@ -3262,6 +3328,10 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Fact Snapshots */
             fact_snapshots: components["schemas"]["SignalFactSnapshotFacts"][];
+            /** Failure Basis */
+            failure_basis?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
             shadow_summary: components["schemas"]["ShadowOutcomeSummary"] | null;
             signal: components["schemas"]["SignalListItem"];
             /** What Happened */
@@ -3615,10 +3685,21 @@ export interface components {
              * @enum {string}
              */
             position_side: "long" | "short";
+            /**
+             * Protection Status
+             * @default unknown
+             * @enum {string}
+             */
+            protection_status: "full" | "partial" | "none" | "unknown";
             /** Review Id */
             review_id: string | null;
             /** Review Revision */
             review_revision: number | null;
+            /**
+             * Stop Present
+             * @default false
+             */
+            stop_present: boolean;
             /** Strategy Group Id */
             strategy_group_id: string;
             /** Terminal At Ms */
@@ -3784,6 +3865,18 @@ export interface components {
             plan: components["schemas"]["PostFillExitPlan"] | null;
             /** Protected Quantity */
             protected_quantity: string;
+            /** Protection Reason */
+            protection_reason?: string | null;
+            /**
+             * Protection Status
+             * @default unknown
+             */
+            protection_status: string;
+            /**
+             * Stop Present
+             * @default false
+             */
+            stop_present: boolean;
             /** Ticket Id */
             ticket_id: string;
             /** Tp1 Filled Quantity */
@@ -3904,10 +3997,21 @@ export interface components {
              * @enum {string}
              */
             position_side: "long" | "short";
+            /**
+             * Protection Status
+             * @default unknown
+             * @enum {string}
+             */
+            protection_status: "full" | "partial" | "none" | "unknown";
             /** Review Id */
             review_id: string | null;
             /** Review Revision */
             review_revision: number | null;
+            /**
+             * Stop Present
+             * @default false
+             */
+            stop_present: boolean;
             /** Strategy Group Id */
             strategy_group_id: string;
             /** Terminal At Ms */
@@ -4771,6 +4875,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FlattenPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_review_enrichment_route_api_owner_v1_controls_review_enrichment_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewEnrichmentApplyBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_enrichment_preview_route_api_owner_v1_controls_review_enrichment_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_review_enrichment_route_api_owner_v1_controls_review_enrichment__ticket_id__request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */

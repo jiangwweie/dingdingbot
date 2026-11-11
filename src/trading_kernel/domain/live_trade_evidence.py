@@ -14,6 +14,7 @@ from src.trading_kernel.domain.commands import (
 )
 from src.trading_kernel.domain.order_attribution import (
     AttributedTradeFill,
+    ExternalExitOrderReference,
     OrderRole,
     attribution_digest,
 )
@@ -64,6 +65,13 @@ def build_review_execution_evidence(*, ticket: TradeTicket, review_id: str | Non
         with localcontext(Context(prec=38, rounding=ROUND_HALF_EVEN)):
             if digest != attribution_digest(fills):
                 missing.append("ATTRIBUTION_DIGEST_MISMATCH")
+    external_by_id = {}
+    raw_external = metrics.get('external_exit_evidence')
+    if isinstance(raw_external,list) and len(raw_external)<=256:
+        try:
+            external_by_id = {r.evidence_id:r for r in (ExternalExitOrderReference.model_validate(row) for row in raw_external)}
+        except ValueError:
+            missing.append('EXTERNAL_EXIT_EVIDENCE_INVALID')
     by_id = {command.command_id: command for command in commands}
     seen: set[tuple[str, str]] = set()
     for fill in fills:
@@ -71,7 +79,16 @@ def build_review_execution_evidence(*, ticket: TradeTicket, review_id: str | Non
         if key in seen:
             missing.append("DUPLICATE_TRADE_IDENTITY")
         seen.add(key)
-        command = by_id.get(fill.command_id)
+        if fill.external_evidence_id is not None:
+            proof = external_by_id.get(fill.external_evidence_id)
+            domain=ticket.identity.netting_domain
+            if (proof is None or proof.ticket_id!=ticket_id or proof.exposure_episode_id!=ticket.identity.exposure_episode_id
+                or proof.terms.identity[:4]!=(domain.venue_id,domain.account_id,domain.exchange_instrument_id,domain.position_side)
+                or not ticket.created_at_ms<=proof.order_created_at_ms<=fill.occurred_at_ms
+                or proof.namespace.value!='regular' or proof.submitted_exchange_order_id!=fill.exchange_order_id):
+                missing.append('EXTERNAL_EXIT_EVIDENCE_INVALID')
+            continue
+        command = by_id.get(fill.command_id) if fill.command_id is not None else None
         allowed_kinds = ({ExchangeCommandKind.ENTRY} if fill.role is OrderRole.ENTRY else
             {ExchangeCommandKind.INITIAL_STOP, ExchangeCommandKind.TAKE_PROFIT,
                 ExchangeCommandKind.EXIT, ExchangeCommandKind.CONTROLLED_FLATTEN,

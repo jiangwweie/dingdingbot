@@ -27,6 +27,14 @@ _PERSISTED_DECIMAL_QUANTUM = Decimal("0.000000000000000001")
 
 
 class CapacityClaimStatus(StrEnum):
+    ACCOUNT_HEALTH_BLOCKED = "account_health_blocked"
+    INSTRUMENT_HEALTH_BLOCKED = "instrument_health_blocked"
+    COUNT_EXHAUSTED = "count_exhausted"
+    STOP_RISK_EXHAUSTED = "stop_risk_exhausted"
+    MARGIN_EXHAUSTED = "margin_exhausted"
+    VENUE_MINIMUM_UNMET = "venue_minimum_unmet"
+    MINIMUM_MATERIALIZATION_UNMET = "minimum_materialization_unmet"
+
     CLAIMED = "claimed"
     SIGNAL_INVALID_OR_STALE = "signal_invalid_or_stale"
     SCOPE_OR_POLICY_MISMATCH = "scope_or_policy_mismatch"

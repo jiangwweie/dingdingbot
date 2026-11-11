@@ -159,6 +159,35 @@ class CurrentFactRefreshRuntimeResult(BaseModel):
 
 async def run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
     request: CurrentFactRefreshRuntimeRequest) -> CurrentFactRefreshRuntimeResult:
+    try:
+        result=await _run_current_fact_refresh_runtime_once(uow_factory=uow_factory,market_source=market_source,request=request)
+    except Exception as exc:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        async with uow_factory() as uow:
+            await uow.signals.record_operational_failure(FailureDiagnostic(stage='facts_refresh',
+                subject_id=request.strategy_group_id,reason_code='unclassified_facts_refresh_error',
+                basis={'error_type':type(exc).__name__,'runtime_commit':request.runtime_commit,
+                    'schema_revision':request.schema_revision},occurred_at_ms=request.now_ms))
+        raise
+    if result.status in {'blocked','invalid'} and result.reason_code:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        async with uow_factory() as uow:
+            scope=None if result.runtime_scope_id is None else await uow.signals.get_runtime_scope(result.runtime_scope_id)
+            if scope is not None and scope.lifecycle_state not in {'active','warming','staged'}:
+                return result
+            profile=None if scope is None else await uow.signals.get_runtime_profile(scope.runtime_profile_id)
+            await uow.signals.record_operational_failure(FailureDiagnostic(stage='facts_refresh',
+                subject_id=result.runtime_scope_id or request.strategy_group_id,reason_code=result.reason_code,
+                basis={'runtime_commit':request.runtime_commit,'schema_revision':request.schema_revision,
+                    'strategy_group_id':request.strategy_group_id,'selection_spec_id':request.selection_spec_id,
+                    'runtime_profile_id':None if scope is None else scope.runtime_profile_id,
+                    'instrument':None if scope is None else scope.exchange_instrument_id,
+                    'account_id':None if profile is None else profile.account_id},occurred_at_ms=request.now_ms))
+    return result
+
+
+async def _run_current_fact_refresh_runtime_once(*,uow_factory: UnitOfWorkFactory,market_source: PublicMarketSource,
+    request: CurrentFactRefreshRuntimeRequest) -> CurrentFactRefreshRuntimeResult:
     if request.strategy_group_id==ORB_STRATEGY_GROUP_ID:
         return await _run_orb_staged_fact_refresh(uow_factory=uow_factory,market_source=market_source,request=request)
     family=generic_selection_spec(request.strategy_group_id)

@@ -63,7 +63,8 @@ class ReviewFill(BaseModel):
 
     exchange_trade_id: str
     exchange_order_id: str
-    command_id: str
+    command_id: str | None
+    external_evidence_id: str | None = None
     role: OrderRole
     quantity: Decimal
     price: Decimal
@@ -74,7 +75,6 @@ class ReviewFill(BaseModel):
     @field_validator(
         "exchange_trade_id",
         "exchange_order_id",
-        "command_id",
         mode="before",
     )
     @classmethod
@@ -83,6 +83,23 @@ class ReviewFill(BaseModel):
         if not normalized:
             raise ValueError("review fill identities must be non-blank")
         return normalized
+
+    @field_validator("command_id", "external_evidence_id")
+    @classmethod
+    def _optional_source_identity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("source identity cannot be blank")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _exclusive_source(self):
+        if bool(self.command_id and self.command_id.strip()) == bool(self.external_evidence_id and self.external_evidence_id.strip()):
+            raise ValueError("fill requires exactly one command or verified external evidence")
+        if self.external_evidence_id is not None and self.role is not OrderRole.EXIT:
+            raise ValueError("external evidence is only valid for exit fills")
+        return self
 
     @field_validator("quantity", "price")
     @classmethod
@@ -114,6 +131,7 @@ class ReviewFill(BaseModel):
             exchange_trade_id=self.exchange_trade_id,
             exchange_order_id=self.exchange_order_id,
             command_id=self.command_id,
+            external_evidence_id=self.external_evidence_id,
             role=self.role,
             quantity=self.quantity,
             price=self.price,

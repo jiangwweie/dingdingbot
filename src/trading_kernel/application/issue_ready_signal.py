@@ -537,6 +537,17 @@ async def issue_ready_signal(
             request.now_ms,
             admission_context=admission_context,
             entry_admission_snapshot_digest=(request.admission_snapshot.digest()),
+            failure_basis={
+                "stage": "capacity_claim", "source_reason_code": decision.refusal_reason or decision.status.value,
+                "account_health": account_entry_health.model_dump(mode="json"),
+                "instrument_health": instrument_entry_health.model_dump(mode="json"),
+                "instrument_rules": {k:v for k,v in rules.model_dump(mode="json").items() if k != "maintenance_margin_brackets"},
+                "account_facts": {k:v for k,v in request.admission_snapshot.account_risk_snapshot.model_dump(mode="json").items()
+                    if k not in {"account_positions","snapshot_digest"}},
+                "quote": {"bid": str(request.admission_snapshot.best_bid_price),"ask":str(request.admission_snapshot.best_ask_price)},
+                "policy": policy.model_dump(mode="json"),
+                "usage": usage.model_dump(mode="json"),
+            },
             binding_constraint=decision.refusal_reason or decision.status.value,
             admission_snapshot=request.admission_snapshot,
         )
@@ -618,6 +629,7 @@ async def _refuse(
     entry_admission_snapshot_digest: str | None = None,
     binding_constraint: str | None = None,
     admission_snapshot: EntryAdmissionSnapshot | None = None,
+    failure_basis: dict | None = None,
 ) -> IssueTicketResult:
     blocker = (
         "signal_invalid_or_stale"
@@ -680,6 +692,7 @@ async def _refuse(
             ticket_id=None,
             entry_admission_snapshot_digest=entry_admission_snapshot_digest,
             decided_at_ms=now_ms,
+            failure_basis=failure_basis,
         )
         await uow.admission_decisions.add(decision)
         async with uow.shadow_outcomes.isolate_collection(
@@ -717,6 +730,13 @@ async def _block_signal(uow, signal, blocker: str, now_ms: int) -> None:
 
 def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
     mapping = {
+        CapacityClaimStatus.ACCOUNT_HEALTH_BLOCKED: IssueTicketStatus.ACCOUNT_HEALTH_BLOCKED,
+        CapacityClaimStatus.INSTRUMENT_HEALTH_BLOCKED: IssueTicketStatus.INSTRUMENT_HEALTH_BLOCKED,
+        CapacityClaimStatus.COUNT_EXHAUSTED: IssueTicketStatus.COUNT_EXHAUSTED,
+        CapacityClaimStatus.STOP_RISK_EXHAUSTED: IssueTicketStatus.STOP_RISK_EXHAUSTED,
+        CapacityClaimStatus.MARGIN_EXHAUSTED: IssueTicketStatus.MARGIN_EXHAUSTED,
+        CapacityClaimStatus.VENUE_MINIMUM_UNMET: IssueTicketStatus.VENUE_MINIMUM_UNMET,
+        CapacityClaimStatus.MINIMUM_MATERIALIZATION_UNMET: IssueTicketStatus.MINIMUM_MATERIALIZATION_UNMET,
         CapacityClaimStatus.SIGNAL_INVALID_OR_STALE: (
             IssueTicketStatus.SIGNAL_INVALID_OR_STALE
         ),
@@ -743,7 +763,7 @@ def _issue_status(status: CapacityClaimStatus) -> IssueTicketStatus:
             IssueTicketStatus.STRATEGY_SIDE_CAPACITY_EXHAUSTED
         ),
         CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED: (
-            IssueTicketStatus.BUDGET_EXHAUSTED
+            IssueTicketStatus.DIRECTIONAL_RISK_EXHAUSTED
         ),
         CapacityClaimStatus.PROTECTION_UNAVAILABLE: (
             IssueTicketStatus.PROTECTION_UNAVAILABLE

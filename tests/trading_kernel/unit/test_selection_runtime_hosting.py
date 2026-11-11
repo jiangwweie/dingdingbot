@@ -431,6 +431,12 @@ async def test_current_facts_refresh_timeout_is_bounded_and_not_authority(monkey
     class Universes:
         async def get_current(self,*_): return SimpleNamespace(universe_version_id="current:timeout")
     class Signals:
+        async def get_runtime_scope(self, runtime_scope_id):
+            return SimpleNamespace(runtime_scope_id=runtime_scope_id,lifecycle_state="active",runtime_profile_id="tiny-live-v1",exchange_instrument_id="binance-usdm:BTCUSDT:perpetual")
+        async def get_runtime_profile(self, runtime_profile_id):
+            return SimpleNamespace(account_id="fixture-account")
+        async def record_operational_failure(self, diagnostic):
+            assert diagnostic.stage == "facts_refresh"
         async def list_current_fact_refresh_scopes(self,**_):
             return tuple(SimpleNamespace(runtime_scope_id=f"scope:{name}") for name in ("a","b"))
     class Uow:

@@ -19,6 +19,7 @@ from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
     OrderNamespace,
     ResolvedOrderIdentity,
     TicketOrderReference,
@@ -106,7 +107,7 @@ _NOT_TRIGGERED_TERMINAL_STATUSES = {"CANCELED", "EXPIRED", "REJECTED"}
 async def resolve_binance_order_identity(
     *,
     exchange: object,
-    reference: TicketOrderReference,
+    reference: TicketOrderReference | ExternalExitOrderReference,
     observed_at_ms: int,
 ) -> ResolvedOrderIdentity:
     """Resolve an accepted Binance order into the sole legal trade order id."""

@@ -136,6 +136,8 @@ from src.trading_kernel.infrastructure.pg_models import (
     strategy_universe_members,
     strategy_universe_versions,
     strategy_versions,
+    trade_aggregates,
+    trade_tickets,
 )
 
 _INSTALL_LOCK_KEY = "brc-strategy-universe-install"
@@ -3492,6 +3494,25 @@ class PostgresStrategyUniverseRepository:
             if not (cleared or replaced or (lease == original and expired)):
                 raise RuntimeError("certification Claim identity contradictory")
             raise InstrumentCertificationClaimSuperseded("instrument certification claim is stale")
+        if certification.blocker_code is not None:
+            from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+            from src.trading_kernel.infrastructure.pg_operational_evidence import (
+                record_failure,
+            )
+            ownership = await self._connection.scalar(sa.select(trade_aggregates.c.position_qty)
+                .join(trade_tickets,trade_tickets.c.ticket_id==trade_aggregates.c.ticket_id)
+                .where(trade_tickets.c.account_id==target.account_id,
+                    trade_tickets.c.exchange_instrument_id==target.exchange_instrument_id,
+                    trade_tickets.c.terminal_at_ms.is_(None)).limit(1))
+            await record_failure(self._connection, FailureDiagnostic(stage='certification',
+                subject_id=target.runtime_profile_id+':'+target.exchange_instrument_id,
+                reason_code=certification.blocker_code,
+                basis={'account_id':target.account_id,'instrument':target.exchange_instrument_id,
+                    'universe_version_id':target.universe_version_id,
+                    'facts_digest':certification.facts_digest,
+                    'source_diagnostic':certification.diagnostic_basis,
+                    'projected_quantity':None if ownership is None else str(ownership)},
+                occurred_at_ms=certification.observed_at_ms))
         await self._connection.execute(
             sa.update(instruments)
             .where(

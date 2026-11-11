@@ -108,7 +108,7 @@ def build_capacity_claim(
     ):
         return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
     if account_entry_health.status is not AccountEntryHealthStatus.HEALTHY:
-        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
+        return CapacityClaimDecision(status=CapacityClaimStatus.ACCOUNT_HEALTH_BLOCKED, claim=None, refusal_reason=account_entry_health.status.value)
     if (
         instrument_entry_health.status
         is InstrumentEntryHealthStatus.SAME_DIRECTION_OCCUPIED
@@ -118,11 +118,11 @@ def build_capacity_claim(
         InstrumentEntryHealthStatus.HEALTHY_FLAT,
         InstrumentEntryHealthStatus.HEALTHY_OPPOSITE_SIDE,
     }:
-        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
+        return CapacityClaimDecision(status=CapacityClaimStatus.INSTRUMENT_HEALTH_BLOCKED, claim=None, refusal_reason=instrument_entry_health.status.value)
     if netting_domain_occupied:
         return _refused(CapacityClaimStatus.NETTING_DOMAIN_OCCUPIED)
     if usage.active_ticket_count >= policy.max_concurrent_tickets:
-        return _refused(CapacityClaimStatus.BUDGET_EXHAUSTED)
+        return _refused(CapacityClaimStatus.COUNT_EXHAUSTED)
     contract = strategy_contract_for(signal.event_spec_id)
     family_ticket_limit = policy.family_ticket_limits.for_family(
         contract.exposure_family
@@ -250,7 +250,7 @@ def build_capacity_claim(
         return CapacityClaimDecision(
             status=_sizing_refusal(sizing.status),
             claim=None,
-            refusal_reason=sizing.refusal_reason,
+            refusal_reason=sizing.refusal_reason or sizing.status.value,
         )
     selected = sizing.selected
     projected_positions = tuple(
@@ -426,7 +426,7 @@ def _sizing_refusal(status: CapacitySizingStatus) -> CapacityClaimStatus:
         CapacitySizingStatus.VENUE_MINIMUM_UNMET,
         CapacitySizingStatus.MINIMUM_MATERIALIZATION_UNMET,
     }:
-        return CapacityClaimStatus.BUDGET_EXHAUSTED
+        return CapacityClaimStatus(status.value)
     return CapacityClaimStatus.INSTRUMENT_RULES_INVALID
 
 
@@ -501,4 +501,4 @@ def _round_take_profit(
 
 
 def _refused(status: CapacityClaimStatus) -> CapacityClaimDecision:
-    return CapacityClaimDecision(status=status, claim=None)
+    return CapacityClaimDecision(status=status, claim=None, refusal_reason=status.value)

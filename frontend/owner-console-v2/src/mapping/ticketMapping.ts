@@ -1,3 +1,4 @@
+import {manualProtectionLabel} from './tradeTruth';
 /**
  * Ticket Mapping and Active Ticket Accounting Truth
  * 
@@ -90,7 +91,7 @@ export function mapActiveTicketToOverviewEpisode(
   const stageZh = STAGE_LABELS[t.lifecycle_stage] ?? t.lifecycle_stage;
   const protection =
     t.management_mode === 'MANUAL'
-      ? { confirmed: false, label: t.manual_risk_reason ? '人工管理 · 保护待核实' : '人工管理 · 以当前订单为准' }
+      ? { confirmed: false, label: manualProtectionLabel(t.manual_risk_reason,t.stop_present,t.protection_status) }
       : t.management_mode === 'REVIEW_REQUIRED'
       ? { confirmed: false, label: '接管待核实 · 自动处置暂停' }
       : protectionFact(t.aggregate_status);

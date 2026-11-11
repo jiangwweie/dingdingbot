@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.domain.commands import ExchangeCommandKind
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.fee_valuation import ValuedFee
+from src.trading_kernel.domain.trade_management import OrderTerms
 
 
 class OrderNamespace(StrEnum):
@@ -105,12 +106,64 @@ class TicketOrderReference(BaseModel):
         return self
 
 
+class ExternalExitOrderReference(BaseModel):
+    """Ticket-bound observed order evidence; it never creates an Exchange Command."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    source: Literal["verified_external_order"] = "verified_external_order"
+    ticket_id: str
+    exposure_episode_id: str
+    evidence_id: str
+    terms: OrderTerms
+    order_created_at_ms: int
+    evidence_at_ms: int
+    role: Literal[OrderRole.EXIT] = OrderRole.EXIT
+
+    @model_validator(mode="after")
+    def _valid(self):
+        if not all(v.strip() for v in (self.ticket_id, self.exposure_episode_id, self.evidence_id)):
+            raise ValueError("external exit evidence identities required")
+        if not 0 < self.order_created_at_ms <= self.evidence_at_ms or not self.terms.reduces_position:
+            raise ValueError("external exit requires exact reducing order and time")
+        return self
+
+    @property
+    def command_id(self) -> None:
+        return None
+
+    @property
+    def namespace(self) -> OrderNamespace:
+        return OrderNamespace(self.terms.order_namespace)
+
+    @property
+    def submitted_exchange_order_id(self) -> str:
+        return self.terms.exchange_order_id
+
+    @property
+    def venue_client_order_id(self) -> str:
+        return self.terms.client_order_id or ""
+
+    @property
+    def command_created_at_ms(self) -> int:
+        return self.order_created_at_ms
+
+    @property
+    def conditional_expectation(self) -> ConditionalOrderExpectation | None:
+        if self.namespace is OrderNamespace.REGULAR:
+            return None
+        if self.terms.quantity is None or self.terms.order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+            raise ValueError("external conditional exit requires exact supported quantity")
+        return ConditionalOrderExpectation(exchange_instrument_id=self.terms.exchange_instrument_id,
+            position_side=self.terms.position_side, side=self.terms.side,
+            order_type=cast(Literal["stop_market", "take_profit_market"],self.terms.order_type.lower()), quantity=self.terms.quantity)
+
+
 class ResolvedOrderIdentity(BaseModel):
     """The exact regular order id that is legal to query for fills."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    reference: TicketOrderReference
+    reference: TicketOrderReference | ExternalExitOrderReference
     resolution_status: Literal["executable", "not_triggered"]
     actual_order_id: str | None
     resolved_at_ms: int
@@ -150,7 +203,8 @@ class AttributedTradeFill(BaseModel):
 
     exchange_trade_id: str
     exchange_order_id: str
-    command_id: str
+    command_id: str | None
+    external_evidence_id: str | None = None
     role: OrderRole
     quantity: Decimal
     price: Decimal
@@ -161,7 +215,6 @@ class AttributedTradeFill(BaseModel):
     @field_validator(
         "exchange_trade_id",
         "exchange_order_id",
-        "command_id",
         mode="before",
     )
     @classmethod
@@ -170,6 +223,23 @@ class AttributedTradeFill(BaseModel):
         if not normalized:
             raise ValueError("attributed fill identities must be non-blank")
         return normalized
+
+    @field_validator("command_id", "external_evidence_id")
+    @classmethod
+    def _optional_source_identity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not value.strip():
+            raise ValueError("source identity cannot be blank")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _exclusive_source(self):
+        if bool(self.command_id and self.command_id.strip()) == bool(self.external_evidence_id and self.external_evidence_id.strip()):
+            raise ValueError("fill requires exactly one command or verified external evidence")
+        if self.external_evidence_id is not None and self.role is not OrderRole.EXIT:
+            raise ValueError("external evidence is only valid for exit fills")
+        return self
 
     @field_validator("quantity", "price")
     @classmethod
@@ -201,7 +271,7 @@ def attribution_digest(fills: tuple[AttributedTradeFill, ...]) -> str:
     return canonical_digest(
         tuple(
             sorted(
-                (fill.model_dump(mode="python") for fill in fills),
+                ({k:v for k,v in fill.model_dump(mode="python").items() if not (k == "external_evidence_id" and v is None)} for fill in fills),
                 key=lambda value: (
                     str(value["exchange_trade_id"]),
                     str(value["exchange_order_id"]),

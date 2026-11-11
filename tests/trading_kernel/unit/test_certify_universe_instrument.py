@@ -83,6 +83,8 @@ class _UniverseRepository:
 
 
 class _RulesRepository:
+    async def record_operational_failure(self, diagnostic):
+        assert diagnostic.stage == "certification"
     def __init__(self, state: _State) -> None:
         self.state = state
 

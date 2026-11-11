@@ -274,6 +274,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
             else None
         ),
@@ -310,6 +311,7 @@ async def seed_runtime_authority(
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
         ),
     )
@@ -333,6 +335,7 @@ async def seed_runtime_authority(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -366,6 +369,7 @@ async def seed_runtime_authority(
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
             else None
         ),
@@ -381,13 +385,13 @@ async def seed_runtime_authority(
     certification = {
         **(
             {"exit_configuration_required": True}
-            if request.schema_revision == "0020_manual_exit_regime_v1"
+            if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure"}
             else {}
         ),
         **(
             {"management_feed_required": True}
             if request.schema_revision
-            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1"}
+            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure"}
             else {}
         ),
         "stage": "entry_paused" if include_tradfi else "observation_only",
@@ -400,6 +404,7 @@ async def seed_runtime_authority(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         certification["product_id"] = PRODUCT_ID
     rows = [
@@ -560,6 +565,7 @@ async def seed_runtime_authority(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         await uow.directional_risk.initialize(venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms)
     return RuntimeAuthoritySeedResult(
@@ -615,6 +621,8 @@ async def deploy_compatible_upgrade_identity(
         ("0017_app_management_observation", "0018_notice_outbox_v1"),
         ("0018_notice_outbox_v1", "0019_management_evidence_v2"),
         ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),
+        ("0020_manual_exit_regime_v1", "0021_manual_operational_closure"),
+        ("0019_management_evidence_v2", "0021_manual_operational_closure"),
     }:
         if await connection.scalar(sa.text("SELECT version_num FROM alembic_version")) != request.schema_revision:
             raise RuntimeAuthorityTransitionRefused("notice upgrade requires exact migrated schema")
@@ -649,6 +657,7 @@ async def deploy_compatible_upgrade_identity(
             "0018_notice_outbox_v1",
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -772,6 +781,7 @@ async def deploy_compatible_upgrade_identity(
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
             else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
@@ -850,6 +860,7 @@ async def deploy_compatible_upgrade_identity(
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
             else None
         ),
@@ -914,6 +925,7 @@ async def deploy_compatible_upgrade_identity(
             "0018_notice_outbox_v1",
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -1031,6 +1043,7 @@ async def _deploy_capability_compatible_identity(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     } and source_schema_revision not in {
         "0011_orb_session_1h_v1",
         "0012_generic_signal_path_v1",
@@ -1042,6 +1055,7 @@ async def _deploy_capability_compatible_identity(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }
     target_contracts = _contracts_for_schema(request.schema_revision)
     target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
@@ -1179,6 +1193,7 @@ async def _deploy_capability_compatible_identity(
                 "0018_notice_outbox_v1",
                 "0019_management_evidence_v2",
                 "0020_manual_exit_regime_v1",
+                "0021_manual_operational_closure",
             }
             else None
         ),
@@ -1191,6 +1206,7 @@ async def _deploy_capability_compatible_identity(
             "0018_notice_outbox_v1",
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -1214,7 +1230,7 @@ async def _deploy_capability_compatible_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure"}
                     else {}
                 ),
             )
@@ -1440,20 +1456,23 @@ async def _deploy_runtime_identity(
             "0018_notice_outbox_v1",
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             certification["product_id"] = PRODUCT_ID
         if request.schema_revision in {
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             certification["management_feed_required"]=True
         if request.schema_revision in {
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }:
             certification.pop('runtime_mode',None)
             certification.pop('management_recovery_ticket_ids',None)
-        if request.schema_revision == "0020_manual_exit_regime_v1":
+        if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure"}:
             certification["exit_configuration_required"] = True
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
@@ -1470,7 +1489,7 @@ async def _deploy_runtime_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure"}
                     else {}
                 ),
             )
@@ -1675,6 +1694,7 @@ def _contracts_for_schema(
             "0018_notice_outbox_v1",
             "0019_management_evidence_v2",
             "0020_manual_exit_regime_v1",
+            "0021_manual_operational_closure",
         }
         else tuple(c for c in contracts if c.strategy_group_id != "SOR-1H-001")
     )
@@ -1698,6 +1718,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }
 
 
@@ -1871,6 +1892,7 @@ def _seed_identity(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         payload["product_id"] = PRODUCT_ID
     if exit_profile_catalog_digest is not None:
@@ -1888,6 +1910,7 @@ def _seed_identity(
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,

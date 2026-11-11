@@ -67,6 +67,7 @@ class OwnerAuthorization(BaseModel):
         "selection_mode_change",
         "exit_profile_bind",
         "exit_profile_retire",
+        "review_revise",
     ]
     owner_identity: str
     authentication_strength: Literal["session", "totp_step_up"]

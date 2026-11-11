@@ -228,7 +228,7 @@ def build_notices(
                     )
             if (
                 final.manual_risk_reason
-                in {"manual_order_facts_incomplete", "manual_risk_inputs_invalid"}
+                in {"manual_order_facts_incomplete", "manual_risk_inputs_invalid", "manual_stop_quantity_exceeds_position", "manual_exposure_increased"}
                 or final.manual_risk_reason == "manual_stop_allocation_unproven"
                 and len(stops) > 1
             ):
@@ -315,6 +315,7 @@ def build_notices(
             entry_price=final.average_fill_price,
             stops=tuple(stops),
             protection=protection,
+            protection_reason=final.manual_risk_reason if manual else None,
             protected_quantity=protected,
             strategy=family,
             strategy_semantics=STRATEGY_LABELS.get(family, "交易机会"),

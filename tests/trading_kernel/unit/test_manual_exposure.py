@@ -80,3 +80,11 @@ def test_protection_with_non_market_stop_cannot_claim_loss_bound():
 
 def test_oversized_fixed_stop_after_manual_reduction_is_not_assumed_valid():
  assert assess(q='5',orders=(stop(quantity='10'),)).entry_blocked
+
+
+def test_oversized_stop_reports_present_but_unknown_instead_of_absent():
+    result = assess(q='5', orders=(stop(quantity='10'),))
+    assert result.protection_status == 'unknown'
+    assert result.stop_present
+    assert result.declared_stop_quantity == D(10)
+    assert result.protected_quantity == 0 and result.risk_at_stop is None

@@ -79,6 +79,8 @@ def render_notice(facts: NoticeSnapshot) -> str:
     elif facts.protection == "unknown":
         prices = " / ".join(format_number(s.price) for s in facts.stops[:3])
         stop = f"止损 {prices}｜覆盖待核实" if prices else "止损待核实"
+        if facts.protection_reason == "manual_stop_quantity_exceeds_position":
+            stop += "｜数量不匹配"
         if len(facts.stops) > 3:
             stop += f"（共{len(facts.stops)}档）"
     else:

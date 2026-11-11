@@ -8,7 +8,7 @@ from enum import StrEnum
 from hashlib import sha256
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 CertificationStatus = Literal[
     "eligible",
@@ -218,6 +218,7 @@ class InstrumentCertificationFacts(BaseModel):
 
 
 class InstrumentCertification(BaseModel):
+    diagnostic_basis: dict[str, JsonValue] | None = None
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: CertificationStatus

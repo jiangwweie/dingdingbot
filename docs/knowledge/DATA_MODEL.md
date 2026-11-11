@@ -117,18 +117,18 @@ stateDiagram-v2
     outcome_unknown --> reconciled_absent: 权威不存在证明
 ```
 
-图描述常见路径，具体 kind 的恢复事件与可重试规则见 [commands](../../src/trading_kernel/domain/commands.py)和 [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py)。**Claimed 租约过期不是直接回到 prepared**，仓储会持久化未知结果。（来源：[record_expired_claim_unknown](../../src/trading_kernel/infrastructure/pg_repositories.py#L1118)）
+图描述常见路径，具体 kind 的恢复事件与可重试规则见 [commands](../../src/trading_kernel/domain/commands.py)和 [recover_unknown_command](../../src/trading_kernel/application/recover_unknown_command.py)。**Claimed 租约过期不是直接回到 prepared**，仓储会持久化未知结果。（来源：[record_expired_claim_unknown](../../src/trading_kernel/infrastructure/pg_repositories.py#L1121)）
 
 ### 防重与并发控制
 
 | 不变量 | 数据库或应用措施 | 证据 |
 | --- | --- | --- |
 | 一次机会最多一个 Signal/Ticket | Episode 唯一 Signal；Signal 唯一 Ticket；确定性身份 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)、[producer](../../src/trading_kernel/application/produce_strategy_signal.py) |
-| 同域最多一个活动 Ticket | active_netting_domain_key 唯一；闭合释放活动键 | [PostgresTicketRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L257) |
-| 新 ENTRY 串行、组合占用原子 | lane 与账户 exposure 锁；签发事务内重查 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L103) |
+| 同域最多一个活动 Ticket | active_netting_domain_key 唯一；闭合释放活动键 | [PostgresTicketRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L260) |
+| 新 ENTRY 串行、组合占用原子 | lane 与账户 exposure 锁；签发事务内重查 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L111) |
 | 聚合事件不能覆盖并发结果 | expected_version、连续 sequence、CAS | [commit_reduction](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L240) |
 | 命令不重复生成身份 | command/idempotency/client identity 唯一；ENTRY generation 限制 | [commands](../../src/trading_kernel/domain/commands.py)、[pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
-| Review 可追溯且当前值唯一 | revision/supersedes 唯一；Aggregate 指针 | [revise_trade_review](../../src/trading_kernel/application/settle_ticket.py#L117) |
+| Review 可追溯且当前值唯一 | revision/supersedes 唯一；Aggregate 指针 | [revise_trade_review](../../src/trading_kernel/application/settle_ticket.py#L122) |
 
 ## 事务边界
 

@@ -2124,6 +2124,7 @@ readiness_current = sa.Table(
 admission_decisions = sa.Table(
     "brc_admission_decisions",
     metadata,
+    _json("failure_basis", nullable=True),
     _id("admission_decision_id", primary_key=True),
     _id("signal_event_id"),
     _id("exposure_episode_id"),
@@ -3041,6 +3042,10 @@ monitor_current = sa.Table(
     _id("ticket_id", nullable=True),
     _id("incident_id", nullable=True),
     _time("updated_at_ms"),
+    _time("first_wait_at_ms", nullable=True),
+    _time("last_checked_at_ms", nullable=True),
+    _time("escalated_at_ms", nullable=True),
+    _time("resolved_at_ms", nullable=True),
     sa.Column("projection_version", sa.BigInteger, nullable=False),
 )
 
@@ -3119,7 +3124,7 @@ owner_authorizations = sa.Table(
         "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
         "'entry_resume', 'owner_flatten_all', 'universe_configure', "
         "'selection_mode_change', 'exit_profile_bind', "
-        "'exit_profile_retire')",
+        "'exit_profile_retire', 'review_revise')",
         name="purpose_valid",
     ),
     sa.CheckConstraint(
@@ -3308,3 +3313,23 @@ sa.Index(
     btc_ma50_snapshots.c.latest_close_time_ms,
     btc_ma50_snapshots.c.observed_at_ms,
 )
+
+
+failure_diagnostics = sa.Table("brc_failure_diagnostics", metadata,
+    _id("diagnostic_id", primary_key=True), sa.Column("stage", SHORT_TEXT, nullable=False),
+    sa.Column("subject_id", LONG_TEXT, nullable=False), sa.Column("reason_code", LONG_TEXT, nullable=False),
+    _json("basis"), _time("occurred_at_ms"),
+    sa.CheckConstraint("octet_length(basis::text)<=16384", name="ck_failure_basis_bounded"))
+sa.Index("ix_brc_failure_diagnostics_subject_time", failure_diagnostics.c.subject_id, failure_diagnostics.c.occurred_at_ms)
+sa.Index("ix_brc_failure_diagnostics_stage_time", failure_diagnostics.c.stage, failure_diagnostics.c.occurred_at_ms)
+review_enrichment_requests = sa.Table("brc_review_enrichment_requests", metadata,
+    _id("request_id", primary_key=True), sa.Column("ticket_id", ID, sa.ForeignKey("brc_trade_tickets.ticket_id"), nullable=False),
+    sa.Column("expected_review_id", ID, sa.ForeignKey("brc_trade_reviews.review_id"), nullable=False),
+    sa.Column("state", SHORT_TEXT, nullable=False),
+    sa.Column("owner_authorization_id",ID,sa.ForeignKey("brc_owner_authorizations.authorization_id"),nullable=True), _json("preview", nullable=True),
+    sa.Column("preview_digest", sa.String(71), nullable=True), sa.Column("last_reason", LONG_TEXT, nullable=True),
+    _time("created_at_ms"), _time("next_check_at_ms"), _time("completed_at_ms", nullable=True),
+    sa.UniqueConstraint("ticket_id", "expected_review_id"),
+    sa.CheckConstraint("state IN ('pending','preview_ready','approved','applied','superseded')", name="ck_review_enrichment_state"),
+    sa.CheckConstraint("state NOT IN ('approved','applied') OR owner_authorization_id IS NOT NULL",name="ck_review_enrichment_approved_authority"))
+sa.Index("ix_brc_review_enrichment_due", review_enrichment_requests.c.state, review_enrichment_requests.c.next_check_at_ms)

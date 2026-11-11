@@ -4,16 +4,16 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 102 张业务表、1188 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **104 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 104 张业务表、1210 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **107 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **97** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **104** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **100** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **107** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
-**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0019_management_evidence_v2`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
+**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0021_manual_operational_closure`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
 ## 怎样读这份目录
 
@@ -48,6 +48,8 @@
 <a id="catalog-registry"></a>
 
 | **App 管理权观察** | **6** | 外部订单证据和观察完整性，服务人工接管。 |
+
+| **运行诊断与终态补证据** | **2** | 失败保全与Review修订队列。 |
 
 ## 策略与事实语义
 
@@ -1254,7 +1256,7 @@
 <details>
 <summary>完整字段（32 列）</summary>
 
-**字段清单**：`admission_decision_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`runtime_scope_id`、`runtime_scope_version`、`owner_policy_id`、`owner_policy_version`、`venue_id`、`account_id`、`exchange_instrument_id`、`position_side`、`exposure_family`、`candidate_rank`、`candidate_count`、`candidate_set_digest`、`candidate_set_summary`、`portfolio_usage`、`decision_status`、`first_blocker`、`binding_constraint`、`capacity_claim_id`、`ticket_id`、`entry_admission_snapshot_digest`、`decision_digest`、`decided_at_ms`
+**字段清单**：`failure_basis`、`admission_decision_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`runtime_scope_id`、`runtime_scope_version`、`owner_policy_id`、`owner_policy_version`、`venue_id`、`account_id`、`exchange_instrument_id`、`position_side`、`exposure_family`、`candidate_rank`、`candidate_count`、`candidate_set_digest`、`candidate_set_summary`、`portfolio_usage`、`decision_status`、`first_blocker`、`binding_constraint`、`capacity_claim_id`、`ticket_id`、`entry_admission_snapshot_digest`、`decision_digest`、`decided_at_ms`。
 
 </details>
 
@@ -1538,7 +1540,7 @@
 <details>
 <summary>完整字段（8 列）</summary>
 
-**字段清单**：`monitor_key`、`owner_status`、`summary`、`intervention`、`ticket_id`、`incident_id`、`updated_at_ms`、`projection_version`
+**字段清单**：`monitor_key`、`owner_status`、`summary`、`intervention`、`ticket_id`、`incident_id`、`updated_at_ms`、`first_wait_at_ms`、`last_checked_at_ms`、`escalated_at_ms`、`resolved_at_ms`、`projection_version`。
 
 </details>
 
@@ -1854,3 +1856,23 @@ COMMIT;
 **维护与用途**：Observation按已激活MA50配置维护；用于审计，不替代Owner权限。
 
 **字段清单**：`window_digest`、`venue_id`、`latest_close_time_ms`、`snapshot`、`observed_at_ms`
+
+### `brc_failure_diagnostics`
+
+**职责**：保留每次失败阶段、原因及有界核验事实。
+
+**主键**：`diagnostic_id`。
+
+**字段清单**：`diagnostic_id`、`stage`、`subject_id`、`reason_code`、`basis`、`occurred_at_ms`。
+
+**维护与用途**：既有Kernel仓储写入，Owner只读核验；不作为交易权限。
+
+### `brc_review_enrichment_requests`
+
+**职责**：管理终态盈亏补证据预览、Owner批准与一次修订。
+
+**主键**：`request_id`。
+
+**字段清单**：`request_id`、`ticket_id`、`expected_review_id`、`state`、`owner_authorization_id`、`preview`、`preview_digest`、`last_reason`、`created_at_ms`、`next_check_at_ms`、`completed_at_ms`。
+
+**维护与用途**：既有Kernel仓储写入，Owner只读核验；不作为交易权限。

@@ -62,6 +62,7 @@ from src.trading_kernel.application.recover_vacuum_late_fill import (
     RecoverVacuumLateFillStatus,
     recover_vacuum_late_fill,
 )
+from src.trading_kernel.application.review_window import _review_window, _ReviewWindow
 from src.trading_kernel.application.runtime_facts import (
     AccountPositionAuditSource,
     AccountRiskSnapshotRequest,
@@ -94,20 +95,13 @@ from src.trading_kernel.domain.commands import (
     ExchangeCommandKind,
     ExchangeCommandStatus,
 )
-from src.trading_kernel.domain.events import (
-    EntryFilled,
-    EntryPartiallyFilled,
-    ExternalFlatDetected,
-    ManualPositionObserved,
-    PositionFlatConfirmed,
-    TradeEvent,
-)
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
     OrderRole,
     TicketOrderReference,
     attribution_digest,
@@ -121,6 +115,7 @@ from src.trading_kernel.domain.review import (
 from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuumState,
 )
+from src.trading_kernel.domain.trade_management import ManagementMode
 
 _POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
 
@@ -338,6 +333,11 @@ async def run_reconciliation_worker_once(
             runtime_commit=request.runtime_commit,
             schema_revision=request.schema_revision,
         )
+    if review_economics_source is not None and housekeeping.status is ReconciliationWorkerStatus.NO_WORK and safety is None:
+        from src.trading_kernel.application.review_enrichment import (
+            prepare_review_enrichment,
+        )
+        await prepare_review_enrichment(uow_factory, review_economics_source, now_ms=request.now_ms)
     if safety is None:
         return housekeeping
     if housekeeping.status is ReconciliationWorkerStatus.NO_WORK:
@@ -999,7 +999,9 @@ async def _run_reconciliation_worker_once_core(
         async with uow_factory() as uow:
             key=f"reconciliation-closure:{aggregate.identity.ticket_id}"
             if result.status in {ReconciliationWorkerStatus.SETTLED, ReconciliationWorkerStatus.REVIEWED}:
-                await resolve_reconciliation_wait(uow,key=key,now_ms=request.now_ms)
+                current_review = await uow.reviews.get_for_ticket(aggregate.identity.ticket_id) if result.status is ReconciliationWorkerStatus.REVIEWED else None
+                await resolve_reconciliation_wait(uow,key=key,now_ms=request.now_ms,
+                    economics_complete=current_review is None or current_review.metrics.get('economics_completeness') == 'complete')
             else:
                 await record_reconciliation_wait(uow,key=key,reason=f"closure_wait:{aggregate.status.value}",
                     now_ms=request.now_ms, allowed_delay_ms=max(request.closure_retry_interval_ms * 3, request.review_economics_visibility_grace_ms),ticket_id=aggregate.identity.ticket_id)
@@ -1305,6 +1307,11 @@ async def _run_reconciliation_worker_once_core_impl(
             entry_time_ms = review_window.entry_time_ms
             exit_time_ms = review_window.exit_time_ms
             executed_entry_quantity = review_window.executed_entry_quantity
+            if review.management_mode is ManagementMode.MANUAL:
+                external = await uow.management.verified_exit_references(review.identity.ticket_id,
+                    entry_time_ms=entry_time_ms, exit_time_ms=exit_time_ms,
+                    system_references=order_references)
+                exit_order_references = (*exit_order_references, *external)
             overlapping_exposure = (
                 await uow.tickets.has_other_instrument_ticket_in_window(
                     ticket_id=review.identity.ticket_id,
@@ -1424,6 +1431,7 @@ async def _run_reconciliation_worker_once_core_impl(
             "ticket_quantity": str(review.ticket.quantity),
             "executed_entry_quantity": str(executed_entry_quantity),
             **economics.model_dump(mode="json"),
+            "external_exit_evidence": [r.model_dump(mode="json") for r in exit_order_references if isinstance(r, ExternalExitOrderReference)],
             "order_attribution": [
                 fill.model_dump(mode="json")
                 for fill in (*economics_facts.entry_fills, *economics_facts.exit_fills)
@@ -1530,49 +1538,6 @@ def _runtime_fenced_result(*, ticket_id: str | None = None) -> ReconciliationWor
         detail="runtime_identity_mismatch",
     )
 
-
-class _ReviewWindow(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    entry_time_ms: int
-    exit_time_ms: int
-    executed_entry_quantity: Decimal
-    external_flat: bool
-
-
-def _review_window(
-    events: list[TradeEvent],
-    *,
-    exposure_started_at_ms: int,
-) -> _ReviewWindow | None:
-    if exposure_started_at_ms <= 0:
-        raise ValueError("review exposure start time must be positive")
-    entry_events = [
-        event
-        for event in events
-        if isinstance(event, (EntryFilled, EntryPartiallyFilled))
-    ]
-    flat_events = [
-        event
-        for event in events
-        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected)) or (isinstance(event,ManualPositionObserved) and event.quantity==0 and not event.orders and event.facts_complete and event.commands_resolved)
-    ]
-    if len(entry_events) != 1 or not flat_events:
-        return None
-    entry = entry_events[0]
-    exit_event = min(
-        (event for event in flat_events if event.occurred_at_ms >= entry.occurred_at_ms),
-        key=lambda event: event.occurred_at_ms,
-        default=None,
-    )
-    if exit_event is None:
-        return None
-    return _ReviewWindow(
-        entry_time_ms=exposure_started_at_ms,
-        exit_time_ms=exit_event.occurred_at_ms,
-        executed_entry_quantity=entry.filled_qty,
-        external_flat=isinstance(exit_event, (ExternalFlatDetected,ManualPositionObserved)),
-    )
 
 
 def _external_review_fallback_due(

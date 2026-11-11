@@ -34,6 +34,8 @@ class SorHourlyDetector:
         now = snapshot.trigger_candle_close_time_ms
         d = now // DAY * DAY
         bars = snapshot.candles_1h
+        if now == d and not bars:
+            return invalid_result(c, "sor_1h_session_not_ready")
         if (
             now % H
             or not bars

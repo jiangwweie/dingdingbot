@@ -281,6 +281,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         "0018_notice_outbox_v1",
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
+        "0021_manual_operational_closure",
     }:
         credential = Path("/etc/brc/notification-credentials/feishu_webhook")
         private_env = Path("/etc/brc/notification-credentials/feishu.env")

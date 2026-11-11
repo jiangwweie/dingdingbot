@@ -206,8 +206,10 @@ def require_upgrade_schema(source: str, target: str) -> None:
         ("0017_app_management_observation", "0018_notice_outbox_v1"),
         ("0018_notice_outbox_v1", "0019_management_evidence_v2"),
         ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),
+        ("0020_manual_exit_regime_v1", "0021_manual_operational_closure"),
+        ("0019_management_evidence_v2", "0021_manual_operational_closure"),
     }:
-        raise ValueError("manual upgrade requires same schema or exact 0017-to-0018 transition")
+        raise ValueError("manual upgrade requires an explicit stopped forward migration path")
 
 
 def extract_plain_archive(source, destination: Path) -> None:

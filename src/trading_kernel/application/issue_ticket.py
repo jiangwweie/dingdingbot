@@ -35,6 +35,14 @@ from src.trading_kernel.domain.ticket import TradeTicket
 
 
 class IssueTicketStatus(StrEnum):
+    ACCOUNT_HEALTH_BLOCKED = "account_health_blocked"
+    INSTRUMENT_HEALTH_BLOCKED = "instrument_health_blocked"
+    COUNT_EXHAUSTED = "count_exhausted"
+    STOP_RISK_EXHAUSTED = "stop_risk_exhausted"
+    MARGIN_EXHAUSTED = "margin_exhausted"
+    VENUE_MINIMUM_UNMET = "venue_minimum_unmet"
+    MINIMUM_MATERIALIZATION_UNMET = "minimum_materialization_unmet"
+
     EXIT_CONFIGURATION_NOT_ACTIVATED = "exit_configuration_not_activated"
     EXIT_CONFIGURATION_BINDING_DRIFT = "exit_configuration_binding_drift"
     DIRECTIONAL_CONTROL_BLOCKED = "directional_control_blocked"

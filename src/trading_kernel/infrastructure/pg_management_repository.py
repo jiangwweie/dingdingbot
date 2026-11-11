@@ -29,6 +29,41 @@ class PostgresManagementRepository(PostgresManagementFeed):
         super().__init__(connection)
         self.new_evidence: dict[str, list[OrderEvidence]] = {}
 
+    async def verified_exit_references(self, ticket_id: str, *, entry_time_ms: int, exit_time_ms: int,
+        system_references: tuple) -> tuple:
+        from src.trading_kernel.domain.order_attribution import (
+            ExternalExitOrderReference,
+        )
+        from src.trading_kernel.domain.trade_management import ManagementMode
+
+        ticket = (await self.c.execute(sa.select(trade_tickets).where(trade_tickets.c.ticket_id == ticket_id))).mappings().one()
+        mode = await self.c.scalar(sa.select(trade_aggregates.c.management_mode).where(trade_aggregates.c.ticket_id == ticket_id))
+        if mode != ManagementMode.MANUAL.value:
+            return ()
+        rows = (await self.c.execute(sa.select(evidence.c.payload).where(evidence.c.ticket_id == ticket_id,
+            evidence.c.observed_at_ms >= entry_time_ms).order_by(evidence.c.observed_at_ms.desc()).limit(257))).scalars().all()
+        if len(rows) > 256:
+            raise ValueError("external exit evidence exceeds bounded review scope")
+        own = {(r.namespace.value,r.submitted_exchange_order_id) for r in system_references}
+        selected = {}
+        for raw in rows:
+            item = OrderEvidence.model_validate(raw)
+            terms = item.terms
+            key = (terms.order_namespace,terms.exchange_order_id)
+            if key in own or key in selected or not terms.reduces_position:
+                continue
+            if (terms.identity[:4] != (ticket['venue_id'],ticket['account_id'],ticket['exchange_instrument_id'],ticket['position_side'])
+                or not item.coverage_complete or item.known_command_outcome_pending
+                or item.created_at_ms is None
+                or not entry_time_ms <= item.created_at_ms <= item.exchange_event_at_ms <= exit_time_ms):
+                continue
+            if terms.order_namespace == 'conditional' and terms.order_type not in {'STOP_MARKET','TAKE_PROFIT_MARKET'}:
+                continue
+            selected[key] = ExternalExitOrderReference(ticket_id=ticket_id,
+                exposure_episode_id=ticket['exposure_episode_id'], evidence_id=item.evidence_id,
+                terms=terms,order_created_at_ms=item.created_at_ms,evidence_at_ms=item.exchange_event_at_ms)
+        return tuple(selected[key] for key in sorted(selected))
+
     async def has_evidence(self, ticket_id, evidence_id):
         return bool(
             await self.c.scalar(

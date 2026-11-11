@@ -7,7 +7,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exposure_family import ExposureFamily
@@ -167,6 +167,7 @@ class AdmissionPortfolioUsage(BaseModel):
 class AdmissionDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    failure_basis: dict[str, JsonValue] | None = None
     admission_decision_id: str
     signal_event_id: str
     exposure_episode_id: str
@@ -197,6 +198,14 @@ class AdmissionDecision(BaseModel):
     decision_digest: str
     decided_at_ms: int
     selection_authority_id: str | None = None
+
+    @field_validator("failure_basis")
+    @classmethod
+    def _bounded_failure_basis(cls, value):
+        if value is None:
+            return None
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        return FailureDiagnostic(stage="admission",subject_id="basis",reason_code="basis",basis=value,occurred_at_ms=1).basis
 
     @field_validator(
         "admission_decision_id",
@@ -324,6 +333,7 @@ def freeze_admission_decision(
     ticket_id: str | None,
     entry_admission_snapshot_digest: str | None,
     decided_at_ms: int,
+    failure_basis: dict[str, JsonValue] | None = None,
 ) -> AdmissionDecision:
     try:
         candidate_rank = (
@@ -364,6 +374,8 @@ def freeze_admission_decision(
         "decision_digest": "sha256:" + "0" * 64,
         "decided_at_ms": decided_at_ms,
     }
+    if failure_basis is not None:
+        payload["failure_basis"] = failure_basis
     decision_digest = canonical_digest(_decision_digest_payload(payload))
     payload["decision_digest"] = decision_digest
     payload["admission_decision_id"] = (
@@ -392,5 +404,5 @@ def _decision_digest_payload(payload: dict[str, object]) -> dict[str, object]:
         key: value
         for key, value in payload.items()
         if key not in {"admission_decision_id", "decision_digest"}
-        and not (key == "selection_authority_id" and value is None)
+        and not (key in {"selection_authority_id", "failure_basis"} and value is None)
     }

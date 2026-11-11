@@ -1667,10 +1667,14 @@ def _without_app_management_columns(
             )
             and not (name == "brc_instrument_rules_current" and c == "exit_order_rules")
             and not (name == "brc_exchange_commands" and c == "management_revision")
+            and not (name == "brc_admission_decisions" and c == "failure_basis")
+            and not (name == "brc_monitor_current" and c in {"first_wait_at_ms","last_checked_at_ms","escalated_at_ms","resolved_at_ms"})
         )
         for name, columns in tables.items()
         if name
         not in {
+            "brc_failure_diagnostics",
+            "brc_review_enrichment_requests",
             "brc_post_fill_exit_plans",
             "brc_exit_configurations",
             "brc_exit_configuration_current",
@@ -3126,6 +3130,8 @@ async def _generic_owner_recovery_preservation_manifest(
     count=0
     for name, table in sorted(metadata.tables.items()):
         if name in {
+            "brc_failure_diagnostics",
+            "brc_review_enrichment_requests",
             "brc_post_fill_exit_plans",
             "brc_exit_configurations",
             "brc_exit_configuration_current",

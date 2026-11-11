@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +16,9 @@ class ManualExposureAssessment(BaseModel):
     risk_at_stop: Decimal | None
     reason: str | None
     entry_blocked: bool
+    protection_status: Literal["full", "partial", "none", "unknown"] = "unknown"
+    stop_present: bool = False
+    declared_stop_quantity: Decimal | None = None
 
 
 def assess_manual_exposure(
@@ -28,12 +32,19 @@ def assess_manual_exposure(
     facts_complete: bool,
     fee_rate: Decimal = Decimal(0),
 ) -> ManualExposureAssessment:
+    stops = tuple(o for o in orders if o.position_side == position_side
+        and o.reduces_position and o.order_type == "STOP_MARKET" and o.trigger_price is not None)
+
     def blocked(reason, covered=Decimal(0)):
         return ManualExposureAssessment(
             protected_quantity=covered,
             risk_at_stop=None,
             reason=reason,
             entry_blocked=True,
+            protection_status="partial" if covered > 0 else "none"
+            if facts_complete and not stops else "unknown",
+            stop_present=bool(stops),
+            declared_stop_quantity=stops[0].quantity if len(stops) == 1 else None,
         )
 
     if not facts_complete:
@@ -55,15 +66,8 @@ def assess_manual_exposure(
             risk_at_stop=Decimal(0),
             reason=None,
             entry_blocked=False,
+            protection_status="none",
         )
-    stops = tuple(
-        o
-        for o in orders
-        if o.position_side == position_side
-        and o.reduces_position
-        and o.order_type == "STOP_MARKET"
-        and o.trigger_price is not None
-    )
     # Do not add overlapping full-position stops and claim excess coverage.
     if len(stops) != 1:
         return blocked("manual_stop_allocation_unproven")
@@ -88,4 +92,30 @@ def assess_manual_exposure(
         risk_at_stop=max(actual, floor),
         reason=None,
         entry_blocked=False,
+        protection_status="full",
+        stop_present=True,
+        declared_stop_quantity=quantity if stop.close_position else stop.quantity,
     )
+
+
+class ManualProtectionView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    status: Literal["full", "partial", "none", "unknown"]
+    stop_present: bool
+    reason: str | None
+
+
+def manual_protection_view(*, reason: str | None, orders: tuple[dict, ...]) -> ManualProtectionView:
+    from src.trading_kernel.domain.position import VenueOrderSnapshot
+
+    stops = tuple(o for o in (VenueOrderSnapshot.model_validate(raw) for raw in orders)
+        if o.terms is not None and o.terms.reduces_position
+        and o.terms.order_type == 'STOP_MARKET' and o.remaining_quantity != 0)
+    status: Literal['full','partial','none','unknown'] = 'unknown'
+    if reason is None:
+        status = 'full' if stops else 'unknown'
+    elif reason == 'manual_stop_coverage_incomplete':
+        status = 'partial'
+    elif reason == 'manual_stop_allocation_unproven' and not stops:
+        status = 'none'
+    return ManualProtectionView(status=status,stop_present=bool(stops),reason=reason)

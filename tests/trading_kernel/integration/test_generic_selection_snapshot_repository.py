@@ -247,7 +247,7 @@ async def local_soak_guard():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("soak_mode", ["four_processes", "idle_static_four"])
 async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_path: Path, soak_mode: str, local_soak_guard) -> None:
-    """A legal Static close during queue wait cannot become a second grant."""
+    """Due Dynamic handover fences the old Static close across four bounded Workers."""
     import os
     import time
 
@@ -351,8 +351,8 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
         pytest.fail(f"resource Worker did not advance; last={seen[-10:]}")
     async def all_snapshots():
         return len({r["component_id"] for r in seen if r["status"]=="snapshot_ready"})==4
-    async def consumed_close_reported():
-        return any(r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED" for r in seen)
+    async def old_static_close_is_gated():
+        return any(r.get("observation_status")=="invalid" and r.get("detail") in {"selection_activation_pending_current_close","selection_entry_vacuum_open","selection_entry_vacuum"} for r in seen)
     async def all_activated():
         async with database.connect() as connection:
             return await connection.scalar(sa.text("SELECT count(*) FROM brc_strategy_selection_control_current WHERE strategy_group_id=ANY(:groups) AND selection_mode='dynamic_selection' AND pending_selection_mode IS NULL"),
@@ -385,7 +385,7 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
         assert process.stdin is not None
         process.stdin.write(f"{cutoff+HOUR+8}\n".encode())
         await process.stdin.drain()
-        await until(consumed_close_reported)
+        await until(old_static_close_is_gated)
         assert seen[0]["cpu_cores"]=="1" and seen[0]["memory_limit_bytes"]==1024**3
         assert seen[0]["workload_digest"]==tape.semantic_digest
         if soak_mode=="four_processes":
@@ -395,27 +395,18 @@ async def test_resource_constrained_resident_soak(database: AsyncEngine, tmp_pat
             assert all(r["worker_role"]=="observation" for r in seen if r["component_id"].startswith(("selection:","materialization:","facts:")))
             resource_rows = [r for r in seen if r["component_id"]=="resource"]
             assert resource_rows and max(r["memory_bytes"] for r in resource_rows)<1024**3
-        rejected = next(r for r in seen if r.get("reason_code")=="GENERIC_CURRENT_CLOSE_ALREADY_CONSUMED")
-        rejected_group = rejected["component_id"].split(":",1)[1]
-        rejected_spec = tape.spec(rejected_group)
-        async with PostgresKernelUnitOfWork(database) as uow:
-            current = await uow.strategy_universes.get_current(rejected_spec.event_spec_id)
-            control = await uow.instrument_selection.get_selection_control(rejected_group)
-            assert current.universe_version_id==baselines[rejected_group]
-            assert control.selection_mode.value=="static_baseline" and control.pending_selection_mode.value=="dynamic_selection"
-            assert await uow.instrument_selection.get_current_generic_authority(rejected_spec.selection_spec_id) is None
-            vacuum = await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=rejected_group, selection_spec_id=rejected_spec.selection_spec_id)
-            assert vacuum.blocks_new_entry
-            generation = await uow.instrument_selection.get_generic_materialization_generation(vacuum.source_generation_id)
-            targets = await uow.strategy_universes.get_generation_universe_targets(generation.materialization_generation_id)
-            assert generation.lifecycle_state.value=="STAGED" and targets[0].lifecycle_state.value=="staged"
-            assert len(await uow.strategy_universes.get_members(targets[0].universe_version_id))>=12
-            assert generation.fenced_at_ms==vacuum.fenced_at_ms
-            assert rejected["clock_ms"]<generation.fenced_at_ms+rejected_spec.materialization_timeout_ms
+        gated = next(r for r in seen if r.get("observation_status")=="invalid" and r.get("detail") in {
+            "selection_activation_pending_current_close","selection_entry_vacuum_open","selection_entry_vacuum"})
         async with database.connect() as connection:
+            scope=(await connection.execute(sa.text("SELECT strategy_group_id,universe_version_id,event_spec_id,exchange_instrument_id FROM brc_runtime_scopes_current WHERE runtime_scope_id=:id"),
+                {"id":gated["runtime_scope_id"]})).mappings().one()
+            assert scope["universe_version_id"]==baselines[scope["strategy_group_id"]]
+            last=await connection.scalar(sa.text("SELECT last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
+                {"event":scope["event_spec_id"],"member":scope["exchange_instrument_id"]})
+            assert last is None or last<cutoff+HOUR
             assert await connection.scalar(sa.text("SELECT count(*) FROM brc_exchange_commands"))==0
-            assert await connection.scalar(sa.text("SELECT last_observed_at_ms FROM brc_exposure_episode_current WHERE event_spec_id=:event AND exchange_instrument_id=:member"),
-                {"event":rejected_spec.event_spec_id,"member":rejected_spec.candidate_ids[0]})==cutoff+HOUR
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_trade_tickets"))==0
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_runtime_incidents WHERE status='open'"))==0
         samples = [r for r in seen if r["component_id"]=="resource"]
         source_calls = [r for r in seen if r["component_id"]=="source"]
         assert samples and max(r["memory_bytes"] for r in samples)<1024**3

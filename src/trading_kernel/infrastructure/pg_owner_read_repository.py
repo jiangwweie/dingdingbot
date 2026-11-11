@@ -3471,6 +3471,7 @@ def _signal_joined_select() -> sa.Select[Any]:
         admission_decisions.c.decision_status,
         admission_decisions.c.first_blocker,
         admission_decisions.c.binding_constraint,
+        admission_decisions.c.failure_basis,
         admission_decisions.c.ticket_id,
         admission_decisions.c.decided_at_ms,
         shadow_outcomes_current.c.shadow_outcome_id,
@@ -3735,6 +3736,7 @@ def _signal_item_facts(
             if decision is None or decision["ticket_id"] is None
             else str(decision["ticket_id"])
         ),
+        failure_basis=None if decision is None else decision["failure_basis"],
         decided_at_ms=decided_at_ms,
         shadow_outcome_id=shadow_outcome_id,
         shadow_source_kind=cast(

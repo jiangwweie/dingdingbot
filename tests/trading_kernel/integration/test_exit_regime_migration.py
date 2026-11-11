@@ -67,7 +67,7 @@ async def test_exact_manual_forward_upgrade_preserves_all_source_rows_and_owner_
                 .all()
                 for n in names
             }
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", "0020_manual_exit_regime_v1")
         async with PostgresKernelUnitOfWork(engine) as uow:
             await deploy_compatible_upgrade_identity(
                 uow,

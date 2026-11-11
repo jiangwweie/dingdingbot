@@ -22,7 +22,8 @@ TradingKernelSchemaRevision = Literal[
     "0018_notice_outbox_v1",
     "0019_management_evidence_v2",
     "0020_manual_exit_regime_v1",
+    "0021_manual_operational_closure",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0020_manual_exit_regime_v1"
+    "0021_manual_operational_closure"
 )

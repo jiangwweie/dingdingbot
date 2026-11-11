@@ -154,6 +154,7 @@ class _FakeUnitOfWork:
     def __init__(self, state: _WorkerState) -> None:
         self.directional_risk = SimpleNamespace(next_pending_budget=AsyncMock(return_value=None), next_resolved_send=AsyncMock(return_value=None))
         self.monitors = _Monitors()
+        self.reviews = SimpleNamespace(get_for_ticket=AsyncMock(return_value=SimpleNamespace(metrics={"economics_completeness":"external_exit_unavailable"})))
         self.aggregates = state.aggregates
         self.exchange_commands = state.commands
         self.events = state.events

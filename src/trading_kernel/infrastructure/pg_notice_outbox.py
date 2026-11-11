@@ -49,7 +49,7 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
         previous is not None
         and previous["owner_status"] == MonitorOwnerStatus.NEEDS_INTERVENTION
     )
-    recovered = was_failed and state.owner_status in {
+    recovered = (was_failed or previous is not None and previous["summary"] == "trade_closed_economics_incomplete" and state.summary == "review_economics_completed") and state.owner_status in {
         MonitorOwnerStatus.COMPLETED,
         MonitorOwnerStatus.RUNNING,
     }
@@ -66,6 +66,8 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
             f"【首尔】{subject}{'异常待处理' if failed else '检查恢复'}｜{clock:%m-%d %H:%M}",
             "系统已记录异常，需要检查控制台"
             if failed
+            else "盈亏核算已补齐" if state.summary == "review_economics_completed"
+            else "交易已收尾，盈亏数据仍待补齐" if state.summary == "trade_closed_economics_incomplete"
             else "该项检查已恢复；其他门槛仍独立生效",
             "当前持仓与保护以控制台和 App 为准",
             "https://manual.jiaoyingpan.cloud/trading/",

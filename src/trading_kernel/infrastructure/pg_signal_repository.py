@@ -118,6 +118,32 @@ class PostgresSignalRepository:
     def __init__(self, connection: AsyncConnection) -> None:
         self._connection = connection
 
+    async def record_operational_failure(self, diagnostic) -> None:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        from src.trading_kernel.infrastructure.pg_models import (
+            failure_diagnostics,
+            instrument_certification_current,
+        )
+        from src.trading_kernel.infrastructure.pg_operational_evidence import (
+            record_failure,
+        )
+        if not isinstance(diagnostic, FailureDiagnostic):
+            raise TypeError("typed operational failure required")
+        basis=dict(diagnostic.basis)
+        instrument=basis.get('instrument')
+        runtime_profile=basis.get('runtime_profile_id')
+        if isinstance(instrument,str) and isinstance(runtime_profile,str):
+            current=(await self._connection.execute(sa.select(instrument_certification_current.c.blocker_code,
+                instrument_certification_current.c.facts_digest).where(
+                instrument_certification_current.c.exchange_instrument_id==instrument,
+                instrument_certification_current.c.runtime_profile_id==runtime_profile))).mappings().one_or_none()
+            if current is not None and current['blocker_code'] is not None:
+                basis['upstream_certification']=dict(current)
+                basis['cause_diagnostic_id']=await self._connection.scalar(sa.select(failure_diagnostics.c.diagnostic_id).where(
+                    failure_diagnostics.c.subject_id==runtime_profile+':'+instrument,
+                    failure_diagnostics.c.stage=='certification').order_by(failure_diagnostics.c.occurred_at_ms.desc()).limit(1))
+        await record_failure(self._connection, diagnostic.model_copy(update={'basis':basis}))
+
     async def add(self, signal: StrategySignal) -> bool:
         result = await self._connection.execute(
             pg_insert(signal_events)
@@ -960,6 +986,14 @@ class PostgresSignalRepository:
                 },
             )
         )
+        if first_blocker is not None and signal_event_id is not None and readiness_state == "blocked":
+            from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+            from src.trading_kernel.infrastructure.pg_operational_evidence import (
+                record_failure,
+            )
+            await record_failure(self._connection, FailureDiagnostic(stage='signal_ingest' if signal_event_id else 'observation',
+                subject_id=runtime_scope_id, reason_code=first_blocker,
+                basis={'signal_event_id':signal_event_id,'facts':fact_summary}, occurred_at_ms=updated_at_ms))
         persisted = await self.get_readiness(runtime_scope_id)
         if persisted is None:
             raise RuntimeError("readiness upsert did not persist current state")

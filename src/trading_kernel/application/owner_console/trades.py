@@ -292,7 +292,11 @@ def build_trade_item(facts: TradeItemFacts) -> TradeListItem:
         attention_items=tuple(dict.fromkeys((*attention_items,
             "人工管理，现存订单由 Owner 在 App 处理" if facts.management_mode=="MANUAL" else "订单归属待核实，自动处置暂停",
             *((facts.manual_risk_reason,) if facts.manual_risk_reason else ()))))
+    from src.trading_kernel.domain.manual_position import manual_protection_view
+    manual_protection = manual_protection_view(reason=facts.manual_risk_reason,orders=facts.management_orders)
     return TradeListItem(
+        protection_status=manual_protection.status if facts.management_mode == "MANUAL" else "unknown",
+        stop_present=manual_protection.stop_present,
         ticket_id=facts.ticket_id,
         strategy_group_id=facts.strategy_group_id,
         event_spec_id=facts.event_spec_id,

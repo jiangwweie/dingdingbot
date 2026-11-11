@@ -62,6 +62,7 @@ class NoticeSnapshot(BaseModel):
     price_tick: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
     stops: tuple[StopView, ...] = ()
     protection: Literal["full", "partial", "none", "unknown"]
+    protection_reason: str | None = None
     protected_quantity: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     strategy: str
     strategy_semantics: str

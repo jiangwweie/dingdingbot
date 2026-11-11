@@ -88,6 +88,8 @@ from src.trading_kernel.domain.instrument_identity import (
     to_exchange_instrument_id,
 )
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
+    OrderNamespace,
     OrderRole,
     ResolvedOrderIdentity,
 )
@@ -680,7 +682,8 @@ class CcxtVenueAdapter:
                     )
                 if projected_quantity > quantity:
                     raise InstrumentCertificationSnapshotContradiction(
-                        "projected_position_exceeds_venue"
+                        "projected_position_exceeds_venue", basis={"position_side":position_side,
+                            "projected_quantity":str(projected_quantity),"venue_quantity":str(quantity)}
                     )
                 unowned_position_qty += quantity - projected_quantity
             elif projected_quantity is not None:
@@ -1319,6 +1322,8 @@ class CcxtVenueAdapter:
         for resolved in resolved_references:
             if resolved.actual_order_id is None:
                 continue
+            if isinstance(resolved.reference, ExternalExitOrderReference):
+                await _verify_external_exit_order(exchange, symbol, resolved.reference)
             rows = _require_list(
                 await _call_raw_exchange(
                     exchange.fetch_my_trades,
@@ -1329,6 +1334,8 @@ class CcxtVenueAdapter:
                 ),
                 name="review fills",
             )
+            if len(rows) >= 100:
+                raise RuntimeError("review fills truncated")
             for row in rows:
                 row_order_id = _review_row_order_id(row)
                 if row_order_id != resolved.actual_order_id:
@@ -1345,11 +1352,15 @@ class CcxtVenueAdapter:
                     exit_time_ms=request.exit_time_ms,
                 )
                 existing = fills_by_trade_id.get(fill.exchange_trade_id)
-                if existing is not None and existing != fill:
-                    raise RuntimeError(
-                        "venue returned contradictory duplicate review fill"
-                    )
+                if existing is not None:
+                    financial_fields = {"command_id", "external_evidence_id"}
+                    if existing.model_dump(mode="python", exclude=financial_fields) != fill.model_dump(mode="python", exclude=financial_fields):
+                        raise RuntimeError("venue returned contradictory duplicate review fill")
+                    if existing.command_id is not None or fill.command_id is None:
+                        continue
                 fills_by_trade_id[fill.exchange_trade_id] = fill
+                if len(fills_by_trade_id)>1000:
+                    raise RuntimeError("review total trade bound exceeded")
 
         ordered_fills = tuple(
             sorted(
@@ -2949,6 +2960,11 @@ async def _review_fill(
     ).strip().lower()
     if _position_side_literal(raw_position_side) != position_side:
         raise RuntimeError("review fill position side differs from Ticket")
+    if isinstance(resolved.reference, ExternalExitOrderReference):
+        actual_side=str(value.get("side") or raw_info.get("side") or "").lower()
+        if actual_side != resolved.reference.terms.side:
+            raise RuntimeError("external exit trade side differs from exact reducing order")
+
     trade_id = str(
         value.get("id")
         or raw_info.get("tradeId")
@@ -2984,6 +3000,7 @@ async def _review_fill(
         exchange_trade_id=trade_id,
         exchange_order_id=exchange_order_id,
         command_id=resolved.reference.command_id,
+        external_evidence_id=resolved.reference.evidence_id if isinstance(resolved.reference, ExternalExitOrderReference) else None,
         role=resolved.reference.role,
         quantity=quantity,
         price=price,
@@ -3051,6 +3068,8 @@ async def _funding_quote(
         ),
         name="funding income",
     )
+    if len(rows) >= 1000:
+        return None, "funding_response_truncated"
     funding_by_id: dict[str, tuple[Decimal, int]] = {}
     for value in rows:
         if not isinstance(value, Mapping):
@@ -3318,3 +3337,23 @@ def _exit_order_rules(
         )
     except (KeyError, ValueError, ArithmeticError):
         return None
+
+
+async def _verify_external_exit_order(exchange, symbol: str, reference: ExternalExitOrderReference) -> None:
+    if reference.namespace is OrderNamespace.CONDITIONAL:
+        # Exact parent/actual-child identity and quantity are already checked by
+        # resolve_binance_order_identity; trade rows still verify side and window.
+        return
+    row = _require_mapping(await _call_raw_exchange(exchange.fetch_order,
+        reference.submitted_exchange_order_id, symbol, {"conditional": False}), name="external exit order")
+    raw = row.get("info")
+    info = raw if isinstance(raw, Mapping) else {}
+    terms = reference.terms
+    if (str(row.get("id") or info.get("orderId")) != terms.exchange_order_id
+        or str(row.get("symbol") or "") != symbol
+        or str(row.get("side") or info.get("side") or "").lower() != terms.side
+        or str(row.get("clientOrderId") or info.get("clientOrderId") or "") != (terms.client_order_id or "")
+        or str(info.get("positionSide") or "").lower() != terms.position_side
+        or int(str(row.get("timestamp") or info.get("time") or 0)) != reference.order_created_at_ms
+        or Decimal(str(row.get("amount") or info.get("origQty") or 0)) != terms.quantity):
+        raise RuntimeError("external exit order differs from exact Ticket evidence")

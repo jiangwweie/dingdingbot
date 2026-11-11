@@ -232,7 +232,7 @@ def test_strategy_side_limit_rejects_invalid_values(invalid) -> None:
         )
 
 
-@pytest.mark.parametrize(("usage", "expected"), [(Decimal(0), CapacityClaimStatus.CLAIMED), (Decimal(15), CapacityClaimStatus.BUDGET_EXHAUSTED), (Decimal(20), CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED)])
+@pytest.mark.parametrize(("usage", "expected"), [(Decimal(0), CapacityClaimStatus.CLAIMED), (Decimal(15), CapacityClaimStatus.MINIMUM_MATERIALIZATION_UNMET), (Decimal(20), CapacityClaimStatus.DIRECTIONAL_RISK_EXHAUSTED)])
 def test_overlay_shares_direction_usage_and_keeps_minimum_materialization(usage, expected):
     _, decision = _build_decision(directional_risk_at_stop=usage, directional_overlay_limit=Decimal("0.02"))
     assert decision.status is expected
@@ -456,3 +456,14 @@ def _snapshot() -> EntryAdmissionSnapshot:
         observed_at_ms=1_008,
         valid_until_ms=1_020,
     )
+
+
+def test_management_health_refusal_is_not_budget_exhaustion(monkeypatch):
+    from src.trading_kernel.domain.account_entry_health import AccountEntryHealthStatus
+    original = classify_account_entry_health
+    monkeypatch.setattr(__import__(__name__, fromlist=['x']), 'classify_account_entry_health',
+        lambda snapshot, ownership: original(snapshot, ownership).model_copy(update={
+            'status': AccountEntryHealthStatus.MANAGEMENT_RISK_UNAVAILABLE}))
+    _, decision = _build_decision()
+    assert decision.status.value == 'account_health_blocked'
+    assert decision.refusal_reason == 'manual_management_risk_unavailable'

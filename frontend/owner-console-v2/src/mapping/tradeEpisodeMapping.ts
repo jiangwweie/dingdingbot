@@ -1,3 +1,4 @@
+import {manualProtectionLabel} from './tradeTruth';
 import { formatPnlWithGrossFallback, formatReviewExitReason } from './reviewMapping.ts';
 import { MoneyDecimal, protectionFact, terminalFact } from './tradeTruth.ts';
 import type { TradeListItem, TradeEpisode, MoneyMetric, TradesSummaryMetrics } from '../types/trades.ts';
@@ -117,7 +118,7 @@ export function mapTradeListItemToEpisode(
   }
 
   // Protection state
-  const protection = item.management_mode === 'MANUAL' ? {confirmed:false,label:item.manual_risk_reason ? '人工管理 · 保护待核实' : '人工管理 · 以 App 当前订单为准'} : item.management_mode === 'REVIEW_REQUIRED' ? {confirmed:false,label:'接管待核实 · 自动处置暂停'} : protectionFact(item.aggregate_status);
+  const protection = item.management_mode === 'MANUAL' ? {confirmed:false,label:manualProtectionLabel(item.manual_risk_reason,item.stop_present,item.protection_status)} : item.management_mode === 'REVIEW_REQUIRED' ? {confirmed:false,label:'接管待核实 · 自动处置暂停'} : protectionFact(item.aggregate_status);
   const isProtected = protection.confirmed;
   const protectionState = protection.label;
 

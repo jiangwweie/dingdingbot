@@ -545,7 +545,7 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
             ),
         )
 
-    assert result.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert result.status is IssueTicketStatus.MARGIN_EXHAUSTED
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         decision = await uow.admission_decisions.get_for_signal(
             signal.signal_event_id
@@ -553,11 +553,15 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
         readiness = await uow.signals.get_readiness(signal.runtime_scope_id)
     assert decision is not None
     assert decision.decision_status.value == "rejected"
-    assert decision.first_blocker == "budget_exhausted"
+    assert decision.first_blocker == "margin_exhausted"
+    assert decision.failure_basis['source_reason_code'] == 'margin_exhausted'
+    assert decision.failure_basis['account_facts']['available_margin'] == '0'
+    assert decision.failure_basis['account_health']['status'] == 'healthy'
+    assert decision.failure_basis['instrument_rules']['projection_version'] > 0
     assert decision.capacity_claim_id is None
     assert decision.ticket_id is None
     assert readiness is not None
-    assert readiness.first_blocker == "budget_exhausted"
+    assert readiness.first_blocker == "margin_exhausted"
     async with issue_engine.connect() as connection:
         assert await connection.scalar(
             sa.select(sa.func.count()).select_from(capacity_claims)
@@ -916,7 +920,7 @@ async def test_adm_003_reprocessing_signal_keeps_one_final_decision(
     async with PostgresKernelUnitOfWork(issue_engine) as uow:
         second = await issue_ready_signal(uow, request)
 
-    assert first.status is IssueTicketStatus.BUDGET_EXHAUSTED
+    assert first.status is IssueTicketStatus.MARGIN_EXHAUSTED
     assert second.status is IssueTicketStatus.NO_READY_SIGNAL
     async with issue_engine.connect() as connection:
         assert await connection.scalar(

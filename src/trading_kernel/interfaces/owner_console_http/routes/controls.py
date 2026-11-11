@@ -7,7 +7,7 @@ from typing import Literal
 
 import sqlalchemy as sa
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_serializer
 
 from src.trading_kernel.application.owner_control import (
     ControlMutationRequest,
@@ -1386,6 +1386,9 @@ from src.trading_kernel.domain.exit_execution import PostFillExitPlan
 
 
 class TicketExitPlanView(BaseModel):
+    protection_status: str = "unknown"
+    stop_present: bool = False
+    protection_reason: str | None = None
     model_config = ConfigDict(frozen=True, extra="forbid")
     ticket_id: str
     management_mode: Literal["AUTO", "MANUAL", "REVIEW_REQUIRED"]
@@ -1412,7 +1415,11 @@ async def read_ticket_exit_plan(ticket_id: str, request: Request) -> TicketExitP
             or domain.account_id != settings.account_id
         ):
             raise HTTPException(status_code=404, detail="ticket_not_found")
+        from src.trading_kernel.domain.manual_position import manual_protection_view
+        view = manual_protection_view(reason=aggregate.manual_risk_reason,orders=aggregate.management_orders)
         return TicketExitPlanView(
+            protection_status=view.status if aggregate.management_mode.value == "MANUAL" else "unknown",
+            stop_present=view.stop_present,protection_reason=view.reason,
             ticket_id=ticket_id,
             management_mode=aggregate.management_mode.value,
             aggregate_status=aggregate.status.value,
@@ -1537,3 +1544,73 @@ async def preview_exit_sizing(body: ExitSizingBody, request: Request) -> ExitSiz
         rules_observed_at_ms=rules.exit_order_rules.observed_at_ms,
         rules_valid_until_ms=rules.exit_order_rules.valid_until_ms,
     )
+
+
+class ReviewEnrichmentApplyBody(ControlWriteBody):
+    request_id: str = Field(min_length=1,max_length=160)
+    approved_preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+@router.post('/controls/review-enrichment/{ticket_id}/request')
+async def request_review_enrichment_route(ticket_id: str, request: Request) -> dict[str, str]:
+    from src.trading_kernel.application.review_enrichment import (
+        request_review_enrichment,
+    )
+
+    _validate_write_request(request)
+    settings=get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        aggregate=await uow.aggregates.get(ticket_id)
+        if aggregate is None or aggregate.identity.netting_domain.account_id!=settings.account_id:
+            raise HTTPException(status_code=404,detail='ticket_not_found')
+        return {'request_id':await request_review_enrichment(uow,ticket_id=ticket_id,now_ms=get_clock_ms(request))}
+
+
+@router.get('/controls/review-enrichment/requests/{request_id}')
+async def review_enrichment_preview_route(request_id: str, request: Request) -> dict:
+    settings=get_settings(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        row=await uow.reviews.get_enrichment(request_id)
+        if row is None:
+            raise HTTPException(status_code=404,detail='request_not_found')
+        aggregate=await uow.aggregates.get(row.ticket_id)
+        if aggregate is None or aggregate.identity.netting_domain.account_id!=settings.account_id:
+            raise HTTPException(status_code=404,detail='request_not_found')
+        return row.model_dump(mode="json")
+
+
+@router.post('/controls/review-enrichment/apply')
+async def apply_review_enrichment_route(body: ReviewEnrichmentApplyBody, request: Request) -> dict[str,str]:
+    from src.trading_kernel.application.owner_control import (
+        _authorization,
+        _require_matching_authorization,
+    )
+    _validate_write_request(request)
+    await _require_step_up(body,request)
+    settings=get_settings(request)
+    now=get_clock_ms(request)
+    mutation=ControlMutationRequest(expected_version=body.expected_version,reason=body.reason,
+        idempotency_key=body.idempotency_key,owner_identity=settings.auth.username,now_ms=now)
+    scope: dict[str, JsonValue]={'product_id':'brc-app-manual-v1','account_id':settings.account_id,
+        'request_id':body.request_id,'preview_digest':body.approved_preview_digest}
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
+        row=await uow.reviews.get_enrichment(body.request_id,for_update=True)
+        if row is None:
+            raise OwnerControlBlocked('review_enrichment_request_missing')
+        aggregate=await uow.aggregates.get(row.ticket_id)
+        if aggregate is None or aggregate.identity.netting_domain.account_id!=settings.account_id:
+            raise OwnerControlBlocked('review_enrichment_account_mismatch')
+        prior=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
+        if prior is None:
+            current=await uow.reviews.get_for_ticket(row.ticket_id)
+            if current is None or current.revision!=body.expected_version:
+                raise OwnerControlConflict('review_revision_changed')
+            authorization=_authorization(purpose='review_revise',request=mutation,
+                authentication_strength='totp_step_up',target_scope=scope)
+            await uow.owner_controls.add_authorization(authorization)
+        else:
+            _require_matching_authorization(prior,purpose='review_revise',request=mutation,target_scope=scope)
+            authorization=prior
+        await uow.reviews.approve_enrichment(body.request_id,digest=body.approved_preview_digest,
+            authorization_id=authorization.authorization_id,now_ms=now)
+        return {'request_id':body.request_id,'status':'approved'}

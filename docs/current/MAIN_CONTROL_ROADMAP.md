@@ -37,6 +37,21 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Manual operational closure repairs — local only, 2026-11-11
+
+Owner authorized MA-OPS-CLOSURE-01 implementation, including external exit
+attribution, append-only terminal Review enrichment with genuine Owner approval,
+closure health monotonicity, precise admission reasons, conservative protection
+status and append-only diagnostics. Local focused branch is
+`codex/manual-operational-closure-v1`; schema candidate is
+`0021_manual_operational_closure`. The prior decimal semantics repair and
+MA50／TP1 implementation are included. Exact final candidate certification is
+required. No production deployment, policy activation, accounting revision,
+service operation or exchange mutation is authorized by this local status.
+Owner explicitly requires confirmation before deployment and production backfill.
+
+See [implementation evidence](../superpowers/plans/2026-11-11-manual-operational-closure-implementation-evidence.md).
+
 ### Manual MA50／configurable TP1 implementation — local only, 2026-11-11
 
 Owner authorized implementation of MA-EXIT-REGIME-01. The focused local branch

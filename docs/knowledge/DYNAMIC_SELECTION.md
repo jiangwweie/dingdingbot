@@ -26,7 +26,7 @@
 | MI | `MI_POSITIVE_IMPULSE_RECENCY_V0` | 16 / 16 | 1h | 13 bars |
 | BRF2 | `BRF2_RESIDUAL_EXTENSION_V0` | 16 / 16 | 4h | 73 bars |
 
-1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L248) 先检查安装、策略控制、模式、epoch 和当期是否到时。
+1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L277) 先检查安装、策略控制、模式、epoch 和当期是否到时。
 2. [run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106) 领取 Job，事务外读取来源，使用同一 cutoff 的完整窗口和资格事实。
 3. [generic_selection_core](../../src/trading_kernel/domain/generic_selection_core.py) 校验无缺口、无未来 candle、来源身份一致，按 Decimal 数学计算特征并排序。
 4. 合格且排名在 entry_rank 内可以新入；原成员在 retain_rank 内且仍合格可保留。完整成员决策和输入摘要随 Snapshot 持久化。
