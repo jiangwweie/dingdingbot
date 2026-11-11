@@ -37,7 +37,7 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Seoul combined operational / exit release — installed, Owner paused, 2026-11-11
+### Seoul combined operational / exit release — installed and Owner resumed, 2026-11-11
 
 Owner authorized deployment preparation/progression, genuinely paused ENTRY
 through the Console (Policy9), then manually closed XRP and ADA. Their existing
@@ -47,8 +47,8 @@ reached terminal; no agent exit, cancellation or SQL terminalization was used.
 At **2026-11-11 14:59 Asia/Shanghai**, the official independent installer completed
 `stage-upgrade` / `activate-upgrade` for the exact production identity above.
 This supersedes all earlier local-only and prior source snapshots below.
-**Installation and genuine configuration activation are complete; the official
-promoter has prepared the runtime, while Policy9 still awaits genuine Owner Resume.**
+**Installation, genuine configuration activation, official promoter and genuine
+Owner Resume are complete. Policy10 permits new ENTRY within unchanged gates.**
 
 | Boundary | Direct evidence |
 | --- | --- |
@@ -59,8 +59,8 @@ promoter has prepared the runtime, while Policy9 still awaits genuine Owner Resu
 | Stopped cutover | All five writers stopped, ENTRY disabled and maintenance-fenced; PG/venue rechecked; stopped custom dump verified on host and local with identical SHA256; official preservation comparison PASS |
 | Installed postflight | Runtime/capabilities/schema exact; integrity/flatness/risk-budget/current Entry recovery readonly certification PASS; three safety workers and API active/NRestarts0; Entry inactive, disabled and fenced |
 | Management | New candidate feed ready, persisted/applied0/0 at initial postflight; XRP/ADA remain MANUAL/terminal/qty0; no restoration of AUTO |
-| Owner authority | Policy9/new ENTRY false unchanged; strategy controls/Selection/budget preserved; CPM/SOR-001/US-equity remain paused |
-| Exit activation | Genuine Owner preview/TOTP activated revision1 at16:05:40.875; exact six profiles/three MA50 gates and hashes verified; latest promoter prepared_owner_paused, Policy9 still paused |
+| Owner authority | Genuine Resume/TOTP at16:11:58.177 created Policy10/new ENTRY true; strategy controls/Selection/budget preserved; CPM/SOR-001/US-equity remain paused |
+| Exit activation | Genuine Owner preview/TOTP activated revision1 at16:05:40.875; exact six profiles/three MA50 gates and hashes verified; official promoter and subsequent genuine Resume verified |
 | HTTPS | Public index and both JS/CSS assets byte-identical to certified archive; Console200, unauthenticated overview401 |
 | Historical accounting | Four terminal economics gaps remain honestly unavailable; enrichment queue empty, no production Review revision or backfill approval fabricated |
 
@@ -76,8 +76,8 @@ restorable source dumps are not committed. No Tokyo application mutation, risk
 expansion, test order, synthetic Signal/Ticket, agent exchange write, genuine
 Owner configuration activation or Resume was performed by this installation.
 
-Remaining: genuine Resume/TOTP and readonly postflight. Configuration activation,
-installed Entry-fact probes and official promoter have completed as recorded below.
+Configuration activation, installed Entry-fact probes, official promoter, genuine
+Resume/TOTP and readonly postflight have completed as recorded below.
 Natural AUTO/App and phone notification acceptance remain separate future facts.
 
 #### Configuration-read incident and declared privilege restoration, 2026-11-11
@@ -134,6 +134,34 @@ additional deployment or trading parameter change occurred during verification.
 The local5412950b prevention code remains undeployed. Evidence:
 `.local/manual-exit-activation-20261111/` configuration readback/verification,
 official promotion receipt and final PG/venue/service checks.
+
+#### Genuine Owner Resume and readonly postflight, 2026-11-11
+
+At **16:11:58.177 Asia/Shanghai**, genuine
+`owner_control_entry_resume / entry_resume / totp_step_up` created
+**Policy10/new_entry_submit_enabled=true**. Authorization and policy-event
+timestamps match; certification confirms `owner_entry_resume_authorized=true`.
+This supersedes the earlier Policy9 waiting snapshots above.
+
+Readonly verification through16:12:38 confirms exact installed SHA/schema,
+configuration1 still active, integrity/flatness/current Entry recovery/risk-budget
+and required management-feed checks PASS. All five services are active/running,
+NRestarts0, no maintenance fence; strategy controls, Selection and all non-entry
+policy values remain identical to the paused baseline. Venue independent sides /
+Cross and rules for7 recovery members pass, non-flat/open-order domains0.
+PG active Tickets/positions/unresolved commands/open Incidents0. XRP and ADA
+remain MANUAL/terminal; no accounting revision or restored AUTO authority.
+
+There are0 new Signals and0 new Tickets since this Resume in the bounded sample.
+The16:00 readiness labels `selection_owner_or_policy_blocked` predate Resume and
+are not current refusal proof. No post-Resume worker fault appears in the sampled
+journals; natural next-period admission/new TP/Runner/App/phone acceptance remain
+unclaimed. No further Owner operation is required by this postflight. Agent work
+was read-only and did not deploy the local prevention patch or create venue orders.
+
+Evidence: `.local/manual-exit-activation-20261111/owner-resume-verification.json`,
+`owner-resumed-postflight.json`, `owner-resumed-runtime.json` and
+`owner-resumed-chain.json`.
 
 ### Manual operational closure repairs — implementation provenance, 2026-11-11
 
