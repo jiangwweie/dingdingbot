@@ -37,6 +37,57 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Seoul patrol — natural-stop closure blocked, 2026-11-11 evening
+
+**Latest readonly patrol at20:24–20:35 Asia/Shanghai supersedes the earlier
+healthy17:35 active-position and16:12 restoration snapshots. Production has a
+business-chain P1 defect; host processes and PostgreSQL remain healthy.**
+
+ADA BRF2 Ticket `ticket:19bb86071db5e5715db7ac677c708265` naturally stopped at
+18:30:37.935: original conditional stop1000002727046553 finished with actual
+child70105046824; four exact SHORT exit fills5711+29+4422+3060=13222 at0.1768.
+TP70102602676 remained unfilled and became EXPIRED. Gross realized−27.7662USDT
+is verified; net after BNB fees/funding is not asserted. Venue is currently flat
+with no regular or conditional residual orders; no evidence of Owner intervention.
+
+| Current boundary | Verified state |
+| --- | --- |
+| Installed identity | a2b6f747 /0021 unchanged; local5412950b prevention patch remains undeployed |
+| Aggregate / occupation | position_protected / REVIEW_REQUIRED, reason tp1_terminal_attribution_unknown; stale13222 projected position and one active budget reservation |
+| Risk gate | Policy10 ENTRY flag remains true, but account-capacity lifecycle_facts_contradictory Incident1 and management-risk blocker prevent fresh admission; unknown Commands0 |
+| Actual opportunity impact |19:00 SOR-1H SOL candidate rejected account_health_blocked; source_reason manual_management_risk_unavailable, exact bounded basis persisted |
+| Management feed | ready, persisted/applied13/13; full Ticket history and attribution/current-exposure coverage complete; cannot clear this review reason through current whitelist |
+| Persistent services / PG | all five active/running/NRestarts0, no failed units or kernel warnings; PG deadlocks0, blocked sessions0, no long transaction, normal memory/disk/load |
+| Diagnostics | lifecycle facts_unavailable2765 in bounded sampled journal, including earlier4 transient feed waits; ADA certification quantity contradiction219 and fact-refresh invalid1117 at final PG sample; same upstream failures also retained at observation stage |
+
+Two exact local reproductions prove the defects: installed GET-only lifecycle
+reader raises `current protective market price unavailable` atvenue_adapter1087
+after actual flat; replay of the real pre-review event aggregate plus terminal
+unfilled TP facts enters REVIEW, and exact flat/no-order reconcile returns
+NO_CHANGE with stale13222 unchanged. The original lifecycle HTTP tuple was not
+retained; no claim is made to have reconstructed each concurrent response.
+Real TP expired stream/REST evidence classified with the actual persisted
+baseline both yield NATURAL/venue_status_change, while lifecycle defaults its
+separate terminal-attribution field to unknown. REVIEW currently prevents
+readonly reconciliation and its clear whitelist omits this reason.
+
+Required repair scope: exact natural-exit/TP terminal attribution; flat closure
+without a live-position mark-price prerequisite; proof-gated readonly REVIEW
+closure through the existing settlement/review/budget chain; safe typed lifecycle
+diagnostics and rejected-send bounded basis. Preserve MANUAL irreversibility and
+all venue-mutation gates; do not UPDATE quantities or blanket-clear REVIEW.
+No ordinary stopped-flat upgrade is currently permitted while this Ticket remains
+nonterminal; recovery requires an exact reviewed/certified path rather than
+generalizing an old single-BNB exception. No repair, deployment, service restart,
+policy mutation, Owner action request or venue write was executed in this patrol.
+Owner has no position or residual order to close. Natural terminal acceptance is
+failed/open until repaired; new ENTRY must not be forced through the current gate.
+
+Evidence and bounded fix directions:
+`.local/manual-production-patrol-20261111-2024/巡检报告与修复清单.md`, actual venue
+order/trades, complete source events, safe exact lifecycle error stack, pure local
+review/flat replay, source baseline classification and host/PG/journal samples.
+
 ### Seoul combined operational / exit release — installed and Owner resumed, 2026-11-11
 
 Owner authorized deployment preparation/progression, genuinely paused ENTRY
