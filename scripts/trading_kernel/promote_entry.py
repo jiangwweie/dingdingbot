@@ -81,11 +81,13 @@ def promote_entry(backend: EntryPromotionBackend, *, prepare_owner_resume: bool 
         certification = backend.certification()
     if not _authority_matches(certification, prepare_owner_resume=prepare_owner_resume):
         policy = certification.get("owner_policy")
-        if isinstance(policy, Mapping) and (
+        if not prepare_owner_resume and isinstance(policy, Mapping) and (
             policy.get("new_entry_submit_enabled") is not True
             or certification.get("owner_entry_resume_authorized") is not True
         ):
             raise EntryPromotionBlocked("entry_promotion_gate_failed:owner_entry_resume_required")
+        if certification.get("management_feed_required") and certification.get("management_feed_pass") is not True:
+            raise EntryPromotionBlocked("entry_promotion_gate_failed:management_feed_not_ready")
         raise EntryPromotionBlocked("entry_promotion_gate_failed")
     if not backend.external_state_and_rules_match(certification):
         raise EntryPromotionBlocked("exchange_state_or_rule_gate_failed")

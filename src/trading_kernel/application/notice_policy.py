@@ -78,6 +78,8 @@ def build_notices(
             else None
         )
     )
+    if any(isinstance(e,ev.VerifiedExitClosed) for e in events):
+        residual=0
     if flat:
         kinds.append(
             NoticeKind.RESIDUAL

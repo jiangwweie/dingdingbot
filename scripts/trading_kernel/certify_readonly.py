@@ -721,7 +721,7 @@ async def _certify(
                 )
                 account=await connection.scalar(text("SELECT account_id FROM brc_runtime_profiles WHERE runtime_profile_id='tiny-live-v1'"))
                 management_feed_pass=await PostgresManagementFeed(connection).feed_ready(
-                    f'{MANAGEMENT_PRODUCT_ID}:binance-usdm:{account}',now_ms=effective_now_ms,
+                    f'{MANAGEMENT_PRODUCT_ID}:binance-usdm:{account}',now_ms=(effective_now_ms if now_ms is not None else int(time.time()*1000)),
                     runtime_commit=runtime_identity.get('runtime_commit'))
 
             dynamic_selection_runtime_counts_row = (
