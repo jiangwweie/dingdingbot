@@ -211,4 +211,18 @@ class VerifiedExitClosureProof(BaseModel):
         payload.pop("observed_at_ms")
         payload.pop("valid_until_ms")
         payload["snapshot"].pop("observed_at_ms")
-        return canonical_digest(payload)
+
+        def financial(value):
+            if isinstance(value, dict):
+                return {k: financial(v) for k, v in value.items()}
+            if isinstance(value, (tuple, list)):
+                return [financial(v) for v in value]
+            if isinstance(value, Decimal):
+                return format(value.normalize(), "f")
+            return value
+
+        exact = self.model_dump(mode="python")
+        exact.pop("observed_at_ms")
+        exact.pop("valid_until_ms")
+        exact["snapshot"].pop("observed_at_ms")
+        return canonical_digest(financial(exact))

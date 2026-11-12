@@ -2037,3 +2037,29 @@ async def _reach_cancel_pending(
                 ),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_margin_refusal_persists_exact_fresh_snapshot_and_subconstraint(dispatch_engine):
+    from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
+    class FreshMargin(PreflightFacts):
+        snapshot=None
+        async def read_entry_admission_snapshot(self,request):
+            original=await super().read_entry_admission_snapshot(request)
+            values=original.account_risk_snapshot.model_dump(exclude={'snapshot_digest'})
+            values['available_margin']=Decimal('0.0001')
+            self.snapshot=original.model_copy(update={'account_risk_snapshot':AccountRiskSnapshot.create(**values)})
+            return self.snapshot
+    ticket=_ticket();await _seed_policy(dispatch_engine);await _issue(dispatch_engine,ticket)
+    source=FreshMargin();venue=CountingVenue()
+    result=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(worker_id='entry-dispatcher',now_ms=1100,lease_until_ms=6100,timeout_seconds=1,
+            runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1000),
+        entry_facts_source=source,clock_ms=lambda:1100)
+    assert venue.calls==0
+    async with dispatch_engine.connect() as c:
+        row=(await c.execute(sa.text("SELECT reason_code,basis FROM brc_failure_diagnostics WHERE subject_id=:id AND stage='dispatch_preflight'"),{'id':result.command_id})).mappings().one()
+    assert row['reason_code']=='margin_drift'
+    assert row['basis']['snapshot_digest']==source.snapshot.digest()
+    assert 'available_margin' in row['basis']['margin_constraints']
+    assert row['basis']['available_margin']=='0.0001'

@@ -145,7 +145,9 @@ async def run_natural_exit(args) -> dict:
         for r in rows:
             cert=r['certification'];bound=cert.get('verified_exit_recovery_scope',{})
             if r['enabled'] or r['certified_commit']!=args.commit or r['schema_revision']!=schema or cert.get('product_id')!=PRODUCT_ID or cert.get('runtime_mode')!='verified_exit_recovery_only' or bound.get('ticket_id')!=args.ticket_id:raise ValueError('natural recovery identity or scope differs')
-        return rows[0]['certification']['verified_exit_recovery_scope']
+        exact=rows[0]['certification']['verified_exit_recovery_scope']
+        if any(r['certification'].get('verified_exit_recovery_scope')!=exact for r in rows) or exact.get('target_commit')!=args.commit or exact.get('schema_revision')!=schema:raise ValueError('natural recovery scopes disagree')
+        return exact
     try:
         async with PostgresKernelUnitOfWork(engine) as u:
             bound=await scope(u);a=await u.aggregates.get(args.ticket_id)

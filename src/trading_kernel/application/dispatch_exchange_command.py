@@ -966,8 +966,11 @@ async def _preflight_new_entry_mutation(
             single=risk.total_margin_balance*policy.max_ticket_initial_margin_fraction if policy is not None else Decimal(0)
             gross=max(risk.total_margin_balance*policy.max_gross_initial_margin_utilization-max(risk.total_initial_margin,claim.current_reserved_margin_at_claim),Decimal(0)) if policy is not None else Decimal(0)
             refusal_basis={"stage":"dispatch_preflight","reason_code":decision.status.value,"ticket_id":aggregate.identity.ticket_id,
-                "command_id":command.command_id,"snapshot_digest":snapshot.snapshot_digest if hasattr(snapshot,'snapshot_digest') else claim.entry_admission_snapshot_digest,
+                "command_id":command.command_id,"snapshot_digest":snapshot.digest(),
                 "observed_at_ms":risk.observed_at_ms,"valid_until_ms":risk.valid_until_ms,
+                "policy_version":aggregate.ticket.owner_policy_version,"runtime_commit":request.runtime_commit,"schema_revision":request.schema_revision,
+                "rules_observed_at_ms":rules.observed_at_ms,"rules_valid_until_ms":rules.valid_until_ms,
+                "total_margin_balance":str(risk.total_margin_balance),"total_initial_margin":str(risk.total_initial_margin),
                 "reserved_margin":str(aggregate.ticket.reserved_margin),"ticket_margin_limit":str(single),
                 "available_margin":str(risk.available_margin),"remaining_gross_margin":str(gross),
                 "margin_constraints":[k for k,v in [("ticket_margin",single),("available_margin",risk.available_margin),("gross_margin",gross)] if aggregate.ticket.reserved_margin>v]}

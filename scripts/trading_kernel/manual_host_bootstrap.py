@@ -192,7 +192,7 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
             target=exact['ticket']
             if exact.get('outside_scope',False) or target is None or target['ticket_id']!=recovery_ticket_ids[0] or target['reason']!='tp1_terminal_attribution_unknown' or any(i['ticket_id']!=target['ticket_id'] or i['kind'] not in {'lifecycle_facts_contradictory','lifecycle_facts_unavailable'} for i in exact['incidents']):
                 raise ValueError('natural recovery source or causal incident differs')
-            identity['natural_exit_recovery']={**target,'incident_ids':[i['incident_id'] for i in exact['incidents']]}
+            identity['natural_exit_recovery']={**target,'source_commit':identity['commit'],'schema_revision':identity['schema'],'incident_ids':[i['incident_id'] for i in exact['incidents']]}
     if (
         identity["commit"] != (current / ".brc-runtime-commit").read_text().strip()
         or identity["schema"] != (current / ".brc-schema-revision").read_text().strip()

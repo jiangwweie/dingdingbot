@@ -1533,6 +1533,9 @@ async def deploy_management_recovery_identity(uow: PostgresKernelUnitOfWork,
 async def deploy_verified_exit_recovery_identity(uow: PostgresKernelUnitOfWork,request: RuntimeAuthoritySeedRequest,*,scope: dict) -> RuntimeDeploymentIdentityResult:
     ticket_id=str(scope['ticket_id'])
     c=uow._require_connection()
+    source_commit=await c.scalar(sa.select(schema_metadata.c.metadata_value).where(schema_metadata.c.metadata_key=='runtime_commit'))
+    if scope.get('source_commit',source_commit)!=source_commit or scope.get('schema_revision',request.schema_revision)!=request.schema_revision:
+        raise ValueError('natural recovery source commit or schema differs')
     row=(await c.execute(sa.select(trade_aggregates).where(trade_aggregates.c.ticket_id==ticket_id).with_for_update())).mappings().one()
     if row['version']!=scope['expected_version'] or row['management_revision']!=scope['management_revision'] or row['management_mode']!='REVIEW_REQUIRED' or row['management_reason']!='tp1_terminal_attribution_unknown':
         raise ValueError('natural recovery aggregate scope differs')
