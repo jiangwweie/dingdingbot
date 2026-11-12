@@ -40,7 +40,7 @@
 | 3. 生成并摄取 Signal | [produce_strategy_signal](../../src/trading_kernel/application/produce_strategy_signal.py#L27)、[ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806) | 冻结事实、Signal、readiness；检查 Registry/Scope/Universe/Authority | 重复 Episode、过期、不一致事实、退役策略 |
 | 4. 选择候选 | [run_entry_worker_once](../../src/trading_kernel/interfaces/entry_worker.py#L113) 先处理已有命令，再检查 lane 和候选 | 有界候选排序，读取策略控制和 scope | lane 忙、无候选、策略暂停 |
 | 5. 获取行动时事实 | Entry 在数据库事务之外读取账户、报价、规则及必要产品 session | `EntryAdmissionSnapshot` 与规则 current | 网络失败、身份不符、事实过期 |
-| 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L111) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L53) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
+| 6. 最终准入 | [issue_ready_signal](../../src/trading_kernel/application/issue_ready_signal.py#L111) 再读候选首位和权限；[build_capacity_claim](../../src/trading_kernel/application/build_capacity_claim.py#L57) 定量 | AdmissionDecision；允许时构造冻结 Claim | 排序已变、容量、保护、方向风险、绑定无效 |
 | 7. 原子签发 | [issue_ticket](../../src/trading_kernel/application/issue_ticket.py#L111) 锁 lane、账户占用并重查当前范围 | Claim、预算预留、域占用、Ticket、Aggregate、TicketIssued、首个 Command；Decision 同事务提交 | 事实已失效、当前 Policy/Scope 改变、同域占用 |
 | 8. 派发 ENTRY | [dispatch_one_command](../../src/trading_kernel/application/dispatch_exchange_command.py#L216) 领取命令，提交租约后做 preflight 与网络调用 | 命令结果及对应领域事件 | 运行身份不匹配、行动时权限/账户状态变化 |
 | 9. 确认成交与保护 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L141) 依据持仓和订单事实归约 | EntryFilled → Initial Stop 命令 → 保护确认 → 后续 TP1/风险验证 | 部分成交、缺保护、真实风险失败 |
@@ -140,7 +140,7 @@ sequenceDiagram
 
 1. **普通部分 ENTRY 成交事故**：打开 Incident → 准备精确余量撤单 → 确认撤单 → controlled flatten 已成交数量 → 对账及资源闭合。另有专门的 Vacuum 撤单完成分支，可在风险与双腿退出条件满足后记录 `VacuumPartialRetained`；不能把这一分支泛化成普通部分成交可直接保留。契约差异见 [D5](SOURCE_AUTHORITY.md)。（来源：[Reducer](../../src/trading_kernel/domain/reducer.py#L134)、[部分成交全链测试](../../tests/trading_kernel/full_chain/test_fault_matrix.py#L120)、[Vacuum 规划](../../src/trading_kernel/application/drain_strategy_entry_vacuum.py#L171)）
 2. **持久化后、派发前重启**：恢复数据库中的 Command，由新租约领取，仍需身份和时效校验。
-3. **派发后、结果落库前重启**：不能凭租约到期认定请求未发；仓储领取与 unknown 恢复负责把不确定性保留下来。（来源：[PostgresExchangeCommandRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L746)、[派发集成测试](../../tests/trading_kernel/integration/test_command_dispatch.py)）
+3. **派发后、结果落库前重启**：不能凭租约到期认定请求未发；仓储领取与 unknown 恢复负责把不确定性保留下来。（来源：[PostgresExchangeCommandRepository](../../src/trading_kernel/infrastructure/pg_repositories.py#L748)、[派发集成测试](../../tests/trading_kernel/integration/test_command_dispatch.py)）
 4. **跨代码或 schema 重启**：先过 Runtime Fence；不匹配写者不能继续外部变更。（来源：[runtime_writer_is_certified](../../src/trading_kernel/application/runtime_fence.py#L16)）
 
 ## 示例：如何解释“有信号但没下单”

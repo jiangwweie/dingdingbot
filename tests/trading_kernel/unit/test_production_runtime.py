@@ -161,7 +161,7 @@ class FakeProbeAdapter:
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
         self.admission_requests.append(request.exchange_instrument_id)
-        return EntryAdmissionSnapshot(
+        return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
             account_risk_snapshot=AccountRiskSnapshot.create(
                 venue_id=request.venue_id,
                 account_id=request.account_id,

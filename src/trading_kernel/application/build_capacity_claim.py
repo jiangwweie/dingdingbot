@@ -45,6 +45,10 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
 )
+from src.trading_kernel.domain.margin_allocation import (
+    MarginAllocation,
+    entry_margin_costs,
+)
 from src.trading_kernel.domain.signal import StrategySignal
 from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.ticket import EntryOrderType, build_ticket_id
@@ -108,7 +112,11 @@ def build_capacity_claim(
     ):
         return _refused(CapacityClaimStatus.ACTION_FACTS_INVALID_OR_STALE)
     if account_entry_health.status is not AccountEntryHealthStatus.HEALTHY:
-        return CapacityClaimDecision(status=CapacityClaimStatus.ACCOUNT_HEALTH_BLOCKED, claim=None, refusal_reason=account_entry_health.status.value)
+        return CapacityClaimDecision(
+            status=CapacityClaimStatus.ACCOUNT_HEALTH_BLOCKED,
+            claim=None,
+            refusal_reason=account_entry_health.status.value,
+        )
     if (
         instrument_entry_health.status
         is InstrumentEntryHealthStatus.SAME_DIRECTION_OCCUPIED
@@ -118,7 +126,11 @@ def build_capacity_claim(
         InstrumentEntryHealthStatus.HEALTHY_FLAT,
         InstrumentEntryHealthStatus.HEALTHY_OPPOSITE_SIDE,
     }:
-        return CapacityClaimDecision(status=CapacityClaimStatus.INSTRUMENT_HEALTH_BLOCKED, claim=None, refusal_reason=instrument_entry_health.status.value)
+        return CapacityClaimDecision(
+            status=CapacityClaimStatus.INSTRUMENT_HEALTH_BLOCKED,
+            claim=None,
+            refusal_reason=instrument_entry_health.status.value,
+        )
     if netting_domain_occupied:
         return _refused(CapacityClaimStatus.NETTING_DOMAIN_OCCUPIED)
     if usage.active_ticket_count >= policy.max_concurrent_tickets:
@@ -206,8 +218,17 @@ def build_capacity_claim(
         instrument_rules.price_tick,
         position_side=signal.position_side,
     )
+    costs = entry_margin_costs(
+        reference_price=entry_price,
+        best_bid=admission_snapshot.best_bid_price,
+        best_ask=admission_snapshot.best_ask_price,
+        mark_price=account_risk.mark_price,
+        position_side=signal.position_side,
+        taker_fee_rate=admission_snapshot.entry_taker_fee_rate,
+    )
     sizing = select_capacity_candidate(
         CapacitySizingRequest(
+            costs=costs,
             total_wallet_balance=account_risk.total_wallet_balance,
             total_margin_balance=account_risk.total_margin_balance,
             total_initial_margin=account_risk.total_initial_margin,
@@ -225,9 +246,7 @@ def build_capacity_claim(
             max_gross_initial_margin_utilization=(
                 policy.max_gross_initial_margin_utilization
             ),
-            directional_stop_risk_limit_fraction=(
-                directional_limit
-            ),
+            directional_stop_risk_limit_fraction=(directional_limit),
             min_materialization_ratio=policy.min_materialization_ratio,
             permitted_max_leverage=min(
                 policy.max_leverage,
@@ -318,6 +337,13 @@ def build_capacity_claim(
         Decimal(1) + policy.max_post_fill_stop_risk_overrun_fraction
     )
     claim = freeze_capacity_claim(
+        margin_allocation=MarginAllocation(
+            wallet_balance=account_risk.total_wallet_balance,
+            single_margin_fraction=policy.max_ticket_initial_margin_fraction,
+            single_margin_limit=account_risk.total_wallet_balance
+            * policy.max_ticket_initial_margin_fraction,
+            costs=costs,
+        ),
         ticket_identity=ticket_identity,
         owner_policy_id=policy.owner_policy_id,
         owner_policy_version=policy.policy_version,

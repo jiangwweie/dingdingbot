@@ -330,4 +330,51 @@ def _request(**changes: object) -> CapacitySizingRequest:
         "tp1_quantity_fraction": Decimal("0.5"),
     }
     payload.update(changes)
+    from src.trading_kernel.domain.margin_allocation import EntryMarginCosts
+    payload["costs"] = EntryMarginCosts(reference_price=payload["entry_reference_price"], margin_price=payload["entry_reference_price"], taker_fee_rate=Decimal(0), opening_loss_per_unit=Decimal(0))
     return CapacitySizingRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize('equity', [Decimal('999.5'), Decimal(1000), Decimal(1001)])
+def test_wallet_allocation_does_not_move_with_unrealized_pnl(equity):
+    decision = select_capacity_candidate(_request(
+        total_margin_balance=equity,
+        total_initial_margin=Decimal(300),
+        current_reserved_margin=Decimal(300),
+        available_margin=equity-Decimal(300),
+        initial_stop_price=Decimal(99),
+        active_ticket_count=1,
+    ))
+    assert decision.selected is not None
+    assert decision.selected.ticket_margin_budget == Decimal(300)
+    assert decision.selected.quantity == Decimal(15)
+
+
+@pytest.mark.parametrize(('price','stop','step','tp','expected_qty'),[
+    ('1.0486','1.0608','.1','1.0340','2160.6'),
+    ('.06714','.06791','1','.06621','33744'),
+    ('2048.63','2065.61','.001','2028.25','1.105'),
+    ('82.96','83.82','.1','81.92','27.3'),
+])
+def test_seoul_candidate_wallet_allocation_replay(price,stop,step,tp,expected_qty):
+    quantities=[]
+    for equity in ('1507.15775018','1521.49683098'):
+        result=select_capacity_candidate(_request(
+            total_wallet_balance=Decimal('1510.41833258'),total_margin_balance=Decimal(equity),
+            total_initial_margin=Decimal('453.74331648'),current_reserved_margin=Decimal('453.0912'),
+            gross_risk_at_stop=Decimal('30.084'),directional_risk_at_stop=Decimal('30.084'),
+            available_margin=Decimal('1053.41443370'),active_ticket_count=1,
+            entry_reference_price=Decimal(price),initial_stop_price=Decimal(stop),take_profit_price=Decimal(tp),
+            quantity_step=Decimal(step),min_quantity=Decimal(step)))
+        assert result.selected is not None
+        quantities.append(result.selected.quantity)
+        assert result.selected.selected_leverage==5
+    assert quantities==[Decimal(expected_qty)]*2
+
+
+def test_sizing_rejects_execution_costs_for_a_different_reference_price():
+    request=_request()
+    values=request.model_dump()
+    values['costs']['reference_price']=Decimal(99)
+    with pytest.raises(ValueError,match='reference'):
+        CapacitySizingRequest.model_validate(values)

@@ -117,9 +117,22 @@ class MultiPositionVenue:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("floating_equity", [False, True])
 async def test_two_serial_entries_protect_distinct_instruments_on_both_sides(
-    certification_engine: AsyncEngine,
+    certification_engine: AsyncEngine, monkeypatch, floating_equity,
 ) -> None:
+    if floating_equity:
+        from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
+        base_facts = PreflightFacts
+        class FloatingFacts(base_facts):
+            async def read_entry_admission_snapshot(self, request):
+                snapshot=await super().read_entry_admission_snapshot(request)
+                values=snapshot.account_risk_snapshot.model_dump(exclude={'snapshot_digest'})
+                # Each ticket's12U allocation would exceed E*30%; both still fit
+                # the real35.991U gross margin capacity with the wallet unchanged.
+                values.update(total_margin_balance=Decimal('39.99'),available_margin=Decimal('39.99'),total_initial_margin=Decimal(0))
+                return snapshot.model_copy(update={'account_risk_snapshot':AccountRiskSnapshot.create(**values)})
+        monkeypatch.setitem(globals(),'PreflightFacts',FloatingFacts)
     await _seed_policy(certification_engine)
     venue = MultiPositionVenue()
     long_ticket = _ticket()

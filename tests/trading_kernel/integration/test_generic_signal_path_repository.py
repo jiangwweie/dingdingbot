@@ -255,10 +255,6 @@ async def test_0011_source_to_0012_identity_rotation_preserves_registry_and_poli
             await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(
                 account_id='test-account',runtime_commit='a'*40,
                 schema_revision='0011_orb_session_1h_v1',seeded_at_ms=10_000))
-        from src.trading_kernel.application.owner_control import (
-            ControlMutationRequest,
-            set_global_entry_state,
-        )
         from src.trading_kernel.infrastructure.runtime_authority_seed import (
             ArmAcceptancePolicyRequest,
             arm_acceptance_policy,
@@ -268,11 +264,16 @@ async def test_0011_source_to_0012_identity_rotation_preserves_registry_and_poli
         for index in range(2):
             async with PostgresKernelUnitOfWork(engine) as uow:
                 await arm_acceptance_policy(uow,ArmAcceptancePolicyRequest(armed_at_ms=10_001+index*2))
-                current=await uow.entry_admission.get_owner_policy('policy-main')
-                await set_global_entry_state(uow,owner_policy_id='policy-main',enabled=False,
-                    request=ControlMutationRequest(expected_version=current.policy_version,
-                        reason='source fixture paused',idempotency_key=f'source-fixture-pause:{index}',
-                        owner_identity='test-owner',now_ms=10_002+index*2),authentication_strength='session')
+                # Build an exact historical deployment source, not an old-schema
+                # runtime adapter using today's Policy projection.
+                from src.trading_kernel.infrastructure.runtime_authority_seed import (
+                    _lock_policy,
+                    _pause_entry_for_compatible_upgrade,
+                )
+                await _pause_entry_for_compatible_upgrade(uow._connection,
+                    current_policy=dict(await _lock_policy(uow._connection)),
+                    occurred_at_ms=10_002+index*2,runtime_commit='a'*40,
+                    operation='historical_source_entry_pause',event_namespace='source-fixture-pause')
         async with engine.connect() as conn:
             before=(await conn.execute(sa.text("SELECT metadata_value FROM brc_schema_metadata WHERE metadata_key='registry_semantic_hash'"))).scalar_one()
         from scripts.trading_kernel.verify_schema import (

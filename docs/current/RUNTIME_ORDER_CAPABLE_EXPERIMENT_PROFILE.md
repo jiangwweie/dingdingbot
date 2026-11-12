@@ -162,6 +162,21 @@ pending control completion require proof that the old signing window has
 closed; local lease expiry alone is insufficient. Installation starts with
 explicit `unset` and does not change the Owner's trading controls.
 
+## Wallet allocation V1 — Owner-approved local implementation
+
+Owner approved the wallet allocation repair on 2026-11-12. New Claim calculations
+allocate initial margin from action-time `total_wallet_balance` using the existing
+single-Ticket fraction (30%). Frozen allocation is still checked against a reduced
+wallet at dispatch; floating PnL does not reallocate it. Account availability,
+gross initial margin against live `total_margin_balance` (90%), current other
+reservations and risk, conservative taker costs, quote/mark gap and Cross stress
+remain action-time checks. Configured leverage stays exactly5x. The existing risk,
+family, count, manual-management and no-retry boundaries remain authoritative.
+This is an approved allocation-basis change, not a statement that the repair is
+installed. Historical terminal Claims retain their original evidence. The current
+production identity and release gates remain solely in MAIN_CONTROL_ROADMAP.
+See [calculation design](../superpowers/specs/2026-11-12-manual-capital-allocation-calculation-design.md).
+
 ## Real-Order Permission
 
 Exchange-command capability may be enabled only after:

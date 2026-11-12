@@ -78,7 +78,7 @@ async def test_default_release_capacity_is_atomic_idempotent_and_does_not_resume
         )
     async with issue_engine.connect() as connection:
         before = (
-            (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+            (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one()
         )
         controls = tuple(
             (
@@ -115,7 +115,7 @@ async def test_default_release_capacity_is_atomic_idempotent_and_does_not_resume
             raise RuntimeError("injected release abort")
     async with issue_engine.connect() as connection:
         assert (
-            await connection.execute(sa.select(owner_policy_current))
+            await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))
         ).mappings().one() == before
         assert (
             await connection.scalar(
@@ -135,7 +135,7 @@ async def test_default_release_capacity_is_atomic_idempotent_and_does_not_resume
         )
     async with issue_engine.connect() as connection:
         after = (
-            (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+            (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one()
         )
         events = (
             (
@@ -209,14 +209,14 @@ async def test_default_capacity_release_refuses_invalid_source_without_partial_r
         if corruption == "entry_enabled":
             await connection.execute(sa.update(owner_policy_current).values(new_entry_submit_enabled=True))
     async with issue_engine.connect() as connection:
-        before = (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+        before = (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one()
     target = source.model_copy(update={"runtime_commit": "b" * 40,
         "seeded_at_ms": 999 if corruption == "time_reversed" else 2000})
     with pytest.raises(RuntimeAuthorityTransitionRefused):
         async with PostgresKernelUnitOfWork(issue_engine) as uow:
             await deploy_compatible_upgrade_identity(uow, target)
     async with issue_engine.connect() as connection:
-        assert (await connection.execute(sa.select(owner_policy_current))).mappings().one() == before
+        assert (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one() == before
         assert await connection.scalar(sa.select(sa.func.count()).select_from(owner_policy_events)
             .where(owner_policy_events.c.operation == "compatible_capacity_policy_v0")) == 0
         assert await connection.scalar(sa.select(schema_metadata.c.metadata_value)
@@ -269,7 +269,7 @@ asyncio.run(main())
             for table, columns in inventory.items():
                 statement = sa.text('SELECT '+','.join('"'+col+'"' for col in columns)+' FROM "'+table+'"')
                 assert tuple((await connection.execute(statement)).all()) == before[table], table
-            policy = (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+            policy = (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one()
             assert policy["max_same_strategy_side"] is None
             assert policy["family_ticket_limits"]["long_continuation"] == 1
         async with PostgresKernelUnitOfWork(engine) as uow:
@@ -277,7 +277,7 @@ asyncio.run(main())
                 account_id="capacity-release-test", runtime_commit="b"*40,
                 schema_revision=CAPACITY_SCHEMA_REVISION, seeded_at_ms=2000))
         async with engine.connect() as connection:
-            policy = (await connection.execute(sa.select(owner_policy_current))).mappings().one()
+            policy = (await connection.execute(sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")))).mappings().one()
             assert policy["max_same_strategy_side"] == 2
             assert policy["family_ticket_limits"]["long_continuation"] == 2
     finally:

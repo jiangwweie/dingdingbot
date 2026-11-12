@@ -5320,7 +5320,7 @@ async def test_owner_staged_runner_materializes_without_fixture_snapshot(
         total_initial_margin=Decimal(0),total_maintenance_margin=Decimal(0),
         available_margin=Decimal(1000),account_positions=(),
         observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
-    admission = EntryAdmissionSnapshot(account_risk_snapshot=risk,
+    admission = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0), account_risk_snapshot=risk,
         best_bid_price=Decimal("104.99"),best_ask_price=Decimal(105),open_orders=(),
         observed_at_ms=issued_at,valid_until_ms=issued_at+60_000)
     brackets = (MaintenanceMarginBracket(bracket_id=f"natural-{group}:1",notional_floor=Decimal(0),
@@ -9873,7 +9873,7 @@ async def test_failed_second_dynamic_generation_respects_previous_freshness(
 
             assert result.signal_event_id is not None
             issued_at = close+3
-            admission = EntryAdmissionSnapshot(account_risk_snapshot=AccountRiskSnapshot.create(
+            admission = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0), account_risk_snapshot=AccountRiskSnapshot.create(
                 venue_id="binance-usdm",account_id="generic-snapshot",account_risk_mode="standard_usdm_single_asset",
                 settlement_asset="USDT",position_mode="independent_sides",margin_mode="cross",
                 exchange_instrument_id=active_scope.exchange_instrument_id,mark_price=Decimal(105),configured_leverage=5,
@@ -11196,7 +11196,7 @@ async def _issue_and_dispatch_hourly_natural_entry(
         total_margin_balance=Decimal(1000),total_initial_margin=Decimal(0),
         total_maintenance_margin=Decimal(0),available_margin=Decimal(1000),
         account_positions=(),observed_at_ms=now_ms,valid_until_ms=now_ms+60_000)
-    admission = EntryAdmissionSnapshot(account_risk_snapshot=risk,
+    admission = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0), account_risk_snapshot=risk,
         best_bid_price=Decimal("104.99"),best_ask_price=Decimal(105),open_orders=(),
         observed_at_ms=now_ms,valid_until_ms=now_ms+60_000)
     brackets = (MaintenanceMarginBracket(bracket_id=f"hourly-{group}:1",notional_floor=Decimal(0),
@@ -13217,7 +13217,7 @@ async def _assert_generic_failed_target(database, source, generation, uid, failu
             # time; an expired setup certification is not Entry authority.
             await make_warming_ready(database,universe_version_id=previous_uid,
                 warm_closed_bar_time_ms=first_close+2*HOUR,valid_until_ms=issued_at+60_000)
-            admission = EntryAdmissionSnapshot(account_risk_snapshot=AccountRiskSnapshot.create(
+            admission = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0), account_risk_snapshot=AccountRiskSnapshot.create(
                 venue_id="binance-usdm",account_id="generic-snapshot",account_risk_mode="standard_usdm_single_asset",
                 settlement_asset="USDT",position_mode="independent_sides",margin_mode="cross",
                 exchange_instrument_id=proposal.observation_cursors[0].exchange_instrument_id,mark_price=Decimal(105),configured_leverage=5,

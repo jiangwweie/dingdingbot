@@ -12,3 +12,9 @@ describe('operational facts stay separate',()=>{
   expect(admissionReasonLabel('budget_exhausted')).toContain('旧记录');
  });
 });
+
+it('distinguishes wallet allocation from actual funds and total margin',()=>{
+ expect(admissionReasonLabel('dispatch_preflight:allocation_wallet_changed')).toBe('钱包余额变化，原单票分配已超限');
+ expect(admissionReasonLabel('available_margin_insufficient')).toBe('账户实际可用保证金不足');
+ expect(admissionReasonLabel('dispatch_preflight:gross_margin_limit')).toBe('账户总保证金额度不足');
+});

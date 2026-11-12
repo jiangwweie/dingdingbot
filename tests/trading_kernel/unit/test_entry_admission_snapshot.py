@@ -60,7 +60,7 @@ def test_ownership_requires_one_quantity_projection_per_owned_domain() -> None:
 
 
 def _snapshot() -> EntryAdmissionSnapshot:
-    return EntryAdmissionSnapshot(
+    return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
             account_id="subaccount-main",

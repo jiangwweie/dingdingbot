@@ -701,6 +701,7 @@ async def _preflight_new_entry_mutation(
     clock_ms: Callable[[], int],
 ) -> _EntryMutationPreflight:
     refusal_basis: dict[str, JsonValue] | None = None
+
     def refused(status: EntryDispatchPreflightStatus) -> _EntryMutationPreflight:
         return _EntryMutationPreflight(status=status, evaluated_at_ms=clock_ms(),failure_basis=refusal_basis)
 
@@ -747,19 +748,37 @@ async def _preflight_new_entry_mutation(
         )
     try:
         facts = await collect_entry_facts(
-            entry_facts_source, snapshot_request=snapshot_request, rules_request=rules_request,
-            product_request=(product_request if product_compatibility.product_family == "tradfi_equity_perpetual" else None),
-            timeout_seconds=request.timeout_seconds, phase="dispatch", identity=command.command_id,
+            entry_facts_source,
+            snapshot_request=snapshot_request,
+            rules_request=rules_request,
+            product_request=(
+                product_request
+                if product_compatibility.product_family == "tradfi_equity_perpetual"
+                else None
+            ),
+            timeout_seconds=request.timeout_seconds,
+            phase="dispatch",
+            identity=command.command_id,
         )
         snapshot, rules, product_session = facts.snapshot, facts.rules, facts.product
     except Exception:  # noqa: BLE001 - unreadable admission facts must fence Entry.
         async with uow_factory() as uow:
-            await record_entry_fact_health(uow, venue_id=domain.venue_id,
-                account_id=domain.account_id, failed=True, now_ms=clock_ms())
+            await record_entry_fact_health(
+                uow,
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                failed=True,
+                now_ms=clock_ms(),
+            )
         return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
     async with uow_factory() as uow:
-        await record_entry_fact_health(uow, venue_id=domain.venue_id,
-            account_id=domain.account_id, failed=False, now_ms=clock_ms())
+        await record_entry_fact_health(
+            uow,
+            venue_id=domain.venue_id,
+            account_id=domain.account_id,
+            failed=False,
+            now_ms=clock_ms(),
+        )
     source_product_decision = evaluate_event_product_entry(
         compatibility=product_compatibility,
         profile=product_profile,
@@ -871,12 +890,20 @@ async def _preflight_new_entry_mutation(
                 > snapshot.account_risk_snapshot.total_wallet_balance * limit
             ):
                 return refused(EntryDispatchPreflightStatus.DIRECTIONAL_RISK_EXHAUSTED)
-        if capability is not None and capability.certification.get('management_feed_required'):
+        if capability is not None and capability.certification.get(
+            "management_feed_required"
+        ):
             from src.trading_kernel.application.management_health import (
                 management_feed_is_current,
             )
-            if not await management_feed_is_current(uow,venue_id=domain.venue_id,account_id=domain.account_id,
-                runtime_commit=request.runtime_commit,now_ms=clock_ms()):
+
+            if not await management_feed_is_current(
+                uow,
+                venue_id=domain.venue_id,
+                account_id=domain.account_id,
+                runtime_commit=request.runtime_commit,
+                now_ms=clock_ms(),
+            ):
                 return refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
         evaluated_at_ms = clock_ms()
         if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
@@ -923,6 +950,25 @@ async def _preflight_new_entry_mutation(
             snapshot=current_product_session,
             now_ms=evaluated_at_ms,
         )
+        exposure = await uow.entry_admission.get_account_exposure(
+            venue_id=domain.venue_id, account_id=domain.account_id, for_update=True
+        )
+        if (
+            exposure is None
+            or exposure.current_reserved_margin < aggregate.ticket.reserved_margin
+            or exposure.gross_risk_at_stop < aggregate.ticket.risk_at_stop
+        ):
+            return refused(EntryDispatchPreflightStatus.CURRENT_CAPACITY_UNAVAILABLE)
+        other_reserved_margin = (
+            exposure.current_reserved_margin - aggregate.ticket.reserved_margin
+        )
+        other_gross_stop_risk = (
+            exposure.gross_risk_at_stop - aggregate.ticket.risk_at_stop
+        )
+        # The capacity row may have waited on a writer lock; sample time after it.
+        evaluated_at_ms = clock_ms()
+        if evaluated_at_ms < facts_requested_at_ms or evaluated_at_ms < request.now_ms:
+            return refused(EntryDispatchPreflightStatus.STALE_SNAPSHOT)
         decision = revalidate_entry_dispatch(
             EntryDispatchPreflightRequest(
                 command=current_command,
@@ -946,6 +992,8 @@ async def _preflight_new_entry_mutation(
                     exchange_instrument_id=domain.exchange_instrument_id,
                     requested_position_side=domain.position_side,
                 ),
+                other_reserved_margin=other_reserved_margin,
+                other_gross_stop_risk=other_gross_stop_risk,
                 active_family_ticket_count=active_family_ticket_count,
                 active_strategy_side_ticket_count=active_strategy_side_ticket_count,
                 active_directional_risk_at_stop=active_directional_risk_at_stop,
@@ -962,18 +1010,53 @@ async def _preflight_new_entry_mutation(
             decision.status is not EntryDispatchPreflightStatus.ALLOWED
             or command.kind is not ExchangeCommandKind.ENTRY
         ):
-            risk=snapshot.account_risk_snapshot
-            single=risk.total_margin_balance*policy.max_ticket_initial_margin_fraction if policy is not None else Decimal(0)
-            gross=max(risk.total_margin_balance*policy.max_gross_initial_margin_utilization-max(risk.total_initial_margin,claim.current_reserved_margin_at_claim),Decimal(0)) if policy is not None else Decimal(0)
-            refusal_basis={"stage":"dispatch_preflight","reason_code":decision.status.value,"ticket_id":aggregate.identity.ticket_id,
-                "command_id":command.command_id,"snapshot_digest":snapshot.digest(),
-                "observed_at_ms":risk.observed_at_ms,"valid_until_ms":risk.valid_until_ms,
-                "policy_version":aggregate.ticket.owner_policy_version,"runtime_commit":request.runtime_commit,"schema_revision":request.schema_revision,
-                "rules_observed_at_ms":rules.observed_at_ms,"rules_valid_until_ms":rules.valid_until_ms,
-                "total_margin_balance":str(risk.total_margin_balance),"total_initial_margin":str(risk.total_initial_margin),
-                "reserved_margin":str(aggregate.ticket.reserved_margin),"ticket_margin_limit":str(single),
-                "available_margin":str(risk.available_margin),"remaining_gross_margin":str(gross),
-                "margin_constraints":[k for k,v in [("ticket_margin",single),("available_margin",risk.available_margin),("gross_margin",gross)] if aggregate.ticket.reserved_margin>v]}
+            risk = snapshot.account_risk_snapshot
+            single = (
+                min(risk.total_wallet_balance, claim.total_wallet_balance_at_claim)
+                * policy.max_ticket_initial_margin_fraction
+                if policy is not None
+                else Decimal(0)
+            )
+            gross = (
+                max(
+                    risk.total_margin_balance
+                    * policy.max_gross_initial_margin_utilization
+                    - max(risk.total_initial_margin, other_reserved_margin),
+                    Decimal(0),
+                )
+                if policy is not None
+                else Decimal(0)
+            )
+            refusal_basis = {
+                "stage": "dispatch_preflight",
+                "reason_code": decision.status.value,
+                "ticket_id": aggregate.identity.ticket_id,
+                "command_id": command.command_id,
+                "snapshot_digest": snapshot.digest(),
+                "observed_at_ms": risk.observed_at_ms,
+                "valid_until_ms": risk.valid_until_ms,
+                "policy_version": aggregate.ticket.owner_policy_version,
+                "runtime_commit": request.runtime_commit,
+                "schema_revision": request.schema_revision,
+                "rules_observed_at_ms": rules.observed_at_ms,
+                "rules_valid_until_ms": rules.valid_until_ms,
+                "allocation_contract": claim.margin_allocation.contract,
+                "allocation_basis": "wallet_balance",
+                "allocation_wallet_at_claim": str(claim.total_wallet_balance_at_claim),
+                "total_wallet_balance": str(risk.total_wallet_balance),
+                "margin_check": None
+                if decision.margin_check is None
+                else decision.margin_check.model_dump(mode="json"),
+                "total_margin_balance": str(risk.total_margin_balance),
+                "total_initial_margin": str(risk.total_initial_margin),
+                "reserved_margin": str(aggregate.ticket.reserved_margin),
+                "ticket_margin_limit": str(single),
+                "available_margin": str(risk.available_margin),
+                "remaining_gross_margin": str(gross),
+                "margin_constraints": []
+                if decision.margin_check is None
+                else list(decision.margin_check.constraints),
+            }
             return refused(decision.status)
         valid_until_ms = min(
             regime_send_proof.snapshot.valid_until_ms

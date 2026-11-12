@@ -4,7 +4,7 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 104 张业务表、1210 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **107 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 104 张业务表、1212 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **107 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
@@ -225,7 +225,7 @@
 **维护与用途**：pg_signal_repository 更新；定量、退出双腿可执行性及压力校验读取。
 
 <details>
-<summary>完整字段（15 列）</summary>
+<summary>完整字段（16 列）</summary>
 
 **字段清单**：`venue_id`、`exchange_instrument_id`、`exit_order_rules`、`quantity_step`、`price_tick`、`min_quantity`、`min_notional`、`exchange_max_leverage`、`maintenance_margin_brackets`、`maintenance_margin_brackets_digest`、`notional_coefficient`、`notional_coefficient_certified`、`session_and_settlement`、`observed_at_ms`、`valid_until_ms`、`projection_version`
 
@@ -322,9 +322,9 @@
 **维护与用途**：runtime seed、正式 Owner 控制按版本推进；Entry/Claim/签发读取当前值。
 
 <details>
-<summary>完整字段（21 列）</summary>
+<summary>完整字段（22 列）</summary>
 
-**字段清单**：`owner_policy_id`、`policy_version`、`enabled`、`new_entry_submit_enabled`、`priority_rank`、`max_concurrent_tickets`、`max_strategy_group_concurrent_tickets`、`family_ticket_limits`、`max_same_strategy_side`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`directional_stop_risk_limit_fraction`、`min_materialization_ratio`、`max_leverage`、`supported_margin_mode`、`post_stop_stress_multiple`、`max_post_fill_stop_risk_overrun_fraction`、`scope`、`updated_at_ms`
+**字段清单**：`margin_allocation_contract`、`owner_policy_id`、`policy_version`、`enabled`、`new_entry_submit_enabled`、`priority_rank`、`max_concurrent_tickets`、`max_strategy_group_concurrent_tickets`、`family_ticket_limits`、`max_same_strategy_side`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`directional_stop_risk_limit_fraction`、`min_materialization_ratio`、`max_leverage`、`supported_margin_mode`、`post_stop_stress_multiple`、`max_post_fill_stop_risk_overrun_fraction`、`scope`、`updated_at_ms`
 
 </details>
 
@@ -1254,9 +1254,9 @@
 **维护与用途**：issue_ready_signal 原子提交；拒绝事实不创建命令，早期 readiness 阻断可尚无最终 Decision。
 
 <details>
-<summary>完整字段（32 列）</summary>
+<summary>完整字段（33 列）</summary>
 
-**字段清单**：`failure_basis`、`admission_decision_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`runtime_scope_id`、`runtime_scope_version`、`owner_policy_id`、`owner_policy_version`、`venue_id`、`account_id`、`exchange_instrument_id`、`position_side`、`exposure_family`、`candidate_rank`、`candidate_count`、`candidate_set_digest`、`candidate_set_summary`、`portfolio_usage`、`decision_status`、`first_blocker`、`binding_constraint`、`capacity_claim_id`、`ticket_id`、`entry_admission_snapshot_digest`、`decision_digest`、`decided_at_ms`。
+**字段清单**：`failure_basis`、`admission_decision_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`runtime_scope_id`、`runtime_scope_version`、`owner_policy_id`、`owner_policy_version`、`venue_id`、`account_id`、`exchange_instrument_id`、`position_side`、`exposure_family`、`candidate_rank`、`candidate_count`、`candidate_set_digest`、`candidate_set_summary`、`portfolio_usage`、`decision_status`、`first_blocker`、`binding_constraint`、`capacity_claim_id`、`ticket_id`、`entry_admission_snapshot_digest`、`decision_digest`、`decided_at_ms`
 
 </details>
 
@@ -1271,9 +1271,9 @@
 **维护与用途**：issue_ticket 持久化，Ticket/ENTRY preflight 校验；比 Ticket 多保留大量“当时如何计算”的事实。
 
 <details>
-<summary>完整字段（86 列）</summary>
+<summary>完整字段（88 列）</summary>
 
-**字段清单**：`capacity_claim_id`、`ticket_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`fact_digest`、`regime_admission`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_admission_snapshot_digest`、`account_entry_health_digest`、`instrument_entry_health_digest`、`instrument_rules_projection_version`、`account_capacity_domain_key`、`leverage_domain_key`、`total_wallet_balance_at_claim`、`total_margin_balance_at_claim`、`total_initial_margin_at_claim`、`total_maintenance_margin_at_claim`、`available_margin_at_claim`、`mark_price_at_claim`、`position_mode_at_claim`、`margin_mode_at_claim`、`active_ticket_count_at_claim`、`remaining_slots_at_claim`、`active_strategy_group_ticket_count_at_claim`、`max_strategy_group_concurrent_tickets`、`remaining_strategy_group_slots_at_claim`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`max_same_strategy_side`、`active_strategy_side_ticket_count_at_claim`、`gross_risk_at_stop_at_claim`、`directional_risk_at_stop_at_claim`、`current_reserved_margin_at_claim`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`directional_stop_risk_limit_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`planned_stop_risk_budget`、`max_post_fill_stop_risk_overrun_fraction`、`post_fill_stop_risk_limit`、`post_stop_stress_multiple`、`ticket_margin_budget`、`required_leverage`、`selected_leverage`、`configured_leverage_at_claim`、`leverage_change_required`、`exchange_max_leverage`、`reserved_margin`、`cross_margin_stress_evidence`、`entry_reference_price`、`quantity`、`notional`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`decision_digest`、`created_at_ms`、`expires_at_ms`
+**字段清单**：`margin_allocation`、`capacity_claim_id`、`ticket_id`、`signal_event_id`、`exposure_episode_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`fact_digest`、`regime_admission`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_admission_snapshot_digest`、`account_entry_health_digest`、`instrument_entry_health_digest`、`instrument_rules_projection_version`、`account_capacity_domain_key`、`leverage_domain_key`、`total_wallet_balance_at_claim`、`total_margin_balance_at_claim`、`total_initial_margin_at_claim`、`total_maintenance_margin_at_claim`、`available_margin_at_claim`、`mark_price_at_claim`、`position_mode_at_claim`、`margin_mode_at_claim`、`active_ticket_count_at_claim`、`remaining_slots_at_claim`、`active_strategy_group_ticket_count_at_claim`、`max_strategy_group_concurrent_tickets`、`remaining_strategy_group_slots_at_claim`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`max_same_strategy_side`、`active_strategy_side_ticket_count_at_claim`、`gross_risk_at_stop_at_claim`、`directional_risk_at_stop_at_claim`、`current_reserved_margin_at_claim`、`max_ticket_stop_risk_fraction`、`max_gross_stop_risk_fraction`、`directional_stop_risk_limit_fraction`、`max_ticket_initial_margin_fraction`、`max_gross_initial_margin_utilization`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`planned_stop_risk_budget`、`max_post_fill_stop_risk_overrun_fraction`、`post_fill_stop_risk_limit`、`post_stop_stress_multiple`、`ticket_margin_budget`、`required_leverage`、`selected_leverage`、`configured_leverage_at_claim`、`leverage_change_required`、`exchange_max_leverage`、`reserved_margin`、`cross_margin_stress_evidence`、`entry_reference_price`、`quantity`、`notional`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`decision_digest`、`created_at_ms`、`expires_at_ms`
 
 </details>
 
@@ -1288,7 +1288,7 @@
 **维护与用途**：签发事务创建；终态仅推进状态/释放活动域等索引，不重算合同或给现有持仓加仓。
 
 <details>
-<summary>完整字段（60 列）</summary>
+<summary>完整字段（61 列）</summary>
 
 **字段清单**：`ticket_id`、`exposure_episode_id`、`signal_event_id`、`strategy_group_id`、`strategy_version_id`、`event_spec_id`、`universe_version_id`、`selection_authority_id`、`universe_semantic_digest`、`runtime_profile_id`、`owner_policy_id`、`owner_policy_version`、`runtime_scope_id`、`runtime_scope_version`、`account_id`、`venue_id`、`exchange_instrument_id`、`position_side`、`netting_domain_key`、`active_netting_domain_key`、`exposure_family`、`active_family_ticket_count_at_claim`、`family_ticket_limit`、`directional_risk_at_stop_at_claim`、`directional_stop_risk_limit_fraction`、`min_materialization_ratio`、`minimum_stop_risk_budget`、`regime_admission`、`exit_policy_id`、`exit_policy_semantic_hash`、`exit_binding_id`、`exit_binding_semantic_hash`、`exit_binding_authority_version`、`entry_reference_price`、`quantity`、`notional`、`capacity_claim_id`、`planned_stop_risk_budget`、`post_fill_stop_risk_limit`、`selected_leverage`、`leverage_change_required`、`reserved_margin`、`risk_reservation_basis`、`margin_mode`、`cross_margin_stress_model_id`、`post_stop_stress_multiple`、`claim_stress_proof_digest`、`risk_at_stop`、`entry_order_type`、`entry_limit_price`、`initial_stop_price`、`pre_tp1_reclaim_price`、`exposure_session_end_ms`、`take_profit_prices`、`take_profit_quantities`、`fact_digest`、`decision_digest`、`status`、`created_at_ms`、`expires_at_ms`、`terminal_at_ms`
 
@@ -1305,7 +1305,7 @@
 **维护与用途**：commit_reduction CAS 推进，Worker 调度读取；不是不可变合同。
 
 <details>
-<summary>完整字段（43 列）</summary>
+<summary>完整字段（45 列）</summary>
 
 **字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`post_fill_exit_plan`、`partial_tp_protection`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
@@ -1339,7 +1339,7 @@
 **维护与用途**：UoW 先创建，dispatcher/恢复更新状态；ENTRY 仅一代，unknown 不回退成可盲重发。
 
 <details>
-<summary>完整字段（15 列）</summary>
+<summary>完整字段（16 列）</summary>
 
 **字段清单**：`command_id`、`ticket_id`、`management_revision`、`command_kind`、`generation`、`idempotency_key`、`venue_client_order_id`、`status`、`quantity`、`request_payload`、`result_payload`、`claim_owner`、`lease_until_ms`、`created_at_ms`、`deadline_at_ms`、`completed_at_ms`
 
@@ -1538,9 +1538,9 @@
 **维护与用途**：project_owner_state 与健康监控更新；终态投影必须在交易转移事务内完成。
 
 <details>
-<summary>完整字段（8 列）</summary>
+<summary>完整字段（12 列）</summary>
 
-**字段清单**：`monitor_key`、`owner_status`、`summary`、`intervention`、`ticket_id`、`incident_id`、`updated_at_ms`、`first_wait_at_ms`、`last_checked_at_ms`、`escalated_at_ms`、`resolved_at_ms`、`projection_version`。
+**字段清单**：`monitor_key`、`owner_status`、`summary`、`intervention`、`ticket_id`、`incident_id`、`updated_at_ms`、`first_wait_at_ms`、`last_checked_at_ms`、`escalated_at_ms`、`resolved_at_ms`、`projection_version`
 
 </details>
 
@@ -1863,7 +1863,7 @@ COMMIT;
 
 **主键**：`diagnostic_id`。
 
-**字段清单**：`diagnostic_id`、`stage`、`subject_id`、`reason_code`、`basis`、`occurred_at_ms`。
+**字段清单**：`diagnostic_id`、`stage`、`subject_id`、`reason_code`、`basis`、`occurred_at_ms`
 
 **维护与用途**：既有Kernel仓储写入，Owner只读核验；不作为交易权限。
 
@@ -1873,6 +1873,6 @@ COMMIT;
 
 **主键**：`request_id`。
 
-**字段清单**：`request_id`、`ticket_id`、`expected_review_id`、`state`、`owner_authorization_id`、`preview`、`preview_digest`、`last_reason`、`created_at_ms`、`next_check_at_ms`、`completed_at_ms`。
+**字段清单**：`request_id`、`ticket_id`、`expected_review_id`、`state`、`owner_authorization_id`、`preview`、`preview_digest`、`last_reason`、`created_at_ms`、`next_check_at_ms`、`completed_at_ms`
 
 **维护与用途**：既有Kernel仓储写入，Owner只读核验；不作为交易权限。

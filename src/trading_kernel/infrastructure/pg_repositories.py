@@ -71,6 +71,7 @@ from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
+from src.trading_kernel.domain.margin_allocation import MarginAllocation
 from src.trading_kernel.domain.order_attribution import (
     ConditionalOrderExpectation,
     OrderNamespace,
@@ -181,6 +182,7 @@ def _owner_policy_from_row(row: RowMapping | dict[str, object]) -> OwnerPolicySn
     if supported_margin_mode != "cross":
         raise RuntimeError("Owner policy has unsupported margin mode")
     return OwnerPolicySnapshot(
+        margin_allocation_contract=cast(Literal["wallet_allocation_v1"], row["margin_allocation_contract"]),
         owner_policy_id=str(row["owner_policy_id"]),
         policy_version=int(str(row["policy_version"])),
         enabled=bool(row["enabled"]),
@@ -1349,7 +1351,7 @@ class PostgresCapacityClaimRepository:
             .limit(1)
         )
         row = result.mappings().one_or_none()
-        if row is None or row["minimum_stop_risk_budget"] is None:
+        if row is None or row["minimum_stop_risk_budget"] is None or row["margin_allocation"] is None:
             return None
         return _capacity_claim_from_row(row)
 
@@ -1371,7 +1373,7 @@ class PostgresCapacityClaimRepository:
                 capacity_claims.c.capacity_claim_id == capacity_claim_id,
                 trade_tickets.c.terminal_at_ms.is_not(None),
                 capacity_claims.c.exposure_family.is_not(None),
-                capacity_claims.c.minimum_stop_risk_budget.is_(None),
+                sa.or_(capacity_claims.c.minimum_stop_risk_budget.is_(None), capacity_claims.c.margin_allocation.is_(None)),
             )
         )
         row = result.mappings().one_or_none()
@@ -1393,7 +1395,7 @@ class PostgresCapacityClaimRepository:
         row = result.mappings().one_or_none()
         if row is None:
             return None
-        if row["minimum_stop_risk_budget"] is None:
+        if row["minimum_stop_risk_budget"] is None or row["margin_allocation"] is None:
             historical = await self.get_historical_terminal(
                 str(row["capacity_claim_id"])
             )
@@ -2692,6 +2694,7 @@ class PostgresEntryAdmissionRepository:
         if supported_margin_mode != "cross":
             raise RuntimeError("Owner policy has unsupported margin mode")
         return OwnerPolicySnapshot(
+            margin_allocation_contract=cast(Literal["wallet_allocation_v1"], row["margin_allocation_contract"]),
             owner_policy_id=str(row["owner_policy_id"]),
             policy_version=int(row["policy_version"]),
             enabled=bool(row["enabled"]),
@@ -3316,6 +3319,7 @@ def _ticket_from_row(row: RowMapping) -> TradeTicket:
 def _capacity_claim_values(claim: CapacityClaim) -> dict[str, object]:
     identity = claim.ticket_identity
     return {
+        "margin_allocation": claim.margin_allocation.model_dump(mode="json"),
         "capacity_claim_id": claim.capacity_claim_id,
         "ticket_id": identity.ticket_id,
         "signal_event_id": identity.signal_event_id,
@@ -3441,6 +3445,7 @@ def _capacity_claim_from_row(row: RowMapping) -> CapacityClaim:
     if margin_mode_at_claim not in {"cross", "isolated"}:
         raise RuntimeError("Capacity Claim has unsupported margin mode")
     return CapacityClaim(
+        margin_allocation=MarginAllocation.model_validate(row["margin_allocation"]),
         capacity_claim_id=str(row["capacity_claim_id"]),
         ticket_identity=TicketIdentity(
             ticket_id=str(row["ticket_id"]),

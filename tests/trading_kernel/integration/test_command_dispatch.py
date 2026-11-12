@@ -2059,7 +2059,46 @@ async def test_dispatch_margin_refusal_persists_exact_fresh_snapshot_and_subcons
     assert venue.calls==0
     async with dispatch_engine.connect() as c:
         row=(await c.execute(sa.text("SELECT reason_code,basis FROM brc_failure_diagnostics WHERE subject_id=:id AND stage='dispatch_preflight'"),{'id':result.command_id})).mappings().one()
-    assert row['reason_code']=='margin_drift'
+    assert row['reason_code']=='available_margin_insufficient'
+    assert row['basis']['allocation_basis']=='wallet_balance'
+    assert row['basis']['margin_check']['reason']=='available_margin_insufficient'
     assert row['basis']['snapshot_digest']==source.snapshot.digest()
     assert 'available_margin' in row['basis']['margin_constraints']
     assert row['basis']['available_margin']=='0.0001'
+
+
+@pytest.mark.asyncio
+async def test_wallet_allocation_persists_and_floating_equity_does_not_reject_entry(dispatch_engine):
+    from src.trading_kernel.domain.cross_margin_stress import AccountRiskSnapshot
+    ticket=_ticket().model_copy(update={'quantity':Decimal('.0075'),'notional':Decimal(450),'reserved_margin':Decimal(90),'initial_stop_price':Decimal(59600),'risk_at_stop':Decimal(3)})
+    await _seed_policy(dispatch_engine)
+    from tests.trading_kernel.support.command_dispatch import issue
+    await issue(dispatch_engine,ticket,ticket_margin_budget=Decimal(90))
+    class FloatingEquity(PreflightFacts):
+        async def read_entry_admission_snapshot(self,request):
+            source=await super().read_entry_admission_snapshot(request)
+            values=source.account_risk_snapshot.model_dump(exclude={'snapshot_digest'})
+            equity=Decimal('299.99')
+            values.update(total_margin_balance=equity,available_margin=equity,total_initial_margin=Decimal(0))
+            return source.model_copy(update={'account_risk_snapshot':AccountRiskSnapshot.create(**values)})
+    venue=CountingVenue()
+    result=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(worker_id='entry-dispatcher',now_ms=1100,lease_until_ms=6100,timeout_seconds=1,
+            runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1000),
+        entry_facts_source=FloatingEquity(),clock_ms=lambda:1100)
+    assert result.status is DispatchCommandStatus.ACCEPTED
+    assert venue.calls==1
+    async with PostgresKernelUnitOfWork(dispatch_engine) as u:
+        claim=await u.capacity_claims.get_for_ticket(ticket.identity.ticket_id)
+        assert claim.margin_allocation.contract=='wallet_allocation_v1'
+        assert claim.margin_allocation.wallet_balance==Decimal(300)
+        persisted=await u.tickets.get(ticket.identity.ticket_id)
+        assert persisted.quantity==ticket.quantity
+        assert persisted.reserved_margin==ticket.reserved_margin
+    # Accepted order must not be dispatched twice by a subsequent worker.
+    again=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(dispatch_engine),venue,
+        DispatchCommandRequest(worker_id='second',now_ms=1101,lease_until_ms=6101,timeout_seconds=1,
+            runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1000),
+        entry_facts_source=FloatingEquity(),clock_ms=lambda:1101)
+    assert again.status is DispatchCommandStatus.NO_COMMAND
+    assert venue.calls==1

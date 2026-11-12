@@ -155,7 +155,7 @@ async def issue_ticket(
         )
 
     policy = await uow.entry_admission.get_owner_policy(ticket.owner_policy_id)
-    if policy is None or policy.policy_version != ticket.owner_policy_version:
+    if policy is None or policy.policy_version != ticket.owner_policy_version or policy.margin_allocation_contract != claim.margin_allocation.contract:
         return IssueTicketResult(
             status=IssueTicketStatus.POLICY_MISSING_OR_STALE,
             ticket_id=None,
@@ -424,7 +424,7 @@ async def issue_ticket(
         * policy.directional_stop_risk_limit_fraction
         or ticket.risk_at_stop < claim.minimum_stop_risk_budget
         or ticket.reserved_margin
-        > claim.total_margin_balance_at_claim
+        > claim.total_wallet_balance_at_claim
         * policy.max_ticket_initial_margin_fraction
         or current_reserved_margin + ticket.reserved_margin
         > claim.total_margin_balance_at_claim

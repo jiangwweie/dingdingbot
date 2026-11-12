@@ -126,7 +126,7 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                 str(row["owner_policy_id"]): row
                 for row in (
                     await connection.execute(
-                        sa.select(owner_policy_current).order_by(
+                        sa.select(*(c for c in owner_policy_current.c if c.name != "margin_allocation_contract")).order_by(
                             owner_policy_current.c.owner_policy_id
                         )
                     )

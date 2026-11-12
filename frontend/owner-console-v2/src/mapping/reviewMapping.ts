@@ -196,6 +196,10 @@ const EXIT_REASON_ZH: Record<string, string> = {
   account_health_blocked: '账户管理或事实门禁',
   instrument_health_blocked: '品种持仓或订单门禁',
   margin_exhausted: '保证金额度不足',
+  allocation_wallet_changed: '钱包余额变化，原单票分配已超限',
+  available_margin_insufficient: '账户实际可用保证金不足',
+  gross_margin_limit: '账户总保证金额度不足',
+  current_capacity_unavailable: '当前资金占用尚未核实',
   count_exhausted: '并发名额不足',
   stop_risk_exhausted: '止损风险额度不足',
   minimum_materialization_unmet: '低于最小风险执行量',
@@ -221,8 +225,9 @@ export function formatReviewExitReason(
   if (raw.startsWith('exposure_family_cap')) {
     return { label: '同类风险额度已占用', raw };
   }
-  if (EXIT_REASON_ZH[raw]) {
-    return { label: EXIT_REASON_ZH[raw], raw };
+  const key=raw.replace(/^dispatch_preflight:/,'');
+  if (EXIT_REASON_ZH[key]) {
+    return { label: EXIT_REASON_ZH[key], raw };
   }
   return { label: '退出原因未识别', raw };
 }

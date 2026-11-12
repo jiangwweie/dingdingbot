@@ -46,6 +46,11 @@ from src.trading_kernel.domain.instrument_entry_health import (
     InstrumentEntryHealth,
     InstrumentEntryHealthStatus,
 )
+from src.trading_kernel.domain.margin_allocation import (
+    MarginCheck,
+    check_entry_margin,
+    entry_margin_costs,
+)
 from src.trading_kernel.domain.product import ProductEntryDecision
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.ticket import TradeTicket
@@ -74,10 +79,11 @@ class EntryDispatchPreflightStatus(StrEnum):
     INCIDENT_FENCED = "incident_fenced"
     OWNERSHIP_CONFLICT = "ownership_conflict"
     WALLET_RISK_DRIFT = "wallet_risk_drift"
-    MARGIN_DRIFT = "margin_drift"
-    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = (
-        "exposure_family_capacity_exhausted"
-    )
+    ALLOCATION_WALLET_CHANGED = "allocation_wallet_changed"
+    AVAILABLE_MARGIN_INSUFFICIENT = "available_margin_insufficient"
+    GROSS_MARGIN_LIMIT = "gross_margin_limit"
+    CURRENT_CAPACITY_UNAVAILABLE = "current_capacity_unavailable"
+    EXPOSURE_FAMILY_CAPACITY_EXHAUSTED = "exposure_family_capacity_exhausted"
     STRATEGY_SIDE_CAPACITY_EXHAUSTED = "strategy_side_capacity_exhausted"
     QUOTE_RISK = "quote_risk"
     PRODUCT_ENTRY_BLOCKED = "product_entry_blocked"
@@ -109,6 +115,8 @@ class EntryDispatchPreflightRequest(BaseModel):
     active_family_ticket_count: int
     active_strategy_side_ticket_count: int
     active_directional_risk_at_stop: Decimal
+    other_reserved_margin: Decimal
+    other_gross_stop_risk: Decimal
     now_ms: int
     product_entry_decision: ProductEntryDecision | None = None
     strategy_entry_enabled: bool = True
@@ -130,7 +138,11 @@ class EntryDispatchPreflightRequest(BaseModel):
             raise ValueError("active Family Ticket count cannot be negative")
         return value
 
-    @field_validator("active_directional_risk_at_stop")
+    @field_validator(
+        "active_directional_risk_at_stop",
+        "other_reserved_margin",
+        "other_gross_stop_risk",
+    )
     @classmethod
     def _require_nonnegative_directional_risk(cls, value: Decimal) -> Decimal:
         if value < 0:
@@ -149,6 +161,7 @@ class EntryDispatchPreflightDecision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     status: EntryDispatchPreflightStatus
+    margin_check: MarginCheck | None = None
 
     @property
     def allowed(self) -> bool:
@@ -257,7 +270,7 @@ def revalidate_entry_dispatch(
     if ticket.risk_at_stop > (
         account_risk.total_wallet_balance
         * request.owner_policy.max_ticket_stop_risk_fraction
-    ) or claim.gross_risk_at_stop_at_claim + ticket.risk_at_stop > (
+    ) or request.other_gross_stop_risk + ticket.risk_at_stop > (
         account_risk.total_wallet_balance
         * request.owner_policy.max_gross_stop_risk_fraction
     ):
@@ -268,25 +281,33 @@ def revalidate_entry_dispatch(
         * request.owner_policy.directional_stop_risk_limit_fraction
     ):
         return _refused(EntryDispatchPreflightStatus.WALLET_RISK_DRIFT)
-    ticket_margin_limit = (
-        account_risk.total_margin_balance
-        * request.owner_policy.max_ticket_initial_margin_fraction
-    )
-    remaining_gross_margin = max(
-        account_risk.total_margin_balance
-        * request.owner_policy.max_gross_initial_margin_utilization
-        - max(
-            account_risk.total_initial_margin,
-            claim.current_reserved_margin_at_claim,
+    costs = entry_margin_costs(
+        reference_price=ticket.entry_reference_price,
+        best_bid=snapshot.best_bid_price,
+        best_ask=snapshot.best_ask_price,
+        mark_price=account_risk.mark_price,
+        position_side=domain.position_side,
+        taker_fee_rate=max(
+            snapshot.entry_taker_fee_rate, claim.margin_allocation.costs.taker_fee_rate
         ),
-        Decimal(0),
     )
-    if ticket.reserved_margin > min(
-        ticket_margin_limit,
-        account_risk.available_margin,
-        remaining_gross_margin,
-    ):
-        return _refused(EntryDispatchPreflightStatus.MARGIN_DRIFT)
+    margin = check_entry_margin(
+        allocation=claim.margin_allocation,
+        reference_margin=ticket.reserved_margin,
+        quantity=ticket.quantity,
+        leverage=ticket.selected_leverage,
+        wallet=account_risk.total_wallet_balance,
+        equity=account_risk.total_margin_balance,
+        available=account_risk.available_margin,
+        initial_margin=account_risk.total_initial_margin,
+        other_reserved=request.other_reserved_margin,
+        gross_fraction=request.owner_policy.max_gross_initial_margin_utilization,
+        costs=costs,
+    )
+    if margin.reason != "allowed":
+        return EntryDispatchPreflightDecision(
+            status=EntryDispatchPreflightStatus(margin.reason), margin_check=margin
+        )
     entry_price = (
         snapshot.best_ask_price
         if domain.position_side == "long"
@@ -352,6 +373,7 @@ def _policy_matches(
         policy
         and policy.owner_policy_id == ticket.owner_policy_id
         and policy.policy_version == ticket.owner_policy_version
+        and policy.margin_allocation_contract == claim.margin_allocation.contract
         and policy.enabled
         and ticket.selected_leverage <= policy.max_leverage
         and ticket.margin_mode == policy.supported_margin_mode

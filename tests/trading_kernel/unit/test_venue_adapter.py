@@ -1221,7 +1221,7 @@ async def test_entry_and_narrow_reads_reuse_one_account_risk_parser(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     exchange = AdmissionSnapshotExchange()
-    adapter = CcxtVenueAdapter(
+    adapter = CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"),
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
     )
@@ -1258,7 +1258,7 @@ async def test_entry_and_narrow_reads_reuse_one_account_risk_parser(
 @pytest.mark.asyncio
 async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> None:
     exchange = AdmissionSnapshotExchange()
-    adapter = CcxtVenueAdapter(
+    adapter = CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"),
         exchanges={("binance-usdm", "experiment-1"): exchange},
         settlement_assets={
             ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
@@ -1277,6 +1277,7 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
     )
 
     risk = snapshot.account_risk_snapshot
+    assert snapshot.entry_taker_fee_rate == Decimal(".0005")
     assert risk.position_mode == "independent_sides"
     assert risk.margin_mode == "cross"
     assert risk.total_wallet_balance == Decimal(1200)
@@ -1312,7 +1313,7 @@ async def test_ccxt_adapter_freezes_one_account_wide_admission_snapshot() -> Non
 @pytest.mark.asyncio
 async def test_ccxt_adapter_derives_account_wide_binance_instrument_ids_without_map() -> None:
     exchange = AdmissionSnapshotExchange()
-    adapter = CcxtVenueAdapter(
+    adapter = CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"),
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
     )
@@ -1367,7 +1368,7 @@ async def test_ccxt_adapter_rejects_non_usdt_account_wide_symbol_without_fabrica
         }
 
     monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", malformed_account)
-    adapter = CcxtVenueAdapter(
+    adapter = CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"),
         exchanges={("binance-usdm", "experiment-1"): exchange},
         clock_ms=lambda: 2_000,
     )
@@ -1427,7 +1428,7 @@ async def test_ccxt_adapter_admits_flat_requested_instrument_from_position_risk(
         exchange, "fapiPrivateV2GetPositionRisk", flat_target_position_risk
     )
     monkeypatch.setattr(exchange, "fapiPrivateV2GetAccount", flat_target_account)
-    adapter = CcxtVenueAdapter(
+    adapter = CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"),
         exchanges={("binance-usdm", "experiment-1"): exchange},
         settlement_assets={
             ("binance-usdm", "binance-usdm:SOLUSDT:perpetual"): "USDT"
@@ -2814,3 +2815,10 @@ async def test_exact_v2_flat_does_not_require_live_position_mark_but_nonzero_doe
         assert facts.position_quantity==0 and facts.current_market_price is None
     else:
         with pytest.raises(RuntimeError,match='protective_mark_missing_nonzero'):await adapter.read_lifecycle_facts(request)
+
+
+@pytest.mark.asyncio
+async def test_admission_without_fee_authority_never_assumes_zero_cost():
+    adapter=CcxtVenueAdapter(exchanges={("binance-usdm","experiment-1"):AdmissionSnapshotExchange()},clock_ms=lambda:2000)
+    with pytest.raises(RuntimeError,match='requires certified conservative taker fee rate'):
+        await adapter.read_entry_admission_snapshot(EntryAdmissionSnapshotRequest(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:SOLUSDT:perpetual',observed_at_ms=2000,valid_for_ms=5000))

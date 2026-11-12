@@ -23,7 +23,8 @@ TradingKernelSchemaRevision = Literal[
     "0019_management_evidence_v2",
     "0020_manual_exit_regime_v1",
     "0021_manual_operational_closure",
+    "0022_wallet_margin_allocation",
 ]
 CURRENT_SCHEMA_REVISION: Final[TradingKernelSchemaRevision] = (
-    "0021_manual_operational_closure"
+    "0022_wallet_margin_allocation"
 )

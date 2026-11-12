@@ -268,3 +268,34 @@ async def test_unknown_result_uses_actual_time_and_preserves_unfinished_send(hea
         send = (await c.execute(sa.select(entry_send_authorizations))).mappings().one()
         assert send['completed_at_ms'] is None
         assert send['authorized_at_ms'] == now
+
+
+@pytest.mark.asyncio
+async def test_current_capacity_lock_time_cannot_reuse_expired_account_facts(head_template_engine, monkeypatch):
+    from src.trading_kernel.infrastructure.pg_repositories import (
+        PostgresEntryAdmissionRepository,
+    )
+    engine=head_template_engine
+    t=ticket();await seed_policy(engine);await issue(engine,t)
+    now=1100
+    original=PostgresEntryAdmissionRepository.get_account_exposure
+    async def delayed(self,*args,**kwargs):
+        nonlocal now
+        value=await original(self,*args,**kwargs)
+        if kwargs.get('for_update'):
+            now=3100
+        return value
+    monkeypatch.setattr(PostgresEntryAdmissionRepository,'get_account_exposure',delayed)
+    class Venue:
+        async def execute(self, request):
+            raise AssertionError('expired capacity facts cannot reach the venue')
+    result=await dispatch_one_command(lambda:PostgresKernelUnitOfWork(engine),Venue(),
+        DispatchCommandRequest(worker_id='capacity-lock-clock',ticket_id=t.identity.ticket_id,
+            now_ms=1100,lease_until_ms=6100,timeout_seconds=1,runtime_commit='kernel-test-head',
+            schema_revision=CURRENT_SCHEMA_REVISION,admission_snapshot_validity_ms=1000),
+        entry_facts_source=PreflightFacts(),clock_ms=lambda:now)
+    assert result.status is DispatchCommandStatus.SUPERSEDED
+    async with engine.connect() as c:
+        assert await c.scalar(sa.select(sa.func.count()).select_from(entry_send_authorizations))==0
+        payload=await c.scalar(sa.select(exchange_commands.c.result_payload))
+        assert payload['reason']=='dispatch_preflight:stale_snapshot'

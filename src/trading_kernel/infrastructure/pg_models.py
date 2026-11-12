@@ -1675,6 +1675,8 @@ owner_policy_events = sa.Table(
 owner_policy_current = sa.Table(
     "brc_owner_policy_current",
     metadata,
+    sa.Column("margin_allocation_contract", SHORT_TEXT, nullable=False, server_default="wallet_allocation_v1"),
+    sa.CheckConstraint("margin_allocation_contract='wallet_allocation_v1'",name="ck_brc_policy_margin_contract"),
     _id("owner_policy_id", primary_key=True),
     sa.Column("policy_version", sa.Integer, nullable=False),
     sa.Column("enabled", sa.Boolean, nullable=False),
@@ -2449,6 +2451,8 @@ runtime_capabilities_current = sa.Table(
 capacity_claims = sa.Table(
     "brc_capacity_claims",
     metadata,
+    _json("margin_allocation", nullable=True),
+    sa.CheckConstraint("margin_allocation IS NULL OR (jsonb_typeof(margin_allocation)='object' AND margin_allocation->>'contract'='wallet_allocation_v1')",name="ck_brc_claim_allocation_contract"),
     _id("capacity_claim_id", primary_key=True),
     _id("ticket_id"),
     _id("signal_event_id"),

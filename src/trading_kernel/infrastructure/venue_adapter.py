@@ -328,7 +328,11 @@ class CcxtVenueAdapter:
             conditional_orders,
             name="admission conditional open orders",
         )
+        fee_rate = self._taker_fee_rates.get((request.venue_id, request.exchange_instrument_id), self._default_taker_fee_rate)
+        if fee_rate is None:
+            raise RuntimeError("admission requires certified conservative taker fee rate")
         return EntryAdmissionSnapshot(
+            entry_taker_fee_rate=fee_rate,
             account_risk_snapshot=account_risk_snapshot,
             best_bid_price=_top_of_book_price(order_book_mapping, "bids"),
             best_ask_price=_top_of_book_price(order_book_mapping, "asks"),

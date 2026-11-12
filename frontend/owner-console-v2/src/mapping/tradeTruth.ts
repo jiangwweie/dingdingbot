@@ -34,6 +34,9 @@ export function admissionReasonLabel(code?:string|null) {
   const labels:Record<string,string>={account_health_blocked:'账户管理或事实门禁',instrument_health_blocked:'品种持仓或订单门禁',
     manual_management_risk_unavailable:'人工持仓风险待核实',count_exhausted:'并发名额不足',stop_risk_exhausted:'止损风险额度不足',
     margin_exhausted:'保证金额度不足',venue_minimum_unmet:'交易所最小下单量不足',minimum_materialization_unmet:'低于最小风险执行量',
+    allocation_wallet_changed:'钱包余额变化，原单票分配已超限',available_margin_insufficient:'账户实际可用保证金不足',
+    gross_margin_limit:'账户总保证金额度不足',current_capacity_unavailable:'当前资金占用尚未核实',
     directional_risk_exhausted:'方向风险额度不足',budget_exhausted:'旧记录未留具体限制原因'};
-  return code ? labels[code] ?? code : '原因未留存';
+  const key=code?.replace(/^dispatch_preflight:/,'');
+  return code ? labels[key!] ?? code : '原因未留存';
 }

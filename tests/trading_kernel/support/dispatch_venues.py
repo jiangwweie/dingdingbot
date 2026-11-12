@@ -128,7 +128,7 @@ class PreflightFacts:
     async def read_entry_admission_snapshot(
         self, request: EntryAdmissionSnapshotRequest
     ) -> EntryAdmissionSnapshot:
-        return EntryAdmissionSnapshot(
+        return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
             account_risk_snapshot=self._account_risk_snapshot(
                 venue_id=request.venue_id,
                 account_id=request.account_id,

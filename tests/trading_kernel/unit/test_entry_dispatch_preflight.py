@@ -96,7 +96,7 @@ def test_entry_preflight_refuses_when_frozen_margin_no_longer_fits() -> None:
 
     decision = revalidate_entry_dispatch(request)
 
-    assert decision.status is EntryDispatchPreflightStatus.MARGIN_DRIFT
+    assert decision.status is EntryDispatchPreflightStatus.AVAILABLE_MARGIN_INSUFFICIENT
 
 
 def test_entry_preflight_recomputes_stress_from_fresh_account_facts() -> None:
@@ -557,8 +557,20 @@ def _preflight_request(*, snapshot, max_same_strategy_side: int | None = None):
             exchange_instrument_id=ticket.identity.netting_domain.exchange_instrument_id,
             requested_position_side=ticket.identity.netting_domain.position_side,
         ),
+        other_reserved_margin=Decimal(0),
+        other_gross_stop_risk=Decimal(0),
         active_family_ticket_count=1,
         active_strategy_side_ticket_count=1,
         active_directional_risk_at_stop=ticket.risk_at_stop,
         now_ms=1_010,
     )
+
+
+def test_frozen_allocation_survives_unrealized_loss_with_sufficient_account_funds():
+    snapshot = _snapshot()
+    # Fixture owns 160U reference margin. Old E*30% would cut it to150U,
+    # although450U total margin capacity and500U cash remain.
+    values = snapshot.account_risk_snapshot.model_dump(exclude={'snapshot_digest'})
+    values.update(total_margin_balance=Decimal(500), available_margin=Decimal(500))
+    fresh = snapshot.model_copy(update={'account_risk_snapshot':AccountRiskSnapshot.create(**values)})
+    assert revalidate_entry_dispatch(_preflight_request(snapshot=fresh)).status is EntryDispatchPreflightStatus.ALLOWED

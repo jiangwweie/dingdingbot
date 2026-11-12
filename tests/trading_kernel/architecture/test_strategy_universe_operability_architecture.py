@@ -46,6 +46,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0019_management_evidence_v2.py",
         "0020_manual_exit_regime_v1.py",
         "0021_manual_operational_closure.py",
+        "0022_wallet_margin_allocation.py",
     )
 
     revisions: dict[str, str | None] = {}
@@ -59,6 +60,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         }
         revisions[str(assignments["revision"])] = assignments["down_revision"]
     assert revisions == {
+        "0022_wallet_margin_allocation": "0021_manual_operational_closure",
         "0021_manual_operational_closure": "0020_manual_exit_regime_v1",
         "0020_manual_exit_regime_v1": "0019_management_evidence_v2",
         "0019_management_evidence_v2": "0018_notice_outbox_v1",
@@ -86,6 +88,7 @@ def test_operability_repair_uses_one_forward_only_schema_revision_chain() -> Non
         "0018_notice_outbox_v1": "0017_app_management_observation",
     }
     assert set(revisions.values()) - {None} == {
+        "0021_manual_operational_closure",
         "0020_manual_exit_regime_v1",
         "0019_management_evidence_v2",
         "0018_notice_outbox_v1",

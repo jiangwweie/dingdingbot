@@ -20,6 +20,10 @@ from src.trading_kernel.domain.exit_execution import ExitOrderRules
 from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.exposure_family import ExposureFamily
 from src.trading_kernel.domain.identities import TicketIdentity
+from src.trading_kernel.domain.margin_allocation import (
+    MarginAllocation,
+    check_entry_margin,
+)
 from src.trading_kernel.domain.ticket import EntryOrderType, TradeTicket
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -79,6 +83,7 @@ class FamilyTicketLimits(BaseModel):
 class CapacityPolicy(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    margin_allocation_contract: Literal["wallet_allocation_v1"] = "wallet_allocation_v1"
     owner_policy_id: str
     policy_version: int
     max_concurrent_tickets: int
@@ -244,6 +249,7 @@ class CapacityInstrumentRules(BaseModel):
 class CapacityClaim(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    margin_allocation: MarginAllocation
     capacity_claim_id: str
     ticket_identity: TicketIdentity
     owner_policy_id: str
@@ -554,14 +560,37 @@ class CapacityClaim(BaseModel):
             raise ValueError("CapacityClaim minimum materialization differs")
         if self.risk_at_stop < self.minimum_stop_risk_budget:
             raise ValueError("CapacityClaim is below minimum materialization")
+        allocation = self.margin_allocation
+        if (
+            allocation.wallet_balance != self.total_wallet_balance_at_claim
+            or allocation.single_margin_fraction
+            != self.max_ticket_initial_margin_fraction
+            or allocation.costs.reference_price != self.entry_reference_price
+        ):
+            raise ValueError("CapacityClaim allocation differs from frozen facts")
         if self.ticket_margin_budget > (
-            self.total_margin_balance_at_claim * self.max_ticket_initial_margin_fraction
+            self.total_wallet_balance_at_claim * self.max_ticket_initial_margin_fraction
         ):
             raise ValueError("CapacityClaim exceeds the per-Ticket margin limit")
         if self.reserved_margin > self.ticket_margin_budget:
             raise ValueError(
                 "CapacityClaim reserved margin exceeds its frozen ticket budget"
             )
+        affordability = check_entry_margin(
+            allocation=allocation,
+            reference_margin=self.reserved_margin,
+            quantity=self.quantity,
+            leverage=self.selected_leverage,
+            wallet=self.total_wallet_balance_at_claim,
+            equity=self.total_margin_balance_at_claim,
+            available=self.available_margin_at_claim,
+            initial_margin=self.total_initial_margin_at_claim,
+            other_reserved=self.current_reserved_margin_at_claim,
+            gross_fraction=self.max_gross_initial_margin_utilization,
+            costs=allocation.costs,
+        )
+        if affordability.reason != "allowed":
+            raise ValueError("CapacityClaim exceeds live margin affordability")
         remaining_gross_margin = (
             self.total_margin_balance_at_claim
             * self.max_gross_initial_margin_utilization
@@ -709,6 +738,7 @@ class CapacityClaimDecision(BaseModel):
 
 def freeze_capacity_claim(
     *,
+    margin_allocation: MarginAllocation,
     ticket_identity: TicketIdentity,
     owner_policy_id: str,
     owner_policy_version: int,
@@ -783,6 +813,7 @@ def freeze_capacity_claim(
     active_strategy_side_ticket_count_at_claim: int | None = None,
 ) -> CapacityClaim:
     payload: dict[str, Any] = {
+        "margin_allocation": margin_allocation,
         "capacity_claim_id": "claim:pending",
         "ticket_identity": ticket_identity,
         "owner_policy_id": owner_policy_id,
@@ -907,6 +938,8 @@ def _digest(payload: object) -> str:
 
 
 def _canonicalize(value: object) -> object:
+    if isinstance(value, BaseModel):
+        return _canonicalize(value.model_dump(mode="python"))
     if isinstance(value, Decimal):
         normalized = value.normalize()
         return "0" if normalized == 0 else format(normalized, "f")

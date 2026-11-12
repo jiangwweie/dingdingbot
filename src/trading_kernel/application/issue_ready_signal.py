@@ -471,6 +471,7 @@ async def issue_ready_signal(
         account_id=profile.account_id,
         position_mode=profile.position_mode,
         policy=CapacityPolicy(
+            margin_allocation_contract=policy.margin_allocation_contract,
             owner_policy_id=policy.owner_policy_id,
             policy_version=policy.policy_version,
             max_concurrent_tickets=policy.max_concurrent_tickets,

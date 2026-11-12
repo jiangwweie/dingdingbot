@@ -2874,6 +2874,7 @@ async def _seed_owner_console_causality(
             await connection.execute(
                 """
                 INSERT INTO brc_capacity_claims (
+                    margin_allocation,
                     capacity_claim_id, ticket_id, signal_event_id,
                     exposure_episode_id, strategy_group_id,
                     strategy_version_id, event_spec_id, universe_version_id,
@@ -2920,6 +2921,7 @@ async def _seed_owner_console_causality(
                     take_profit_prices, take_profit_quantities,
                     decision_digest, created_at_ms, expires_at_ms
                 ) VALUES (
+                    '{"contract":"wallet_allocation_v1","wallet_balance":"1000","single_margin_fraction":"0.30","single_margin_limit":"300","costs":{"reference_price":"100","margin_price":"100","taker_fee_rate":"0.0005","opening_loss_per_unit":"0"}}'::jsonb,
                     'claim:causality', 'ticket:causality', 'signal:z',
                     'episode:z', 'strategy-group:alpha',
                     'strategy-version:alpha', 'event-spec:signal',

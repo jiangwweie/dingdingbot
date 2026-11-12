@@ -173,7 +173,7 @@ def _snapshot(
     positions: tuple[AccountRiskPosition, ...] = (),
     open_orders: tuple[AdmissionOrder, ...] = (),
 ) -> EntryAdmissionSnapshot:
-    return EntryAdmissionSnapshot(
+    return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
             account_id="subaccount-main",

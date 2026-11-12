@@ -346,6 +346,7 @@ class GenericSelectionMemberRuntimeStatus(BaseModel):
 class OwnerPolicySnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    margin_allocation_contract: Literal["wallet_allocation_v1"] = "wallet_allocation_v1"
     owner_policy_id: str
     policy_version: int
     enabled: bool

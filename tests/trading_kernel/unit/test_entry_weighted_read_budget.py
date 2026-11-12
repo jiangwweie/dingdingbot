@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 """Production-shaped queue regression: real CCXT weights and FIFO throttler."""
 
 import asyncio
@@ -63,7 +65,7 @@ async def test_real_weighted_queue_old_budget_times_out_then_two_new_reads_remai
 
     for name in routes:
         setattr(exchange,name,charged(name,getattr(exchange,name)))
-    adapter=CcxtVenueAdapter(exchanges={("binance-usdm","experiment-1"):exchange}, clock_ms=lambda:int(time.time()*1000))
+    adapter=CcxtVenueAdapter(default_taker_fee_rate=Decimal("0.0005"), exchanges={("binance-usdm","experiment-1"):exchange}, clock_ms=lambda:int(time.time()*1000))
 
     async def read(timeout,validity,phase):
         now=int(time.time()*1000)

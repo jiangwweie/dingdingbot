@@ -1668,6 +1668,8 @@ def _without_app_management_columns(
             and not (name == "brc_instrument_rules_current" and c == "exit_order_rules")
             and not (name == "brc_exchange_commands" and c == "management_revision")
             and not (name == "brc_admission_decisions" and c == "failure_basis")
+            and not (name == "brc_capacity_claims" and c == "margin_allocation")
+            and not (name == "brc_owner_policy_current" and c == "margin_allocation_contract")
             and not (name == "brc_monitor_current" and c in {"first_wait_at_ms","last_checked_at_ms","escalated_at_ms","resolved_at_ms"})
         )
         for name, columns in tables.items()

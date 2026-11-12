@@ -524,7 +524,7 @@ async def test_capacity_rejection_records_one_decision_and_no_trading_authority(
             "configured_leverage": 5,
         }
     )
-    exhausted_snapshot = EntryAdmissionSnapshot(
+    exhausted_snapshot = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=exhausted_account,
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal(10000),
@@ -898,7 +898,7 @@ async def test_adm_003_reprocessing_signal_keeps_one_final_decision(
             "configured_leverage": 5,
         }
     )
-    snapshot = EntryAdmissionSnapshot(
+    snapshot = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=account,
         best_bid_price=Decimal("9999.9"),
         best_ask_price=Decimal(10000),
@@ -1667,7 +1667,7 @@ async def _seed_tradfi_live_authority(
         expires_at_ms=10_000,
         facts=signal_facts,
     )
-    admission_snapshot = EntryAdmissionSnapshot(
+    admission_snapshot = EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
             account_id="subaccount-main",
@@ -2001,7 +2001,7 @@ class _MismatchedTradFiProductFacts:
         self,
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
-        return EntryAdmissionSnapshot(
+        return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
             account_risk_snapshot=AccountRiskSnapshot.create(
                 venue_id=request.venue_id,
                 account_id=request.account_id,
@@ -2188,7 +2188,7 @@ async def _insert_scope_facts(
 
 
 def _admission_snapshot() -> EntryAdmissionSnapshot:
-    return EntryAdmissionSnapshot(
+    return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
             account_id="subaccount-main",

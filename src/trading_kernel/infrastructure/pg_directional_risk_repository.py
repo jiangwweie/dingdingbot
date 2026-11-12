@@ -226,7 +226,15 @@ class PostgresDirectionalRiskRepository:
         row = (
             (
                 await self._connection.execute(
-                    sa.select(owner_policy_current)
+                    sa.select(
+                        owner_policy_current.c.policy_version,
+                        owner_policy_current.c.updated_at_ms,
+                        owner_policy_current.c.new_entry_submit_enabled,
+                        owner_policy_current.c.max_ticket_stop_risk_fraction,
+                        owner_policy_current.c.max_gross_stop_risk_fraction,
+                        owner_policy_current.c.directional_stop_risk_limit_fraction,
+                        owner_policy_current.c.min_materialization_ratio,
+                    )
                     .where(
                         owner_policy_current.c.owner_policy_id
                         == request.owner_policy_id
@@ -300,7 +308,15 @@ class PostgresDirectionalRiskRepository:
         row = (
             (
                 await self._connection.execute(
-                    sa.select(owner_policy_current)
+                    sa.select(
+                        owner_policy_current.c.policy_version,
+                        owner_policy_current.c.updated_at_ms,
+                        owner_policy_current.c.new_entry_submit_enabled,
+                        owner_policy_current.c.max_ticket_stop_risk_fraction,
+                        owner_policy_current.c.max_gross_stop_risk_fraction,
+                        owner_policy_current.c.directional_stop_risk_limit_fraction,
+                        owner_policy_current.c.min_materialization_ratio,
+                    )
                     .where(
                         owner_policy_current.c.owner_policy_id
                         == request.owner_policy_id

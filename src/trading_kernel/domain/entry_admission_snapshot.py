@@ -166,11 +166,19 @@ class EntryAdmissionSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     account_risk_snapshot: AccountRiskSnapshot
+    entry_taker_fee_rate: Decimal
     best_bid_price: Decimal
     best_ask_price: Decimal
     open_orders: tuple[AdmissionOrder, ...]
     observed_at_ms: int
     valid_until_ms: int
+
+    @field_validator("entry_taker_fee_rate")
+    @classmethod
+    def valid_entry_fee(cls, value: Decimal) -> Decimal:
+        if not value.is_finite() or not 0 <= value < 1:
+            raise ValueError("entry taker fee rate is invalid")
+        return value
 
     @field_validator("best_bid_price", "best_ask_price")
     @classmethod

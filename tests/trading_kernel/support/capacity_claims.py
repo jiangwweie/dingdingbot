@@ -11,6 +11,10 @@ from src.trading_kernel.domain.cross_margin_stress import (
     StressPosition,
     evaluate_cross_margin_stress,
 )
+from src.trading_kernel.domain.margin_allocation import (
+    EntryMarginCosts,
+    MarginAllocation,
+)
 from tests.trading_kernel.support.tickets import (
     fixture_binding_for_ticket,
     fixture_profile_identity_for_ticket,
@@ -40,6 +44,7 @@ def make_issue_request(
     )
     return IssueTicketRequest(
         capacity_claim=freeze_capacity_claim(
+            margin_allocation=MarginAllocation(wallet_balance=resolved_stress_balance,single_margin_fraction=Decimal(".30"),single_margin_limit=resolved_stress_balance*Decimal(".30"),costs=EntryMarginCosts(reference_price=ticket.entry_reference_price,margin_price=ticket.entry_reference_price,taker_fee_rate=Decimal(0),opening_loss_per_unit=Decimal(0))),
             ticket_identity=ticket.identity,
             owner_policy_id=ticket.owner_policy_id,
             owner_policy_version=ticket.owner_policy_version,

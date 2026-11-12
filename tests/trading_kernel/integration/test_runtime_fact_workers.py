@@ -108,7 +108,7 @@ class FakeEntryAdmissionFactsSource:
         request: EntryAdmissionSnapshotRequest,
     ) -> EntryAdmissionSnapshot:
         self.requests.append(request)
-        return EntryAdmissionSnapshot(
+        return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
             account_risk_snapshot=AccountRiskSnapshot.create(
                 venue_id=request.venue_id,
                 account_id=request.account_id,

@@ -14,6 +14,7 @@ from src.trading_kernel.domain.exit_execution import (
     ExitPlanUnexecutable,
     calculate_exit_quantities,
 )
+from src.trading_kernel.domain.margin_allocation import EntryMarginCosts, margin_budget
 
 FIXED_EXCHANGE_CONFIGURED_LEVERAGE: Final[int] = 5
 
@@ -35,6 +36,7 @@ class CapacitySizingRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    costs: EntryMarginCosts
     total_wallet_balance: Decimal
     total_margin_balance: Decimal
     total_initial_margin: Decimal
@@ -134,6 +136,8 @@ class CapacitySizingRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_sizing_facts(self) -> CapacitySizingRequest:
+        if self.costs.reference_price != self.entry_reference_price:
+            raise ValueError("margin costs reference differs from sizing reference")
         if self.initial_stop_price == self.entry_reference_price:
             raise ValueError("initial stop must differ from entry reference")
         return self
@@ -217,24 +221,19 @@ def select_capacity_candidate(request: CapacitySizingRequest) -> CapacitySizingD
         * request.min_materialization_ratio
     )
 
-    gross_initial_margin_limit = (
-        request.total_margin_balance * request.max_gross_initial_margin_utilization
+    budgets = margin_budget(
+        wallet=request.total_wallet_balance,
+        equity=request.total_margin_balance,
+        available=request.available_margin,
+        initial_margin=request.total_initial_margin,
+        other_reserved=request.current_reserved_margin,
+        single_fraction=request.max_ticket_initial_margin_fraction,
+        gross_fraction=request.max_gross_initial_margin_utilization,
     )
-    current_margin_usage = max(
-        request.total_initial_margin,
-        request.current_reserved_margin,
-    )
-    remaining_gross_margin = max(
-        gross_initial_margin_limit - current_margin_usage,
-        Decimal(0),
-    )
-    remaining_executable_margin = min(
-        request.available_margin,
-        remaining_gross_margin,
-    )
+    remaining_gross_margin = budgets.gross_remaining
+    remaining_executable_margin = budgets.available_limit
     ticket_margin_budget = min(
-        request.total_margin_balance * request.max_ticket_initial_margin_fraction,
-        remaining_executable_margin,
+        budgets.single_limit, remaining_gross_margin, remaining_executable_margin
     )
     if ticket_margin_budget <= 0:
         return _refused(CapacitySizingStatus.MARGIN_EXHAUSTED)
@@ -332,7 +331,22 @@ def _evaluate_candidate(
         ticket_margin_budget * Decimal(leverage) / request.entry_reference_price,
         request.quantity_step,
     )
-    quantity = min(risk_quantity, margin_quantity)
+    costs = request.costs
+    actual_margin_per_unit = costs.margin_price / Decimal(leverage)
+    available_quantity = _floor_to_step(
+        remaining_executable_margin
+        / (actual_margin_per_unit + costs.cash_cost_per_unit),
+        request.quantity_step,
+    )
+    gross_quantity = _floor_to_step(
+        remaining_gross_margin
+        / (
+            actual_margin_per_unit
+            + request.max_gross_initial_margin_utilization * costs.cash_cost_per_unit
+        ),
+        request.quantity_step,
+    )
+    quantity = min(risk_quantity, margin_quantity, available_quantity, gross_quantity)
     notional = quantity * request.entry_reference_price
     planned_stop_risk = quantity * abs(
         request.entry_reference_price - request.initial_stop_price

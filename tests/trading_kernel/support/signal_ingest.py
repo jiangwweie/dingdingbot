@@ -158,7 +158,7 @@ def admission_snapshot(
     valid_for_ms: int = 8_999,
     configured_leverage: int = 1,
 ) -> EntryAdmissionSnapshot:
-    return EntryAdmissionSnapshot(
+    return EntryAdmissionSnapshot(entry_taker_fee_rate=Decimal(0),
         account_risk_snapshot=AccountRiskSnapshot.create(
             venue_id="binance-usdm",
             account_id="subaccount-main",

@@ -37,6 +37,21 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Wallet allocation repair — approved local candidate, 2026-11-12
+
+Owner approved local repair of the margin allocation/dispatch boundary after
+readonly Seoul/Tokyo diagnosis. The candidate keeps configured5x, allocates the
+single-Ticket initial margin from action-time wallet balance, and retains live
+account affordability, equity-based gross margin, actual other reservations/risk,
+conservative entry costs and all manual-management/ENTRY authority gates.
+[Calculation design](../superpowers/specs/2026-11-12-manual-capital-allocation-calculation-design.md)
+owns formulas, evidence and tradeoffs. New0022 is a stopped, flat, forward-only
+preservation-gated upgrade; old terminal Claims receive no invented allocation.
+Local implementation and validation are in progress on
+`codex/manual-capital-allocation-v1`. Production identity above is unchanged;
+Owner confirmation is still required before installation. No new Owner pause or
+Resume is requested by this local stage, and no venue mutation is part of it.
+
 ### Natural-exit repair installed, ADA closed and Owner resumed, 2026-11-12
 
 Owner explicitly authorized implementation/deployment of MA-NATURAL-CLOSE-01,
