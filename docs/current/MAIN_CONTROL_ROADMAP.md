@@ -37,14 +37,14 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Natural-exit repair installed and current ADA closed — Owner paused, 2026-11-12
+### Natural-exit repair installed, ADA closed and Owner resumed, 2026-11-12
 
 Owner explicitly authorized implementation/deployment of MA-NATURAL-CLOSE-01,
 then genuinely paused ENTRY at08:36:06.437 Asia/Shanghai (Policy11). Exact
 identity, account flatness and existing incident/Ticket scope were reread.
 **The production P1 closure defect below is repaired and its existing Ticket is
-terminal. Final production identity is the certified reference above; new ENTRY
-still awaits genuine Owner Resume/TOTP after official preparation.**
+terminal. Final production identity is the certified reference above; genuine
+Owner Resume/TOTP created Policy12 and restored new ENTRY within unchanged gates.**
 
 | Boundary | Direct completed evidence |
 | --- | --- |
@@ -58,7 +58,7 @@ still awaits genuine Owner Resume/TOTP after official preparation.**
 | Supplementary fixes | Verified REVIEW closure now reports CLOSED/residual0; realtime readonly feed certification uses its read-time sample, while explicit historical time still rejects future facts; both have PG regression evidence |
 | Installed postflight | final identity/schema/capabilities/config/integrity/flatness/risk/current Entry readiness/management checks PASS; all five services active/running/NRestarts0; current invocation journals without original faults |
 | Entry preparation |14/14 admission/dispatch GET-only rounds PASS; official promoter prepared_owner_paused; ENTRY started through fenced sequence and maintenance fence removed |
-| Current Owner posture | Policy11/new ENTRY false remains genuine pause; original strategy controls/Selection/directional risk/budget and configuration1 retained; CPM/SOR-001/US-equity remain paused |
+| Current Owner posture | Genuine Resume/TOTP at11:26:54.127 created Policy12/new ENTRY true; original strategy controls/Selection/directional risk/budget and configuration1 retained; CPM/SOR-001/US-equity remain paused |
 | Venue / internal occupation | At11:23:42 final PG and signed GET checks: active Tickets/positions/budget/unresolved Commands/open Incidents0; venue positions/regular/conditional orders0 |
 | ADA qualification | Returned eligible, configured5/Cross/independent sides, no blocker. Initial startup authority-invalid attempts ended once normal certification refreshed; no continuing lifecycle failure after recovery |
 | HTTPS | exact final index and JS/CSS hashes PASS; public Console200 and unauthenticated overview401 |
@@ -77,9 +77,25 @@ applied without Owner approval. Earlier unknown economics remain unknown. The
 old rejected DOGE/SOL intents were not resent. No test order, strategy/risk
 expansion, Tokyo application mutation, schema migration or credential change.
 
-**Only genuine Owner Resume/TOTP and its readonly postflight remain in this
-release's restoration sequence.** Natural future stop/TP/Runner/App and phone
-receipt remain separately observed acceptance, never implied by local tests.
+**This release's installation, precise ADA recovery, official promotion and
+genuine Owner restoration sequence are complete.** Natural future
+stop/TP/Runner/App and phone receipt remain separately observed acceptance,
+never implied by local tests.
+
+At11:26:54.127 Asia/Shanghai genuine
+`owner_control_entry_resume / entry_resume / totp_step_up` created Policy12/true;
+authorization and policy-event timestamps match. Readonly postflight through
+11:27:42 confirms exact final code/schema/config identity, integrity/flatness/
+Entry recovery/risk and management readiness PASS, genuine Resume authority true,
+all five active/running/NRestarts0, no fence, and zero internal Ticket/position/
+budget/unknown-command/open-Incident occupation. Signed exchange probes for7
+members prove independent sides/Cross and zero nonflat/open-order domains.
+Original strategy controls, Selection and all non-entry policy parameters remain
+unchanged. The bounded current-invocation worker sample contains no original
+faults, with0 new Signals/0 new Tickets since Resume; no forced trade or missed
+Signal replay was used. No further Owner operation is required by this postflight.
+Evidence: `.local/manual-natural-close-20261112/owner-resume-verification.json`,
+`owner-resumed-postflight.json`, runtime and chain readbacks.
 
 Evidence: `.local/manual-natural-close-20261112/` — final native certification
 logs, resource audit, original-source and completion terminal-source rehearsals,
