@@ -10681,7 +10681,14 @@ async def _assert_bounded_protected_safety_load(database, *, ticket, now_ms):
                     reconciled = [r for r in seen if r["component_id"]=="reconciliation" and r["status"]=="position_reconciled" and r.get("ticket_id")==ticket.identity.ticket_id]
                     hung = [r for r in seen if r["status"]=="warming_source_hung"]
                     if len(lifecycle)>=4 and len(reconciled)>=3 and hung:
-                        break
+                        # Other active-scope Fact reads can hang before this
+                        # generation is materialized. Wait for the exact target;
+                        # a source-call label alone is not warming evidence.
+                        async with PostgresKernelUnitOfWork(database) as uow:
+                            warming_targets = await uow.strategy_universes.get_generation_universe_targets(
+                                GenericMaterializationGeneration.id_for_snapshot(selected.selection_snapshot_id))
+                        if len(warming_targets)==1 and warming_targets[0].lifecycle_state.value=="warming":
+                            break
                     assert process.returncode is None,"protected Safety probe exited"
                     await asyncio.sleep(0.2)
             async with PostgresKernelUnitOfWork(database) as uow:

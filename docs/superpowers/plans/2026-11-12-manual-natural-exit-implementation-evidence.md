@@ -31,3 +31,9 @@ Owner于2026-11-12明确要求部署，授权实施已交付方案和精确自�
 BNB历史费用及funding证据缺失时，初始Review明确经济不完整并进入原有补证据预览队列，不填0、不自动修订其他已终态旧票。后续自然退出／TP／Runner／App以及手机实际收件仍需分别观察。
 
 本文件随实际完成追加，不能以本地实施记录宣称已安装或已恢复交易。
+
+## 候选复核与资源前置条件修正
+
+69ea610c完整unit／architecture2185、integration1948、full-chain76及Ruff／Mypy／Golden均通过，但最后core parity因启动环境未传既有SOR_DYNAMIC_SELECTION_CACHE_DIR而未生成R4证书。使用原冻结cache的单独core parity通过961快照／23064成员决定；不得手工补证书。
+
+独立四项resource组合中两项保护与warming并行场景最初在warming target为空处失败。trace证明任意active-scope事实读取也会记录warming_source_hung，旧等待条件在准确generation物化前就可能结束。用同一70秒／总600秒预算等待准确generation target进入warming后，保留原全部仓位／命令／CPU／内存断言，四项串行通过134.67秒。修正仅在测试等待条件，不修改生产策略、Selection或资源边界。最终SHA使用完整环境重新认证。
