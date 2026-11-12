@@ -41,3 +41,9 @@ BNB历史费用及funding证据缺失时，初始Review明确经济不完整并�
 ## 安装后新增边界复核
 
 55a56c43三证通过并已完成同schema限定安装／真实GET预览及apply，当前票terminal、仓位／预算／因果事故0，正常身份恢复、Owner仍暂停。现场发现两项补充缺口：REVIEW终态收尾通知误归residual；readonly认证以启动前采样时间判断稍后读取的RR feed，可能把已ready的新鲜水位误作未来证据而阻止promoter。前者先RED后修为确证事件下residual0；后者新增PG时序反例，实时feed按读取时刻校验，显式历史now仍严格拒绝未来数据，未放宽lease／TTL。补充候选单独认证后按普通terminal-clean同schema程序安装，不再次运行已完成的恢复apply。
+
+## 最终发布阶段完成
+
+最终候选e4c0f5e9精确R4／API／static三证PASS：unit／architecture2185、integration1950、full-chain76，Ruff／Mypy262／diff及Golden／core parity961快照／23064成员决定通过。前一55a56c43也完整认证并用于原受阻票的限定恢复；补充版在真实终态源上走普通same-schema升级，不重复恢复apply。
+
+现场真实GET预览与重新取证apply内容digest一致，ADA首次terminal，mode历史保留，源事件／准确事故／预算一次释放和Review均核验；normal identity恢复。随后102表25129行真实终态源逐表保全演练与正式普通升级PASS。最终14轮事实读取、官方promoter、五服务／management及零占用核验完成。真实Owner恢复与当前生产身份仅以路线图最新快照及行动时只读核验为准；不在本实现文档复制可漂移开关状态。

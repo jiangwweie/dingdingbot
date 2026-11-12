@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-11
+last_verified: 2026-11-12
 ---
 
 # Main Control Roadmap
@@ -22,11 +22,11 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `a2b6f747f9ea39fe91e1d30bf16aa63175a4aa76` |
-| Production tag | `manual-runtime-2026.11.11.1` |
+| Production commit | `e4c0f5e9b3e99afc2198252a0421d413062f6cb7` |
+| Production tag | `manual-runtime-2026.11.12.2` |
 | Production schema | `0021_manual_operational_closure` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `a2b6f747f9ea39fe91e1d30bf16aa63175a4aa76` — exact certified combined release; prior independent UI changes retained |
+| Static frontend commit | `e4c0f5e9b3e99afc2198252a0421d413062f6cb7` — exact certified combined release; published bytes unchanged from preceding UI |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
 | Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
@@ -36,6 +36,57 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Natural-exit repair installed and current ADA closed — Owner paused, 2026-11-12
+
+Owner explicitly authorized implementation/deployment of MA-NATURAL-CLOSE-01,
+then genuinely paused ENTRY at08:36:06.437 Asia/Shanghai (Policy11). Exact
+identity, account flatness and existing incident/Ticket scope were reread.
+**The production P1 closure defect below is repaired and its existing Ticket is
+terminal. Final production identity is the certified reference above; new ENTRY
+still awaits genuine Owner Resume/TOTP after official preparation.**
+
+| Boundary | Direct completed evidence |
+| --- | --- |
+| Final candidate | e4c0f5e9 exact R4 / API / static PASS: unit+architecture2185, integration1950, full-chain76; Ruff, Mypy262 files, diff, Golden/core parity961 snapshots/23064 member decisions PASS |
+| Independent resource audit | all4 source-bound tests PASS134.67s; unchanged1CPU/1GiB/70s scenario and600s total limits. Exact generation warming was added to the wait condition because unrelated active Fact reads could emit the same source-hung label before target creation; old final assertions retained |
+| Original source rehearsal | Real paused nonterminal source plus causal Incident restored into isolated manual PG; scoped identity, rollback preview, duplicate apply and normal identity restoration PASS; Owner/config/original Command rows preserved |
+| Initial scoped installation |55a56c43 installed through official same0021 stages with all five writers stopped and verified host/local stopped backup; exact recovery scope bound, capabilities disabled, no ordinary workers started |
+| Real recovery | Fresh GET preview and fresh matching-content apply at10:33 prove original stop parent/child and13222 full exit; appended VerifiedExitClosed/BudgetSettled/ReviewRecorded; no venue mutation, no forged MANUAL/AUTO transition |
+| ADA final accounting state | Ticket/aggregate terminal, REVIEW_REQUIRED history retained, quantity/protected0; budget released once, account/netting occupation0 and exact causal Incident resolved; outcome initial_stop_triggered, gross−27.76620USDT, net unavailable pending BNB/funding evidence |
+| Supplementary installation | e4c0f5e9 ordinary stopped/flat same-schema stages PASS after real terminal-source rehearsal preserving102 tables/25129 rows; fresh host/local backup verified; no second recovery apply or repeated release |
+| Supplementary fixes | Verified REVIEW closure now reports CLOSED/residual0; realtime readonly feed certification uses its read-time sample, while explicit historical time still rejects future facts; both have PG regression evidence |
+| Installed postflight | final identity/schema/capabilities/config/integrity/flatness/risk/current Entry readiness/management checks PASS; all five services active/running/NRestarts0; current invocation journals without original faults |
+| Entry preparation |14/14 admission/dispatch GET-only rounds PASS; official promoter prepared_owner_paused; ENTRY started through fenced sequence and maintenance fence removed |
+| Current Owner posture | Policy11/new ENTRY false remains genuine pause; original strategy controls/Selection/directional risk/budget and configuration1 retained; CPM/SOR-001/US-equity remain paused |
+| Venue / internal occupation | At11:23:42 final PG and signed GET checks: active Tickets/positions/budget/unresolved Commands/open Incidents0; venue positions/regular/conditional orders0 |
+| ADA qualification | Returned eligible, configured5/Cross/independent sides, no blocker. Initial startup authority-invalid attempts ended once normal certification refreshed; no continuing lifecycle failure after recovery |
+| HTTPS | exact final index and JS/CSS hashes PASS; public Console200 and unauthenticated overview401 |
+
+An early post-recovery notice was classified as residual despite actual zero
+orders because REVIEW retained history. That accepted notice is preserved as a
+historical defect; e4c0f5e9 corrects future notification classification. No fake
+trade event, notice replay or manual outbox rewrite was used to hide it.
+Early promoter refusal exposed a read-time feed sample race; the final candidate
+fixes it and the final official promoter completed. Prior failed/aborted
+certification runs remain evidence, not final release certificates.
+
+The current ADA initial Review honestly marks economics incomplete; its existing
+bounded enrichment queue prepared evidence, but no historical Review revision was
+applied without Owner approval. Earlier unknown economics remain unknown. The
+old rejected DOGE/SOL intents were not resent. No test order, strategy/risk
+expansion, Tokyo application mutation, schema migration or credential change.
+
+**Only genuine Owner Resume/TOTP and its readonly postflight remain in this
+release's restoration sequence.** Natural future stop/TP/Runner/App and phone
+receipt remain separately observed acceptance, never implied by local tests.
+
+Evidence: `.local/manual-natural-close-20261112/` — final native certification
+logs, resource audit, original-source and completion terminal-source rehearsals,
+stopped backups, official stage/activation receipts, recovery preview/apply and
+normal-identity receipts, installed postflight, restored ADA state, final
+verification and public artifact hashes. See
+[implementation evidence](../superpowers/plans/2026-11-12-manual-natural-exit-implementation-evidence.md).
 
 ### Seoul patrol — natural-stop closure blocked, 2026-11-11 evening
 
