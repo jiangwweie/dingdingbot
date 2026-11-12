@@ -131,6 +131,7 @@ _EXIT_EVENTS = {
 _RECONCILIATION_EVENTS = {
     "PositionFlatConfirmed",
     "ExternalFlatDetected",
+    "VerifiedExitClosed",
     "OwnedOrphanOrderDetected",
     "OwnedOrderAbsenceConfirmed",
     "UnownedOrderDetected",

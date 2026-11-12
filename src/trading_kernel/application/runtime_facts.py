@@ -26,6 +26,7 @@ from src.trading_kernel.domain.order_attribution import (
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts
+from src.trading_kernel.domain.trade_management import OrderTerms
 
 
 class EntryAdmissionSnapshotRequest(BaseModel):
@@ -384,6 +385,7 @@ class LifecycleFactsRequest(BaseModel):
     entry_order_reference: TicketOrderReference
     tp1_order_reference: TicketOrderReference | None = None
     active_stop_reference: TicketOrderReference | None = None
+    tp1_management_baseline: OrderTerms | None = None
     exact_tp_fills_required: bool = False
     tp1_exchange_order_id: str | None
     entry_fill_window_started_at_ms: int

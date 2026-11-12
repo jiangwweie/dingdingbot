@@ -39,7 +39,7 @@ class BinanceClosureReader:
         'positions':'/fapi/v3/positionRisk','orders':'/fapi/v1/openOrders',
         'algos':'/fapi/v1/openAlgoOrders','mode':'/fapi/v1/positionSide/dual',
         'all_orders':'/fapi/v1/allOrders','all_algos':'/fapi/v1/allAlgoOrders',
-        'trades':'/fapi/v1/userTrades',
+        'trades':'/fapi/v1/userTrades','order':'/fapi/v1/order','algo_order':'/fapi/v1/algoOrder',
     }
 
     def __init__(self, *, api_key: SecretStr, api_secret: SecretStr):

@@ -176,10 +176,12 @@ async def resolve_binance_order_identity(
             raise BinanceAlgoOrderAttributionError(
                 "Binance actualQty is unavailable for executable algo order"
             )
-        if snapshot.actual_quantity != expectation.quantity:
+        if snapshot.actual_quantity <= 0 or snapshot.actual_quantity > expectation.quantity:
             raise BinanceAlgoOrderAttributionError(
-                "Binance actualQty differs from frozen command quantity"
+                "Binance actualQty exceeds frozen command quantity or is zero"
             )
+        if snapshot.actual_quantity < expectation.quantity and snapshot.algo_status != "FINISHED":
+            raise BinanceAlgoOrderAttributionError("partial algo execution is not finished")
         return ResolvedOrderIdentity(
             reference=reference,
             resolution_status="executable",

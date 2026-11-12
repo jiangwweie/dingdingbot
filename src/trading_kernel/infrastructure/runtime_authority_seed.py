@@ -1322,6 +1322,7 @@ async def _deploy_runtime_identity(
     closure_ticket_id: str | None = None,
     allow_compatible_runtime_fence: bool = False,
     management_recovery_ticket_ids: tuple[str, ...] = (),
+    verified_exit_incident_ids: tuple[str,...] | None = None,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -1359,7 +1360,7 @@ async def _deploy_runtime_identity(
 
     if management_recovery_ticket_ids:
         await _require_management_recovery_activity(connection,
-            ticket_ids=management_recovery_ticket_ids,account_id=request.account_id)
+            ticket_ids=management_recovery_ticket_ids,account_id=request.account_id,verified_exit_incident_ids=verified_exit_incident_ids)
     elif closure_ticket_id is not None:
         await _require_closure_identity_activity(
             connection,
@@ -1472,6 +1473,7 @@ async def _deploy_runtime_identity(
         }:
             certification.pop('runtime_mode',None)
             certification.pop('management_recovery_ticket_ids',None)
+            certification.pop('verified_exit_recovery_scope',None)
         if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure"}:
             certification["exit_configuration_required"] = True
         certification["deployment_commit"] = request.runtime_commit
@@ -1528,7 +1530,21 @@ async def deploy_management_recovery_identity(uow: PostgresKernelUnitOfWork,
     return result
 
 
-async def _require_management_recovery_activity(connection: AsyncConnection, *, ticket_ids: tuple[str,...],account_id: str) -> None:
+async def deploy_verified_exit_recovery_identity(uow: PostgresKernelUnitOfWork,request: RuntimeAuthoritySeedRequest,*,scope: dict) -> RuntimeDeploymentIdentityResult:
+    ticket_id=str(scope['ticket_id'])
+    c=uow._require_connection()
+    row=(await c.execute(sa.select(trade_aggregates).where(trade_aggregates.c.ticket_id==ticket_id).with_for_update())).mappings().one()
+    if row['version']!=scope['expected_version'] or row['management_revision']!=scope['management_revision'] or row['management_mode']!='REVIEW_REQUIRED' or row['management_reason']!='tp1_terminal_attribution_unknown':
+        raise ValueError('natural recovery aggregate scope differs')
+    result=await _deploy_runtime_identity(uow,request,management_recovery_ticket_ids=(ticket_id,),verified_exit_incident_ids=tuple(scope['incident_ids']))
+    rows=(await c.execute(sa.select(runtime_capabilities_current).with_for_update())).mappings().all()
+    for item in rows:
+        cert={**item['certification'],'runtime_mode':'verified_exit_recovery_only','verified_exit_recovery_scope':{**scope,'target_commit':request.runtime_commit,'schema_revision':request.schema_revision}}
+        await c.execute(sa.update(runtime_capabilities_current).where(runtime_capabilities_current.c.capability_key==item['capability_key']).values(enabled=False,certification=cert))
+    return result
+
+
+async def _require_management_recovery_activity(connection: AsyncConnection, *, ticket_ids: tuple[str,...],account_id: str,verified_exit_incident_ids: tuple[str,...] | None = None) -> None:
     policy=(await connection.execute(sa.select(owner_policy_current).with_for_update())).mappings().all()
     if len(policy)!=1 or policy[0]['new_entry_submit_enabled']:
         raise ValueError("management recovery requires genuine Owner pause")
@@ -1541,7 +1557,14 @@ async def _require_management_recovery_activity(connection: AsyncConnection, *, 
     unresolved=await connection.scalar(sa.select(sa.func.count()).select_from(exchange_commands).where(exchange_commands.c.status.in_(['prepared','claimed','dispatch_started','outcome_unknown'])))
     incidents=await connection.scalar(sa.select(sa.func.count()).select_from(runtime_incidents).where(runtime_incidents.c.status=='open'))
     lane=(await connection.execute(sa.select(entry_lane_current).with_for_update())).mappings().all()
-    if unresolved or incidents or len(lane)!=1 or lane[0]['status']!='idle':
+    if verified_exit_incident_ids is not None:
+        outside_positions=await connection.scalar(sa.select(sa.func.count()).select_from(positions_current).where(positions_current.c.quantity!=0,~positions_current.c.ticket_id.in_(ticket_ids)))
+        outside_budgets=await connection.scalar(sa.select(sa.func.count()).select_from(budget_reservations).where(budget_reservations.c.status=='active',~budget_reservations.c.ticket_id.in_(ticket_ids)))
+        if outside_positions or outside_budgets:raise ValueError('natural recovery has unrelated internal occupation')
+        actual=(await connection.execute(sa.select(runtime_incidents).where(runtime_incidents.c.status=='open').with_for_update())).mappings().all()
+        if {r['incident_id'] for r in actual}!=set(verified_exit_incident_ids) or any(r['ticket_id'] not in ticket_ids or r['incident_kind'] not in {'lifecycle_facts_contradictory','lifecycle_facts_unavailable'} for r in actual):
+            raise ValueError('natural recovery causal incident set differs')
+    if unresolved or (incidents and verified_exit_incident_ids is None) or len(lane)!=1 or lane[0]['status']!='idle':
         raise ValueError("management recovery has unrelated or unresolved work")
 
 

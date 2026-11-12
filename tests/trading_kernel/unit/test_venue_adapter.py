@@ -2790,3 +2790,27 @@ async def test_v2_lifecycle_keeps_exact_tp_trade_ids_and_current_market_price():
     assert len(facts.tp_fill_evidence.fills)==1
     assert facts.tp_fill_evidence.command_id=='tp-command'
     assert facts.current_market_price==Decimal(60500)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('flat',[True,False])
+async def test_exact_v2_flat_does_not_require_live_position_mark_but_nonzero_does(flat):
+    class NoMark(LifecycleFactsExchange):
+        async def fetch_positions(self,symbols,params):
+            if flat:return []
+            rows=await super().fetch_positions(symbols,params)
+            for row in rows:row.pop('markPrice',None);row.get('info',{}).pop('markPrice',None)
+            return rows
+        async def fetch_order(self,order_id,symbol,params):
+            return {'id':order_id,'status':'expired','filled':'0','average':None}
+        async def fetch_my_trades(self,symbol,since,limit,params):
+            if params['orderId']=='venue-tp1-1':return []
+            return await super().fetch_my_trades(symbol,since,limit,params)
+    exchange=NoMark();adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20_000_000)
+    tp=TicketOrderReference(command_id='tp-command',command_kind=ExchangeCommandKind.TAKE_PROFIT,role=OrderRole.EXIT,namespace=OrderNamespace.REGULAR,venue_client_order_id='tp-client',submitted_exchange_order_id='venue-tp1-1',command_created_at_ms=2000)
+    request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.01'),entry_order_reference=_entry_order_reference(),tp1_exchange_order_id='venue-tp1-1',tp1_order_reference=tp,exact_tp_fills_required=True,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,observed_at_ms=20_000_000)
+    if flat:
+        facts=await adapter.read_lifecycle_facts(request)
+        assert facts.position_quantity==0 and facts.current_market_price is None
+    else:
+        with pytest.raises(RuntimeError,match='protective_mark_missing_nonzero'):await adapter.read_lifecycle_facts(request)

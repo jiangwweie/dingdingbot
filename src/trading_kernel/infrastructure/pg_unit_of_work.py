@@ -70,6 +70,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
     RequestControlledFlatten,
+    ResolveExactClosureIncidents,
     ResolveIncident,
     ResolveTicketIncidentsAtClosure,
 )
@@ -254,6 +255,7 @@ class PostgresKernelUnitOfWork:
                 ProjectTerminalOwnerState,
                 ResolveIncident,
                 ResolveTicketIncidentsAtClosure,
+                ResolveExactClosureIncidents,
             )
             if any(not isinstance(effect, allowed) for effect in reduction.effects):
                 raise UnsupportedKernelEffect(
@@ -628,6 +630,13 @@ class PostgresKernelUnitOfWork:
                     incident.incident_id,
                     resolved_at_ms=event.occurred_at_ms,
                 )
+                continue
+            if isinstance(effect, ResolveExactClosureIncidents):
+                actual = await self.incidents.list_open_for_ticket(effect.ticket_id)
+                if {i.incident_id for i in actual} != set(effect.incident_ids):
+                    raise UnsupportedKernelEffect("closure incident set changed")
+                for incident in actual:
+                    await self.incidents.resolve(incident.incident_id, resolved_at_ms=event.occurred_at_ms)
                 continue
             if isinstance(effect, ResolveTicketIncidentsAtClosure):
                 await self.incidents.resolve_all_open_for_ticket(

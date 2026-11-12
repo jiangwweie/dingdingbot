@@ -11,6 +11,7 @@ from src.trading_kernel.domain.events import (
     ManualPositionObserved,
     PositionFlatConfirmed,
     TradeEvent,
+    VerifiedExitClosed,
 )
 
 
@@ -38,7 +39,7 @@ def _review_window(
     flat_events = [
         event
         for event in events
-        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected)) or (isinstance(event,ManualPositionObserved) and event.quantity==0 and not event.orders and event.facts_complete and event.commands_resolved)
+        if isinstance(event, (PositionFlatConfirmed, ExternalFlatDetected, VerifiedExitClosed)) or (isinstance(event,ManualPositionObserved) and event.quantity==0 and not event.orders and event.facts_complete and event.commands_resolved)
     ]
     if len(entry_events) != 1 or not flat_events:
         return None
@@ -52,7 +53,7 @@ def _review_window(
         return None
     return _ReviewWindow(
         entry_time_ms=exposure_started_at_ms,
-        exit_time_ms=exit_event.occurred_at_ms,
+        exit_time_ms=exit_event.proof.exit_time_ms if isinstance(exit_event,VerifiedExitClosed) else exit_event.occurred_at_ms,
         executed_entry_quantity=entry.filled_qty,
         external_flat=isinstance(exit_event, (ExternalFlatDetected,ManualPositionObserved)),
     )

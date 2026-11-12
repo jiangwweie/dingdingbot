@@ -936,6 +936,20 @@ class CcxtVenueAdapter:
             raise RuntimeError("complete entry quantity differs from frozen entry")
         return facts
 
+    async def read_verified_exit(self, *, aggregate, references, incident_ids):
+        from src.trading_kernel.infrastructure.verified_exit_source import (
+            collect_verified_exit,
+        )
+        domain=aggregate.identity.netting_domain
+        exchange,_=self._resolve_exchange_and_symbol(venue_id=domain.venue_id,account_id=domain.account_id,exchange_instrument_id=domain.exchange_instrument_id)
+        class Reader:
+            async def read(self, name, params):
+                methods={'order':'fapiPrivateGetOrder','algo_order':'fapiPrivateGetAlgoOrder',
+                    'trades':'fapiPrivateGetUserTrades','positions':'fapiPrivateV3GetPositionRisk',
+                    'orders':'fapiPrivateGetOpenOrders','algos':'fapiPrivateGetOpenAlgoOrders','mode':'fapiPrivateGetPositionSideDual'}
+                return await _call_raw_exchange(getattr(exchange,methods[name]),params)
+        return await collect_verified_exit(Reader(),aggregate=aggregate,references=references,incident_ids=incident_ids)
+
     async def read_lifecycle_facts(
         self,
         request: LifecycleFactsRequest,
@@ -1083,11 +1097,14 @@ class CcxtVenueAdapter:
                         or current_market_price <= 0
                     ):
                         raise RuntimeError("current protective market price invalid")
-        if request.exact_tp_fills_required and current_market_price is None:
-            raise RuntimeError("current protective market price unavailable")
+        if request.exact_tp_fills_required and position_quantity > 0 and current_market_price is None:
+            from src.trading_kernel.infrastructure.verified_exit_source import (
+                VerifiedExitUnavailable,
+            )
+            raise VerifiedExitUnavailable("protective_mark_missing_nonzero")
         active_stop_quantity = None
         tp1_order_terminal = False
-        tp1_terminal_attribution: Literal["own_failure","unknown"] = "unknown"
+        tp1_terminal_attribution: Literal["own_failure","unknown","natural"] = "unknown"
         tp_fill_evidence = None
         if request.exact_tp_fills_required:
             if request.tp1_order_reference is not None:
@@ -1170,6 +1187,26 @@ class CcxtVenueAdapter:
                     "expired",
                     "rejected",
                 }
+                if tp1_order_terminal and request.tp1_management_baseline is not None:
+                    from src.trading_kernel.domain.trade_management import (
+                        ManagementDecision,
+                        OrderAction,
+                        SystemOrderIntent,
+                        classify_order_evidence,
+                    )
+                    from src.trading_kernel.infrastructure.binance_management_observation import (
+                        parse_rest_order,
+                    )
+                    raw_order=_require_mapping(_require_mapping(tp1_order,name="TP1 order").get("info"),name="TP1 raw order")
+                    evidence=parse_rest_order(cast(Mapping[str,object],raw_order),account_id=domain.account_id,conditional=False,
+                        received_at_ms=max(request.observed_at_ms,int(str(raw_order['updateTime']))),coverage_complete=True)
+                    baseline=request.tp1_management_baseline
+                    if (baseline.exchange_order_id!=request.tp1_order_reference.submitted_exchange_order_id
+                        or baseline.client_order_id!=request.tp1_order_reference.venue_client_order_id):
+                        raise ValueError('TP1 baseline differs from durable reference')
+                    classification=classify_order_evidence(evidence,system_intents=(SystemOrderIntent(command_id=request.tp1_order_reference.command_id,
+                        action=OrderAction.NEW,terms=baseline,exchange_event_at_ms=request.tp1_order_reference.command_created_at_ms),))
+                    if classification.decision in {ManagementDecision.SYSTEM,ManagementDecision.NATURAL}:tp1_terminal_attribution="natural"
             elif request.tp1_exchange_order_id is not None:
                 raise RuntimeError("TP1 exact durable command reference missing")
             if request.active_stop_reference is not None:

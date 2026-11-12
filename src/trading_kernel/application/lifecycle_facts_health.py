@@ -30,6 +30,7 @@ async def record_lifecycle_facts_failure(
     *,
     ticket_id: str,
     error_type: str,
+    reason_code: str | None = None,
     now_ms: int,
     due_at_ms: int,
 ) -> None:
@@ -41,6 +42,10 @@ async def record_lifecycle_facts_failure(
         AggregateStatus.RUNNER_PROTECTED,
     }:
         return
+    from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+    await uow.signals.record_operational_failure(FailureDiagnostic(stage="lifecycle_facts",subject_id=ticket_id,
+        reason_code=reason_code or "lifecycle_facts_unclassified",basis={"error_type":error_type,
+        "aggregate_version":aggregate.version,"management_mode":aggregate.management_mode.value},occurred_at_ms=now_ms))
     contradictory = error_type in _CONTRADICTORY_ERROR_TYPES
     incident_kind = (
         "lifecycle_facts_contradictory"

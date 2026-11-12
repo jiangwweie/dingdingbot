@@ -6,10 +6,11 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from enum import StrEnum
 from typing import TypedDict
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
 
 from src.trading_kernel.application.entry_fact_collection import (
     collect_entry_facts,
@@ -186,6 +187,7 @@ class _EntryMutationPreflight(BaseModel):
 
     status: EntryDispatchPreflightStatus
     evaluated_at_ms: int
+    failure_basis: dict[str, JsonValue] | None = None
     entry_authorized_at_ms: int | None = None
     entry_send_expires_at_ms: int | None = None
 
@@ -369,6 +371,7 @@ async def dispatch_one_command(
                 worker_id=request.worker_id,
                 now_ms=preflight.evaluated_at_ms,
                 status=preflight.status,
+                failure_basis=preflight.failure_basis,
             )
             return DispatchCommandResult(
                 status=DispatchCommandStatus.SUPERSEDED,
@@ -697,8 +700,9 @@ async def _preflight_new_entry_mutation(
     entry_facts_source: EntryFactsSource | None,
     clock_ms: Callable[[], int],
 ) -> _EntryMutationPreflight:
+    refusal_basis: dict[str, JsonValue] | None = None
     def refused(status: EntryDispatchPreflightStatus) -> _EntryMutationPreflight:
-        return _EntryMutationPreflight(status=status, evaluated_at_ms=clock_ms())
+        return _EntryMutationPreflight(status=status, evaluated_at_ms=clock_ms(),failure_basis=refusal_basis)
 
     facts_requested_at_ms = clock_ms()
     if (
@@ -958,6 +962,15 @@ async def _preflight_new_entry_mutation(
             decision.status is not EntryDispatchPreflightStatus.ALLOWED
             or command.kind is not ExchangeCommandKind.ENTRY
         ):
+            risk=snapshot.account_risk_snapshot
+            single=risk.total_margin_balance*policy.max_ticket_initial_margin_fraction if policy is not None else Decimal(0)
+            gross=max(risk.total_margin_balance*policy.max_gross_initial_margin_utilization-max(risk.total_initial_margin,claim.current_reserved_margin_at_claim),Decimal(0)) if policy is not None else Decimal(0)
+            refusal_basis={"stage":"dispatch_preflight","reason_code":decision.status.value,"ticket_id":aggregate.identity.ticket_id,
+                "command_id":command.command_id,"snapshot_digest":snapshot.snapshot_digest if hasattr(snapshot,'snapshot_digest') else claim.entry_admission_snapshot_digest,
+                "observed_at_ms":risk.observed_at_ms,"valid_until_ms":risk.valid_until_ms,
+                "reserved_margin":str(aggregate.ticket.reserved_margin),"ticket_margin_limit":str(single),
+                "available_margin":str(risk.available_margin),"remaining_gross_margin":str(gross),
+                "margin_constraints":[k for k,v in [("ticket_margin",single),("available_margin",risk.available_margin),("gross_margin",gross)] if aggregate.ticket.reserved_margin>v]}
             return refused(decision.status)
         valid_until_ms = min(
             regime_send_proof.snapshot.valid_until_ms
@@ -1007,6 +1020,7 @@ async def _record_preflight_refusal(
     worker_id: str,
     now_ms: int,
     status: EntryDispatchPreflightStatus,
+    failure_basis: dict[str, JsonValue] | None = None,
 ) -> None:
     result = ExchangeCommandResult(
         status=ExchangeCommandStatus.REJECTED,
@@ -1014,6 +1028,9 @@ async def _record_preflight_refusal(
         reason=f"dispatch_preflight:{status.value}",
     )
     async with uow_factory() as uow:
+        from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+        await uow.signals.record_operational_failure(FailureDiagnostic(stage="dispatch_preflight",subject_id=command.command_id,
+            reason_code=status.value,basis=failure_basis or {"command_id":command.command_id,"reason_code":status.value,"basis_completeness":"unavailable_final_send"},occurred_at_ms=now_ms))
         current_command = await uow.exchange_commands.get(command.command_id)
         aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
         if current_command is None or aggregate is None:

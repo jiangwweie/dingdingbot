@@ -2120,7 +2120,7 @@ def _causality_trade_item_facts(
     review: TradeCausalityReviewFacts | None,
 ) -> TradeItemFacts:
     exit_event = next(
-        (event for event in events if event.event_type == "ExitRequested"),
+        (event for event in events if event.event_type in {"ExitRequested","VerifiedExitClosed"}),
         None,
     )
     open_incident = next(
@@ -2574,7 +2574,7 @@ def _ticket_facts_select(
         )
         .where(
             trade_events.c.ticket_id == trade_tickets.c.ticket_id,
-            trade_events.c.event_type == "ExitRequested",
+            trade_events.c.event_type.in_(["ExitRequested","VerifiedExitClosed"]),
         )
         .order_by(
             trade_events.c.sequence.asc(),

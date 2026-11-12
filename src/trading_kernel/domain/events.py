@@ -16,6 +16,7 @@ from src.trading_kernel.domain.exit_execution import PostFillExitPlan, TpFillEvi
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 from src.trading_kernel.domain.trade_management import OrderEvidence
+from src.trading_kernel.domain.verified_exit_closure import VerifiedExitClosureProof
 
 
 class _Event(BaseModel):
@@ -58,6 +59,10 @@ class TicketIssued(_Event):
 
 
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+class VerifiedExitClosed(_TicketEvent):
+    proof: VerifiedExitClosureProof
 
 
 class LeverageConfirmed(_TicketEvent):
@@ -622,6 +627,7 @@ class ManualPositionObserved(_TicketEvent):
 
 
 TradeEvent = (
+    VerifiedExitClosed |
     TicketIssued
     | ManualTakeoverConfirmed
     | ManagementReviewRequired

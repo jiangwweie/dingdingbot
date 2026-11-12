@@ -111,7 +111,7 @@ async def record_trade_review(
         reduction=reduce_event(aggregate, event),
         expected_version=aggregate.version,
     )
-    if request.metrics.get('economics_completeness') == 'external_exit_unavailable':
+    if request.metrics.get('economics_completeness') in {'external_exit_unavailable','incomplete_evidence'}:
         from src.trading_kernel.application.review_enrichment import (
             request_review_enrichment,
         )

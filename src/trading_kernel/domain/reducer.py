@@ -31,6 +31,7 @@ from src.trading_kernel.domain.effects import (
     ReleaseCapitalAuthorities,
     ReleaseEntryLane,
     RequestControlledFlatten,
+    ResolveExactClosureIncidents,
     ResolveIncident,
     ResolveTicketIncidentsAtClosure,
 )
@@ -109,6 +110,7 @@ from src.trading_kernel.domain.events import (
     VacuumPartialFlattenRequired,
     VacuumPartialRetained,
     VacuumPostAbsenceNoFillVerified,
+    VerifiedExitClosed,
 )
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
 from src.trading_kernel.domain.trade_management import ManagementMode
@@ -137,6 +139,33 @@ def reduce_event(
         return _issue_ticket(event)
 
     _require_event_identity_and_sequence(current, event)
+
+    if isinstance(event, VerifiedExitClosed):
+        proof = event.proof
+        if current.status in {AggregateStatus.SETTLEMENT_PENDING, AggregateStatus.REVIEW_PENDING, AggregateStatus.TERMINAL}:
+            raise InvalidLifecycleTransition("verified closure already recorded")
+        if (proof.ticket_id != current.identity.ticket_id or proof.domain != current.identity.netting_domain
+            or proof.entry_quantity != current.ticket.quantity or proof.expected_version != current.version
+            or proof.management_revision != current.management_revision
+            or not proof.observed_at_ms <= event.occurred_at_ms < proof.valid_until_ms
+            or current.post_fill_stress_status != "passed"
+            or min(f.occurred_at_ms for f in proof.entry_fills) < current.ticket.created_at_ms):
+            raise InvalidLifecycleTransition("verified exit proof differs from protected Ticket")
+        identities={(o.reference.namespace.value,o.reference.submitted_exchange_order_id) for o in proof.orders}
+        for namespace,order_id in [("regular",current.entry_exchange_order_id),("regular",current.tp1_exchange_order_id),("conditional",current.initial_stop_exchange_order_id),("conditional",current.active_stop_exchange_order_id)]:
+            if order_id is not None and (namespace,order_id) not in identities:
+                raise InvalidLifecycleTransition("verified exit omits known order identity")
+        domain = current.identity.netting_domain
+        return _transition(current, event, status=AggregateStatus.SETTLEMENT_PENDING,
+            updates={"position_qty":Decimal(0),"protected_qty":Decimal(0),"management_orders":(),
+                "initial_stop_exchange_order_id":None,"active_stop_exchange_order_id":None,"active_stop_price":None,
+                "tp1_exchange_order_id":None,"pending_replaced_stop_exchange_order_id":None,
+                "pending_cancel_exchange_order_id":None,"pending_stop_price":None,"entry_lane_held":False},
+            effects=(ResolveExactClosureIncidents(ticket_id=current.identity.ticket_id,incident_ids=proof.incident_ids),
+                ReleaseCapitalAuthorities(ticket_id=current.identity.ticket_id,
+                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",netting_domain_key=domain.key(),
+                    notional=current.ticket.notional,risk_at_stop=current.ticket.risk_at_stop,
+                    reserved_margin=current.ticket.reserved_margin,released_at_ms=event.occurred_at_ms)))
 
     if isinstance(event, ManagementReviewCleared):
         if current.management_mode is not ManagementMode.REVIEW_REQUIRED or current.management_reason not in {"collector_gap","order_history_incomplete_or_command_unknown","kernel_order_not_matched_to_command","known_order_creation_time_or_terms_drift"}:
@@ -214,7 +243,10 @@ def reduce_event(
                 "management_reason": event.reason,
             },
         )
-    if current.management_mode is not ManagementMode.AUTO and not (current.management_mode is ManagementMode.MANUAL and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised))):
+    if current.management_mode is not ManagementMode.AUTO and not (
+        (current.management_mode is ManagementMode.MANUAL and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised)))
+        or (current.position_qty==0 and current.protected_qty==0 and current.status in {AggregateStatus.SETTLEMENT_PENDING,AggregateStatus.REVIEW_PENDING,AggregateStatus.TERMINAL} and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised)))
+    ):
         raise InvalidLifecycleTransition(
             "manual or unresolved management forbids automatic lifecycle reduction"
         )

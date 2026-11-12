@@ -1877,6 +1877,13 @@ class PostgresIncidentRepository:
         row = result.mappings().one_or_none()
         return None if row is None else RuntimeIncidentRecord.model_validate(row)
 
+    async def list_open_for_ticket(self, ticket_id: str) -> tuple[RuntimeIncidentRecord, ...]:
+        rows=(await self._connection.execute(sa.select(runtime_incidents).where(
+            runtime_incidents.c.ticket_id==ticket_id,runtime_incidents.c.status=='open').order_by(
+            runtime_incidents.c.incident_id).limit(17).with_for_update())).mappings().all()
+        if len(rows)>16:raise ValueError('closure incident set exceeds bound')
+        return tuple(RuntimeIncidentRecord.model_validate(r) for r in rows)
+
     async def get_open_account_position_incident(
         self, account_block_key: str,
     ) -> RuntimeIncidentRecord | None:

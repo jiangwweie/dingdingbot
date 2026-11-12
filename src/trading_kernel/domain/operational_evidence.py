@@ -10,7 +10,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 
 class FailureDiagnostic(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    stage: Literal['admission','certification','observation','facts_refresh','signal_ingest','review']
+    stage: Literal['admission','certification','observation','facts_refresh','signal_ingest','review','lifecycle_facts','exit_closure','dispatch_preflight']
     subject_id: str = Field(min_length=1, max_length=200)
     reason_code: str = Field(min_length=1, max_length=160)
     basis: dict[str, JsonValue]

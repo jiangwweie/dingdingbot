@@ -345,6 +345,12 @@ def _exit_reason(
     else:
         if any(value is None for value in event_facts[1:]):
             raise TradeFactsContradiction("partial exit Event row")
+        if facts.exit_event_type == "VerifiedExitClosed":
+            from src.trading_kernel.domain.verified_exit_closure import (
+                VerifiedExitClosureProof,
+            )
+            if facts.exit_event_payload is None:raise TradeFactsContradiction("missing verified exit proof")
+            return VerifiedExitClosureProof.model_validate(facts.exit_event_payload["proof"]).exit_reason,None
         if facts.exit_event_type != "ExitRequested":
             raise TradeFactsContradiction("unexpected exit Event type")
         payload = facts.exit_event_payload

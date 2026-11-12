@@ -48,7 +48,7 @@ def build_notices(
         before is not None
         and before.position_qty > 0
         or any(
-            isinstance(e, (ev.PositionFlatConfirmed, ev.ExternalFlatDetected))
+            isinstance(e, (ev.PositionFlatConfirmed, ev.ExternalFlatDetected, ev.VerifiedExitClosed))
             for e in events
         )
     )
@@ -97,7 +97,7 @@ def build_notices(
     ):
         kinds.append(NoticeKind.CLOSED)
         residual = 0
-    if final.management_mode is ManagementMode.REVIEW_REQUIRED:
+    if final.management_mode is ManagementMode.REVIEW_REQUIRED and final.status not in {AggregateStatus.SETTLEMENT_PENDING,AggregateStatus.REVIEW_PENDING,AggregateStatus.TERMINAL}:
         if (
             before is None
             or before.management_mode is not ManagementMode.REVIEW_REQUIRED

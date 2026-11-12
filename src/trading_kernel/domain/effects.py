@@ -100,6 +100,11 @@ class ResolveTicketIncidentsAtClosure(_Effect):
     ticket_id: str
 
 
+class ResolveExactClosureIncidents(_Effect):
+    ticket_id: str
+    incident_ids: tuple[str, ...]
+
+
 class ReleaseEntryLane(_Effect):
     ticket_id: str
 
@@ -138,6 +143,7 @@ KernelEffect = (
     | OpenIncident
     | ResolveIncident
     | ResolveTicketIncidentsAtClosure
+    | ResolveExactClosureIncidents
     | ReleaseEntryLane
     | ReleaseCapitalAuthorities
     | ReleaseBudget

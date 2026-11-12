@@ -16,7 +16,7 @@ from src.trading_kernel.interfaces.owner_console_http.app import (
     create_owner_console_app,
 )
 from src.trading_kernel.interfaces.owner_console_http.auth import OwnerAuthSettings
-from tests.trading_kernel.integration.test_manual_exit_configuration import intent
+from tests.trading_kernel.support.exit_configuration import intent
 from tests.trading_kernel.support.owner_roles import apply_owner_control_grants
 
 

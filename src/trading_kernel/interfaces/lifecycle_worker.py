@@ -171,6 +171,11 @@ async def run_lifecycle_worker_once(
         order_references = await uow.exchange_commands.list_order_references(
             aggregate.identity.ticket_id
         )
+    if aggregate.management_mode.value != "AUTO":
+        async with uow_factory() as uow:
+            await uow.aggregates.expedite_reconciliation(aggregate.identity.ticket_id,due_at_ms=request.now_ms)
+            await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="lifecycle",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
+        return LifecycleWorkerResult(status=LifecycleWorkerStatus.NO_CHANGE,ticket_id=aggregate.identity.ticket_id,detail="readonly_management_reconciliation_required")
     if profile_record is None or rules is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
@@ -203,6 +208,10 @@ async def run_lifecycle_worker_once(
             ticket_id=aggregate.identity.ticket_id,
             detail="entry_command_or_exposure_missing",
         )
+    async with uow_factory() as uow:
+        baseline_rows=await uow.management.command_rows_for_order(aggregate.identity.ticket_id,"regular",aggregate.tp1_exchange_order_id or "")
+    from src.trading_kernel.domain.trade_management import OrderTerms
+    tp_baseline=next((r["result_payload"].get("management_baseline") or r["result_payload"].get("venue_payload",{}).get("management_baseline") for r in baseline_rows if r["result_payload"]),None)
     profile = profile_record.profile
     applicable_time_stop_bars = (
         None
@@ -239,6 +248,7 @@ async def run_lifecycle_worker_once(
             ),
             None,
         ),
+        tp1_management_baseline=None if tp_baseline is None else OrderTerms.model_validate(tp_baseline),
         exact_tp_fills_required=profile.execution is not None,
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entry_fill_window_started_at_ms=(
@@ -266,6 +276,7 @@ async def run_lifecycle_worker_once(
                 uow,
                 ticket_id=aggregate.identity.ticket_id,
                 error_type=type(exc).__name__,
+                reason_code=getattr(exc,"code",None),
                 now_ms=request.now_ms,
                 due_at_ms=request.now_ms + request.idle_poll_interval_ms,
             )

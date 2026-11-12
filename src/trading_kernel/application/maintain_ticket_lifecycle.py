@@ -46,7 +46,7 @@ class TicketLifecycleFacts(BaseModel):
     current_market_price: Decimal | None = None
     active_stop_quantity: Decimal | None = None
     tp1_order_terminal: bool = False
-    tp1_terminal_attribution: Literal["own_failure", "unknown"] = "unknown"
+    tp1_terminal_attribution: Literal["own_failure", "unknown", "natural"] = "unknown"
     position_quantity: Decimal
     tp1_filled_quantity: Decimal
     tp1_average_fill_price: Decimal | None
@@ -152,6 +152,12 @@ async def maintain_ticket_lifecycle(
             )
         if filled > target:
             raise ValueError("TP1 cumulative fill exceeds frozen target")
+        if (filled < target and request.facts.tp1_order_terminal and request.facts.tp1_terminal_attribution == "natural"
+            and request.facts.active_stop_quantity != aggregate.position_qty-(filled-aggregate.tp1_filled_qty)):
+            # A known natural terminal update may race a position snapshot.
+            # Reconciliation proves full exit before any budget release or new write.
+            await uow.aggregates.expedite_reconciliation(aggregate.identity.ticket_id,due_at_ms=request.now_ms)
+            return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
         if (
             filled < target
             and request.facts.tp1_order_terminal

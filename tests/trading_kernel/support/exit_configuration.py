@@ -279,3 +279,45 @@ async def maintain_ticket_lifecycle_with_exact_tp_fixture(uow, request):
             }
         )
     return await maintain_ticket_lifecycle(uow, request)
+
+from src.trading_kernel.infrastructure.strategy_registry_seed import (
+    seed_strategy_registry,
+)
+
+
+async def intent(engine,account_id="manual-account"):
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=1000)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from src.trading_kernel.infrastructure.pg_models import runtime_profiles
+    async with engine.begin() as c:
+        await c.execute(pg_insert(runtime_profiles).values(runtime_profile_id="tiny-live-v1",venue_id="binance-usdm",account_id=account_id,
+            environment="live",position_mode="independent_sides",status="active",updated_at_ms=1000).on_conflict_do_nothing())
+    parameters = []
+    async with PostgresKernelUnitOfWork(engine) as uow:
+        for event in EXIT_EVENTS:
+            current = await uow.exit_profiles.get_current_binding(event)
+            binding = await uow.exit_profiles.get_binding(current.exit_binding_id)
+            profile = await uow.exit_profiles.get_profile(
+                exit_profile_id=binding.exit_profile_id,
+                semantic_hash=binding.exit_profile_semantic_hash,
+            )
+            sor = event in EXIT_EVENTS[4:]
+            parameters.append(
+                EventExitParameters(
+                    event_spec_id=event,
+                    expected_binding_id=current.exit_binding_id,
+                    expected_binding_revision=current.projection_version,
+                    reward_multiple=Decimal("1.2") if sor else Decimal(1),
+                    target_fraction=profile.profile.tp1.quantity_fraction
+                    if sor
+                    else Decimal(".05"),
+                    minimum_lift=not sor,
+                    max_actual_fraction=Decimal(1) if sor else Decimal(".5"),
+                    ma50_enabled=event in MA50_EVENTS,
+                )
+            )
+    return ExitConfigurationIntent(
+        account_id=account_id, expected_revision=0, events=tuple(parameters)
+    )

@@ -93,6 +93,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         deploy_compatible_upgrade_identity,
         deploy_management_recovery_identity,
         deploy_runtime_identity,
+        deploy_verified_exit_recovery_identity,
     )
 
     require_upgrade_schema(source["schema"], receipt["schema_revision"])
@@ -225,7 +226,10 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
             if source.get('recovery_ticket_ids'):
                 if forward:
                     raise ValueError('recovery-only upgrade must keep exact schema')
-                await deploy_management_recovery_identity(uow,request,recovery_ticket_ids=tuple(source['recovery_ticket_ids']))
+                if source.get('natural_exit_recovery'):
+                    await deploy_verified_exit_recovery_identity(uow,request,scope=source['natural_exit_recovery'])
+                else:
+                    await deploy_management_recovery_identity(uow,request,recovery_ticket_ids=tuple(source['recovery_ticket_ids']))
             else:
                 await (deploy_compatible_upgrade_identity if forward else deploy_runtime_identity)(uow,request)
         if forward and source["schema"]=="0017_app_management_observation":
@@ -367,6 +371,7 @@ def main():
     p.add_argument("--machine-id", required=True)
     p.add_argument("--public-ip", required=True)
     p.add_argument("--recovery-ticket-id")
+    p.add_argument("--natural-exit-recovery",action="store_true")
     a = p.parse_args()
     if os.geteuid() != 0:
         raise ValueError("root required")
@@ -386,7 +391,7 @@ def main():
     )
     with open("/run/brc-manual-install.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        source = require_stopped_upgrade(recovery_ticket_ids=() if a.recovery_ticket_id is None else (a.recovery_ticket_id,))
+        source = require_stopped_upgrade(recovery_ticket_ids=() if a.recovery_ticket_id is None else (a.recovery_ticket_id,),natural_exit_recovery=a.natural_exit_recovery)
         if source != prepared["source"]:
             raise ValueError("stopped upgrade source changed after staging")
         print(
