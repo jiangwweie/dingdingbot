@@ -47,10 +47,22 @@ conservative entry costs and all manual-management/ENTRY authority gates.
 [Calculation design](../superpowers/specs/2026-11-12-manual-capital-allocation-calculation-design.md)
 owns formulas, evidence and tradeoffs. New0022 is a stopped, flat, forward-only
 preservation-gated upgrade; old terminal Claims receive no invented allocation.
-Local implementation and validation are in progress on
-`codex/manual-capital-allocation-v1`. Production identity above is unchanged;
-Owner confirmation is still required before installation. No new Owner pause or
-Resume is requested by this local stage, and no venue mutation is part of it.
+**Local candidate8ac0f8bbb7e232ad99735d23c1841ff92e65570b / schema0022_wallet_margin_allocation
+is complete on `codex/manual-capital-allocation-v1`; official exact R4, Owner API
+and V2 static certification all PASS.** R4 includes unit/architecture2207,
+integration1957, full-chain77, Ruff/Mypy263, Golden/core parity961 snapshots and
+23064 member decisions. V2 tests146 and production build PASS. Resource group
+initially had a cleanup-only exit137 after protected-safety assertions passed;
+Docker recorded SIGINT then SIGKILL after5s, no OOM. The same4 scenarios passed
+unchanged on serial repeat132.25s. The specific child shutdown delay remains
+unreconstructed and is not declared repaired.
+[Implementation evidence](../superpowers/plans/2026-11-12-manual-wallet-allocation-implementation-evidence.md)
+retains the failure, repeat and limits. Official local preparation passed with
+`deployment_authorized=false`; this is not fresh host/account authority.
+Production identity above is unchanged. Owner confirmation is still required
+before installation; then refresh actual pause/flatness/orders/commands/identity
+and stopped-writer forward-migration gates. No new Owner pause or Resume is
+requested by this completed local stage, and no venue mutation is part of it.
 
 ### Natural-exit repair installed, ADA closed and Owner resumed, 2026-11-12
 

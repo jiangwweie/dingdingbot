@@ -1,6 +1,6 @@
 # MA-CAPITAL-01：人工接管版资金分配与发送检查计算方案
 
-状态：**Owner已批准本地修复，代码候选已完成，正在进行精确提交认证；部署前等待Owner确认，尚未安装或激活。**
+状态：**Owner已批准本地修复，代码候选与精确三证已完成；部署前等待Owner确认，尚未安装或激活。实施结果及资源测试证据边界见[验证记录](../plans/2026-11-12-manual-wallet-allocation-implementation-evidence.md)。**
 
 ## 1. 推荐决定
 
