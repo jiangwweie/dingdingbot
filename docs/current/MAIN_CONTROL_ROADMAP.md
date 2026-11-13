@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-12
+last_verified: 2026-11-13
 ---
 
 # Main Control Roadmap
@@ -22,11 +22,11 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `e4c0f5e9b3e99afc2198252a0421d413062f6cb7` |
-| Production tag | `manual-runtime-2026.11.12.2` |
-| Production schema | `0021_manual_operational_closure` |
+| Production commit | `7c8179adb1332793d1ef399af760a6788a79119a` |
+| Production tag | `manual-runtime-2026.11.13.1` |
+| Production schema | `0022_wallet_margin_allocation` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `e4c0f5e9b3e99afc2198252a0421d413062f6cb7` — exact certified combined release; published bytes unchanged from preceding UI |
+| Static frontend commit | `7c8179adb1332793d1ef399af760a6788a79119a` — exact certified V2 release, public HTML/JS/CSS hashes verified |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
 | Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
@@ -36,6 +36,50 @@ The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Wallet allocation0022 installed — awaiting genuine Owner Resume, 2026-11-13
+
+Owner authorized deployment, then genuinely paused new ENTRY at08:31:29.552
+Asia/Shanghai, Policy13. The original ADA AUTO Ticket had already exited by its
+system strategy-exit order, with no venue position/order remaining, but normal
+closure collection repeatedly exceeded the reconciliation service's5s budget.
+Installed GET-only collection proved the exact entry/exit/all terminal orders.
+The independent reconciliation-only startup budget was set to15s; the unchanged
+certified source Worker naturally appended VerifiedExitClosed/BudgetSettled/
+ReviewRecorded by08:46:39.331. Position/protection/reservation/occupation became0;
+Review economics complete, gross−7.848USDT and net−9.9182239014765242 under the
+existing BNB valuation contract. No forced MANUAL state, direct ticket repair,
+replayed ENTRY or venue mutation was used. ENTRY retains its certified10s/30s
+facts configuration; the base shared timeout remains5s.
+
+Before production DDL, exact installer review identified SELECT-star control
+comparison would treat0022's added Policy column as a preservation violation.
+A regression and actual terminal-source rehearsal confirmed the correction:
+compare every original source column, separately enforce target-added fields;
+changing an original Policy value still fails. The final candidate above adds
+only this installer fix and its regression to the prior8ac0f8bb runtime candidate.
+
+| Boundary | Direct completed evidence |
+| --- | --- |
+| Final exact certifications | Kernel R4 PASS: unit/architecture2207, integration1958, full-chain77; Ruff/Mypy263, Golden/core parity961 snapshots/23064 decisions PASS. Owner API and V2 static exact certifications PASS |
+| Source rehearsal | Actual paused active source closure/idempotence plus actual terminal source forward migration PASS;102 tables/29939 original rows preserved, Owner controls and original commands retained |
+| Stopped source | Five writers stopped, ENTRY disabled and maintenance-fenced after fresh real Owner pause/PG/venue flatness checks; stopped backup verified on server and locally, SHA256e0c7dfafad231631b3d680dfc578b3516a8ff96995e936dd9b96cd81ff13cda2 |
+| Formal installation | Official stage-upgrade/activate-upgrade PASS,0021→0022; original column/history preservation PASS; Owner Policy numeric fields/control versions/Selection remain unchanged |
+| Installed identity | Kernel/API/static exact final commit; schema0022; Policy margin_allocation_contract=wallet_allocation_v1, no active unversioned Claim |
+| Installed certification | Integrity/flatness/Entry recovery/risk/management/configuration checks PASS;0 positions/Tickets/unknown Commands/open Incidents |
+| Real Entry reads |14/14 installed GET rounds PASS; maximum6444ms, minimum remaining fact validity23556ms under original10s/30s contract |
+| Official promoter | prepared_owner_paused; ENTRY started while fenced, fence removed through official path; five services active/running/NRestarts0, management feed ready |
+| HTTPS | Public index and exact JS/CSS all200 and SHA256 match installed files; unauthenticated Owner API401 |
+| Current Owner state | Policy13/new ENTRY false; genuine Resume/TOTP requested after final checks, awaiting Owner action. Installation is complete; restoration must not be declared before readback |
+
+No Tokyo application/account write, risk expansion, credential mutation, test
+order or unsolicited historical Review revision was performed. Earlier tests'
+resource cleanup-only137 and unchanged repeat pass remain documented; this
+installation does not claim that separate shutdown delay repaired.
+Evidence: `.local/manual-wallet-deploy-20261113/`, including failed diagnostic/
+readback attempts, source dumps/rehearsals, exact certifications, official stage
+receipts, installed certification,14-round probe and public artifact hashes.
+See [deployment evidence](../superpowers/plans/2026-11-13-manual-wallet-allocation-deployment-evidence.md).
 
 ### Wallet allocation repair — approved local candidate, 2026-11-12
 
