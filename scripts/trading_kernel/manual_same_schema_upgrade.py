@@ -51,6 +51,26 @@ def preservation_projection_sql(
     )
 
 
+async def read_preserved_controls(connection, source_columns: dict[str, list[str]]) -> dict:
+    """Compare original control columns; target additions are separately constrained."""
+    from sqlalchemy import text
+
+    result = {}
+    for key, table in (
+        ("policy", "brc_owner_policy_current"),
+        ("controls", "brc_strategy_entry_controls_current"),
+        ("selection", "brc_strategy_selection_control_current"),
+    ):
+        columns = source_columns[table]
+        if not columns:
+            raise ValueError("preserved control source columns missing")
+        selected = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
+        result[key] = [dict(row) for row in (await connection.execute(
+            text('SELECT ' + selected + ' FROM "' + table + '" ORDER BY 1')
+        )).mappings()]
+    return result
+
+
 async def refresh_owner_read_grants(engine) -> None:
     """Reapply declared SELECT coverage after new tables, never write grants."""
     from sqlalchemy import text
@@ -188,17 +208,7 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                 }
             result["preserved_table_rows"] = history
             result["preserved_columns"] = all_columns
-            for key, table in [
-                ("policy", "brc_owner_policy_current"),
-                ("controls", "brc_strategy_entry_controls_current"),
-                ("selection", "brc_strategy_selection_control_current"),
-            ]:
-                result[key] = [
-                    dict(r)
-                    for r in (
-                        await c.execute(text("SELECT * FROM " + table))
-                    ).mappings()
-                ]
+            result.update(await read_preserved_controls(c, all_columns))
             return result
 
     try:
