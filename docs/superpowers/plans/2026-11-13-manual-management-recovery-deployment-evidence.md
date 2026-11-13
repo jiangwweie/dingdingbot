@@ -17,6 +17,7 @@ Owner 明确批准首尔人工接管产品部署，并通过控制台真实暂�
 6. 核验旧 gap 不被补造成连续覆盖；实际 Owner 只读角色能读取管理就绪字段；公网 HTTPS 资源哈希与安装文件一致。
 7. 通过安装代码执行真实 Entry admission/dispatch 两阶段 GET-only 事实采集，随后运行官方 promoter prepare-owner-resume。
 8. 最终只读复核五服务、精确身份、认证、授权姿态、内部零占用、交易所无仓无残单及当前调用日志。
+9. Owner 在控制台真实 Resume/TOTP 后，只读核验新授权、门禁、自然闭合K线后的readiness及当前有效Selection/Owner权限。
 
 ## 证据索引
 
@@ -32,11 +33,13 @@ Owner 明确批准首尔人工接管产品部署，并通过控制台真实暂�
 | installed-management-read.json | 真实 Owner read role 与静态 HTTPS 文件校验 |
 | promotion.json | 真实事实采集与官方 promoter |
 | paused-final-verification.json | 暂停状态的最终就绪核对 |
+| owner-restoration-verified.json / owner-resumed-chain.json | 真实Resume授权、当前认证、服务、交易所和日志 |
+| current-entry-authority.json / sor-entry-authority.json | 当前权限解析与历史readiness区分；不造Signal/Ticket |
 | deployment-progress.json | 当前操作阶段；不是运行权威 |
 
 ## 授权与剩余验收
 
-- 安装和暂停状态验收完成，真实 Owner Resume/TOTP 仍由 Owner 在控制台执行；程序不构造该授权。
+- 安装、暂停状态验收及真实 Owner Resume 后的只读核验均已完成；恢复授权来自控制台真实操作，程序未构造授权。
 - 原有策略、退出配置、资金风险合同和永久 MANUAL 行为保持；Tokyo 不变更，不创建测试订单。
 - 已安装源码与本地验证证明能力边界；未来真实故障后的自动重连、自然新订单及手机通知接收仍需各自直接现场证据。
-- 当前暂停状态和后续真实恢复的完成程度以路线图最新记录为准，不从此程序记录推断未来已恢复。
+- 当前运行身份、Owner状态与采样时刻以路线图最新记录为准；本记录不推断未来状态。

@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-13
+last_verified: 2026-11-14
 ---
 
 # Main Control Roadmap
@@ -37,7 +37,7 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Management recovery0023 installed — genuine Owner Resume pending, 2026-11-13
+### Management recovery0023 installed — genuine Owner restoration complete, verified2026-11-14
 
 Owner explicitly authorized deployment and then genuinely paused new ENTRY through
 the Seoul Console at 2026-11-13T22:28:48.011000+08:00 (Policy15, matching entry_pause authorization).
@@ -60,11 +60,35 @@ Vacuum or authorization repair and no venue write was used.
 | Official promoter | prepared_owner_paused; ENTRY started while fenced, fence removed by official path |
 | Final paused snapshot |22:37:09 Asia/Shanghai: five services active/running/NRestarts0, no maintenance fence, Policy15 still false; venue empty, no active internal Tickets/positions/Commands/Incidents/reservations; current invocation fault sample0 |
 
-**Installation and paused acceptance are complete; genuine Owner Resume/TOTP is
-still pending.** The agent cannot generate that authorization. A fresh readonly
-post-Resume check must confirm the actual new Policy event, current receiver,
-services and external state. Future fault-triggered reconnect and natural new
-order acceptance are not claimed from this deployment alone.
+**Installation and genuine Owner restoration are complete.** Owner used real
+Resume/TOTP at 2026-11-13T23:57:23.482000+08:00 to create Policy16/new ENTRY true;
+entry_resume purpose, totp_step_up strength and exact authorization/event timestamps
+were verified directly. Non-entry Policy amounts and all strategy/Selection
+controls remain unchanged; the agent did not generate an Owner authorization.
+
+Final readonly verification through 2026-11-14T00:03:13.326000+08:00 confirms the exact installed
+identity above, all five services active/running/NRestarts0, no maintenance fence,
+owner_entry_resume_authorized=true, entry_recovery_ready=true and feed/risk/exit
+configuration/integrity checks PASS. Venue GET probe covers7 members in
+independent-sides/Cross with0 nonflat or open-order domains; internal active
+Ticket/position/reservation/unknown-Command/open-Incident occupation0 and current
+invocation fault samples0. The new management epoch remains ready and CPM's old
+Vacuum remains RESOLVED_OWNER_RESUME, with the old gap history retained.
+
+The23:00 readiness rows initially still reflected the real global pause. After
+the next natural00:00 Shanghai closed bar, CPM/MI/MPG/BRF2 all28 current scopes
+refreshed to signal_absent. The installed official current Selection/Owner
+resolver returned VALID/static_baseline for28/28, proving no current residual
+Owner or Vacuum grant blocker. A separate read of existing SOR-1H scope returned
+VALID selection authority for14/14; two old readiness labels there still reflect
+the23:00 pause and are not current authorization failures. No scopes or strategy
+controls were enabled or rewritten by this verification.
+
+Since genuine Resume,0 new Signals and0 new Tickets were observed. No forced
+order or rejected-intent replay was used. Future fault-triggered reconnect and
+natural new-order acceptance remain independently unclaimed. Evidence includes
+`owner-restoration-verified.json`, `owner-resumed-chain.json`,
+`current-entry-authority.json` and `sor-entry-authority.json`.
 Evidence directory: `.local/manual-management-deploy-20261113/`; the
 [deployment verification record](../superpowers/plans/2026-11-13-manual-management-recovery-deployment-evidence.md)
 owns the procedure and evidence map, not competing current production state.
