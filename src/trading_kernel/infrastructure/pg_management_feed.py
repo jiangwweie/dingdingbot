@@ -27,17 +27,32 @@ class PostgresManagementFeed:
     def __init__(self, connection):
         self.c = connection
 
-    async def get_feed(self, scope_key):
-        row = (
-            (
-                await self.c.execute(
-                    sa.select(feeds).where(feeds.c.scope_key == scope_key)
-                )
-            )
-            .mappings()
-            .one_or_none()
+    async def lock_receiver(self, scope_key):
+        await self.c.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:scope,0))"),
+            {"scope": "management-feed:" + scope_key},
         )
+
+    async def get_feed(self, scope_key, *, for_update=False):
+        statement = sa.select(feeds).where(feeds.c.scope_key == scope_key)
+        if for_update:
+            statement = statement.with_for_update()
+        row = (await self.c.execute(statement)).mappings().one_or_none()
         return None if row is None else dict(row)
+
+    async def current_gap_started_at(self, scope_key, epoch_id):
+        return await self.c.scalar(
+            sa.select(coverage.c.occurred_at_ms)
+            .where(
+                coverage.c.scope_key == scope_key,
+                coverage.c.epoch_id == epoch_id,
+                coverage.c.kind.in_(("gap", "epoch_started")),
+            )
+            .order_by(
+                coverage.c.occurred_at_ms.desc(), coverage.c.coverage_event_id.desc()
+            )
+            .limit(1)
+        )
 
     async def start_feed(
         self, *, scope_key, epoch_id, worker_id, runtime_commit, now_ms
@@ -336,16 +351,8 @@ class PostgresManagementFeed:
             )
         return watermark
 
-    async def feed_ready(self, scope_key, *, now_ms, runtime_commit=None):
-        row = (
-            (
-                await self.c.execute(
-                    sa.select(feeds).where(feeds.c.scope_key == scope_key)
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
+    @staticmethod
+    def _row_ready(row, *, now_ms, runtime_commit=None):
         return bool(
             row
             and row["connection_state"] == "ready"
@@ -358,6 +365,55 @@ class PostgresManagementFeed:
             and row["connected_at_ms"] <= now_ms
             and row["schema_revision"] == CURRENT_SCHEMA_REVISION
             and (runtime_commit is None or row["runtime_commit"] == runtime_commit)
+        )
+
+    async def feed_ready(self, scope_key, *, now_ms, runtime_commit=None):
+        return self._row_ready(
+            await self.get_feed(scope_key), now_ms=now_ms, runtime_commit=runtime_commit
+        )
+
+    async def read_readiness(self, scope_key, *, required, now_ms, runtime_commit=None):
+        from src.trading_kernel.application.management_health import (
+            ManagementFeedReadiness,
+        )
+
+        feed = await self.get_feed(scope_key)
+        ready = self._row_ready(feed, now_ms=now_ms, runtime_commit=runtime_commit)
+        reason = None
+        if required and not ready:
+            reason = (
+                "management_feed_missing"
+                if feed is None
+                else (
+                    "management_receiver_lease_expired"
+                    if feed["lease_until_ms"] <= now_ms
+                    else "management_runtime_identity_differs"
+                    if feed["schema_revision"] != CURRENT_SCHEMA_REVISION
+                    or (
+                        runtime_commit is not None
+                        and feed["runtime_commit"] != runtime_commit
+                    )
+                    else feed["health_reason"] or "management_receiver_not_ready"
+                )
+            )
+        since = None
+        if reason and feed:
+            since = await self.current_gap_started_at(scope_key, feed["epoch_id"])
+            if reason == "management_receiver_lease_expired":
+                since = feed["lease_until_ms"]
+        return ManagementFeedReadiness(
+            required=required,
+            ready=ready,
+            connection_state="missing" if feed is None else feed["connection_state"],
+            blocker_code=reason,
+            blocked_since_ms=since,
+            last_successful_at_ms=None
+            if feed is None
+            else feed["last_successful_at_ms"],
+            lease_until_ms=None if feed is None else feed["lease_until_ms"],
+            epoch_id=None if feed is None else feed["epoch_id"],
+            persisted_watermark=None if feed is None else feed["persisted_watermark"],
+            applied_watermark=None if feed is None else feed["applied_watermark"],
         )
 
     async def stream_events(self, scope_key, start_ms, end_ms):
@@ -393,7 +449,9 @@ class PostgresManagementFeed:
             .mappings()
             .one_or_none()
         )
-        if not row or not await self.feed_ready(scope_key, now_ms=max(end_ms,row["last_successful_at_ms"] or end_ms)):
+        if not row or not await self.feed_ready(
+            scope_key, now_ms=max(end_ms, row["last_successful_at_ms"] or end_ms)
+        ):
             return False
         intervals = []
         if (

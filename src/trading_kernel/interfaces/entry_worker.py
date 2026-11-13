@@ -106,6 +106,7 @@ class EntryWorkerResult(BaseModel):
     status: EntryWorkerStatus
     ticket_id: str | None = None
     command_id: str | None = None
+    detail: str | None = None
     issue_status: IssueTicketStatus | None = None
     dispatch_status: DispatchCommandStatus | None = None
 
@@ -198,11 +199,17 @@ async def run_entry_worker_once(
         capability=await uow.signals.get_runtime_capability('exchange_commands')
         if capability is not None and capability.certification.get('management_feed_required'):
             from src.trading_kernel.application.management_health import (
-                management_feed_is_current,
+                read_management_feed_readiness,
             )
-            if not await management_feed_is_current(uow,venue_id=profile.venue_id,account_id=profile.account_id,
-                runtime_commit=request.runtime_commit,now_ms=clock_ms()):
-                return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE)
+            checked_at_ms = clock_ms()
+            feed = await read_management_feed_readiness(uow.management, required=True, venue_id=profile.venue_id, account_id=profile.account_id,
+                runtime_commit=request.runtime_commit, now_ms=checked_at_ms)
+            if not feed.ready:
+                await uow.signals.save_readiness(runtime_scope_id=signal.runtime_scope_id,
+                    readiness_state="blocked", first_blocker=feed.blocker_code or "management_receiver_not_ready",
+                    signal_event_id=signal.signal_event_id, fact_summary={"management_feed":feed.model_dump(mode="json")},
+                    updated_at_ms=checked_at_ms)
+                return EntryWorkerResult(status=EntryWorkerStatus.FACTS_UNAVAILABLE, detail=feed.blocker_code)
     facts_requested_at_ms = clock_ms()
     snapshot_request = EntryAdmissionSnapshotRequest(
         venue_id=profile.venue_id,

@@ -793,12 +793,7 @@ class CcxtVenueAdapter:
     async def restart_management_transport(self,epoch_id):
         for exchange in self._exchanges.values():
             if getattr(exchange,'management_epoch_id',None)!=epoch_id:continue
-            exchange.management_receive_gap='management_receiver_protocol_gap'
-            exchange.management_gap=True
-            exchange._management_connected_ms=None
-            client=exchange._management_client
-            if client is not None and not client.closed():await client.close()
-            exchange._management_client=None
+            exchange.request_management_restart(epoch_id)
 
     async def read_management_scan(self, request):
         from src.trading_kernel.infrastructure.management_collector import (

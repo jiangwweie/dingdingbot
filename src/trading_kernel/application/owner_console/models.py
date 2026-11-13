@@ -20,6 +20,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.trading_kernel.application.management_health import ManagementFeedReadiness
 from src.trading_kernel.domain.ticket import TradeTicket
 
 
@@ -514,6 +515,7 @@ class NoticeDeliverySummary(FrozenModel):
 
 
 class OwnerOverview(FrozenModel):
+    management_feed: ManagementFeedReadiness | None = None
     notification_delivery: NoticeDeliverySummary | None = None
     performance: PerformanceSummary | None = None
     observed_at_ms: int
@@ -1211,6 +1213,7 @@ class StrategyObservationListPage(FrozenModel):
 
 
 class OverviewFacts(FrozenModel):
+    management_feed: ManagementFeedReadiness | None = None
     notification_delivery: NoticeDeliverySummary | None = None
     performance: PerformanceSummary | None = None
     observed_at_ms: int

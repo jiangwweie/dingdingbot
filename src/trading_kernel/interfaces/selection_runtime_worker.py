@@ -545,6 +545,24 @@ async def _run_generic_materialization_runtime_once(
         if control.selection_spec_id!=request.selection_spec_id:
             return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.BLOCKED,reason_code="SELECTION_CONTROL_SPEC_DRIFT")
         if control.selection_mode is SelectionMode.STATIC_BASELINE and control.pending_selection_mode is None:
+            await uow.strategy_universes.lock_mutation()
+            owner = await uow.owner_controls.get_strategy_control(request.strategy_group_id, for_update=True)
+            control = await uow.instrument_selection.get_selection_control(request.strategy_group_id, for_update=True)
+            if control is None or control.selection_mode is not SelectionMode.STATIC_BASELINE or control.pending_selection_mode is not None:
+                return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.BLOCKED, reason_code="STATIC_OWNER_RESUME_CONTROL_CHANGED")
+            vacuum = await uow.instrument_selection.get_current_entry_vacuum(
+                strategy_group_id=request.strategy_group_id, selection_spec_id=request.selection_spec_id, for_update=True)
+            if vacuum is not None and vacuum.source_generation_id is None and vacuum.first_blocker == "OWNER_PAUSED":
+                now_ms = clock_ms()
+                if vacuum.state in {StrategyEntryVacuumState.OPEN, StrategyEntryVacuumState.DRAINING_ENTRY}:
+                    drain = await drain_strategy_entry_vacuum_once(uow, DrainStrategyEntryVacuumRequest(
+                        strategy_group_id=request.strategy_group_id, selection_spec_id=request.selection_spec_id, now_ms=now_ms))
+                    return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.WAITING,
+                        reason_code=drain.reason_code or drain.status.value)
+                if owner is not None and owner.entry_state.value == "enabled" and vacuum.state is StrategyEntryVacuumState.OWNER_PAUSED:
+                    resolved = await uow.instrument_selection.resolve_static_owner_pause_vacuum(vacuum, resolved_at_ms=now_ms)
+                    return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.ADVANCED if resolved else MaterializationRuntimeStatus.BLOCKED,
+                        reason_code="STATIC_OWNER_RESUME_RESOLVED" if resolved else "STATIC_OWNER_RESUME_PROOF_MISSING")
             return MaterializationRuntimeResult(status=MaterializationRuntimeStatus.NOT_DUE,reason_code="STATIC_BASELINE_NO_PENDING_DYNAMIC")
         try:
             installed=await uow.instrument_selection.get_generic_spec(request.selection_spec_id)

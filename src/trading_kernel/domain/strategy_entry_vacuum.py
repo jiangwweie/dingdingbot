@@ -23,6 +23,7 @@ class StrategyEntryVacuumState(StrEnum):
     RESOLVED_ACTIVE = "RESOLVED_ACTIVE"
     RESOLVED_FALLBACK = "RESOLVED_FALLBACK"
     RESOLVED_CONTINUITY = "RESOLVED_CONTINUITY"
+    RESOLVED_OWNER_RESUME = "RESOLVED_OWNER_RESUME"
     VALID_EMPTY = "VALID_EMPTY"
     OWNER_PAUSED = "OWNER_PAUSED"
     SUPERSEDED = "SUPERSEDED"
@@ -70,6 +71,7 @@ class StrategyEntryVacuum(BaseModel):
             StrategyEntryVacuumState.RESOLVED_ACTIVE,
             StrategyEntryVacuumState.RESOLVED_FALLBACK,
             StrategyEntryVacuumState.RESOLVED_CONTINUITY,
+            StrategyEntryVacuumState.RESOLVED_OWNER_RESUME,
         }
 
     @property
@@ -120,6 +122,11 @@ class StrategyEntryVacuum(BaseModel):
             and self.source_generation_id is None
         ):
             raise ValueError("materialization Vacuum state requires source Generation")
+        if self.state is StrategyEntryVacuumState.RESOLVED_OWNER_RESUME and (
+            self.strategy_group_id not in {"CPM-RO-001", "MPG-001", "MI-001", "BRF2-001"}
+            or self.source_generation_id is not None or self.first_blocker != "OWNER_PAUSED"
+        ):
+            raise ValueError("Owner resume requires a generation-free Generic Owner pause")
         return self
 
 
@@ -128,6 +135,7 @@ _TERMINAL_STATES = frozenset(
         StrategyEntryVacuumState.RESOLVED_ACTIVE,
         StrategyEntryVacuumState.RESOLVED_FALLBACK,
         StrategyEntryVacuumState.RESOLVED_CONTINUITY,
+        StrategyEntryVacuumState.RESOLVED_OWNER_RESUME,
         StrategyEntryVacuumState.VALID_EMPTY,
         StrategyEntryVacuumState.FAILED_CLOSED,
     }
@@ -180,6 +188,7 @@ _LEGAL_TRANSITIONS: dict[
     ),
     StrategyEntryVacuumState.OWNER_PAUSED: frozenset(
         {
+            StrategyEntryVacuumState.RESOLVED_OWNER_RESUME,
             StrategyEntryVacuumState.RECONFIGURING,
             StrategyEntryVacuumState.VALID_EMPTY,
             StrategyEntryVacuumState.SUPERSEDED,

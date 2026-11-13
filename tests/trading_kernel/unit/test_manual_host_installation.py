@@ -285,6 +285,8 @@ def test_stopped_upgrade_requires_fence_before_any_database_read(tmp_path, monke
     ('0020_manual_exit_regime_v1','0021_manual_operational_closure',True),
     ('0021_manual_operational_closure','0022_wallet_margin_allocation',True),
     ('0022_wallet_margin_allocation','0021_manual_operational_closure',False),
+    ('0022_wallet_margin_allocation','0023_management_recovery',True),
+    ('0023_management_recovery','0022_wallet_margin_allocation',False),
     ('0020_manual_exit_regime_v1','0022_wallet_margin_allocation',False),
     ('0019_management_evidence_v2','0021_manual_operational_closure',True),
     ('0021_manual_operational_closure','0020_manual_exit_regime_v1',False),

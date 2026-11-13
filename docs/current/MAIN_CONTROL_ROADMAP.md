@@ -37,6 +37,21 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
+### Management recovery0023 — local implementation, pending Owner deployment review, 2026-11-13
+
+Owner authorized local repair after direct readonly evidence confirmed the
+management-feed tick-time race, failed silent-stream restart, stale CPM static
+Owner-pause Vacuum, and incomplete trading-readiness reporting. Current work
+adds lock-time sampling, explicit private-stream restart with durable backlog
+preservation, a proof-guarded static Owner Resume terminal transition, and
+Overview/V2/ENTRY/certification blocker facts. Production identity above is
+unchanged. The migration is stopped/flat/paused/forward-only; no Tokyo mutation,
+new order, forged Owner authorization or direct production state repair is part
+of this local task. Full implementation and verification boundaries are in the
+[management recovery plan](../superpowers/plans/2026-11-13-manual-management-recovery-v2.md).
+Local tests do not establish production recovery; exact certification and
+Owner-reviewed installation remain release gates.
+
 ### Wallet allocation0022 installed — genuine Owner restoration complete, 2026-11-13
 
 Owner authorized deployment, then genuinely paused new ENTRY at08:31:29.552

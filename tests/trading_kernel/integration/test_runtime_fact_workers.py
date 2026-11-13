@@ -1154,3 +1154,29 @@ async def test_entry_worker_uses_each_real_action_time_after_both_slow_fact_read
     async with PostgresKernelUnitOfWork(engine) as uow:
         created=await uow.tickets.get(result.ticket_id)
         assert created.created_at_ms==7_003
+
+
+@pytest.mark.asyncio
+async def test_entry_feed_blocker_is_logged_and_persisted_before_any_venue_read(runtime_fact_worker_engine):
+    from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+    e=runtime_fact_worker_engine
+    await _seed_runtime_authority(e)
+    await _enable_exchange_commands(e)
+    signal=_signal(signal_event_id='signal-management-blocker')
+    async with PostgresKernelUnitOfWork(e) as u:
+        await ingest_signal(u,IngestSignalRequest(signal=signal,runtime_commit='kernel-test-head',
+            schema_revision=CURRENT_SCHEMA_REVISION,now_ms=1002))
+    async with e.begin() as c:
+        await c.execute(runtime_capabilities_current.update().where(runtime_capabilities_current.c.capability_key=='exchange_commands')
+            .values(certification={'management_feed_required':True}))
+    facts=FakeEntryAdmissionFactsSource();venue=RecordingAcceptingVenue()
+    result=await run_entry_worker_once(lambda:PostgresKernelUnitOfWork(e),venue,facts,
+        EntryWorkerRequest(worker_id='entry',runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,
+            now_ms=1003,lease_until_ms=6003,timeout_seconds=1,admission_snapshot_validity_ms=1000),clock_ms=lambda:1003)
+    assert result.status is EntryWorkerStatus.FACTS_UNAVAILABLE
+    assert result.detail=='management_feed_missing'
+    assert facts.requests==[] and venue.command_kinds==[]
+    async with PostgresKernelUnitOfWork(e) as u:
+        readiness=await u.signals.get_readiness(signal.runtime_scope_id)
+        assert readiness.first_blocker=='management_feed_missing'
+        assert readiness.fact_summary['management_feed']['ready'] is False

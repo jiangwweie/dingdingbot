@@ -10,6 +10,8 @@ from uuid import uuid4
 
 import ccxt.pro as ccxt_pro  # type: ignore[import-untyped]
 
+MANAGEMENT_CLOSE_TIMEOUT_SECONDS = 5
+
 _ORDER_FIELDS = frozenset(
     [
         "s",
@@ -73,6 +75,8 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         self.management_gap = True
         self.management_lost_before_ms = None
         self._management_task = None
+        self._management_restart = asyncio.Event()
+        self._management_restart_epoch = None
         self._management_client = None
         self._management_connected_ms = None
         self.management_epoch_id = "management-epoch:" + uuid4().hex
@@ -101,7 +105,23 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         return bool(key and client.url == self.get_private_ws_url("future", key))
 
     def on_connected(self, client, message=None):
+        if getattr(client, "_brc_management_retired", False):
+            return None
         if self._is_management_client(client):
+            if (
+                self.management_pending_events
+                and len(self.management_closed_batches)
+                == self.management_closed_batches.maxlen
+            ):
+                # Pause receipt rather than evict an epoch that PostgreSQL has
+                # not acknowledged. This connection cannot establish coverage.
+                client._brc_management_retired = True
+                self._management_client = client
+                self.management_gap = True
+                self.management_receive_gap = "management_epoch_queue_overflow"
+                self._management_connected_ms = None
+                self._management_restart.set()
+                return None
             if self.management_pending_events:
                 self.management_closed_batches.append(
                     {
@@ -130,11 +150,15 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
 
     def on_error(self, client, error):
         self._lose_management_connection(client)
-        return super().on_error(client, error)
+        if self.clients.get(client.url) is client:
+            return super().on_error(client, error)
+        return None
 
     def on_close(self, client, error):
         self._lose_management_connection(client)
-        return super().on_close(client, error)
+        if self.clients.get(client.url) is client:
+            return super().on_close(client, error)
+        return None
 
     def management_covers(self, *, start_ms, end_ms):
         client = self._management_client
@@ -151,6 +175,8 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
         )
 
     def handle_order_update(self, client, message):
+        if getattr(client, "_brc_management_retired", False):
+            return None
         if message.get("e") in ("ORDER_TRADE_UPDATE", "ALGO_UPDATE"):
             self.management_receive_sequence += 1
             if (
@@ -172,29 +198,89 @@ class ManagementBinanceUsdm(ccxt_pro.binanceusdm):
             )
         return super().handle_order_update(client, message)
 
+    def request_management_restart(self, epoch_id):
+        if (
+            epoch_id != self.management_epoch_id
+            or self._management_restart_epoch == epoch_id
+        ):
+            return
+        self._management_restart_epoch = epoch_id
+        self.management_receive_gap = "management_receiver_protocol_gap"
+        self.management_gap = True
+        self._management_connected_ms = None
+        self._management_restart.set()
+        self.start_management_stream()
+
+    async def _close_management_transport(self):
+        client = self._management_client
+        self._management_client = None
+        if client is None:
+            key = self.options.get("future", {}).get("listenKey")
+            if key:
+                client = self.clients.get(self.get_private_ws_url("future", key))
+        if client is None:
+            return
+        client._brc_management_retired = True
+        # CCXT caches clients by URL. Retire that exact transport before
+        # subscribing again, including when closing it fails or times out.
+        if self.clients.get(client.url) is client:
+            self.clients.pop(client.url)
+        try:
+            if not client.closed():
+                await asyncio.wait_for(client.close(), MANAGEMENT_CLOSE_TIMEOUT_SECONDS)
+        except Exception:  # noqa: BLE001 - reconnect with coverage fenced.
+            self.management_receive_gap = "private_stream_close_failed"
+
     async def _management_loop(self):
         while True:
+            if self._management_restart.is_set():
+                self._management_restart.clear()
+                await self._close_management_transport()
+            if (
+                self.management_pending_events
+                and len(self.management_closed_batches)
+                == self.management_closed_batches.maxlen
+            ):
+                await self._close_management_transport()
+                await asyncio.sleep(0.5)
+                continue
+            watch = asyncio.create_task(self.watch_orders())
+            restart = asyncio.create_task(self._management_restart.wait())
+            failed = False
             try:
-                await self.watch_orders()
-                if self.management_receive_gap is not None:
-                    raise RuntimeError("management receive gap requires new transport")
+                done, _ = await asyncio.wait(
+                    (watch, restart), return_when=asyncio.FIRST_COMPLETED
+                )
+                if restart in done:
+                    continue
+                # CCXT Client.close cancels the subscription Future. This is
+                # distinct from cancellation of the receiver owner task.
+                if watch.cancelled():
+                    failed = True
+                else:
+                    await watch
+                    failed = self.management_receive_gap is not None
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - uncertain stream state starts a new connection epoch.
+            except Exception:  # noqa: BLE001 - uncertain stream starts a new epoch.
+                failed = True
+            finally:
+                for task in (watch, restart):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(watch, restart, return_exceptions=True)
+            if failed:
                 self.management_gap = True
                 self.management_receive_gap = "private_stream_watch_failed"
                 self._management_connected_ms = None
-                client = self._management_client
-                if client is not None and not client.closed():
-                    try:
-                        await asyncio.wait_for(client.close(), timeout=5)
-                    except Exception:  # noqa: BLE001 - transport failure must not kill reconnection.
-                        self.management_receive_gap="private_stream_close_failed"
-                self._management_client = None
-                await asyncio.sleep(2)
+                await self._close_management_transport()
+                try:
+                    await asyncio.wait_for(self._management_restart.wait(), timeout=2)
+                except TimeoutError:
+                    pass
 
     def start_management_stream(self):
-        if self._management_task is None:
+        if self._management_task is None or self._management_task.done():
             self.management_started_ms = int(time.time() * 1000)
             self._management_task = asyncio.create_task(self._management_loop())
 

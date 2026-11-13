@@ -4991,6 +4991,31 @@ class PostgresInstrumentSelectionRepository:
         row = (await self._connection.execute(statement)).mappings().one_or_none()
         return None if row is None else _entry_vacuum_from_row(row)
 
+    async def resolve_static_owner_pause_vacuum(
+        self, vacuum: StrategyEntryVacuum, *, resolved_at_ms: int,
+    ) -> bool:
+        """Resume the unchanged static baseline; never create Selection authority."""
+        if vacuum.state is not StrategyEntryVacuumState.OWNER_PAUSED:
+            return False
+        proof = await self._connection.scalar(sa.text(
+            "SELECT brc_static_owner_resume_proof(:vid,:at)"),
+            {"vid": vacuum.entry_vacuum_id, "at": resolved_at_ms})
+        if proof is None:
+            return False
+        version = vacuum.projection_version + 1
+        await self._connection.execute(sa.insert(strategy_entry_vacuum_events).values(
+            entry_vacuum_event_id=f"vacuum-event:{vacuum.entry_vacuum_id}:{version}",
+            entry_vacuum_id=vacuum.entry_vacuum_id, event_sequence=version,
+            event_type="RESOLVED_OWNER_RESUME", payload=proof, occurred_at_ms=resolved_at_ms))
+        changed = await self._connection.execute(sa.update(strategy_entry_vacuums_current).where(
+            strategy_entry_vacuums_current.c.entry_vacuum_id == vacuum.entry_vacuum_id,
+            strategy_entry_vacuums_current.c.projection_version == vacuum.projection_version,
+            strategy_entry_vacuums_current.c.state == "OWNER_PAUSED").values(
+                state="RESOLVED_OWNER_RESUME", resolved_at_ms=resolved_at_ms, projection_version=version))
+        if changed.rowcount != 1:
+            raise SelectionJobConflict("Static Owner resume fence changed")
+        return True
+
     async def list_draining_entry_vacuums(
         self, *, limit: int,
     ) -> tuple[StrategyEntryVacuum, ...]:
@@ -6521,7 +6546,7 @@ class PostgresInstrumentSelectionRepository:
             if owner is None:
                 raise SelectionJobConflict("Owner Pause drain control missing")
             if owner["entry_state"]=="enabled":
-                if not await self._connection.scalar(sa.text("SELECT brc_generic_early_resume_drain_matches(:vid,:at)"),
+                if not await self._connection.scalar(sa.text("SELECT brc_generic_early_resume_drain_matches(:vid,:at) OR brc_static_owner_resume_authorization(:vid,:at) IS NOT NULL"),
                     {"vid":vacuum.entry_vacuum_id,"at":drained_at_ms}):
                     raise SelectionJobConflict("Owner Pause early Resume drain proof missing")
                 resume=await self._connection.scalar(sa.text("SELECT authorization_id FROM brc_strategy_entry_control_events WHERE strategy_entry_control_event_id=:id"),

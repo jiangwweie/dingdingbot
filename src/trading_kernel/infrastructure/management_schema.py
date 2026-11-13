@@ -65,6 +65,7 @@ def define_management_tables(metadata):
         coverage.c.from_ms,
         coverage.c.to_ms,
     )
+    sa.Index("ix_brc_management_coverage_epoch_time", coverage.c.scope_key, coverage.c.epoch_id, coverage.c.occurred_at_ms)
     feed = sa.Table(
         "brc_management_feed_current",
         metadata,

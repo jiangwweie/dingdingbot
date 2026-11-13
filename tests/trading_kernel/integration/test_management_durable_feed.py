@@ -217,6 +217,7 @@ async def test_durable_receiver_acknowledges_only_after_commit_and_identity_gate
         worker_id="receiver",
         runtime_commit="wrong",
         now_ms=5000,
+        clock_ms=lambda: 5000,
     )
     assert result.status == "runtime_fenced" and source.acknowledged == []
     result = await persist_management_feed_once(
@@ -225,6 +226,7 @@ async def test_durable_receiver_acknowledges_only_after_commit_and_identity_gate
         worker_id="receiver",
         runtime_commit="kernel-test-head",
         now_ms=6000,
+        clock_ms=lambda: 6000,
     )
     assert result.status == "management_feed_persisted" and source.acknowledged == [
         ("durable-e", 0)
@@ -249,5 +251,103 @@ async def test_durable_receiver_acknowledges_only_after_commit_and_identity_gate
             worker_id="receiver",
             runtime_commit="kernel-test-head",
             now_ms=7000,
+            clock_ms=lambda: 7000,
         )
     assert source.acknowledged == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", [None, "future_receipt", "future_exchange"])
+async def test_receive_after_tick_start_is_not_a_protocol_error(
+    head_template_engine, fault
+):
+    import json
+    from pathlib import Path
+
+    from src.trading_kernel.interfaces.management_feed_worker import (
+        management_scope,
+        persist_management_feed_once,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+
+    e = head_template_engine
+    t = registered_sor_long_ticket()
+    await reach_position_protected(e, t)
+    raw = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "fixtures/manual_management_recovery/receive_clock_event.json"
+        ).read_text()
+    )
+
+    processed_at_ms = raw["received_at_ms"] + 1
+    if fault == "future_receipt":
+        raw["received_at_ms"] = processed_at_ms + 1
+    elif fault == "future_exchange":
+        raw["payload"]["T"] = raw["received_at_ms"] + 1
+        raw["payload"]["E"] = raw["received_at_ms"] + 1
+
+    class Source:
+        def __init__(self):
+            self.acknowledged = []
+            self.restarts = []
+
+        async def restart_management_transport(self, epoch_id):
+            assert self.acknowledged == [(epoch_id, 1)]
+            self.restarts.append(epoch_id)
+
+        def management_feed_batches(self):
+            return [
+                {
+                    "venue_id": "binance-usdm",
+                    "account_id": t.identity.netting_domain.account_id,
+                    "epoch_id": "clock-race",
+                    "connected_at_ms": raw["tick_started_ms"] - 100,
+                    "events": [
+                        {
+                            "sequence": 1,
+                            "received_at_ms": raw["received_at_ms"],
+                            "payload": raw["payload"],
+                        }
+                    ],
+                    "gap_reason": None,
+                    "backlog_pending": False,
+                }
+            ]
+
+        def acknowledge_management_events(self, epoch, watermark):
+            self.acknowledged.append((epoch, watermark))
+
+    source = Source()
+    result = await persist_management_feed_once(
+        lambda: PostgresKernelUnitOfWork(e),
+        source,
+        worker_id="receiver",
+        runtime_commit="kernel-test-head",
+        now_ms=raw["tick_started_ms"],
+        clock_ms=lambda: processed_at_ms,
+    )
+    async with PostgresKernelUnitOfWork(e) as u:
+        row = await u.management.get_feed(
+            management_scope("binance-usdm", t.identity.netting_domain.account_id)
+        )
+        if fault is None:
+            assert row["connection_state"] == "ready" and row["health_reason"] is None
+            assert row["persisted_watermark"] == row["applied_watermark"] == 1
+        else:
+            assert (
+                row["connection_state"] == "gap"
+                and row["health_reason"] == "management_stream_protocol_invalid"
+            )
+            assert row["persisted_watermark"] == 1 and row["applied_watermark"] == 0
+    assert source.acknowledged == [("clock-race", 1)]
+    assert source.restarts == ([] if fault is None else ["clock-race"])
+    assert result.status == (
+        "management_feed_persisted" if fault is None else "management_feed_recovering"
+    )
+    assert result.detail == (
+        None if fault is None else "management_stream_protocol_invalid"
+    )

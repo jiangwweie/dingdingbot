@@ -1,0 +1,31 @@
+{
+  "provenance": "sanitized real ALGO_UPDATE; original receive sequence35",
+  "tick_started_ms": 1794547055266,
+  "received_at_ms": 1794547055267,
+  "payload": {
+    "E": 1794547055249,
+    "T": 1794547055248,
+    "e": "ALGO_UPDATE",
+    "o": {
+      "R": true,
+      "S": "BUY",
+      "V": "NONE",
+      "X": "NEW",
+      "f": "GTE_GTC",
+      "o": "TAKE_PROFIT",
+      "p": "0",
+      "q": "1.24",
+      "s": "BNBUSDT",
+      "cp": false,
+      "ia": false,
+      "pP": true,
+      "pm": "OPPONENT",
+      "ps": "SHORT",
+      "tp": "635.5",
+      "wt": "MARK_PRICE",
+      "aid": 123456,
+      "gtd": 0,
+      "caid": "brc-clock-regression"
+    }
+  }
+}

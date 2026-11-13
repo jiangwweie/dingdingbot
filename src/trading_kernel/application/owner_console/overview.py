@@ -45,6 +45,7 @@ def build_owner_overview(facts: OverviewFacts, now_ms: int) -> OwnerOverview:
     )
 
     return OwnerOverview(
+        management_feed=facts.management_feed,
         notification_delivery=facts.notification_delivery,
         observed_at_ms=now_ms,
         conclusion=conclusion,
@@ -158,6 +159,13 @@ def _conclusion(facts: OverviewFacts,now_ms: int) -> OwnerConclusion:
             owner_action="Follow the intervention recorded by the Monitor.",
             evidence=_fact_evidence(identity, occurred_at_ms),
         )
+
+    if facts.management_feed is not None and facts.management_feed.required and not facts.management_feed.ready:
+        return _owner_conclusion(level="attention",
+            summary="Management receiver unavailable; new ENTRY is blocked and ordinary AUTO management is restricted.",
+            owner_action=None, evidence=_fact_evidence(
+                "management-feed:" + (facts.management_feed.epoch_id or "missing"),
+                facts.management_feed.blocked_since_ms or now_ms))
 
     for index, key in enumerate(facts.monitor_keys):
         if key.startswith('management-feed:') and (index>=len(facts.monitor_updated_at_ms) or

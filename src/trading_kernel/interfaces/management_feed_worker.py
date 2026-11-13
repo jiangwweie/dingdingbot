@@ -18,7 +18,7 @@ class FeedTickResult(BaseModel):
 
 
 async def persist_management_feed_once(
-    uow_factory, source, *, worker_id, runtime_commit, now_ms
+    uow_factory, source, *, worker_id, runtime_commit, now_ms, clock_ms
 ):
     from src.trading_kernel.application.runtime_fence import runtime_writer_is_certified
     from src.trading_kernel.infrastructure.runtime_identity import (
@@ -34,10 +34,13 @@ async def persist_management_feed_once(
     ):
         return FeedTickResult(status="runtime_fenced")
     states = source.management_feed_batches()
+    blocked_reasons = set()
     for state in states:
         scope = management_scope(state["venue_id"], state["account_id"])
         async with uow_factory() as u:
-            current = await u.management.get_feed(scope)
+            await u.management.lock_receiver(scope)
+            current = await u.management.get_feed(scope, for_update=True)
+            now_ms = clock_ms()
             if current is None or current["epoch_id"] != state["epoch_id"]:
                 await u.management.start_feed(
                     scope_key=scope,
@@ -47,7 +50,11 @@ async def persist_management_feed_once(
                     now_ms=now_ms,
                 )
 
-            async def apply_observer(ticket_id, evidence):
+            # Receipts can arrive while runtime certification or ownership
+            # locking is awaited. Check processing time, not tick start.
+            now_ms = clock_ms()
+
+            async def apply_observer(ticket_id, evidence, *, observed_at_ms=now_ms):
                 from src.trading_kernel.application.observe_trade_management import (
                     observe_trade_management,
                 )
@@ -91,7 +98,7 @@ async def persist_management_feed_once(
                 ):
                     return False
                 await observe_trade_management(
-                    u, ticket_id=ticket_id, evidence=evidence, now_ms=now_ms
+                    u, ticket_id=ticket_id, evidence=evidence, now_ms=observed_at_ms
                 )
                 return True
 
@@ -116,6 +123,12 @@ async def persist_management_feed_once(
                 scope, now_ms=now_ms, runtime_commit=runtime_commit
             )
             feed = await u.management.get_feed(scope)
+            if not ready:
+                blocked_reasons.add(
+                    (feed["health_reason"] or "management_receiver_not_ready")
+                    if feed
+                    else "management_feed_missing"
+                )
             await u.monitors.save_if_changed(
                 MonitorStateRecord(
                     monitor_key=f"management-feed:{scope}",
@@ -136,10 +149,23 @@ async def persist_management_feed_once(
         if feed is not None and feed["health_reason"] in {
             "management_stream_protocol_invalid",
             "management_receive_sequence_gap",
+            "management_receive_queue_overflow",
+            "management_epoch_queue_overflow",
+            "private_stream_disconnected",
+            "private_stream_watch_failed",
+            "private_stream_close_failed",
+            "management_receiver_protocol_gap",
         }:
             restart = getattr(source, "restart_management_transport", None)
             if callable(restart):
                 await restart(state["epoch_id"])
     return FeedTickResult(
-        status="management_feed_persisted" if states else "management_feed_unavailable"
+        status=(
+            "management_feed_recovering"
+            if blocked_reasons
+            else "management_feed_persisted"
+        )
+        if states
+        else "management_feed_unavailable",
+        detail=",".join(sorted(blocked_reasons)) if blocked_reasons else None,
     )

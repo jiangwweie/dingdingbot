@@ -192,7 +192,7 @@ async def _run(args: argparse.Namespace) -> int:
         async def management_feed_tick():
             async with receiver_lock:
                 return await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(engine),adapter,
-                    worker_id=f'{args.worker_id}:{os.getpid()}',runtime_commit=args.runtime_commit,now_ms=int(time.time()*1000))
+                    worker_id=f'{args.worker_id}:{os.getpid()}',runtime_commit=args.runtime_commit,now_ms=int(time.time()*1000),clock_ms=lambda:int(time.time()*1000))
 
         async def notice_tick():
             return await deliver_one_notice(engine, channel, now_ms=int(time.time() * 1000))
@@ -203,7 +203,7 @@ async def _run(args: argparse.Namespace) -> int:
                     poll_interval_ms=args.poll_interval_ms,
                     idle_statuses=frozenset({"no_work", "account_position_audited"})),
                 WorkerProcessLoop(component_id="management-feed",tick=management_feed_tick,
-                    poll_interval_ms=500,idle_statuses=frozenset({'management_feed_persisted'})),
+                    poll_interval_ms=500,idle_statuses=frozenset({'management_feed_persisted','management_feed_recovering'})),
                 WorkerProcessLoop(component_id="notifications", tick=notice_tick,
                     poll_interval_ms=1000,
                     idle_statuses=frozenset({"no_work", "channel_missing"})),

@@ -712,6 +712,7 @@ async def _certify(
             )
             management_feed_required=bool(await connection.scalar(text("SELECT certification->>'management_feed_required'='true' FROM brc_runtime_capabilities_current WHERE capability_key='exchange_commands'")))
             management_feed_pass=True
+            management_feed = None
             if management_feed_required:
                 from src.trading_kernel.domain.product_identity import (
                     PRODUCT_ID as MANAGEMENT_PRODUCT_ID,
@@ -720,9 +721,11 @@ async def _certify(
                     PostgresManagementFeed,
                 )
                 account=await connection.scalar(text("SELECT account_id FROM brc_runtime_profiles WHERE runtime_profile_id='tiny-live-v1'"))
-                management_feed_pass=await PostgresManagementFeed(connection).feed_ready(
-                    f'{MANAGEMENT_PRODUCT_ID}:binance-usdm:{account}',now_ms=(effective_now_ms if now_ms is not None else int(time.time()*1000)),
+                management_feed = await PostgresManagementFeed(connection).read_readiness(
+                    f'{MANAGEMENT_PRODUCT_ID}:binance-usdm:{account}', required=True,
+                    now_ms=(effective_now_ms if now_ms is not None else int(time.time()*1000)),
                     runtime_commit=runtime_identity.get('runtime_commit'))
+                management_feed_pass = management_feed.ready
 
             dynamic_selection_runtime_counts_row = (
                 await connection.execute(
@@ -1732,6 +1735,7 @@ async def _certify(
         "exit_configuration_activated": bool(exit_configuration_current_rows),
         "management_feed_required": management_feed_required,
         "management_feed_pass": management_feed_pass,
+        "management_feed": None if management_feed is None else management_feed.model_dump(mode="json"),
         "owner_entry_resume_authorized": entry_restoration.owner_resume_authorized,
         "entry_current_universe_identity_pass":entry_current_universe_identity_pass,
         "entry_enabled_event_spec_ids":list(entry_restoration.enabled_event_spec_ids),

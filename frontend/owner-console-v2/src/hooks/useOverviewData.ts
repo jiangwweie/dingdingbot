@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { mapManagementHealth } from '../mapping/managementHealthMapping';
 import { useQuery } from '@tanstack/react-query';
 import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
 import { fetchControls, controlsQueryKey } from '../api/controlsApi';
@@ -150,16 +151,22 @@ export function useOverviewData() {
     }`;
   }
 
+  const managementHealth = mapManagementHealth(rawOverview?.management_feed, rawOverview?.observed_at_ms ?? Date.now());
+  if (managementHealth.blocked && healthStatus !== 'danger') {
+    healthStatus = 'attention';
+    statusLabel = '新开仓受阻';
+    summary = managementHealth.summary;
+  }
   const pulse: SystemPulseData = {
     status: healthStatus,
     status_label: statusLabel,
     summary,
-    details:
+    details: managementHealth.details || (
       freshness === 'fresh'
         ? '观察、准入、生命周期服务持续运转中'
         : freshness === 'stale'
         ? '数据生成时间已滞后，请核实后台监控 Worker 状态'
-        : '事实数据生成中或当前只读证据不可用',
+        : '事实数据生成中或当前只读证据不可用'),
     conclusion: conclusionLevel,
     freshness,
     freshness_label:

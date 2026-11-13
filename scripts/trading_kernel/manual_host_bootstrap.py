@@ -221,6 +221,7 @@ def require_upgrade_schema(source: str, target: str) -> None:
         ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),
         ("0020_manual_exit_regime_v1", "0021_manual_operational_closure"),
         ("0021_manual_operational_closure", "0022_wallet_margin_allocation"),
+        ("0022_wallet_margin_allocation", "0023_management_recovery"),
         ("0019_management_evidence_v2", "0021_manual_operational_closure"),
     }:
         raise ValueError("manual upgrade requires an explicit stopped forward migration path")

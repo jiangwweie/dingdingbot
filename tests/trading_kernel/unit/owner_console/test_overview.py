@@ -225,3 +225,17 @@ def test_expired_management_heartbeat_cannot_display_healthy_from_last_green_sta
     result=build_owner_overview(facts,now_ms=1_800_000_020_000)
     assert result.conclusion.level=='attention'
     assert result.conclusion.evidence[0].identity.startswith('management-feed:')
+
+
+def test_feed_blocker_is_visible_even_without_incidents_and_monitor_projection():
+    from src.trading_kernel.application.management_health import ManagementFeedReadiness
+    now=1_800_000_010_000
+    feed=ManagementFeedReadiness(required=True,ready=False,connection_state='gap',
+        blocker_code='management_stream_protocol_invalid',blocked_since_ms=now-3600000,
+        last_successful_at_ms=now-3600001,lease_until_ms=now+15000,
+        epoch_id='epoch',persisted_watermark=35,applied_watermark=35)
+    result=build_owner_overview(overview_facts(management_feed=feed,monitor_keys=(),monitor_statuses=()),now_ms=now)
+    assert result.conclusion.level=='attention'
+    assert result.management_feed.blocker_code=='management_stream_protocol_invalid'
+    assert result.management_feed.blocked_since_ms==now-3600000
+    assert 'new ENTRY' in result.conclusion.summary

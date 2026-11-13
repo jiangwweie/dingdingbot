@@ -2403,6 +2403,32 @@ export interface components {
             /** Summary */
             summary: string;
         };
+        /**
+         * ManagementFeedReadiness
+         * @description Trading readiness is distinct from service liveness and integrity certification.
+         */
+        ManagementFeedReadiness: {
+            /** Applied Watermark */
+            applied_watermark: number | null;
+            /** Blocked Since Ms */
+            blocked_since_ms: number | null;
+            /** Blocker Code */
+            blocker_code: string | null;
+            /** Connection State */
+            connection_state: string;
+            /** Epoch Id */
+            epoch_id: string | null;
+            /** Last Successful At Ms */
+            last_successful_at_ms: number | null;
+            /** Lease Until Ms */
+            lease_until_ms: number | null;
+            /** Persisted Watermark */
+            persisted_watermark: number | null;
+            /** Ready */
+            ready: boolean;
+            /** Required */
+            required: boolean;
+        };
         MaterializationGeneration: {
             [key: string]: unknown;
         };
@@ -2614,6 +2640,7 @@ export interface components {
             evidence: components["schemas"]["EvidenceRef"][];
             /** Execution Incident Count */
             execution_incident_count: number | null;
+            management_feed?: components["schemas"]["ManagementFeedReadiness"] | null;
             notification_delivery?: components["schemas"]["NoticeDeliverySummary"] | null;
             /** Observed At Ms */
             observed_at_ms: number;
@@ -3474,7 +3501,7 @@ export interface components {
          * StrategyEntryVacuumState
          * @enum {string}
          */
-        StrategyEntryVacuumState: "OPEN" | "DRAINING_ENTRY" | "RECONFIGURING" | "RECOVERY_PENDING" | "RESOLVED_ACTIVE" | "RESOLVED_FALLBACK" | "RESOLVED_CONTINUITY" | "VALID_EMPTY" | "OWNER_PAUSED" | "SUPERSEDED" | "FAILED_CLOSED";
+        StrategyEntryVacuumState: "OPEN" | "DRAINING_ENTRY" | "RECONFIGURING" | "RECOVERY_PENDING" | "RESOLVED_ACTIVE" | "RESOLVED_FALLBACK" | "RESOLVED_CONTINUITY" | "RESOLVED_OWNER_RESUME" | "VALID_EMPTY" | "OWNER_PAUSED" | "SUPERSEDED" | "FAILED_CLOSED";
         /** StrategyGroupSampleState */
         StrategyGroupSampleState: {
             /** Evidence */

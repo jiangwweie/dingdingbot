@@ -67,7 +67,7 @@ async def test_wallet_migration_preserves_source_columns_and_installs_insert_gua
                 .all()
                 for n in names
             }
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", "0022_wallet_margin_allocation")
         async with PostgresKernelUnitOfWork(engine) as u:
             await deploy_compatible_upgrade_identity(
                 u,
@@ -127,7 +127,7 @@ async def test_wallet_migration_rejects_dirty_source_atomically(table, change):
         async with engine.begin() as c:
             await c.execute(sa.text(f"UPDATE {table} SET {change}"))
         with pytest.raises(AssertionError, match="0022 requires"):
-            run_alembic(url, "upgrade", "head")
+            run_alembic(url, "upgrade", "0022_wallet_margin_allocation")
         async with engine.connect() as c:
             assert (
                 await c.scalar(sa.text("SELECT version_num FROM alembic_version"))
@@ -184,7 +184,7 @@ async def test_old_terminal_claim_is_preserved_without_fabricating_new_allocatio
             before = await c.scalar(
                 sa.text("SELECT row_to_json(c)::text FROM brc_capacity_claims c")
             )
-        run_alembic(url, "upgrade", "head")
+        run_alembic(url, "upgrade", "0022_wallet_margin_allocation")
         async with engine.connect() as c:
             after = await c.scalar(
                 sa.text(

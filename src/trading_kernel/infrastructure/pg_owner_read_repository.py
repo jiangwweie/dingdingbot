@@ -1204,7 +1204,25 @@ class PostgresOwnerReadRepository:
             read_delivery_summary,
         )
         notification_delivery=await read_delivery_summary(self._connection)
+        from src.trading_kernel.application.management_health import (
+            read_management_feed_readiness,
+        )
+        from src.trading_kernel.infrastructure.pg_management_repository import (
+            PostgresManagementRepository,
+        )
+        from src.trading_kernel.infrastructure.pg_signal_repository import (
+            PostgresSignalRepository,
+        )
+
+        management_feed = None
+        if venue_id is not None and account_id is not None:
+            capability = await PostgresSignalRepository(self._connection).get_runtime_capability('exchange_commands')
+            management_feed = await read_management_feed_readiness(PostgresManagementRepository(self._connection),
+                required=bool(capability and capability.certification.get('management_feed_required')),
+                venue_id=venue_id, account_id=account_id,
+                runtime_commit=None if capability is None else capability.certified_commit, now_ms=now_ms)
         return OverviewFacts(
+            management_feed=management_feed,
             notification_delivery=notification_delivery,
             observed_at_ms=now_ms,
             runtime_freshness=freshness,
