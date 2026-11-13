@@ -22,11 +22,11 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `7c8179adb1332793d1ef399af760a6788a79119a` |
-| Production tag | `manual-runtime-2026.11.13.1` |
-| Production schema | `0022_wallet_margin_allocation` |
+| Production commit | `d70e0b6dbe4d60ef8478c9ac6236aa596bf42e7d` |
+| Production tag | `manual-runtime-2026.11.13.2` |
+| Production schema | `0023_management_recovery` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `7c8179adb1332793d1ef399af760a6788a79119a` — exact certified V2 release, public HTML/JS/CSS hashes verified |
+| Static frontend commit | `d70e0b6dbe4d60ef8478c9ac6236aa596bf42e7d` — exact certified V2 release, public HTML/JS/CSS hashes verified |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
 | Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
@@ -37,15 +37,47 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Management recovery0023 — certified local candidate, pending Owner deployment review, 2026-11-13
+### Management recovery0023 installed — genuine Owner Resume pending, 2026-11-13
+
+Owner explicitly authorized deployment and then genuinely paused new ENTRY through
+the Seoul Console at 2026-11-13T22:28:48.011000+08:00 (Policy15, matching entry_pause authorization).
+Action-time host/product/account/PG identities, global lane, empty venue and
+internal terminal-clean state passed before all five writers were stopped.
+The official installer then completed the exact0022→0023 forward migration with
+Owner controls and every original source value preserved. No direct Ticket,
+Vacuum or authorization repair and no venue write was used.
+
+| Installation boundary | Direct verified result |
+| --- | --- |
+| Release identity | Kernel/API/static exact production reference above; all three exact certifications PASS |
+| Stopped backup | Server/custom dump validated and copied locally; SHA256 `d622f214f87dbc85750516c2d90bae9d3064eb8ff75cdb14cc5bcf4a843d1a84` |
+| Source preservation |102 tables /30662 original rows preserved; Owner Policy, strategy and Selection controls unchanged |
+| Management receiver | New private epoch ready, lease fresh, persisted/applied0; previous protocol-gap history retained |
+| CPM old Owner-pause fence | Official Observation/Materialization cadence appended DRAINING_ENTRY, OWNER_PAUSED and RESOLVED_OWNER_RESUME using existing genuine control3 Resume authorization; projection4 |
+| Installed read role / HTTPS | Actual Owner read-role Overview reports feed ready; HTTPS index/JS/CSS200 and exact hashes; unauthenticated Owner API401 |
+| Installed certification | Integrity, flatness, entry_recovery_ready, risk, management feed and exit configuration PASS |
+| Entry fact collection |14/14 GET-only rounds PASS; maximum6319ms, minimum remaining validity23681ms under unchanged10s/30s contract |
+| Official promoter | prepared_owner_paused; ENTRY started while fenced, fence removed by official path |
+| Final paused snapshot |22:37:09 Asia/Shanghai: five services active/running/NRestarts0, no maintenance fence, Policy15 still false; venue empty, no active internal Tickets/positions/Commands/Incidents/reservations; current invocation fault sample0 |
+
+**Installation and paused acceptance are complete; genuine Owner Resume/TOTP is
+still pending.** The agent cannot generate that authorization. A fresh readonly
+post-Resume check must confirm the actual new Policy event, current receiver,
+services and external state. Future fault-triggered reconnect and natural new
+order acceptance are not claimed from this deployment alone.
+Evidence directory: `.local/manual-management-deploy-20261113/`; the
+[deployment verification record](../superpowers/plans/2026-11-13-manual-management-recovery-deployment-evidence.md)
+owns the procedure and evidence map, not competing current production state.
+
+### Management recovery0023 — completed local certification before deployment, 2026-11-13
 
 Owner authorized local repair after direct readonly evidence confirmed the
 management-feed tick-time race, failed silent-stream restart, stale CPM static
 Owner-pause Vacuum, and incomplete trading-readiness reporting. Current work
 adds lock-time sampling, explicit private-stream restart with durable backlog
 preservation, a proof-guarded static Owner Resume terminal transition, and
-Overview/V2/ENTRY/certification blocker facts. Production identity above is
-unchanged. The migration is stopped/flat/paused/forward-only; no Tokyo mutation,
+Overview/V2/ENTRY/certification blocker facts. No production change had occurred
+during that local implementation stage. The migration is stopped/flat/paused/forward-only; no Tokyo mutation,
 new order, forged Owner authorization or direct production state repair is part
 of this local task. Full implementation and verification boundaries are in the
 [management recovery plan](../superpowers/plans/2026-11-13-manual-management-recovery-v2.md).
@@ -71,9 +103,9 @@ A final independent PG and venue recheck at21:23 confirmed the same old-runtime
 blockers, no active internal exposure and no venue positions/orders. No production
 writes, restart, control changes or venue writes occurred.
 
-Local tests do not establish production recovery. Owner deployment review,
-action-time exact server/account/PG facts, genuine pause and stopped/flat forward
-installation, installed acceptance/promoter and genuine Resume remain release gates.
+That local certification did not establish production recovery. The subsequent
+Owner-approved installation evidence and remaining genuine Resume boundary are
+recorded in the latest deployment snapshot above.
 
 ### Wallet allocation0022 installed — genuine Owner restoration complete, 2026-11-13
 
