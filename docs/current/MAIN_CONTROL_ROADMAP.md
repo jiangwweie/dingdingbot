@@ -37,7 +37,7 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Management recovery0023 — local implementation, pending Owner deployment review, 2026-11-13
+### Management recovery0023 — certified local candidate, pending Owner deployment review, 2026-11-13
 
 Owner authorized local repair after direct readonly evidence confirmed the
 management-feed tick-time race, failed silent-stream restart, stale CPM static
@@ -49,8 +49,31 @@ unchanged. The migration is stopped/flat/paused/forward-only; no Tokyo mutation,
 new order, forged Owner authorization or direct production state repair is part
 of this local task. Full implementation and verification boundaries are in the
 [management recovery plan](../superpowers/plans/2026-11-13-manual-management-recovery-v2.md).
-Local tests do not establish production recovery; exact certification and
-Owner-reviewed installation remain release gates.
+**Exact local runtime candidate is `d70e0b6dbe4d60ef8478c9ac6236aa596bf42e7d`
+on `codex/manual-management-recovery-v2`, target schema `0023_management_recovery`.**
+Kernel R4 PASS: unit/architecture2217, integration1982, full-chain77; Ruff,
+Mypy263, Golden/core parity961 snapshots/23064 decisions PASS. Exact Owner API
+and V2 static certification PASS; V2 tests148/build and serial resource group4
+PASS. Official local preparation validated all three certificates and explicitly
+left deployment_authorized=false. Later evidence-only documentation commits do
+not replace or recertify that runtime candidate.
+
+A previously exported genuine Seoul terminal snapshot was restored only to the
+manual disposable PG:102 tables/29939 original rows survived forward migration;
+CPM's old Owner-pause Vacuum advanced through the official drain and resume path
+using its existing real authorization, with Owner controls/commands/Tickets
+unchanged and an idempotent repeat. This historical replay is not current live
+execution. Readonly production recheck at20:58 Asia/Shanghai still showed7c8179ad/
+0022, Policy14 enabled, management_stream_protocol_invalid and CPM OPEN; active
+Tickets/positions/pending Commands/open Incidents/reservations were0. Independent
+GET-only exchange read at21:09 was flat with no regular or conditional orders.
+A final independent PG and venue recheck at21:23 confirmed the same old-runtime
+blockers, no active internal exposure and no venue positions/orders. No production
+writes, restart, control changes or venue writes occurred.
+
+Local tests do not establish production recovery. Owner deployment review,
+action-time exact server/account/PG facts, genuine pause and stopped/flat forward
+installation, installed acceptance/promoter and genuine Resume remain release gates.
 
 ### Wallet allocation0022 installed — genuine Owner restoration complete, 2026-11-13
 
