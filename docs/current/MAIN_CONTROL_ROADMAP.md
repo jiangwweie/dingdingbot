@@ -37,7 +37,7 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Wallet allocation0022 installed — awaiting genuine Owner Resume, 2026-11-13
+### Wallet allocation0022 installed — genuine Owner restoration complete, 2026-11-13
 
 Owner authorized deployment, then genuinely paused new ENTRY at08:31:29.552
 Asia/Shanghai, Policy13. The original ADA AUTO Ticket had already exited by its
@@ -70,7 +70,23 @@ only this installer fix and its regression to the prior8ac0f8bb runtime candidat
 | Real Entry reads |14/14 installed GET rounds PASS; maximum6444ms, minimum remaining fact validity23556ms under original10s/30s contract |
 | Official promoter | prepared_owner_paused; ENTRY started while fenced, fence removed through official path; five services active/running/NRestarts0, management feed ready |
 | HTTPS | Public index and exact JS/CSS all200 and SHA256 match installed files; unauthenticated Owner API401 |
-| Current Owner state | Policy13/new ENTRY false; genuine Resume/TOTP requested after final checks, awaiting Owner action. Installation is complete; restoration must not be declared before readback |
+| Current Owner state | Genuine Resume/TOTP at09:40:28.547 Asia/Shanghai created Policy14/new ENTRY true; authorization purpose entry_resume, strength totp_step_up and matching policy/authorization timestamps directly verified. Original non-entry Policy amounts unchanged |
+
+**Final post-Resume readonly verification through09:41:08.306 Asia/Shanghai
+confirms restoration complete**: exact final code/schema identity; installed
+certification/integrity/flatness/Entry readiness/risk/feed/configuration PASS;
+owner_entry_resume_authorized=true; five services active/running/NRestarts0;
+management feed ready; no fence. Internal active Ticket/position/reservation/
+unknown-Command/open-Incident occupation0; exchange signed GET probe covers7
+members in independent-sides/Cross with0 nonflat or open-order domains. The
+current invocation journal sample has no new faults. Original strategy controls
+remain as installed; all non-entry Policy amounts and wallet_allocation_v1 remain
+unchanged. Since this genuine Resume,0 new Signals and0 new Tickets were observed;
+no forced trade or rejected-intent replay was used as acceptance. Future natural
+orders/App/phone evidence remain separately unclaimed.
+Evidence: `.local/manual-wallet-deploy-20261113/owner-restoration-verified.json`,
+`owner-resumed-chain.json` and `owner-resumed-postflight.json`. This sequence needs
+no further Owner operation at this verified point.
 
 No Tokyo application/account write, risk expansion, credential mutation, test
 order or unsolicited historical Review revision was performed. Earlier tests'
