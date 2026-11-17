@@ -294,6 +294,71 @@ class PostgresKernelUnitOfWork:
                 raise UnsupportedKernelEffect(
                     "Owner reduction requires exact readonly fill proof"
                 )
+            reduction_proof.require_source(current)
+            if reduction_proof.retired_protections:
+                from src.trading_kernel.domain.trade_management import (
+                    OrderAction,
+                    OrderEvidence,
+                )
+                from src.trading_kernel.infrastructure.pg_models import (
+                    management_order_evidence,
+                )
+
+                references = await self.exchange_commands.list_order_references(
+                    ticket_id
+                )
+                for retired in reduction_proof.retired_protections:
+                    raw = (
+                        await self._require_connection().execute(
+                            sa.select(management_order_evidence.c.payload).where(
+                                management_order_evidence.c.ticket_id == ticket_id,
+                                management_order_evidence.c.evidence_id
+                                == retired.evidence_id,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    evidence = (
+                        None if raw is None else OrderEvidence.model_validate(raw)
+                    )
+                    if (
+                        evidence is None
+                        or evidence.terms.exchange_order_id != retired.exchange_order_id
+                        or evidence.terms.client_order_id != retired.client_order_id
+                        or evidence.terms.order_namespace != "conditional"
+                        or evidence.terms.identity[:4]
+                        != (
+                            current.identity.netting_domain.venue_id,
+                            current.identity.netting_domain.account_id,
+                            current.identity.netting_domain.exchange_instrument_id,
+                            current.identity.netting_domain.position_side,
+                        )
+                        or evidence.action
+                        not in {OrderAction.CANCEL, OrderAction.EXPIRED}
+                        or evidence.action is not (OrderAction.CANCEL if retired.status=="CANCELED" else OrderAction.EXPIRED)
+                        or evidence.executed_quantity != 0
+                        or evidence.received_at_ms != retired.observed_at_ms
+                        or not evidence.coverage_complete
+                        or evidence.known_command_outcome_pending
+                        or not any(
+                            r.submitted_exchange_order_id == retired.exchange_order_id
+                            and r.venue_client_order_id == retired.client_order_id
+                            and r.command_created_at_ms <= evidence.exchange_event_at_ms
+                            for r in references
+                        )
+                    ):
+                        raise UnsupportedKernelEffect(
+                            "Owner reduction retired protection lacks durable terminal evidence"
+                        )
+            from src.trading_kernel.infrastructure.owner_device_authorization_evidence import (
+                trusted_owner_authorization_matches,
+            )
+
+            if not await trusted_owner_authorization_matches(
+                self._require_connection(), reduction_proof.authorization_id
+            ):
+                raise UnsupportedKernelEffect(
+                    "Owner reduction signed authority not verified"
+                )
             auth = await self.owner_controls.get_authorization(
                 reduction_proof.authorization_id
             )

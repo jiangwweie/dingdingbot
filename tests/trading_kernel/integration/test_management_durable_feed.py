@@ -655,3 +655,122 @@ async def test_deferred_observer_cannot_commit_partial_side_effects(head_templat
         await u.management.persist_stream_batch(scope_key=scope,epoch_id='deferred-epoch',events=[{'sequence':1,'received_at_ms':5001,'payload':raw}],connected_at_ms=5000,now_ms=5100,apply_observer=defer,account_id=d.account_id)
         assert (await u.aggregates.get(t.identity.ticket_id)).protected_qty==t.quantity
         assert (await u.management.get_feed(scope))['applied_watermark']==0
+
+
+@pytest.mark.asyncio
+async def test_reconnect_persists_new_epoch_while_old_application_blocked_and_survives_restart(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import management_stream_events
+    from src.trading_kernel.interfaces.management_feed_worker import (
+        management_scope,
+        persist_management_feed_once,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    # An unrecognized regular order intentionally defers attribution, preserving
+    # a real unapplied head event while the new connection keeps receiving.
+    raw={'e':'ORDER_TRADE_UPDATE','E':5000,'T':5000,'o':{'s':'BTCUSDT','c':'external','S':'SELL','o':'LIMIT','f':'GTC',
+        'q':'0.001','p':'65000','sp':'0','x':'NEW','X':'NEW','i':9001,'z':'0','ps':'LONG','cp':False,'R':False,
+        'wt':'CONTRACT_PRICE','pP':False,'pm':'NONE','V':'NONE','gtd':0,'O':5000}}
+    scope=management_scope('binance-usdm',t.identity.netting_domain.account_id)
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u.management.start_feed(scope_key=scope,epoch_id='old-blocked',worker_id='receiver',runtime_commit='kernel-test-head',now_ms=5000)
+        await u.management.persist_stream_batch(scope_key=scope,epoch_id='old-blocked',events=[{'sequence':1,'received_at_ms':5001,'payload':raw}],connected_at_ms=5000,now_ms=5100,account_id=t.identity.netting_domain.account_id)
+    class Source:
+        def __init__(self,epoch='new-receiving'):
+            self.epoch=epoch;self.acks=[]
+        def management_feed_batches(self):
+            return [{'venue_id':'binance-usdm','account_id':t.identity.netting_domain.account_id,'epoch_id':self.epoch,
+                'events':[{'sequence':1,'received_at_ms':6001,'payload':{**raw,'E':6000,'T':6000,'o':{**raw['o'],'i':9002,'O':6000}}}],
+                'connected_at_ms':6000,'gap_reason':None,'backlog_pending':False}]
+        def acknowledge_management_events(self,epoch,watermark):self.acks.append((epoch,watermark))
+    source=Source()
+    result=await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=7000,clock_ms=lambda:7000)
+    assert result.status=='management_feed_recovering'
+    assert source.acks==[('new-receiving',1)]
+    async with PostgresKernelUnitOfWork(e) as u:
+        feed=await u.management.get_feed(scope)
+        assert feed['epoch_id']=='old-blocked' and feed['applied_watermark']==0
+        count=await u._require_connection().scalar(sa.select(sa.func.count()).select_from(management_stream_events).where(management_stream_events.c.epoch_id=='new-receiving'))
+        assert count==1
+    # Drop receiver memory entirely. Pending epoch can still be found from PG.
+    async with PostgresKernelUnitOfWork(e) as u:
+        pending=await u.management.next_received_epoch(scope,exclude_epoch='old-blocked')
+        assert pending['epoch_id']=='new-receiving' and pending['persisted_watermark']==1
+
+    from src.trading_kernel.domain.events import ExternalFlatDetected
+    from src.trading_kernel.domain.reducer import reduce_event
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get_for_update(t.identity.ticket_id)
+        event=ExternalFlatDetected(event_id='flat-for-recovery',ticket_id=t.identity.ticket_id,
+            sequence=a.last_event_sequence+1,occurred_at_ms=8000)
+        await u.commit_reduction(event=event,reduction=reduce_event(a,event),expected_version=a.version)
+    class RestartedSource:
+        def management_feed_batches(self):
+            return [{'venue_id':'binance-usdm','account_id':t.identity.netting_domain.account_id,'epoch_id':'after-process-restart',
+                'events':[],'connected_at_ms':9000,'gap_reason':None,'backlog_pending':False}]
+        def acknowledge_management_events(self,*args):pass
+    restarted=RestartedSource()
+    for now in (9000,10000):
+        await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),restarted,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=now,clock_ms=lambda now=now:now)
+    async with PostgresKernelUnitOfWork(e) as u:
+        feed=await u.management.get_feed(scope)
+        assert feed['epoch_id']=='after-process-restart'
+        assert await u.management.feed_ready(scope,now_ms=10000)
+        for epoch in ('old-blocked','new-receiving'):
+            receipt=await u.management.received_epoch(scope,epoch)
+            assert receipt['completed_at_ms'] is not None
+        assert await u._require_connection().scalar(sa.select(sa.func.count()).select_from(management_stream_events))==2
+
+
+@pytest.mark.asyncio
+async def test_new_epoch_cannot_overtake_unflushed_pages_of_closed_receiver(head_template_engine):
+    from collections import deque
+    from types import SimpleNamespace
+
+    from src.trading_kernel.domain.events import ExternalFlatDetected
+    from src.trading_kernel.domain.reducer import reduce_event
+    from src.trading_kernel.infrastructure.venue_adapter import CcxtVenueAdapter
+    from src.trading_kernel.interfaces.management_feed_worker import (
+        management_scope,
+        persist_management_feed_once,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get_for_update(t.identity.ticket_id)
+        ev=ExternalFlatDetected(event_id='flat',ticket_id=t.identity.ticket_id,sequence=a.last_event_sequence+1,occurred_at_ms=4000)
+        await u.commit_reduction(event=ev,reduction=reduce_event(a,ev),expected_version=a.version)
+    raw={'e':'ORDER_TRADE_UPDATE','E':5000,'T':5000,'o':{'s':'BTCUSDT','c':'external','S':'SELL','o':'LIMIT','f':'GTC','q':'0.001','p':'65000','sp':'0','x':'CANCELED','X':'CANCELED','i':9001,'z':'0','ps':'LONG','cp':False,'R':False,'wt':'CONTRACT_PRICE','pP':False,'pm':'NONE','V':'NONE','gtd':0,'O':5000}}
+    exchange=SimpleNamespace(management_closed_batches=deque([{'epoch_id':'paged-old','events':deque({'sequence':i,'received_at_ms':5001,'payload':{**raw,'o':{**raw['o'],'i':9000+i}}} for i in range(1,131)), 'connected_at_ms':5000,'gap_reason':None}]),
+        management_epoch_id='live-new',management_pending_events=deque([{'sequence':1,'received_at_ms':6001,'payload':{**raw,'o':{**raw['o'],'i':9999}}}]),
+        _management_connected_ms=6000,management_receive_gap=None)
+    source=CcxtVenueAdapter(exchanges={('binance-usdm',t.identity.netting_domain.account_id):exchange},clock_ms=lambda:8000)
+    scope=management_scope('binance-usdm',t.identity.netting_domain.account_id)
+    await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=7000,clock_ms=lambda:7000)
+    async with PostgresKernelUnitOfWork(e) as u:
+        feed=await u.management.get_feed(scope)
+        assert feed['epoch_id']=='paged-old' and feed['applied_watermark']==128
+        assert not await u.management.feed_ready(scope,now_ms=7000)
+        assert (await u.management.received_epoch(scope,'live-new'))['persisted_watermark']==1
+    await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=8000,clock_ms=lambda:8000)
+    async with PostgresKernelUnitOfWork(e) as u:
+        assert (await u.management.get_feed(scope))['epoch_id']=='live-new'
+        assert (await u.management.received_epoch(scope,'paged-old'))['completed_at_ms']==8000
+        assert await u.management.feed_ready(scope,now_ms=8000)
+
+
+@pytest.mark.asyncio
+async def test_epoch_switch_checks_received_tail_not_only_old_applied_row(head_template_engine):
+    async with PostgresKernelUnitOfWork(head_template_engine) as u:
+        await u.management.start_feed(scope_key='scope',epoch_id='old',worker_id='receiver',runtime_commit='a'*40,now_ms=1000)
+        await u.management.persist_received_batch(scope_key='scope',epoch_id='old',events=[{'sequence':1,'received_at_ms':1100,'payload':{'e':'unknown'}}],connected_at_ms=1000,now_ms=1200,worker_id='receiver')
+        with pytest.raises(ValueError,match='unapplied'):
+            await u.management.start_feed(scope_key='scope',epoch_id='new',worker_id='receiver',runtime_commit='a'*40,now_ms=1300)

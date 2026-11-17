@@ -1447,6 +1447,20 @@ def reduce_event(
             raise InvalidLifecycleTransition(
                 "owner reduction quantity or protection differs"
             )
+        if event.proof is not None:
+            event.proof.require_source(current)
+        if (
+            current.status is AggregateStatus.RUNNER_PROTECTED
+            and event.original_tp_price is not None
+        ):
+            raise InvalidLifecycleTransition(
+                "Runner reduction forbids a new TP condition"
+            )
+        retired = (
+            {item.exchange_order_id for item in event.proof.retired_protections}
+            if event.proof is not None
+            else set()
+        )
         old = current.owner_reduction_context
         if (
             current.status is AggregateStatus.POSITION_PROTECTED
@@ -1489,6 +1503,9 @@ def reduce_event(
                 "active_stop_price": event.protection_price,
                 "tp1_exchange_order_id": None,
                 "owner_reduction_context": context,
+                "initial_stop_exchange_order_id": None
+                if current.initial_stop_exchange_order_id in retired
+                else current.initial_stop_exchange_order_id,
             },
         )
 

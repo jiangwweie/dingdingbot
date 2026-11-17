@@ -195,13 +195,17 @@ class VerifiedExitClosureProof(BaseModel):
 
     @property
     def exit_reason(self) -> str:
-        last = max(self.exit_fills, key=lambda f: (f.occurred_at_ms, f.trade_id))
-        order = next(o for o in self.orders if o.executable_id == last.order_id)
+        latest=max(f.occurred_at_ms for f in self.exit_fills)
+        order_by_id={o.executable_id:o for o in self.orders}
+        kinds={order_by_id[f.order_id].reference.command_kind.value for f in self.exit_fills if f.occurred_at_ms==latest}
+        if len(kinds)!=1:
+            return "concurrent_exit_fills"
         return {
             "initial_stop": "initial_stop_triggered",
             "replace_protection": "runner_stop",
             "take_profit": "take_profit_triggered",
-        }.get(order.reference.command_kind.value, "strategy_exit")
+            "owner_reduce": "owner_reduction",
+        }.get(next(iter(kinds)), "strategy_exit")
 
     def digest(self) -> str:
         return canonical_digest(self.model_dump(mode="json"))

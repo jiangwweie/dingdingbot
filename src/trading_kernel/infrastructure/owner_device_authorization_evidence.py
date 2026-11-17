@@ -95,7 +95,8 @@ async def trusted_owner_authorization_matches(
     try:
         proof = DeviceWriteProof.model_validate(row["proof"])
         if (
-            row["authentication_strength"] != "trusted_device_session"
+            row["result_kind"] != "authorized"
+            or row["authentication_strength"] != "trusted_device_session"
             or row["purpose"] != row["auth_purpose"]
             or row["owner_identity"] != row["auth_owner"]
             or row["device_owner"] != row["auth_owner"]

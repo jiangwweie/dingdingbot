@@ -95,9 +95,7 @@ class OwnerReductionPreview(_Frozen):
             raise ValueError("preview_quantity_mismatch")
         if self.expires_at_ms <= self.created_at_ms:
             raise ValueError("preview_time_invalid")
-        if not self.continue_runner and (
-            self.tp_trigger_price is None or not self.cancel_tp_order_id
-        ):
+        if not self.continue_runner and self.tp_trigger_price is None:
             raise ValueError("pre_tp_reduction_requires_exact_target")
         return self
 
@@ -198,17 +196,20 @@ def preview_owner_reduction(
     ):
         raise ValueError("protection_unproven")
     runner = a.status is AggregateStatus.RUNNER_PROTECTED
+    waiting = not runner and a.owner_reduction_context is not None
     target = (
         None
         if runner
-        else (
+        else a.owner_reduction_context.original_tp_price if waiting and a.owner_reduction_context else (
             a.post_fill_exit_plan.tp_price
             if a.post_fill_exit_plan
             else a.ticket.take_profit_prices[0]
         )
     )
+    if waiting and (f.tp_order_id is not None or f.tp_state not in {"absent","cancelled"}):
+        raise ValueError("retired_tp_reappeared")
     if not runner and (
-        f.tp_state != "open"
+        (f.tp_state != "open" if not waiting else False)
         or f.tp_order_id != a.tp1_exchange_order_id
         or f.tp_filled_quantity != 0
         or target is None

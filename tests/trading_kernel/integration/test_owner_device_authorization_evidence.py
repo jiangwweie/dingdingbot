@@ -88,12 +88,21 @@ async def test_authorization_requires_exact_signed_source(
             )
         )
         # Simulate corrupt provenance at insertion boundary, not an approved link.
-        values = {"authorization_id": "auth-1"}
+        values = {"authorization_id": "auth-1", "result_kind": "authorized"}
         if alteration == "body":
             values["payload"] = {**payload, "enabled": True}
         if alteration == "signature":
             values["signature"] = "A" * 86
-        await c.execute(sa.update(owner_device_write_evidence).values(**values))
+        if alteration in {"body", "signature"}:
+            from sqlalchemy.exc import DBAPIError
+
+            with pytest.raises(DBAPIError, match="immutable"):
+                async with c.begin_nested():
+                    await c.execute(
+                        sa.update(owner_device_write_evidence).values(**values)
+                    )
+        else:
+            await c.execute(sa.update(owner_device_write_evidence).values(**values))
         assert await trusted_owner_authorization_matches(c, "auth-1") is (
             alteration is None
         )
@@ -101,3 +110,37 @@ async def test_authorization_requires_exact_signed_source(
             await r.revoke(device_id=bound["device_id"], now_ms=5000)
             # Revocation forbids new writes but retains proof of historical intent.
             assert await trusted_owner_authorization_matches(c, "auth-1")
+
+
+@pytest.mark.asyncio
+async def test_device_registration_key_is_immutable_and_only_revoke_column_changes(
+    head_template_engine,
+):
+    from sqlalchemy.exc import DBAPIError
+
+    from src.trading_kernel.infrastructure.pg_models import owner_device_registrations
+    from tests.trading_kernel.support.owner_device import keypair
+
+    _, jwk = keypair()
+    _, other = keypair()
+    async with head_template_engine.begin() as c:
+        r = PostgresOwnerDeviceRepository(c)
+        grant = await r.issue_binding(
+            owner_identity="Owner", replace_device=False, now_ms=1000
+        )
+        bound = await r.bind(token=grant, public_key=jwk, now_ms=2000)
+        with pytest.raises(DBAPIError, match="immutable"):
+            async with c.begin_nested():
+                await c.execute(
+                    sa.update(owner_device_registrations)
+                    .where(owner_device_registrations.c.device_id == bound["device_id"])
+                    .values(public_key=other)
+                )
+        await r.revoke(device_id=bound["device_id"], now_ms=3000)
+        with pytest.raises(DBAPIError, match="immutable"):
+            async with c.begin_nested():
+                await c.execute(
+                    sa.update(owner_device_registrations)
+                    .where(owner_device_registrations.c.device_id == bound["device_id"])
+                    .values(revoked_at_ms=None)
+                )

@@ -128,15 +128,51 @@ def set_cookie(response: Response, token: str) -> None:
 
 @router.post("/devices/bind")
 async def bind(request: Request, body: BindBody, response: Response) -> dict:
-    async with get_control_engine(request).begin() as c:
+    # Production is a private Unix socket behind Nginx. Only that peer may
+    # supply its overwritten X-Real-IP; network peers cannot spoof the bucket.
+    from ipaddress import ip_address
+
+    peer = request.client.host if request.client is not None else None
+    source = peer or "unix-socket"
+    if peer is None or peer == "unix-socket":
         try:
-            bound = await PostgresOwnerDeviceRepository(c).bind(
-                token=body.token,
-                public_key=body.public_key,
-                now_ms=get_clock_ms(request),
-            )
+            source = str(ip_address(request.headers.get("x-real-ip", "")))
         except ValueError:
-            raise HTTPException(403, "binding_unavailable") from None
+            source = "unix-socket"
+    now = get_clock_ms(request)
+    status = 200
+    bound = None
+    async with get_control_engine(request).begin() as c:
+        repository = PostgresOwnerDeviceRepository(c)
+        await repository._lock()
+        now = get_clock_ms(request)
+        bucket, failures = await repository.binding_failures("ip:" + source, now_ms=now)
+        token_bucket, token_failures = await repository.binding_failures(
+            "token:" + body.token, now_ms=now
+        )
+        if len(failures) >= 5 or len(token_failures) >= 5:
+            status = 429
+        else:
+            try:
+                async with c.begin_nested():
+                    bound = await repository.bind(
+                        token=body.token, public_key=body.public_key, now_ms=now
+                    )
+            except ValueError:
+                status = 403
+            await repository.record_binding_result(
+                bucket, failures, success=bound is not None, now_ms=now
+            )
+            await repository.record_binding_result(
+                token_bucket, token_failures, success=bound is not None, now_ms=now
+            )
+    if status != 200:
+        raise HTTPException(
+            status,
+            "binding_unavailable",
+            headers={"Retry-After": "900"} if status == 429 else None,
+        )
+    assert bound is not None
     token = bound.pop("session_token")
     set_cookie(response, token)
     return bound
@@ -189,6 +225,7 @@ async def authorize(
             purpose=purpose,
             now_ms=now,
             allow_idempotent_replay=True,
+            clock_ms=lambda: get_clock_ms(request),
         )
     except ValueError:
         raise HTTPException(403, "device_write_unavailable") from None
@@ -265,6 +302,10 @@ async def global_control(request: Request, body: SignedBody) -> dict:
             "entry_resume" if payload["enabled"] else "entry_pause",
             now,
         )
+        receipt = await PostgresOwnerDeviceRepository(c).write_receipt(body.proof)
+        if receipt is not None:
+            return receipt
+        now = await PostgresOwnerDeviceRepository(c).write_authorized_at(body.proof)
         result = await set_global_entry_state(
             u,
             owner_policy_id=get_settings(request).owner_policy_id,
@@ -281,15 +322,17 @@ async def global_control(request: Request, body: SignedBody) -> dict:
         auth = await u.owner_controls.get_authorization_by_idempotency_key(
             body.proof.idempotency_key
         )
-        await PostgresOwnerDeviceRepository(u._require_connection()).link_authorization(
+        response = {
+            "enabled": result.new_entry_submit_enabled,
+            "version": result.policy_version,
+        }
+        await PostgresOwnerDeviceRepository(u._require_connection()).finish_control(
             proof=body.proof,
             owner_identity=owner,
             authorization_id=None if auth is None else auth.authorization_id,
+            result=response,
         )
-    return {
-        "enabled": result.new_entry_submit_enabled,
-        "version": result.policy_version,
-    }
+    return response
 
 
 @router.post("/controls/strategy")
@@ -315,6 +358,14 @@ async def strategy_control(request: Request, body: SignedBody) -> dict:
             "strategy_resume" if p["enabled"] else "strategy_pause",
             now,
         )
+        receipt = await PostgresOwnerDeviceRepository(
+            u._require_connection()
+        ).write_receipt(body.proof)
+        if receipt is not None:
+            return receipt
+        now = await PostgresOwnerDeviceRepository(
+            u._require_connection()
+        ).write_authorized_at(body.proof)
         result = await set_strategy_entry_state(
             u,
             strategy_group_id=p["strategy_group_id"],
@@ -333,12 +384,14 @@ async def strategy_control(request: Request, body: SignedBody) -> dict:
         auth = await u.owner_controls.get_authorization_by_idempotency_key(
             body.proof.idempotency_key
         )
-        await PostgresOwnerDeviceRepository(u._require_connection()).link_authorization(
+        response = result.model_dump(mode="json")
+        await PostgresOwnerDeviceRepository(u._require_connection()).finish_control(
             proof=body.proof,
             owner_identity=owner,
             authorization_id=None if auth is None else auth.authorization_id,
+            result=response,
         )
-    return result.model_dump(mode="json")
+    return response
 
 
 @router.get("/positions")
@@ -528,3 +581,57 @@ async def orders(request: Request) -> dict:
             "observed_at_ms": now,
         }
     )
+
+
+@router.get("/requests/{idempotency_key}")
+async def request_receipt(
+    request: Request, idempotency_key: str, nonce_id: str | None = None
+) -> dict:
+    from src.trading_kernel.infrastructure.pg_models import (
+        owner_device_write_evidence as writes,
+    )
+
+    if not 1 <= len(idempotency_key) <= 160:
+        raise HTTPException(422, "request_key_invalid")
+    async with get_control_engine(request).begin() as c:
+        repository = PostgresOwnerDeviceRepository(c)
+        await repository._lock()
+        device, session = await repository.authenticate(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+        row = (
+            (
+                await c.execute(
+                    sa.select(writes.c.result_kind, writes.c.result_payload).where(
+                        writes.c.owner_identity == device.owner_identity,
+                        writes.c.idempotency_key == idempotency_key,
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None and nonce_id is not None and len(nonce_id) <= 160:
+            from src.trading_kernel.infrastructure.pg_models import owner_request_nonces
+
+            nonce = (
+                (
+                    await c.execute(
+                        sa.select(owner_request_nonces).where(
+                            owner_request_nonces.c.nonce_id == nonce_id,
+                            owner_request_nonces.c.session_id == session.session_id,
+                        )
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if (
+                nonce is not None
+                and nonce["consumed_at_ms"] is None
+                and nonce["expires_at_ms"] <= get_clock_ms(request)
+            ):
+                return {"state": "not_accepted"}
+    if row is None or row["result_payload"] is None:
+        return {"state": "pending"}
+    return {"state": "completed", "result": row["result_payload"]}

@@ -4,14 +4,14 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 111 张业务表、1276 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **114 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 113 张业务表、1290 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **116 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **111** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **113** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **114** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **116** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
 **范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0024_owner_cooperation`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
@@ -51,7 +51,7 @@
 
 | **运行诊断与终态补证据** | **2** | 失败保全与Review修订队列。 |
 
-| **可信手机设备与人工操作** | **7** | 设备绑定、签名写证据、可恢复操作及追加历史。 |
+| **可信手机设备与人工操作** | **9** | 设备绑定、签名写证据、可恢复操作及追加历史。 |
 
 ## 策略与事实语义
 
@@ -1954,4 +1954,26 @@ COMMIT;
 
 **维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
 
-**字段清单**：`evidence_id`、`authorization_id`、`device_id`、`device_epoch`、`owner_identity`、`purpose`、`idempotency_key`、`payload`、`proof`、`signature`、`body_digest`、`authorized_at_ms`
+**字段清单**：`evidence_id`、`result_kind`、`result_payload`、`authorization_id`、`device_id`、`device_epoch`、`owner_identity`、`purpose`、`idempotency_key`、`payload`、`proof`、`signature`、`body_digest`、`authorized_at_ms`
+
+
+### `brc_owner_binding_limits`
+
+**职责**：记录来源哈希及最近5次绑定失败，15分钟限制在服务重启后仍有效。
+
+**主键**：`bucket_key`
+
+**维护与用途**：现有Kernel仓储按精确scope维护；接收持久化不授予交易权限，已提交原始事件不可跳过。
+
+**字段清单**：`bucket_key`、`failures`、`expires_at_ms`
+
+
+### `brc_management_receive_epochs`
+
+**职责**：保存各接收epoch的顺序与原始落库水位；当前应用水位仍只由原Feed当前行负责。
+
+**主键**：`scope_key`、`epoch_id`
+
+**维护与用途**：现有Kernel仓储按精确scope维护；接收持久化不授予交易权限，已提交原始事件不可跳过。
+
+**字段清单**：`scope_key`、`epoch_id`、`ordinal`、`persisted_watermark`、`connected_at_ms`、`gap_reason`、`backlog_pending`、`updated_at_ms`、`completed_at_ms`

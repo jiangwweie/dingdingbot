@@ -181,6 +181,7 @@ _TERMINAL_REJECTION_STATUSES = {
     TicketStatus.ENTRY_RECONCILED_ABSENT.value,
 }
 _EXIT_ATTRIBUTION_COMMAND_KINDS = {
+    ExchangeCommandKind.OWNER_REDUCE.value,
     ExchangeCommandKind.INITIAL_STOP.value,
     ExchangeCommandKind.TAKE_PROFIT.value,
     ExchangeCommandKind.EXIT.value,

@@ -74,6 +74,7 @@ async def record_owner_reduction(
         return "already_recorded"
     if a.position_qty != proof.source_quantity:
         raise ValueError("owner_reduction_position_changed")
+    proof.require_source(a)
     event = OwnerReductionRecorded(
         event_id=f"event:{proof.ticket_id}:{a.last_event_sequence + 1}",
         ticket_id=proof.ticket_id,
@@ -86,9 +87,15 @@ async def record_owner_reduction(
         average_fill_price=proof.average_price,
         remaining_quantity=proof.remaining_quantity,
         original_tp_order_id=proof.original_tp_order_id,
-        original_tp_price=a.post_fill_exit_plan.tp_price
-        if a.post_fill_exit_plan
-        else a.ticket.take_profit_prices[0],
+        original_tp_price=(
+            None
+            if proof.source_stage == "runner"
+            else a.owner_reduction_context.original_tp_price
+            if a.owner_reduction_context is not None
+            else a.post_fill_exit_plan.tp_price
+            if a.post_fill_exit_plan
+            else a.ticket.take_profit_prices[0]
+        ),
         protection_order_id=proof.protection_order_id,
         protection_price=proof.protection_price,
         proof_digest=proof.digest(),

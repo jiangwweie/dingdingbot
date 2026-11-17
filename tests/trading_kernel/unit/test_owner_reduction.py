@@ -388,3 +388,16 @@ def test_short_price_condition_is_mirrored():
         ).action
         == "request_break_even"
     )
+
+
+def test_second_reduction_reuses_retired_tp_condition_without_recancelling():
+    from src.trading_kernel.domain.owner_reduction_context import OwnerReductionContext
+    a=aggregate()
+    a=a.model_copy(update={'position_qty':a.position_qty/2,'protected_qty':a.position_qty/2,
+        'tp1_exchange_order_id':None,'owner_reduction_context':OwnerReductionContext(operation_id='previous',cumulative_quantity=a.position_qty/2,
+            original_tp_order_id=a.tp1_exchange_order_id,original_tp_price=a.ticket.take_profit_prices[0],last_reduction_observed_at_ms=2500)})
+    f=facts(a,tp_order_id=None,tp_state='absent')
+    p=preview_owner_reduction(aggregate=a,facts=f,requested_quantity=a.position_qty/2,quantity_step=D('.0001'),minimum_quantity=D('.0001'),minimum_notional=D(1),now_ms=3000)
+    assert p.cancel_tp_order_id is None and p.tp_trigger_price==a.owner_reduction_context.original_tp_price
+    decision=advance_owner_reduction(state(p),f,now_ms=3000)
+    assert decision.action=='prepare_reduction'

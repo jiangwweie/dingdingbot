@@ -439,6 +439,7 @@ def test_trade_page_removes_limit_plus_one_and_uses_exact_ticket_cursor() -> Non
         ("initial_stop", "initial_stop_triggered"),
         ("replace_protection", "protection_stop_triggered"),
         ("take_profit", "take_profit_triggered"),
+        ("owner_reduce", "owner_reduction"),
     ],
 )
 def test_exit_reason_uses_exact_current_review_fill_and_command(

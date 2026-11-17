@@ -2174,7 +2174,7 @@ def _causality_trade_item_facts(
         review_metrics=None if review is None else review.metrics,
         frozen_exit_profile=ticket_row["frozen_exit_profile"],
         tp1_reached=any(e.event_type == "TakeProfitFilled" for e in events),
-        exit_commands=tuple(ExitCommandFacts.model_validate(c.model_dump(include=set(ExitCommandFacts.model_fields))) for c in commands if c.command_kind in {"initial_stop", "take_profit", "replace_protection"}),
+        exit_commands=tuple(ExitCommandFacts.model_validate(c.model_dump(include=set(ExitCommandFacts.model_fields))) for c in commands if c.command_kind in {"initial_stop", "take_profit", "replace_protection", "owner_reduce"}),
         exit_event_id=None if exit_event is None else exit_event.event_id,
         exit_event_type=None if exit_event is None else exit_event.event_type,
         exit_event_payload=None if exit_event is None else exit_event.payload,
@@ -2521,7 +2521,7 @@ def _exit_commands_column() -> sa.ColumnElement[Any]:
         .where(
             exchange_commands.c.ticket_id == trade_tickets.c.ticket_id,
             exchange_commands.c.command_kind.in_(
-                ("initial_stop", "take_profit", "replace_protection")
+                ("initial_stop", "take_profit", "replace_protection", "owner_reduce")
             ),
             trade_reviews.c.metrics["order_attribution"].op("@>")(
                 sa.func.jsonb_build_array(

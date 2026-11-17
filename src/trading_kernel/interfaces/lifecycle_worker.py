@@ -248,6 +248,7 @@ async def run_lifecycle_worker_once(
             ),
             None,
         ),
+        expected_active_stop_price=aggregate.active_stop_price,
         tp1_management_baseline=None if tp_baseline is None else OrderTerms.model_validate(tp_baseline),
         exact_tp_fills_required=profile.execution is not None,
         owner_reduction_price_required=(aggregate.owner_reduction_context is not None

@@ -3364,8 +3364,9 @@ def _asyncpg_dsn(dsn: str) -> str:
     )
 
 
+@pytest.mark.parametrize("kind,reason",[("initial_stop","initial_stop_triggered"),("owner_reduce","owner_reduction")])
 async def test_review_protection_fill_attribution_is_shared_with_trades(
-    owner_read_dsn: str,
+    owner_read_dsn: str,kind: str,reason: str,
 ) -> None:
     await _seed_owner_console_trades(owner_read_dsn)
     # This fixture has no lifecycle ExitRequested, but an exact current Review fill.
@@ -3377,8 +3378,9 @@ async def test_review_protection_fill_attribution_is_shared_with_trades(
         owner_read_dsn,
         """
         INSERT INTO brc_exchange_commands(command_id,ticket_id,command_kind,generation,idempotency_key,venue_client_order_id,status,quantity,request_payload,result_payload,created_at_ms,deadline_at_ms)
-        VALUES ('command:y:stop','ticket:y','initial_stop',1,'idem:y:stop','client:y:stop','accepted',1,'{}','{"exchange_order_id":"algo:1"}',1800000005000,1800000100000)
+        VALUES ('command:y:stop','ticket:y',$1,1,'idem:y:stop','client:y:stop','accepted',1,'{}','{"exchange_order_id":"algo:1"}',1800000005000,1800000100000)
     """,
+        kind,
     )
     await _execute_owner_console_admin(
         owner_read_dsn,
@@ -3419,7 +3421,7 @@ async def test_review_protection_fill_attribution_is_shared_with_trades(
         review = next(
             item.review for item in reviews.items if item.ticket_id == "ticket:y"
         )
-        assert trade.exit_reason == review.exit_reason == "initial_stop_triggered"
+        assert trade.exit_reason == review.exit_reason == reason
         assert (
             trade.exit_attribution.source
             == review.exit_attribution.source

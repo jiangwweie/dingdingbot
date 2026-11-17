@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from typing import Any
 
 import sqlalchemy as sa
@@ -69,6 +70,64 @@ class PostgresOwnerDeviceRepository:
             )
         )
         return token
+
+    async def binding_failures(
+        self, source: str, *, now_ms: int
+    ) -> tuple[str, list[int]]:
+        from hashlib import sha256
+
+        from src.trading_kernel.infrastructure.pg_models import owner_binding_limits
+
+        bucket = "binding:" + sha256(source.encode()).hexdigest()
+        # One bounded cleanup per binding request. Failed-source addresses are
+        # hashed, never included in diagnostic output or credential evidence.
+        expired = (
+            sa.select(owner_binding_limits.c.bucket_key)
+            .where(owner_binding_limits.c.expires_at_ms <= now_ms)
+            .order_by(owner_binding_limits.c.expires_at_ms)
+            .limit(64)
+        )
+        await self.c.execute(
+            sa.delete(owner_binding_limits).where(
+                owner_binding_limits.c.bucket_key.in_(expired)
+            )
+        )
+        await self.c.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key,0))"),
+            {"key": bucket},
+        )
+        row = (
+            (
+                await self.c.execute(
+                    sa.select(owner_binding_limits)
+                    .where(owner_binding_limits.c.bucket_key == bucket)
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return bucket, [] if row is None else [
+            int(t) for t in row["failures"] if now_ms - 900000 < int(t) <= now_ms
+        ]
+
+    async def record_binding_result(
+        self, bucket: str, failures: list[int], *, success: bool, now_ms: int
+    ) -> None:
+        from sqlalchemy.dialects.postgresql import insert
+
+        from src.trading_kernel.infrastructure.pg_models import owner_binding_limits
+
+        values = [] if success else [*failures, now_ms][-5:]
+        statement = insert(owner_binding_limits).values(
+            bucket_key=bucket, failures=values, expires_at_ms=now_ms + 900000
+        )
+        await self.c.execute(
+            statement.on_conflict_do_update(
+                index_elements=[owner_binding_limits.c.bucket_key],
+                set_={"failures": values, "expires_at_ms": now_ms + 900000},
+            )
+        )
 
     async def bind(
         self, *, token: str, public_key: dict[str, str], now_ms: int
@@ -248,9 +307,12 @@ class PostgresOwnerDeviceRepository:
         purpose: str,
         now_ms: int,
         allow_idempotent_replay: bool = False,
+        clock_ms: Callable[[], int] | None = None,
     ) -> str:
         # Serialize revocation with all new accepted intents. No network I/O.
         await self._lock()
+        if clock_ms is not None:
+            now_ms = clock_ms()
         d, s = await self.authenticate(token, now_ms=now_ms, lock=True)
         require_device_write(
             registration=d, session=s, proof=proof, purpose=purpose, now_ms=now_ms
@@ -345,7 +407,7 @@ class PostgresOwnerDeviceRepository:
         await self.c.execute(
             sa.update(writes)
             .where(writes.c.evidence_id == row["evidence_id"])
-            .values(authorization_id=authorization_id)
+            .values(authorization_id=authorization_id, result_kind="authorized")
         )
         from src.trading_kernel.infrastructure.owner_device_authorization_evidence import (
             trusted_owner_authorization_matches,
@@ -353,6 +415,70 @@ class PostgresOwnerDeviceRepository:
 
         if not await trusted_owner_authorization_matches(self.c, authorization_id):
             raise ValueError("device_authorization_source_mismatch")
+
+    async def write_authorized_at(self, proof: DeviceWriteProof) -> int:
+        return int(
+            (
+                await self.c.execute(
+                    sa.select(writes.c.authorized_at_ms).where(
+                        writes.c.evidence_id
+                        == canonical_digest(proof.model_dump(mode="json"))
+                    )
+                )
+            ).scalar_one()
+        )
+
+    async def write_receipt(self, proof: DeviceWriteProof) -> dict | None:
+        return (
+            await self.c.execute(
+                sa.select(writes.c.result_payload).where(
+                    writes.c.evidence_id
+                    == canonical_digest(proof.model_dump(mode="json")),
+                    writes.c.result_kind.in_(("authorized", "no_change")),
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def finish_control(
+        self,
+        *,
+        proof: DeviceWriteProof,
+        owner_identity: str,
+        authorization_id: str | None,
+        result: dict,
+    ) -> None:
+        row = (
+            (
+                await self.c.execute(
+                    sa.select(writes)
+                    .where(
+                        writes.c.evidence_id
+                        == canonical_digest(proof.model_dump(mode="json"))
+                    )
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one()
+        )
+        if row["owner_identity"] != owner_identity or row["result_kind"] != "pending":
+            raise ValueError("device_write_result_conflict")
+        await self.c.execute(
+            sa.update(writes)
+            .where(writes.c.evidence_id == row["evidence_id"])
+            .values(
+                authorization_id=authorization_id,
+                result_kind="authorized" if authorization_id else "no_change",
+                result_payload=result,
+            )
+        )
+        if authorization_id is not None:
+            from src.trading_kernel.infrastructure.owner_device_authorization_evidence import (
+                trusted_owner_authorization_matches,
+            )
+
+            if not await trusted_owner_authorization_matches(self.c, authorization_id):
+                raise ValueError("device_authorization_source_mismatch")
 
     async def revoke(self, *, device_id: str, now_ms: int) -> None:
         await self._lock()

@@ -768,12 +768,10 @@ class CcxtVenueAdapter:
         for (venue,account),exchange in self._exchanges.items():
             if not hasattr(exchange,'management_epoch_id'):
                 continue
-            if exchange.management_closed_batches:
-                old=exchange.management_closed_batches[0]
+            for old in exchange.management_closed_batches:
                 states.append({'venue_id':venue,'account_id':account,'epoch_id':old['epoch_id'],
                     'connected_at_ms':old['connected_at_ms'],'gap_reason':old['gap_reason'],
-                    'backlog_pending':True,'events':[{**event,'account_id':account} for event in list(old['events'])[:128]]})
-                continue
+                    'backlog_pending':len(old['events'])>128,'events':[{**event,'account_id':account} for event in list(old['events'])[:128]]})
             states.append({'venue_id':venue,'account_id':account,'epoch_id':exchange.management_epoch_id,
                 'connected_at_ms':exchange._management_connected_ms,'gap_reason':exchange.management_receive_gap,'backlog_pending':len(exchange.management_pending_events)>128,
                 'events':[{**event,'account_id':account} for event in list(exchange.management_pending_events)[:128]]})
@@ -1233,50 +1231,73 @@ class CcxtVenueAdapter:
                     if classification.decision in {ManagementDecision.SYSTEM,ManagementDecision.NATURAL}:tp1_terminal_attribution="natural"
             elif request.tp1_exchange_order_id is not None:
                 raise RuntimeError("TP1 exact durable command reference missing")
-            if request.active_stop_reference is not None:
-                stop_reference = request.active_stop_reference
-                stop_rows = _require_list(
-                    await _call_raw_exchange(
-                        exchange.fetch_open_orders,
-                        symbol,
-                        None,
-                        100,
-                        {"conditional": True},
-                    ),
-                    name="active protection orders",
-                )
-                if len(stop_rows) >= 100:
-                    raise RuntimeError("active protection orders truncated")
-                stops = _position_open_orders(
-                    stop_rows,
-                    expected_symbol=symbol,
-                    position_side=domain.position_side,
-                    order_namespace="conditional",
-                )
-                stop_order = next(
-                    (
-                        o
-                        for o in stops
-                        if o.exchange_order_id
-                        == stop_reference.submitted_exchange_order_id
-                    ),
-                    None,
-                )
-                expectation = stop_reference.conditional_expectation
+        if request.active_stop_reference is not None and (
+            request.exact_tp_fills_required or request.owner_reduction_price_required
+        ):
+            stop_reference = request.active_stop_reference
+            stop_rows = _require_list(
+                await _call_raw_exchange(
+                    exchange.fetch_open_orders, symbol, None, 100, {"conditional": True}
+                ),
+                name="active protection orders",
+            )
+            if len(stop_rows) >= 100:
+                raise RuntimeError("active protection orders truncated")
+            from src.trading_kernel.infrastructure.binance_management_observation import (
+                parse_rest_order,
+            )
+
+            expectation = stop_reference.conditional_expectation
+            matched = []
+            for value in stop_rows:
+                row = _require_mapping(value, name="active protection order")
                 if (
-                    stop_order is not None
-                    and stop_order.terms is not None
-                    and expectation is not None
+                    str(row.get("id") or "")
+                    != stop_reference.submitted_exchange_order_id
+                    or row.get("symbol") != symbol
                 ):
-                    terms = stop_order.terms
-                    if (
-                        terms.client_order_id == stop_reference.venue_client_order_id
-                        and terms.quantity == expectation.quantity
-                        and terms.side == expectation.side
-                        and terms.position_side == expectation.position_side
-                        and terms.order_type == expectation.order_type.upper()
-                    ):
-                        active_stop_quantity = terms.quantity
+                    continue
+                try:
+                    raw = _require_mapping(
+                        row.get("info"), name="active protection raw order"
+                    )
+                    evidence = parse_rest_order(
+                        cast(Mapping[str, object], raw),
+                        account_id=domain.account_id,
+                        conditional=True,
+                        received_at_ms=lifecycle_observed_at_ms,
+                        coverage_complete=True,
+                    )
+                except (ValueError, KeyError, TypeError):
+                    continue
+                terms = evidence.terms
+                if (
+                    expectation is not None
+                    and raw.get("algoStatus") == "NEW"
+                    and evidence.exchange_event_at_ms <= lifecycle_observed_at_ms
+                    and terms.identity
+                    == (
+                        domain.venue_id,
+                        domain.account_id,
+                        domain.exchange_instrument_id,
+                        domain.position_side,
+                        "conditional",
+                        stop_reference.submitted_exchange_order_id,
+                    )
+                    and terms.client_order_id == stop_reference.venue_client_order_id
+                    and terms.quantity == expectation.quantity
+                    and terms.side == expectation.side
+                    and terms.position_side == expectation.position_side
+                    and terms.order_type == expectation.order_type.upper()
+                    and (
+                        request.expected_active_stop_price is None
+                        and not request.owner_reduction_price_required
+                        or terms.trigger_price == request.expected_active_stop_price
+                    )
+                ):
+                    matched.append(terms)
+            if len(matched) == 1:
+                active_stop_quantity=matched[0].quantity
         allocated_entry_fee = (
             entry_fee_quote * position_quantity / request.entry_quantity
         )

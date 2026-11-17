@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 
 
 class FakeAsyncExchange:
@@ -283,3 +284,40 @@ class InstrumentRulesExchange(FakeAsyncExchange):
                 ],
             }
         ]
+
+
+class OwnerContinuationExchange:
+    """Protocol-shaped readonly close/stop facts, with no exchange write API."""
+
+    def __init__(self, *, quantity, stop_price, stop_id='stop-remaining', stop_client='stop-client', entry_id='venue-entry-1', now_ms=20000000):
+        self.quantity, self.stop_price = str(quantity), str(stop_price)
+        self.stop_id, self.stop_client, self.entry_id = stop_id, stop_client, entry_id
+        self.now_ms = now_ms
+        self.stop_reads = 0
+        self.stop_changes = {}
+
+    async def fetch_positions(self, symbols, params):
+        return [{'symbol':symbols[0],'contracts':self.quantity,'entryPrice':'60000',
+                 'markPrice':'63000','info':{'positionSide':params['positionSide']}}]
+
+    async def fetch_my_trades(self, symbol, since, limit, params):
+        assert params['orderId']==self.entry_id
+        return [{'id':'entry-fill','order':self.entry_id,'amount':str(Decimal(self.quantity)*2),
+                 'price':'60000','fee':{'cost':'.01','currency':'USDT'},'timestamp':2000,
+                 'info':{'positionSide':'LONG','commission':'.01','commissionAsset':'USDT'}}]
+
+    async def fapiPublicV2GetTickerPrice(self, params):
+        assert params=={'symbol':'BTCUSDT'}
+        return {'symbol':'BTCUSDT','price':'62000','time':self.now_ms}
+
+    async def fetch_open_orders(self, symbol, since, limit, params):
+        assert params=={'conditional':True}
+        self.stop_reads+=1
+        raw={'algoId':self.stop_id,'clientAlgoId':self.stop_client,'algoStatus':'NEW',
+            'symbol':'BTCUSDT','side':'SELL','positionSide':'LONG','orderType':'STOP_MARKET',
+            'quantity':self.quantity,'price':'0','triggerPrice':self.stop_price,'timeInForce':'GTC',
+            'reduceOnly':False,'closePosition':False,'workingType':'CONTRACT_PRICE','priceProtect':False,
+            'priceMatch':'NONE','selfTradePreventionMode':'NONE','goodTillDate':0,
+            'createTime':3000,'updateTime':3000,**self.stop_changes}
+        return [{'id':self.stop_id,'clientOrderId':self.stop_client,'symbol':symbol,
+                 'side':'sell','amount':self.quantity,'reduceOnly':False,'info':raw}]

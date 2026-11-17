@@ -131,6 +131,23 @@ async def test_mobile_bind_control_and_replay_requires_device_proof(
         )
         assert replay.status_code == 200
         assert replay.json() == result.json()
+        receipt = await client.get("/api/owner/v1/mobile/requests/mobile-resume-1")
+        assert receipt.json() == {"state": "completed", "result": result.json()}
+        assert (
+            await client.get("/api/owner/v1/mobile/requests/not-submitted")
+        ).json() == {"state": "pending"}
+        unused = (
+            await client.post(
+                "/api/owner/v1/mobile/nonces", headers={"origin": "https://owner.test"}
+            )
+        ).json()
+        app.state.owner_clock_ms = lambda: 64000
+        not_accepted = await client.get(
+            "/api/owner/v1/mobile/requests/not-submitted",
+            params={"nonce_id": unused["nonce_id"]},
+        )
+        assert not_accepted.json() == {"state": "not_accepted"}
+        app.state.owner_clock_ms = lambda: 3000
         wrong = await client.post(
             "/api/owner/v1/mobile/nonces", headers={"origin": "https://other.test"}
         )
@@ -204,3 +221,151 @@ async def test_mobile_orders_distinguishes_empty_missing_and_stale(
         app.state.owner_clock_ms = lambda: 34001
         stale = await client.get("/api/owner/v1/mobile/orders")
         assert stale.json()["status"] == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_repeated_same_state_has_explicit_no_change_receipt(head_template_engine):
+    from src.trading_kernel.infrastructure.pg_models import owner_device_write_evidence
+    from tests.trading_kernel.support.owner_device import keypair, sign
+
+    e = head_template_engine
+    async with PostgresKernelUnitOfWork(e) as u:
+        await seed_runtime_authority(
+            u,
+            RuntimeAuthoritySeedRequest(
+                account_id="mobile-account",
+                runtime_commit="a" * 40,
+                schema_revision=CURRENT_SCHEMA_REVISION,
+                seeded_at_ms=1000,
+            ),
+        )
+    key, jwk = keypair()
+    async with e.begin() as c:
+        grant = await PostgresOwnerDeviceRepository(c).issue_binding(
+            owner_identity="Owner", replace_device=False, now_ms=2000
+        )
+    app = FastAPI()
+    app.state.owner_console_settings = SimpleNamespace(
+        public_host="owner.test",
+        public_origin="https://owner.test",
+        owner_policy_id="policy-main",
+        account_id="mobile-account",
+        venue_id="binance-usdm",
+    )
+    app.state.owner_control_engine = e
+    app.state.owner_clock_ms = lambda: 3000
+    app.include_router(router)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://owner.test"
+    ) as client:
+        bind = (
+            await client.post(
+                "/api/owner/v1/mobile/devices/bind",
+                json={"token": grant, "public_key": jwk},
+                headers={"origin": "https://owner.test"},
+            )
+        ).json()
+        controls = (await client.get("/api/owner/v1/mobile/controls")).json()
+        nonce = (
+            await client.post(
+                "/api/owner/v1/mobile/nonces", headers={"origin": "https://owner.test"}
+            )
+        ).json()
+        payload = {
+            "owner_policy_id": "policy-main",
+            "enabled": False,
+            "expected_version": controls["global"]["policy_version"],
+        }
+        proof = DeviceWriteProof(
+            device_id=bind["device_id"],
+            device_epoch=1,
+            method="POST",
+            path="/api/owner/v1/mobile/controls/global",
+            body_digest=canonical_digest(payload),
+            nonce_id=nonce["nonce_id"],
+            idempotency_key="no-change-1",
+            issued_at_ms=nonce["issued_at_ms"],
+            expires_at_ms=nonce["expires_at_ms"],
+        )
+        body = {
+            "proof": proof.model_dump(mode="json"),
+            "signature": sign(key, proof),
+            "payload": payload,
+        }
+        result = await client.post(
+            proof.path, json=body, headers={"origin": "https://owner.test"}
+        )
+        assert result.status_code == 200, result.text
+        async with e.connect() as c:
+            receipt = (
+                (await c.execute(sa.select(owner_device_write_evidence)))
+                .mappings()
+                .one()
+            )
+            assert (
+                receipt["result_kind"] == "no_change"
+                and receipt["result_payload"] == result.json()
+            )
+        assert (
+            await client.post(
+                proof.path, json=body, headers={"origin": "https://owner.test"}
+            )
+        ).json() == result.json()
+
+
+@pytest.mark.asyncio
+async def test_binding_failure_limit_persists_and_cannot_be_bypassed_by_new_token(
+    head_template_engine,
+):
+    from tests.trading_kernel.support.owner_device import keypair
+
+    e = head_template_engine
+    _, jwk = keypair()
+    app = FastAPI()
+    app.state.owner_console_settings = SimpleNamespace(
+        public_host="owner.test", public_origin="https://owner.test"
+    )
+    app.state.owner_control_engine = e
+    now = [1000]
+    app.state.owner_clock_ms = lambda: now[0]
+    app.include_router(router)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="https://owner.test"
+    ) as client:
+        for _ in range(5):
+            failed = await client.post(
+                "/api/owner/v1/mobile/devices/bind",
+                json={"token": "A" * 43, "public_key": jwk},
+                headers={"origin": "https://owner.test"},
+            )
+            assert failed.status_code == 403
+            now[0] += 1
+        limited = await client.post(
+            "/api/owner/v1/mobile/devices/bind",
+            json={"token": "B" * 43, "public_key": jwk},
+            headers={"origin": "https://owner.test"},
+        )
+        assert limited.status_code == 429
+        async with e.begin() as c:
+            grant = await PostgresOwnerDeviceRepository(c).issue_binding(
+                owner_identity="Owner", replace_device=False, now_ms=now[0]
+            )
+        assert (
+            await client.post(
+                "/api/owner/v1/mobile/devices/bind",
+                json={"token": grant, "public_key": jwk},
+                headers={"origin": "https://owner.test"},
+            )
+        ).status_code == 429
+        now[0] += 900001
+        async with e.begin() as c:
+            grant = await PostgresOwnerDeviceRepository(c).issue_binding(
+                owner_identity="Owner", replace_device=False, now_ms=now[0]
+            )
+        assert (
+            await client.post(
+                "/api/owner/v1/mobile/devices/bind",
+                json={"token": grant, "public_key": jwk},
+                headers={"origin": "https://owner.test"},
+            )
+        ).status_code == 200

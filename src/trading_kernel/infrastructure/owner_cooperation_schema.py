@@ -150,6 +150,14 @@ def define_owner_cooperation_tables(metadata: sa.MetaData) -> tuple[sa.Table, ..
         metadata,
         sa.Column("evidence_id", sa.String(71), primary_key=True),
         sa.Column(
+            "result_kind", sa.String(24), nullable=False, server_default="pending"
+        ),
+        sa.Column("result_payload", JSONB(none_as_null=True)),
+        sa.CheckConstraint(
+            "(result_kind='pending' AND authorization_id IS NULL AND result_payload IS NULL) OR (result_kind='authorized' AND authorization_id IS NOT NULL) OR (result_kind='no_change' AND authorization_id IS NULL AND result_payload IS NOT NULL)",
+            name="result_valid",
+        ),
+        sa.Column(
             "authorization_id",
             ids,
             sa.ForeignKey("brc_owner_authorizations.authorization_id"),
@@ -171,4 +179,51 @@ def define_owner_cooperation_tables(metadata: sa.MetaData) -> tuple[sa.Table, ..
             name="uq_brc_owner_device_write_request",
         ),
     )
-    return devices, sessions, grants, nonces, operations, events, writes
+    binding_limits = sa.Table(
+        "brc_owner_binding_limits",
+        metadata,
+        sa.Column("bucket_key", sa.String(80), primary_key=True),
+        sa.Column("failures", JSONB, nullable=False),
+        sa.Column("expires_at_ms", time, nullable=False),
+        sa.CheckConstraint(
+            "jsonb_typeof(failures)='array' AND jsonb_array_length(failures)<=5 AND expires_at_ms>0",
+            name="valid",
+        ),
+    )
+    sa.Index("ix_brc_owner_binding_limits_expiry", binding_limits.c.expires_at_ms)
+    receive_epochs = sa.Table(
+        "brc_management_receive_epochs",
+        metadata,
+        sa.Column("scope_key", ids, primary_key=True),
+        sa.Column("epoch_id", ids, primary_key=True),
+        sa.Column("ordinal", time, nullable=False),
+        sa.Column("persisted_watermark", time, nullable=False),
+        sa.Column("connected_at_ms", time),
+        sa.Column("gap_reason", sa.String(256)),
+        sa.Column("backlog_pending", sa.Boolean, nullable=False),
+        sa.Column("updated_at_ms", time, nullable=False),
+        sa.Column("completed_at_ms", time),
+        sa.UniqueConstraint(
+            "scope_key", "ordinal", name="uq_brc_management_receive_ordinal"
+        ),
+        sa.CheckConstraint(
+            "ordinal>0 AND persisted_watermark>=0 AND updated_at_ms>0", name="valid"
+        ),
+    )
+    sa.Index(
+        "ix_brc_management_receive_pending",
+        receive_epochs.c.scope_key,
+        receive_epochs.c.ordinal,
+        postgresql_where=receive_epochs.c.completed_at_ms.is_(None),
+    )
+    return (
+        devices,
+        sessions,
+        grants,
+        nonces,
+        operations,
+        events,
+        writes,
+        binding_limits,
+        receive_epochs,
+    )

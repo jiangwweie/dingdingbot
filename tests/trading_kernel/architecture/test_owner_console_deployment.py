@@ -102,3 +102,13 @@ def test_kernel_release_no_longer_carries_owner_console_runtime_artifacts() -> N
 
     assert ".venv-owner-console" not in source
     assert "frontend/owner-console/dist" not in source
+
+
+def test_phone_html_type_and_binding_endpoint_have_explicit_runtime_guards():
+    source=_read("deploy/owner-console/nginx/owner-console.locations.conf")
+    assert 'rewrite ^ /mobile/index.html last;' in source
+    html=source.split('location = /mobile/index.html {',1)[1].split('location ^~ /mobile/',1)[0]
+    assert 'default_type text/html;' in html and 'types { }' in html
+    binding=source.split('location = /api/owner/v1/mobile/devices/bind {',1)[1].split('}',1)[0]
+    assert 'limit_req zone=brc_owner_login' in binding and 'limit_req_status 429' in binding
+    assert 'access_log off;' in binding and 'proxy_cache off;' in binding

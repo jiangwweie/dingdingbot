@@ -17,6 +17,9 @@ from src.trading_kernel.infrastructure.pg_models import (
 )
 from src.trading_kernel.infrastructure.pg_models import management_feed_current as feeds
 from src.trading_kernel.infrastructure.pg_models import (
+    management_receive_epochs as receive_epochs,
+)
+from src.trading_kernel.infrastructure.pg_models import (
     management_stream_events as raw_events,
 )
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
@@ -60,6 +63,196 @@ class PostgresManagementFeed:
             .limit(1)
         )
 
+    async def received_epoch(self, scope_key, epoch_id):
+        row = (
+            (
+                await self.c.execute(
+                    sa.select(receive_epochs).where(
+                        receive_epochs.c.scope_key == scope_key,
+                        receive_epochs.c.epoch_id == epoch_id,
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else dict(row)
+
+    async def next_received_epoch(self, scope_key, *, exclude_epoch=None):
+        q = sa.select(receive_epochs).where(
+            receive_epochs.c.scope_key == scope_key,
+            receive_epochs.c.completed_at_ms.is_(None),
+        )
+        if exclude_epoch is not None:
+            q = q.where(receive_epochs.c.epoch_id != exclude_epoch)
+        row = (
+            (await self.c.execute(q.order_by(receive_epochs.c.ordinal).limit(1)))
+            .mappings()
+            .one_or_none()
+        )
+        return None if row is None else dict(row)
+
+    async def persist_received_batch(
+        self,
+        *,
+        scope_key,
+        epoch_id,
+        events,
+        connected_at_ms,
+        now_ms,
+        gap_reason=None,
+        backlog_pending=False,
+        worker_id=None,
+    ):
+        """Persist receipt independently of ordered application; never grant ready."""
+        await self.lock_receiver(scope_key)
+        current = await self.get_feed(scope_key, for_update=True)
+        if (
+            current is not None
+            and worker_id is not None
+            and current["owner_worker_id"] != worker_id
+            and current["lease_until_ms"] > now_ms
+        ):
+            raise ValueError("management epoch ownership differs")
+        row = (
+            (
+                await self.c.execute(
+                    sa.select(receive_epochs)
+                    .where(
+                        receive_epochs.c.scope_key == scope_key,
+                        receive_epochs.c.epoch_id == epoch_id,
+                    )
+                    .with_for_update()
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            ordinal = 1 + int(
+                await self.c.scalar(
+                    sa.select(
+                        sa.func.coalesce(sa.func.max(receive_epochs.c.ordinal), 0)
+                    ).where(receive_epochs.c.scope_key == scope_key)
+                )
+                or 0
+            )
+            existing = await self.c.scalar(
+                sa.select(raw_events.c.receive_sequence)
+                .where(
+                    raw_events.c.scope_key == scope_key,
+                    raw_events.c.epoch_id == epoch_id,
+                )
+                .order_by(raw_events.c.receive_sequence.desc())
+                .limit(1)
+            )
+            row = {
+                "scope_key": scope_key,
+                "epoch_id": epoch_id,
+                "ordinal": ordinal,
+                "persisted_watermark": max(
+                    existing or 0,
+                    current["persisted_watermark"]
+                    if current is not None and current["epoch_id"] == epoch_id
+                    else 0,
+                ),
+                "connected_at_ms": connected_at_ms,
+                "gap_reason": None,
+                "backlog_pending": backlog_pending,
+                "updated_at_ms": now_ms,
+                "completed_at_ms": None,
+            }
+            await self.c.execute(insert(receive_epochs).values(**row))
+        if (
+            current is not None
+            and worker_id is not None
+            and current["owner_worker_id"] != worker_id
+        ):
+            await self.c.execute(
+                sa.update(feeds)
+                .where(feeds.c.scope_key == scope_key)
+                .values(
+                    owner_worker_id=worker_id, lease_until_ms=now_ms + FEED_LEASE_MS
+                )
+            )
+        watermark = row["persisted_watermark"]
+        reason = row["gap_reason"] or gap_reason
+        for event in sorted(events, key=lambda e: e["sequence"]):
+            sequence = event["sequence"]
+            payload = event["payload"]
+            digest = canonical_digest(payload)
+            if sequence <= watermark:
+                old = (
+                    (
+                        await self.c.execute(
+                            sa.select(
+                                raw_events.c.payload_digest, raw_events.c.received_at_ms
+                            ).where(
+                                raw_events.c.scope_key == scope_key,
+                                raw_events.c.epoch_id == epoch_id,
+                                raw_events.c.receive_sequence == sequence,
+                            )
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                if (
+                    old is None
+                    or old["payload_digest"] != digest
+                    or old["received_at_ms"] != event["received_at_ms"]
+                ):
+                    raise ValueError("management receive identity collision")
+                continue
+            if row["completed_at_ms"] is not None:
+                raise ValueError("completed management epoch received new input")
+            if sequence != watermark + 1:
+                reason = "management_receive_sequence_gap"
+            await self.c.execute(
+                insert(raw_events).values(
+                    event_id="stream:"
+                    + sha256(f"{scope_key}:{epoch_id}:{sequence}".encode()).hexdigest(),
+                    scope_key=scope_key,
+                    epoch_id=epoch_id,
+                    receive_sequence=sequence,
+                    received_at_ms=event["received_at_ms"],
+                    exchange_event_at_ms=None,
+                    message_kind=str(payload.get("e", "unknown"))[:96],
+                    safe_payload=payload,
+                    payload_digest=digest,
+                )
+            )
+            watermark = sequence
+            try:
+                parsed = parse_order_update(
+                    payload,
+                    account_id=event.get("account_id", "account"),
+                    received_at_ms=event["received_at_ms"],
+                    coverage_complete=True,
+                )
+                if (
+                    parsed.exchange_event_at_ms > parsed.received_at_ms
+                    or parsed.received_at_ms > now_ms
+                ):
+                    raise ValueError("event clock")
+            except (ValueError, TypeError, KeyError):
+                reason = "management_stream_protocol_invalid"
+        await self.c.execute(
+            sa.update(receive_epochs)
+            .where(
+                receive_epochs.c.scope_key == scope_key,
+                receive_epochs.c.epoch_id == epoch_id,
+            )
+            .values(
+                persisted_watermark=watermark,
+                connected_at_ms=row["connected_at_ms"] or connected_at_ms,
+                gap_reason=reason,
+                backlog_pending=backlog_pending,
+                updated_at_ms=now_ms,
+            )
+        )
+        return watermark
+
     async def start_feed(
         self, *, scope_key, epoch_id, worker_id, runtime_commit, now_ms
     ):
@@ -91,6 +284,10 @@ class PostgresManagementFeed:
             and old["applied_watermark"] < old["persisted_watermark"]
         ):
             raise ValueError("previous management epoch has unapplied events")
+        if old is not None and old['epoch_id']!=epoch_id:
+            received_old=await self.received_epoch(scope_key,old['epoch_id'])
+            if received_old is not None and (received_old['persisted_watermark']>old['applied_watermark'] or received_old['backlog_pending']):
+                raise ValueError("previous management epoch has unapplied receipts")
         if (
             old is not None
             and old["connected_at_ms"] is not None
@@ -111,6 +308,32 @@ class PostgresManagementFeed:
                 )
                 .on_conflict_do_nothing()
             )
+        earlier = await self.next_received_epoch(
+            scope_key, exclude_epoch=None if old is None else old["epoch_id"]
+        )
+        if earlier is not None and earlier["epoch_id"] != epoch_id:
+            raise ValueError("management receive epoch order differs")
+        if old is not None and old["epoch_id"] != epoch_id:
+            await self.c.execute(
+                sa.update(receive_epochs)
+                .where(
+                    receive_epochs.c.scope_key == scope_key,
+                    receive_epochs.c.epoch_id == old["epoch_id"],
+                )
+                .values(completed_at_ms=now_ms)
+            )
+        received = (
+            (
+                await self.c.execute(
+                    sa.select(receive_epochs).where(
+                        receive_epochs.c.scope_key == scope_key,
+                        receive_epochs.c.epoch_id == epoch_id,
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
         values = {
             "scope_key": scope_key,
             "epoch_id": epoch_id,
@@ -119,7 +342,9 @@ class PostgresManagementFeed:
             "schema_revision": CURRENT_SCHEMA_REVISION,
             "lease_until_ms": now_ms + FEED_LEASE_MS,
             "connection_state": "connecting",
-            "persisted_watermark": 0,
+            "persisted_watermark": 0
+            if received is None
+            else received["persisted_watermark"],
             "applied_watermark": 0,
             "connected_at_ms": None,
             "last_successful_at_ms": None,
@@ -180,69 +405,31 @@ class PostgresManagementFeed:
         ):
             raise ValueError("management epoch ownership differs")
         apply_commit = application_runtime_commit or row["runtime_commit"]
-        watermark = row["persisted_watermark"]
-        applied = row["applied_watermark"]
-        for event in sorted(events, key=lambda e: e["sequence"]):
-            sequence = event["sequence"]
-            payload = event["payload"]
-            digest = canonical_digest(payload)
-            if sequence <= watermark:
-                old = (
-                    (
-                        await self.c.execute(
-                            sa.select(
-                                raw_events.c.payload_digest, raw_events.c.received_at_ms
-                            ).where(
-                                raw_events.c.scope_key == scope_key,
-                                raw_events.c.epoch_id == epoch_id,
-                                raw_events.c.receive_sequence == sequence,
-                            )
-                        )
+        watermark = await self.persist_received_batch(
+            scope_key=scope_key,
+            epoch_id=epoch_id,
+            events=events,
+            connected_at_ms=connected_at_ms,
+            now_ms=now_ms,
+            gap_reason=gap_reason,
+            backlog_pending=backlog_pending,
+            worker_id=worker_id,
+        )
+        receipt = (
+            (
+                await self.c.execute(
+                    sa.select(receive_epochs).where(
+                        receive_epochs.c.scope_key == scope_key,
+                        receive_epochs.c.epoch_id == epoch_id,
                     )
-                    .mappings()
-                    .one_or_none()
                 )
-                if (
-                    old is None
-                    or old["payload_digest"] != digest
-                    or old["received_at_ms"] != event["received_at_ms"]
-                ):
-                    raise ValueError("management receive identity collision")
-                continue
-            if sequence != watermark + 1:
-                gap_reason = "management_receive_sequence_gap"
-            await self.c.execute(
-                insert(raw_events)
-                .values(
-                    event_id="stream:"
-                    + sha256(f"{scope_key}:{epoch_id}:{sequence}".encode()).hexdigest(),
-                    scope_key=scope_key,
-                    epoch_id=epoch_id,
-                    receive_sequence=sequence,
-                    received_at_ms=event["received_at_ms"],
-                    exchange_event_at_ms=None,
-                    message_kind=str(payload.get("e", "unknown"))[:96],
-                    safe_payload=payload,
-                    payload_digest=digest,
-                )
-                .on_conflict_do_nothing()
             )
-            watermark = sequence
-            try:
-                parsed = parse_order_update(
-                    payload,
-                    account_id=event.get("account_id", "account"),
-                    received_at_ms=event["received_at_ms"],
-                    coverage_complete=True,
-                )
-                if (
-                    parsed.exchange_event_at_ms > parsed.received_at_ms
-                    or parsed.received_at_ms > now_ms
-                ):
-                    raise ValueError("management event clock differs")
-
-            except (ValueError, TypeError, KeyError):
-                gap_reason = "management_stream_protocol_invalid"
+            .mappings()
+            .one()
+        )
+        gap_reason = receipt["gap_reason"] or gap_reason
+        backlog_pending = backlog_pending or receipt["backlog_pending"]
+        applied = row["applied_watermark"]
         # A receipt can be acknowledged once raw input is durable; authority waits
         # for ordered canonical application, including attribution to active Tickets.
         pending = (
@@ -343,7 +530,13 @@ class PostgresManagementFeed:
                             raise _ObservationDeferred
                 except _ObservationDeferred:
                     break
-                except (ValueError, TypeError, KeyError, RuntimeError, AssertionError) as exc:
+                except (
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    RuntimeError,
+                    AssertionError,
+                ) as exc:
                     attempt = attempts + 1
                     await self.c.execute(
                         insert(failure_diagnostics)
@@ -490,9 +683,20 @@ class PostgresManagementFeed:
         )
 
     async def feed_ready(self, scope_key, *, now_ms, runtime_commit=None):
-        return self._row_ready(
-            await self.get_feed(scope_key), now_ms=now_ms, runtime_commit=runtime_commit
+        row = await self.get_feed(scope_key)
+        if not self._row_ready(row, now_ms=now_ms, runtime_commit=runtime_commit):
+            return False
+        receipt = await self.received_epoch(scope_key, row["epoch_id"])
+        if receipt is not None and (
+            receipt["persisted_watermark"] != row["applied_watermark"]
+            or receipt["gap_reason"]
+            or receipt["backlog_pending"]
+        ):
+            return False
+        pending = await self.next_received_epoch(
+            scope_key, exclude_epoch=row["epoch_id"]
         )
+        return pending is None
 
     async def read_readiness(self, scope_key, *, required, now_ms, runtime_commit=None):
         from src.trading_kernel.application.management_health import (
@@ -500,7 +704,9 @@ class PostgresManagementFeed:
         )
 
         feed = await self.get_feed(scope_key)
-        ready = self._row_ready(feed, now_ms=now_ms, runtime_commit=runtime_commit)
+        ready = await self.feed_ready(
+            scope_key, now_ms=now_ms, runtime_commit=runtime_commit
+        )
         reason = None
         if required and not ready:
             reason = (

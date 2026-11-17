@@ -25,6 +25,8 @@ async def test_owner_schema_preserves_source_values_and_rejects_enabled_entry(en
     name, url = await create_empty_database()
     e = create_async_engine(url)
     try:
+        async with e.begin() as c:
+            await c.execute(sa.text("DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_control') THEN CREATE ROLE brc_owner_control NOLOGIN; END IF; END $$"))
         run_alembic(url, "upgrade", "0023_management_recovery")
         async with PostgresKernelUnitOfWork(e) as u:
             await seed_runtime_authority(
@@ -96,6 +98,17 @@ async def test_owner_schema_preserves_source_values_and_rejects_enabled_entry(en
                 sa.text("SELECT version_num FROM alembic_version")
             ) == ("0023_management_recovery" if enabled else "0024_owner_cooperation")
             if not enabled:
+                for table,column,allowed in [
+                    ('brc_owner_device_registrations','public_key',False),
+                    ('brc_owner_device_registrations','revoked_at_ms',True),
+                    ('brc_owner_device_write_evidence','proof',False),
+                    ('brc_owner_device_write_evidence','signature',False),
+                    ('brc_owner_device_write_evidence','authorization_id',True),
+                    ('brc_owner_device_write_evidence','result_payload',True),
+                ]:
+                    assert await c.scalar(sa.text("SELECT has_column_privilege('brc_owner_control',:table,:column,'UPDATE')"),{'table':table,'column':column}) is allowed
+                assert not await c.scalar(sa.text("SELECT has_table_privilege('brc_owner_control','brc_management_receive_epochs','INSERT')"))
+                assert not await c.scalar(sa.text("SELECT has_table_privilege('brc_owner_control','brc_owner_binding_grants','INSERT')"))
                 for table in [
                     "brc_owner_device_registrations",
                     "brc_owner_device_sessions",
@@ -103,6 +116,9 @@ async def test_owner_schema_preserves_source_values_and_rejects_enabled_entry(en
                     "brc_owner_request_nonces",
                     "brc_owner_position_operations",
                     "brc_owner_position_operation_events",
+                    "brc_owner_device_write_evidence",
+                    "brc_owner_binding_limits",
+                    "brc_management_receive_epochs",
                 ]:
                     assert await c.scalar(sa.text("SELECT count(*) FROM " + table)) == 0
     finally:

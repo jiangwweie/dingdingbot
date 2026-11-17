@@ -3345,4 +3345,4 @@ from src.trading_kernel.infrastructure.owner_cooperation_schema import (
 )
 
 (owner_device_registrations, owner_device_sessions, owner_binding_grants, owner_request_nonces,
- owner_position_operations, owner_position_operation_events, owner_device_write_evidence) = define_owner_cooperation_tables(metadata)
+ owner_position_operations, owner_position_operation_events, owner_device_write_evidence, owner_binding_limits, management_receive_epochs) = define_owner_cooperation_tables(metadata)

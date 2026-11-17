@@ -150,3 +150,21 @@ def test_ambiguous_or_incomplete_closure_is_rejected(defect):
         p["orders"][1]["terms"]["client_order_id"] = "alien"
     with pytest.raises(ValueError):
         VerifiedExitClosureProof.model_validate(p)
+
+
+@pytest.mark.parametrize('same_time',[False,True])
+def test_partial_owner_reduction_is_accounted_separately_from_final_exit(same_time):
+    from copy import deepcopy
+    from decimal import Decimal
+    p=proof_payload();half=Decimal(p['entry_quantity'])/2
+    stop=p['orders'][1];stop['terms']['quantity']=str(half);stop['executed_quantity']=str(half)
+    stop['reference']['conditional_expectation']['quantity']=str(half)
+    owner=deepcopy(stop);owner.update(actual_order_id=None,status='FILLED')
+    owner['reference'].update(command_id='reduce',command_kind='owner_reduce',namespace='regular',
+        venue_client_order_id='reduce-client',submitted_exchange_order_id='reduce-order',conditional_expectation=None)
+    owner['terms'].update(order_namespace='regular',exchange_order_id='reduce-order',client_order_id='reduce-client',order_type='MARKET',trigger_price=None)
+    p['orders'].append(owner);p['exit_fills'][0]['quantity']=str(half)
+    p['exit_fills'].append({'trade_id':'z-reduce','order_id':'reduce-order','quantity':str(half),'price':'61000','occurred_at_ms':3000 if same_time else 2500})
+    proof=VerifiedExitClosureProof.model_validate(p)
+    assert proof.exit_quantity==proof.entry_quantity
+    assert proof.exit_reason==('concurrent_exit_fills' if same_time else 'initial_stop_triggered')

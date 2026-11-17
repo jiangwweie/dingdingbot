@@ -154,6 +154,14 @@ def _define_frozen_tables(metadata: sa.MetaData) -> tuple[sa.Table, ...]:
         metadata,
         sa.Column("evidence_id", sa.String(71), primary_key=True),
         sa.Column(
+            "result_kind", sa.String(24), nullable=False, server_default="pending"
+        ),
+        sa.Column("result_payload", JSONB(none_as_null=True)),
+        sa.CheckConstraint(
+            "(result_kind='pending' AND authorization_id IS NULL AND result_payload IS NULL) OR (result_kind='authorized' AND authorization_id IS NOT NULL) OR (result_kind='no_change' AND authorization_id IS NULL AND result_payload IS NOT NULL)",
+            name="result_valid",
+        ),
+        sa.Column(
             "authorization_id",
             ids,
             sa.ForeignKey("brc_owner_authorizations.authorization_id"),
@@ -175,7 +183,54 @@ def _define_frozen_tables(metadata: sa.MetaData) -> tuple[sa.Table, ...]:
             name="uq_brc_owner_device_write_request",
         ),
     )
-    return devices, sessions, grants, nonces, operations, events, writes
+    binding_limits = sa.Table(
+        "brc_owner_binding_limits",
+        metadata,
+        sa.Column("bucket_key", sa.String(80), primary_key=True),
+        sa.Column("failures", JSONB, nullable=False),
+        sa.Column("expires_at_ms", time, nullable=False),
+        sa.CheckConstraint(
+            "jsonb_typeof(failures)='array' AND jsonb_array_length(failures)<=5 AND expires_at_ms>0",
+            name="valid",
+        ),
+    )
+    sa.Index("ix_brc_owner_binding_limits_expiry", binding_limits.c.expires_at_ms)
+    receive_epochs = sa.Table(
+        "brc_management_receive_epochs",
+        metadata,
+        sa.Column("scope_key", ids, primary_key=True),
+        sa.Column("epoch_id", ids, primary_key=True),
+        sa.Column("ordinal", time, nullable=False),
+        sa.Column("persisted_watermark", time, nullable=False),
+        sa.Column("connected_at_ms", time),
+        sa.Column("gap_reason", sa.String(256)),
+        sa.Column("backlog_pending", sa.Boolean, nullable=False),
+        sa.Column("updated_at_ms", time, nullable=False),
+        sa.Column("completed_at_ms", time),
+        sa.UniqueConstraint(
+            "scope_key", "ordinal", name="uq_brc_management_receive_ordinal"
+        ),
+        sa.CheckConstraint(
+            "ordinal>0 AND persisted_watermark>=0 AND updated_at_ms>0", name="valid"
+        ),
+    )
+    sa.Index(
+        "ix_brc_management_receive_pending",
+        receive_epochs.c.scope_key,
+        receive_epochs.c.ordinal,
+        postgresql_where=receive_epochs.c.completed_at_ms.is_(None),
+    )
+    return (
+        devices,
+        sessions,
+        grants,
+        nonces,
+        operations,
+        events,
+        writes,
+        binding_limits,
+        receive_epochs,
+    )
 
 
 revision: str = "0024_owner_cooperation"
@@ -246,6 +301,25 @@ def upgrade():
     c.exec_driver_sql(
         "CREATE TRIGGER trg_owner_operation_event_immutable BEFORE UPDATE OR DELETE ON brc_owner_position_operation_events FOR EACH ROW EXECUTE FUNCTION brc_owner_operation_event_immutable()"
     )
+    c.exec_driver_sql("""CREATE FUNCTION brc_owner_device_source_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Owner device source immutable'; END IF;
+      IF TG_TABLE_NAME='brc_owner_device_registrations' THEN
+        IF (to_jsonb(NEW)-'revoked_at_ms') IS DISTINCT FROM (to_jsonb(OLD)-'revoked_at_ms')
+          OR OLD.revoked_at_ms IS NOT NULL OR NEW.revoked_at_ms IS NULL OR NEW.revoked_at_ms<OLD.registered_at_ms
+          THEN RAISE EXCEPTION 'Owner device registration immutable'; END IF;
+      ELSE
+        IF (to_jsonb(NEW)-ARRAY['authorization_id','result_kind','result_payload']) IS DISTINCT FROM
+           (to_jsonb(OLD)-ARRAY['authorization_id','result_kind','result_payload'])
+          OR OLD.result_kind<>'pending' OR NEW.result_kind NOT IN ('authorized','no_change')
+          THEN RAISE EXCEPTION 'Owner write evidence immutable'; END IF;
+      END IF;
+      RETURN NEW;
+    END; $$""")
+    for table in ["brc_owner_device_registrations", "brc_owner_device_write_evidence"]:
+        c.exec_driver_sql(
+            f"CREATE TRIGGER trg_{table}_source_immutable BEFORE UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION brc_owner_device_source_immutable()"
+        )
     c.exec_driver_sql("""CREATE FUNCTION brc_owner_device_authorization_valid(aid text, expected_purpose text, checked_at bigint)
     RETURNS boolean LANGUAGE sql STABLE AS $$
       SELECT EXISTS(SELECT 1 FROM brc_owner_authorizations a
@@ -253,7 +327,7 @@ def upgrade():
         JOIN brc_owner_device_registrations d ON d.device_id=e.device_id
         WHERE a.authorization_id=aid AND a.purpose=expected_purpose
           AND expected_purpose IN ('entry_pause','entry_resume','strategy_pause','strategy_resume','position_reduce','position_close','protection_tighten','manual_tp_set','manual_tp_cancel')
-          AND a.authentication_strength='trusted_device_session' AND e.purpose=a.purpose
+          AND a.authentication_strength='trusted_device_session' AND e.result_kind='authorized' AND e.purpose=a.purpose
           AND e.owner_identity=a.owner_identity AND d.owner_identity=a.owner_identity
           AND e.device_epoch=d.epoch AND e.authorized_at_ms=a.authorized_at_ms
           AND d.registered_at_ms<=a.authorized_at_ms AND a.authorized_at_ms<=checked_at
@@ -305,7 +379,24 @@ def upgrade():
             c.exec_driver_sql("GRANT INSERT, UPDATE ON " + names + " TO " + role)
         if role == "brc_owner_control":
             c.exec_driver_sql(
-                "GRANT INSERT, UPDATE ON brc_owner_device_registrations, brc_owner_device_sessions, brc_owner_request_nonces, brc_owner_position_operations, brc_owner_device_write_evidence TO "
+                "GRANT INSERT, UPDATE ON brc_owner_device_sessions, brc_owner_request_nonces, brc_owner_position_operations, brc_owner_binding_limits TO "
+                + role
+            )
+            c.exec_driver_sql("GRANT DELETE ON brc_owner_binding_limits TO " + role)
+            c.exec_driver_sql(
+                "GRANT INSERT ON brc_owner_device_registrations, brc_owner_device_write_evidence TO "
+                + role
+            )
+            c.exec_driver_sql(
+                "REVOKE UPDATE ON brc_owner_device_registrations, brc_owner_device_write_evidence FROM "
+                + role
+            )
+            c.exec_driver_sql(
+                "GRANT UPDATE (revoked_at_ms) ON brc_owner_device_registrations TO "
+                + role
+            )
+            c.exec_driver_sql(
+                "GRANT UPDATE (authorization_id,result_kind,result_payload) ON brc_owner_device_write_evidence TO "
                 + role
             )
             c.exec_driver_sql(

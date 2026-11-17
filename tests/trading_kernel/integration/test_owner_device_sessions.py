@@ -104,3 +104,18 @@ async def test_binding_consumed_and_replacement_revokes_old_session(
         assert (await r.authenticate(b2["session_token"], now_ms=5000))[
             0
         ].device_id == b2["device_id"]
+
+
+@pytest.mark.asyncio
+async def test_device_authority_rechecks_time_after_lock_wait(head_template_engine):
+    key,jwk=keypair()
+    async with head_template_engine.begin() as c:
+        r=PostgresOwnerDeviceRepository(c)
+        grant=await r.issue_binding(owner_identity='Owner',replace_device=False,now_ms=1000)
+        device=await r.bind(token=grant,public_key=jwk,now_ms=2000)
+        nonce=await r.issue_nonce(device['session_token'],now_ms=3000)
+        payload={'enabled':False}
+        proof=DeviceWriteProof(device_id=device['device_id'],device_epoch=1,method='POST',path='/api/owner/v1/mobile/controls/global',
+            body_digest=canonical_digest(payload),nonce_id=nonce['nonce_id'],idempotency_key='delayed',issued_at_ms=nonce['issued_at_ms'],expires_at_ms=nonce['expires_at_ms'])
+        with pytest.raises(ValueError,match='device_nonce_expired'):
+            await r.authorize(token=device['session_token'],proof=proof,signature=sign(key,proof),body=payload,purpose='entry_pause',now_ms=3000,clock_ms=lambda:64000)

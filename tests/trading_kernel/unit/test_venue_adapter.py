@@ -2856,3 +2856,24 @@ async def test_owner_continuation_reads_contract_price_without_querying_retired_
     else:
         with pytest.raises(RuntimeError,match='owner_contract_price'):
             await adapter.read_lifecycle_facts(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('exact_tp',[False,True])
+@pytest.mark.parametrize('mutation',[None,{'clientAlgoId':'external'}, {'triggerPrice':'58000'}, {'quantity':'.01'}, {'algoStatus':'CANCELED'}])
+async def test_owner_reduced_v1_and_v2_read_exact_surviving_stop(exact_tp,mutation):
+    from tests.trading_kernel.support.venue_adapter import OwnerContinuationExchange
+    exchange=OwnerContinuationExchange(quantity='.005',stop_price='59000')
+    exchange.stop_changes=mutation or {}
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20000000)
+    stop=TicketOrderReference(command_id='stop-command',command_kind=ExchangeCommandKind.REPLACE_PROTECTION,role=OrderRole.EXIT,
+        namespace=OrderNamespace.CONDITIONAL,venue_client_order_id='stop-client',submitted_exchange_order_id='stop-remaining',command_created_at_ms=3000,
+        conditional_expectation=ConditionalOrderExpectation(exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long',side='sell',order_type='stop_market',quantity=Decimal('.005')))
+    req=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),
+        event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),
+        entry_order_reference=_entry_order_reference(),tp1_exchange_order_id=None,active_stop_reference=stop,expected_active_stop_price=Decimal(59000),
+        entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,
+        exact_tp_fills_required=exact_tp,owner_reduction_price_required=True,observed_at_ms=20000000)
+    result=await adapter.read_lifecycle_facts(req)
+    assert exchange.stop_reads==1
+    assert result.active_stop_quantity==(None if mutation else Decimal('.005'))

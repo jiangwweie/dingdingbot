@@ -35,12 +35,44 @@ async def persist_management_feed_once(
         return FeedTickResult(status="runtime_fenced")
     states = source.management_feed_batches()
     blocked_reasons = set()
+    # Receipt durability must not wait for an older event's canonical application.
     for state in states:
         scope = management_scope(state["venue_id"], state["account_id"])
         async with uow_factory() as u:
+            current = await u.management.get_feed(scope)
+            if (
+                current is not None
+                and await u.management.received_epoch(scope, current["epoch_id"])
+                is None
+            ):
+                await u.management.persist_received_batch(
+                    scope_key=scope,
+                    epoch_id=current["epoch_id"],
+                    events=[],
+                    connected_at_ms=current["connected_at_ms"],
+                    now_ms=clock_ms(),
+                    worker_id=worker_id,
+                )
+            watermark = await u.management.persist_received_batch(
+                scope_key=scope,
+                epoch_id=state["epoch_id"],
+                events=state["events"],
+                connected_at_ms=state["connected_at_ms"],
+                now_ms=clock_ms(),
+                gap_reason=state["gap_reason"],
+                backlog_pending=state["backlog_pending"],
+                worker_id=worker_id,
+            )
+        source.acknowledge_management_events(state["epoch_id"], watermark)
+    processed_scopes = set()
+    for state in states:
+        scope = management_scope(state["venue_id"], state["account_id"])
+        if scope in processed_scopes:
+            continue
+        processed_scopes.add(scope)
+        async with uow_factory() as u:
             await u.management.lock_receiver(scope)
             current = await u.management.get_feed(scope, for_update=True)
-            now_ms = clock_ms()
             # Receipts can arrive while runtime certification or ownership
             # locking is awaited. Check processing time, not tick start.
             now_ms = clock_ms()
@@ -99,13 +131,10 @@ async def persist_management_feed_once(
                 )
                 return True
 
-            if (
-                current is not None
-                and current["epoch_id"] != state["epoch_id"]
-                and current["applied_watermark"] < current["persisted_watermark"]
-            ):
-                # A reconnect must not abandon durable unapplied events. Apply
-                # the old epoch in order before starting the new receiver epoch.
+            if current is not None:
+                active_receipt = await u.management.received_epoch(
+                    scope, current["epoch_id"]
+                )
                 await u.management.persist_stream_batch(
                     scope_key=scope,
                     epoch_id=current["epoch_id"],
@@ -115,31 +144,51 @@ async def persist_management_feed_once(
                     apply_observer=apply_observer,
                     account_id=state["account_id"],
                     application_runtime_commit=runtime_commit,
+                    worker_id=worker_id,
+                    backlog_pending=False
+                    if active_receipt is None
+                    else active_receipt["backlog_pending"],
                 )
-                old = await u.management.get_feed(scope)
-                if old["applied_watermark"] < old["persisted_watermark"]:
-                    return FeedTickResult(
-                        status="management_feed_recovering",
-                        detail="previous_epoch_unapplied",
-                    )
-            if current is None or current["epoch_id"] != state["epoch_id"]:
+                current = await u.management.get_feed(scope)
+                if (
+                    current["applied_watermark"] < current["persisted_watermark"]
+                    or active_receipt is not None
+                    and active_receipt["backlog_pending"]
+                ):
+                    blocked_reasons.add("previous_epoch_unapplied")
+                    continue
+            pending = await u.management.next_received_epoch(
+                scope, exclude_epoch=None if current is None else current["epoch_id"]
+            )
+            target = (
+                state["epoch_id"]
+                if pending is None and current is None
+                else pending["epoch_id"]
+                if pending
+                else current["epoch_id"]
+            )
+            if current is None or current["epoch_id"] != target:
                 await u.management.start_feed(
                     scope_key=scope,
-                    epoch_id=state["epoch_id"],
+                    epoch_id=target,
                     worker_id=worker_id,
                     runtime_commit=runtime_commit,
                     now_ms=now_ms,
                 )
-
+            # Target owns its persisted receipt facts, not the current socket's
+            # connection/health metadata after a restart.
+            receipt = await u.management.received_epoch(scope, target)
             watermark = await u.management.persist_stream_batch(
                 scope_key=scope,
-                epoch_id=state["epoch_id"],
-                events=state["events"],
-                connected_at_ms=state["connected_at_ms"],
+                epoch_id=target,
+                events=[],
+                connected_at_ms=None if receipt is None else receipt["connected_at_ms"],
                 now_ms=now_ms,
-                gap_reason=state["gap_reason"],
+                gap_reason=None if receipt is None else receipt["gap_reason"],
                 worker_id=worker_id,
-                backlog_pending=state["backlog_pending"],
+                backlog_pending=False
+                if receipt is None
+                else receipt["backlog_pending"],
                 apply_observer=apply_observer,
                 account_id=state["account_id"],
                 application_runtime_commit=runtime_commit,
@@ -174,8 +223,7 @@ async def persist_management_feed_once(
                     updated_at_ms=now_ms,
                 )
             )
-        # Acknowledge only after __aexit__ has committed all raw input and watermarks.
-        source.acknowledge_management_events(state["epoch_id"], watermark)
+        # Raw receipts were acknowledged after their independent transaction.
         if feed is not None and feed["health_reason"] in {
             "management_stream_protocol_invalid",
             "management_receive_sequence_gap",

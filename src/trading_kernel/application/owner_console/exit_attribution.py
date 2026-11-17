@@ -27,6 +27,8 @@ _LABELS = {
     "protection_stop_triggered": "保护止损成交",
     "time_stop_hit": "持仓时间到期退出",
     "strategy_exit": "策略条件退出",
+    "owner_reduction": "系统内人工减仓成交",
+    "concurrent_exit_fills": "多类退出同刻成交，最终触发源无法唯一确认",
     "recover_exit_rejection": "退出恢复处理",
     "initial_stop_rejected": "初始止损异常后受控退出",
     "partial_tp_protection_unproven": "部分止盈后保护覆盖未证实，安全退出",
@@ -86,7 +88,7 @@ def classify_exit(
     """Classify explicit facts only; a non-Owner exit is not automatically natural."""
     if not code:
         return "unknown"
-    if code.startswith("owner_flatten_all:"):
+    if code.startswith("owner_flatten_all:") or code=="owner_reduction":
         return "owner"
     if code.startswith(("deployment_drain:", "ticket_incident:")) or code in {
         "recover_exit_rejection",
@@ -187,6 +189,7 @@ def review_fill_exit_attribution(facts: TradeItemFacts) -> ExitAttribution | Non
         if facts.tp1_reached
         else "protection_stop_triggered",
         "take_profit": "take_profit_triggered",
+        "owner_reduce": "owner_reduction",
     }.get(kind)
     if code is None or facts.review_created_at_ms is None:
         return None
