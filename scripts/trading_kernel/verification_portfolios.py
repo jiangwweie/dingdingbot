@@ -38,6 +38,9 @@ FAST_KERNEL_COMMANDS: Final[CommandSet] = (
 R1_STATIC_COMMANDS: Final[CommandSet] = (
     ("pnpm", "--dir", "frontend/owner-console-v2", "exec", "tsc", "-b"),
     ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
+    ("node", "--check", "frontend/owner-mobile/app.js"),
+    ("node", "--check", "frontend/owner-mobile/sw.js"),
+    (".venv/bin/python", "scripts/owner_console/build_mobile.py"),
 )
 
 R2_OWNER_API_COMMANDS: Final[CommandSet] = (

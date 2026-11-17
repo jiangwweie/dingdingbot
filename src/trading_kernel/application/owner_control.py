@@ -154,7 +154,7 @@ async def set_strategy_entry_state(
     strategy_group_id: str,
     target_state: StrategyEntryState,
     request: ControlMutationRequest,
-    authentication_strength: Literal["session", "totp_step_up"],
+    authentication_strength: Literal["session", "totp_step_up", "trusted_device_session"],
 ) -> StrategyEntryControl:
     existing_authorization = (
         await uow.owner_controls.get_authorization_by_idempotency_key(
@@ -248,7 +248,7 @@ async def set_global_entry_state(
     owner_policy_id: str,
     enabled: bool,
     request: ControlMutationRequest,
-    authentication_strength: Literal["session", "totp_step_up"],
+    authentication_strength: Literal["session", "totp_step_up", "trusted_device_session"],
 ) -> OwnerPolicySnapshot:
     current = await uow.entry_admission.get_owner_policy(owner_policy_id)
     if current is None:
@@ -375,7 +375,7 @@ async def stage_generic_dynamic_selection_mode(
     strategy_group_id: str,
     effective_period_anchor_ms: int,
     request: ControlMutationRequest,
-    authentication_strength: Literal["session", "totp_step_up"],
+    authentication_strength: Literal["session", "totp_step_up", "trusted_device_session"],
 ) -> SelectionControl:
     """Schedule one installed Generic Spec under a durable Owner-owned epoch."""
     if authentication_strength != "totp_step_up":
@@ -1112,7 +1112,7 @@ def _authorization(
         "review_revise",
     ],
     request: ControlMutationRequest,
-    authentication_strength: Literal["session", "totp_step_up"],
+    authentication_strength: Literal["session", "totp_step_up", "trusted_device_session"],
     target_scope: dict[str, JsonValue],
 ) -> OwnerAuthorization:
     digest = _authorization_digest(

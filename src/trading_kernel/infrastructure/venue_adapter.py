@@ -165,6 +165,8 @@ class _CcxtExchange(Protocol):
 
     def fapiPublicGetPremiumIndex(self, params: Mapping[str, object]) -> object: ...
 
+    def fapiPublicV2GetTickerPrice(self, params: Mapping[str, object]) -> object: ...
+
     def fapiPublicGetExchangeInfo(self, params: Mapping[str, object]) -> object: ...
 
     def fapiPublicGetTradingSchedule(self, params: Mapping[str, object]) -> object: ...
@@ -1024,12 +1026,35 @@ class CcxtVenueAdapter:
             if request.runner_market_required
             else _empty_rows()
         )
-        positions, entry_fills, tp1_order, candle_rows = await asyncio.gather(
+        contract_price_call = (
+            _call_raw_exchange(exchange.fapiPublicV2GetTickerPrice,
+                {"symbol": domain.exchange_instrument_id.split(":")[1]})
+            if request.owner_reduction_price_required else _empty_value()
+        )
+        positions, entry_fills, tp1_order, candle_rows, contract_ticker = await asyncio.gather(
             positions_call,
             entry_fills_call,
             tp1_order_call,
             candles_call,
+            contract_price_call,
         )
+        contract_price = None
+        contract_observed = None
+        contract_valid_until = None
+        lifecycle_observed_at_ms = request.observed_at_ms
+        if request.owner_reduction_price_required:
+            lifecycle_observed_at_ms = self._clock_ms()
+            ticker = _require_mapping(contract_ticker, name="owner_contract_price")
+            try:
+                contract_price = Decimal(str(ticker["price"]))
+                contract_observed = int(str(ticker["time"]))
+            except (KeyError, ValueError, ArithmeticError):
+                raise RuntimeError("owner_contract_price_invalid") from None
+            if (ticker.get("symbol") != domain.exchange_instrument_id.split(":")[1]
+                    or not contract_price.is_finite() or contract_price <= 0
+                    or not 0 < contract_observed <= lifecycle_observed_at_ms < contract_observed + 30000):
+                raise RuntimeError("owner_contract_price_identity_or_time_invalid")
+            contract_valid_until = contract_observed + 30000
         position_quantity, _, _, _ = _position_details(
             _require_list(positions, name="positions"),
             expected_symbol=symbol,
@@ -1269,6 +1294,9 @@ class CcxtVenueAdapter:
             else None
         )
         return TicketLifecycleFacts(
+            contract_market_price=contract_price,
+            contract_price_observed_at_ms=contract_observed,
+            contract_price_valid_until_ms=contract_valid_until,
             tp_fill_evidence=tp_fill_evidence,
             current_market_price=current_market_price,
             active_stop_quantity=active_stop_quantity,
@@ -1281,7 +1309,7 @@ class CcxtVenueAdapter:
             exit_taker_fee_rate=taker_fee_rate,
             price_tick=request.price_tick,
             market_facts=market_facts,
-            observed_at_ms=request.observed_at_ms,
+            observed_at_ms=lifecycle_observed_at_ms,
         )
 
     async def read_fee_discount_capability(

@@ -98,6 +98,9 @@ from src.trading_kernel.interfaces.owner_console_http.routes.instruments import 
 from src.trading_kernel.interfaces.owner_console_http.routes.market import (
     router as market_router,
 )
+from src.trading_kernel.interfaces.owner_console_http.routes.mobile import (
+    router as mobile_router,
+)
 from src.trading_kernel.interfaces.owner_console_http.routes.overview import (
     router as overview_router,
 )
@@ -208,6 +211,7 @@ def create_owner_console_app(
             message="统计事实已更新，请刷新整个查询后继续翻页",
         )
 
+    app.include_router(mobile_router)
     app.include_router(auth_router)
     app.include_router(google_router)
     app.include_router(controls_router)
@@ -227,12 +231,16 @@ def create_owner_console_app(
         if (
             request.url.path.startswith(f"{_API_PREFIX}/")
             and request.url.path not in _PUBLIC_AUTH_PATHS
+            and not request.url.path.startswith(f"{_API_PREFIX}/mobile/")
         ):
             try:
                 await require_authenticated(request)
             except UnauthorizedError:
                 return unauthorized_response()
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.path.startswith(f"{_API_PREFIX}/mobile/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/healthz")
     async def healthz(request: Request) -> Response:

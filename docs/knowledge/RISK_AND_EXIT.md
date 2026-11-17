@@ -80,7 +80,7 @@ stateDiagram-v2
     review_pending --> terminal: ReviewRecorded
 ```
 
-这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L21) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L134) 为准。
+这是**正常路径的缩略状态图**，合并了回执、确认、撤单与重试中间态；不是全部合法转移枚举。完整状态以 [AggregateStatus](../../src/trading_kernel/domain/aggregate.py#L22) 和 [reduce_event](../../src/trading_kernel/domain/reducer.py#L138) 为准。
 
 ### 冻结退出规则怎样使用
 
@@ -90,7 +90,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L127)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L644)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L732)、[Reducer](../../src/trading_kernel/domain/reducer.py#L134)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L133)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L644)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L732)、[Reducer](../../src/trading_kernel/domain/reducer.py#L138)。
 
 ## 成交后风险与部分成交
 

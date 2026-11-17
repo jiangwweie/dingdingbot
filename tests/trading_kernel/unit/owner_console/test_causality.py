@@ -410,3 +410,18 @@ def test_causality_fact_boundary_rejects_candles_and_history_over_caps() -> None
         TradeCausalityFacts.model_validate(
             {**facts.model_dump(mode="python"), "incidents": incidents}
         )
+
+
+def test_cooperative_reduction_events_keep_auto_causality_stage() -> None:
+    detail = build_trade_causality(
+        trade_causality_facts(
+            event_types=("OwnerReductionCommandObserved", "OwnerReductionRecorded", "OwnerReductionPriceSatisfied"),
+            aggregate_status="runner_protected",
+            ticket_status="issued",
+            terminal_at_ms=None,
+            review=None,
+        )
+    )
+    assert [(event.classification, event.stage) for event in detail.raw_events] == [
+        ("mapped", "tp_runner"), ("mapped", "tp_runner"), ("mapped", "tp_runner")
+    ]

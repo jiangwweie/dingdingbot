@@ -17,7 +17,7 @@ from scripts.owner_console.deploy_release import (
 TARGET_COMMIT = "a" * 40
 
 
-def test_static_builder_installs_and_builds_only_v2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_static_builder_builds_v2_and_phone_in_one_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
     commands: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(
@@ -30,6 +30,9 @@ def test_static_builder_installs_and_builds_only_v2(monkeypatch: pytest.MonkeyPa
 
     def run(command: tuple[str, ...], **kwargs: object) -> SimpleNamespace:
         commands.append(command)
+        if command[0] == "tar":
+            import shutil
+            shutil.copytree(release_module.REPO_ROOT / "frontend/owner-mobile", Path(command[command.index("-C") + 1]) / "frontend/owner-mobile")
         if command[0] == "pnpm" and command[-1] == "build":
             dist = Path(str(kwargs["cwd"])) / command[2] / "dist"
             dist.mkdir(parents=True)
@@ -40,6 +43,7 @@ def test_static_builder_installs_and_builds_only_v2(monkeypatch: pytest.MonkeyPa
     with release_module._build_static_dist(TARGET_COMMIT) as dist:
         assert dist.parts[-3:] == ("frontend", "owner-console-v2", "dist")
         assert (dist / "index.html").read_text(encoding="utf-8") == "V2"
+        assert (dist / "mobile/app.js").is_file()
 
     assert commands[1:] == [
         ("pnpm", "--dir", "frontend/owner-console-v2", "install", "--frozen-lockfile"),

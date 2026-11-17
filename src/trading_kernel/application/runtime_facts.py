@@ -387,6 +387,7 @@ class LifecycleFactsRequest(BaseModel):
     active_stop_reference: TicketOrderReference | None = None
     tp1_management_baseline: OrderTerms | None = None
     exact_tp_fills_required: bool = False
+    owner_reduction_price_required: bool = False
     tp1_exchange_order_id: str | None
     entry_fill_window_started_at_ms: int
     price_tick: Decimal

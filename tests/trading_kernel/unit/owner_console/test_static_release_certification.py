@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from scripts.owner_console.certify_static_release_candidate import (
+    STATIC_CERTIFICATION_COMMANDS,
     OwnerStaticReleaseCertificationManifest,
     build_owner_static_certification_identity,
     validate_owner_static_manifest_identity,
@@ -17,7 +18,7 @@ def test_static_certification_binds_the_exact_commit_and_r1_portfolio() -> None:
         **identity,
         status="pass",
         certified_at_ms=1,
-        command_durations_ms=(1, 1),
+        command_durations_ms=(1,) * len(STATIC_CERTIFICATION_COMMANDS),
     )
 
     validate_owner_static_manifest_identity(manifest, COMMIT)
@@ -28,7 +29,7 @@ def test_static_certification_rejects_a_different_exact_commit() -> None:
         **build_owner_static_certification_identity(COMMIT),
         status="pass",
         certified_at_ms=1,
-        command_durations_ms=(1, 1),
+        command_durations_ms=(1,) * len(STATIC_CERTIFICATION_COMMANDS),
     )
 
     with pytest.raises(ValueError, match="release commit differs"):

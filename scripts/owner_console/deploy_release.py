@@ -613,6 +613,8 @@ def _build_static_dist(commit: str) -> Iterator[Path]:
         dist = build_root / "frontend/owner-console-v2/dist"
         if not (dist / "index.html").is_file():
             raise RuntimeError("Owner Console frontend build did not produce index.html")
+        from scripts.owner_console.build_mobile import build_mobile
+        build_mobile(build_root / "frontend/owner-mobile", dist / "mobile")
         yield dist
 
 

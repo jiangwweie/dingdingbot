@@ -68,3 +68,12 @@ GRANT UPDATE ON TABLE
     brc_event_exit_profile_binding_current,
     brc_exit_policies
 TO brc_owner_control;
+
+-- Mobile intents and device sessions; binding grants can only be issued by the
+-- independent admin command, never by the Owner API database role.
+GRANT INSERT, UPDATE ON TABLE
+    brc_owner_device_registrations, brc_owner_device_sessions,
+    brc_owner_request_nonces, brc_owner_position_operations, brc_owner_device_write_evidence
+TO brc_owner_control;
+GRANT UPDATE (consumed_at_ms) ON brc_owner_binding_grants TO brc_owner_control;
+GRANT INSERT ON brc_owner_position_operation_events TO brc_owner_control;

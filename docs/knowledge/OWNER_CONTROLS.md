@@ -57,7 +57,7 @@ sequenceDiagram
     W->>DB: 正式路径生成 durable Command
 ```
 
-**控制请求不携带交易所写凭据，也不直接调用 venue。**实际 request 校验、全局认证和控制事务分布在 [app](../../src/trading_kernel/interfaces/owner_console_http/app.py#L128)、[auth](../../src/trading_kernel/interfaces/owner_console_http/auth.py#L156)、[routes/controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py) 与 [application/owner_control](../../src/trading_kernel/application/owner_control.py)。
+**控制请求不携带交易所写凭据，也不直接调用 venue。**实际 request 校验、全局认证和控制事务分布在 [app](../../src/trading_kernel/interfaces/owner_console_http/app.py#L131)、[auth](../../src/trading_kernel/interfaces/owner_console_http/auth.py#L156)、[routes/controls](../../src/trading_kernel/interfaces/owner_console_http/routes/controls.py) 与 [application/owner_control](../../src/trading_kernel/application/owner_control.py)。
 
 ### 并发与幂等
 

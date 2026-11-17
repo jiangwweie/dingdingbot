@@ -206,10 +206,16 @@ async def read_entry_restoration_state(
         .mappings()
         .one_or_none()
     )
+    device_resume=False
+    if authorization is not None and authorization["authentication_strength"]=="trusted_device_session":
+        from src.trading_kernel.infrastructure.owner_device_authorization_evidence import (
+            trusted_owner_authorization_matches,
+        )
+        device_resume=await trusted_owner_authorization_matches(connection,authorization['authorization_id'])
     owner_resume = bool(
         authorization is not None
         and authorization["purpose"] == "entry_resume"
-        and authorization["authentication_strength"] == "totp_step_up"
+        and (authorization["authentication_strength"] == "totp_step_up" or device_resume)
         and authorization["target_scope"]
         == {"owner_policy_id": policy["owner_policy_id"]}
         and 0

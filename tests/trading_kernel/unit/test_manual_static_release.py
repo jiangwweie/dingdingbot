@@ -148,3 +148,22 @@ def test_wrong_host_identity_prevents_static_activation(monkeypatch):
             }
         )
     activate.assert_not_called()
+
+
+def test_mobile_shell_is_in_same_exact_static_artifact(tmp_path):
+    d=dist(tmp_path)
+    (d/'mobile').mkdir()
+    for name in ('index.html','app.js','styles.css','sw.js','manifest.webmanifest','icon.svg'):
+        (d/'mobile'/name).write_text(name)
+    bundle,manifest=static_bundle(d)
+    assert len(bundle)>0 and 'mobile/app.js' in manifest
+    assert 'mobile/sw.js' in manifest and 'index.html' in manifest
+
+
+@pytest.mark.parametrize('path',['mobile/.env','mobile/../unsafe.py','mobile/secrets.json','mobile/asset.py'])
+def test_mobile_bundle_rejects_files_outside_shell_allowlist(tmp_path,path):
+    d=dist(tmp_path)
+    target=d/path
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.write_text('should not be published')
+    with pytest.raises(ValueError):static_bundle(d)

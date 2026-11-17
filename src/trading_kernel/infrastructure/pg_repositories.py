@@ -86,6 +86,7 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryState,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
+from src.trading_kernel.domain.owner_reduction_context import OwnerReductionContext
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
@@ -3627,6 +3628,7 @@ def _aggregate_values(
         "post_fill_exit_plan": None
         if aggregate.post_fill_exit_plan is None
         else aggregate.post_fill_exit_plan.model_dump(mode="json"),
+        "owner_reduction_context": None if aggregate.owner_reduction_context is None else aggregate.owner_reduction_context.model_dump(mode="json"),
         "partial_tp_protection": aggregate.partial_tp_protection,
         "tp1_target_qty": aggregate.tp1_target_qty,
         "tp1_filled_qty": aggregate.tp1_filled_qty,
@@ -3901,6 +3903,7 @@ def _aggregate_from_row(
         post_fill_exit_plan=None
         if row["post_fill_exit_plan"] is None
         else PostFillExitPlan.model_validate(row["post_fill_exit_plan"]),
+        owner_reduction_context=None if row["owner_reduction_context"] is None else OwnerReductionContext.model_validate(row["owner_reduction_context"]),
         partial_tp_protection=bool(row["partial_tp_protection"]),
         tp1_target_qty=Decimal(row["tp1_target_qty"]),
         tp1_filled_qty=Decimal(row["tp1_filled_qty"]),

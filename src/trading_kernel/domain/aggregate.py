@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue
 
 from src.trading_kernel.domain.exit_execution import PostFillExitPlan
 from src.trading_kernel.domain.identities import TicketIdentity
+from src.trading_kernel.domain.owner_reduction_context import OwnerReductionContext
 from src.trading_kernel.domain.post_fill_risk import (
     PostFillDisposition,
     PostFillRiskStatus,
@@ -139,6 +140,7 @@ class TradeAggregate(BaseModel):
     active_stop_price: Decimal | None = None
     tp1_exchange_order_id: str | None = None
     post_fill_exit_plan: PostFillExitPlan | None = None
+    owner_reduction_context: OwnerReductionContext | None = None
     partial_tp_protection: bool = False
     tp1_target_qty: Decimal = Decimal(0)
     tp1_filled_qty: Decimal = Decimal(0)

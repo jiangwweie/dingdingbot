@@ -6,13 +6,21 @@ import re
 from decimal import Decimal
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 from src.trading_kernel.domain.cross_margin_stress import (
     CrossMarginStressEvidence,
     CrossMarginStressStatus,
 )
 from src.trading_kernel.domain.exit_execution import PostFillExitPlan, TpFillEvidence
+from src.trading_kernel.domain.owner_reduction_proof import OwnerReductionProof
 from src.trading_kernel.domain.post_fill_risk import PostFillRiskDecision
 from src.trading_kernel.domain.ticket import TradeTicket
 from src.trading_kernel.domain.trade_management import OrderEvidence
@@ -626,8 +634,41 @@ class ManualPositionObserved(_TicketEvent):
         return self
 
 
+class OwnerReductionCommandObserved(_TicketEvent):
+    operation_id: str = Field(min_length=1)
+    command_id: str = Field(min_length=1)
+    outcome: dict[str, JsonValue]
+
+
+class OwnerReductionRecorded(_TicketEvent):
+    proof: OwnerReductionProof | None = None
+    operation_id: str = Field(min_length=1)
+    command_id: str = Field(min_length=1)
+    exchange_order_id: str = Field(min_length=1)
+    filled_quantity: Decimal = Field(gt=0,allow_inf_nan=False)
+    average_fill_price: Decimal = Field(gt=0,allow_inf_nan=False)
+    remaining_quantity: Decimal = Field(gt=0,allow_inf_nan=False)
+    original_tp_order_id: str | None
+    original_tp_price: Decimal | None = Field(default=None,gt=0,allow_inf_nan=False)
+    protection_order_id: str = Field(min_length=1)
+    protection_price: Decimal = Field(gt=0,allow_inf_nan=False)
+    proof_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class OwnerReductionPriceSatisfied(_TicketEvent):
+    operation_id: str = Field(min_length=1)
+    observed_price: Decimal = Field(gt=0,allow_inf_nan=False)
+    observed_at_ms: int = Field(gt=0)
+    valid_until_ms: int = Field(gt=0)
+    proposed_stop: Decimal = Field(gt=0,allow_inf_nan=False)
+    source_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
 TradeEvent = (
-    VerifiedExitClosed |
+    OwnerReductionCommandObserved
+    | OwnerReductionRecorded
+    | OwnerReductionPriceSatisfied
+    |     VerifiedExitClosed |
     TicketIssued
     | ManualTakeoverConfirmed
     | ManagementReviewRequired

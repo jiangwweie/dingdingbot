@@ -68,9 +68,16 @@ class OwnerAuthorization(BaseModel):
         "exit_profile_bind",
         "exit_profile_retire",
         "review_revise",
+        "position_reduce",
+        "position_close",
+        "protection_tighten",
+        "manual_tp_set",
+        "manual_tp_cancel",
     ]
     owner_identity: str
-    authentication_strength: Literal["session", "totp_step_up"]
+    authentication_strength: Literal[
+        "session", "totp_step_up", "trusted_device_session"
+    ]
     request_digest: str
     target_scope: dict[str, JsonValue]
     idempotency_key: str

@@ -10,9 +10,11 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
+from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
     ExitRequested,
     ManagementReviewRequired,
+    OwnerReductionPriceSatisfied,
     RunnerStopRequested,
     TakeProfitCompletedForExit,
     TakeProfitFilled,
@@ -22,6 +24,7 @@ from src.trading_kernel.domain.events import (
 from src.trading_kernel.domain.exit_execution import TpFillEvidence
 from src.trading_kernel.domain.exit_policy import (
     ExitDecisionKind,
+    ExitProfile,
     LifecycleMarketFacts,
     calculate_cost_adjusted_break_even,
     evaluate_profile_pre_tp1_exit,
@@ -42,6 +45,9 @@ class LifecycleMaintenanceStatus(StrEnum):
 class TicketLifecycleFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    contract_market_price: Decimal | None = None
+    contract_price_observed_at_ms: int | None = None
+    contract_price_valid_until_ms: int | None = None
     tp_fill_evidence: TpFillEvidence | None = None
     current_market_price: Decimal | None = None
     active_stop_quantity: Decimal | None = None
@@ -142,6 +148,9 @@ async def maintain_ticket_lifecycle(
     profile = profile_record.profile
     if profile.position_side != aggregate.identity.netting_domain.position_side:
         raise ValueError("ExitProfile side differs from Ticket Netting Domain")
+
+    if aggregate.status is AggregateStatus.POSITION_PROTECTED and aggregate.owner_reduction_context is not None:
+        return await _maintain_owner_reduced_position(uow, aggregate, profile, request)
 
     if aggregate.status is AggregateStatus.POSITION_PROTECTED:
         target = aggregate.tp1_target_qty
@@ -404,3 +413,125 @@ def _event_fields(
         "sequence": sequence,
         "occurred_at_ms": occurred_at_ms,
     }
+
+
+async def _maintain_owner_reduced_position(
+    uow: KernelUnitOfWork,
+    aggregate: TradeAggregate,
+    profile: ExitProfile,
+    request: LifecycleMaintenanceRequest,
+) -> LifecycleMaintenanceResult:
+    """Continue original guards then price-only BE, without reading a retired TP."""
+    facts, ctx = request.facts, aggregate.owner_reduction_context
+    assert ctx is not None
+    no_change = LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+    if (
+        facts.position_quantity != aggregate.position_qty
+        or facts.position_quantity <= 0
+        or facts.tp1_filled_quantity != aggregate.tp1_filled_qty
+    ):
+        await uow.aggregates.expedite_reconciliation(
+            aggregate.identity.ticket_id, due_at_ms=request.now_ms
+        )
+        return no_change
+    if facts.market_facts is not None:
+        decision = evaluate_profile_pre_tp1_exit(
+            profile=profile,
+            market_facts=facts.market_facts,
+            observed_at_ms=facts.observed_at_ms,
+            pre_tp1_reclaim_price=aggregate.ticket.pre_tp1_reclaim_price,
+            exposure_session_end_ms=aggregate.ticket.exposure_session_end_ms,
+        )
+        if decision.kind is ExitDecisionKind.EXIT:
+            event = ExitRequested(
+                **_event_fields(aggregate, request.now_ms), reason=decision.reason
+            )
+            await uow.commit_reduction(
+                event=event,
+                reduction=reduce_event(aggregate, event),
+                expected_version=aggregate.version,
+            )
+            return LifecycleMaintenanceResult(
+                status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+                event_id=event.event_id,
+            )
+    price, observed, valid = (
+        facts.contract_market_price,
+        facts.contract_price_observed_at_ms,
+        facts.contract_price_valid_until_ms,
+    )
+    if (
+        price is None
+        or not price.is_finite()
+        or price <= 0
+        or observed is None
+        or valid is None
+        or not ctx.last_reduction_observed_at_ms < observed <= request.now_ms < valid
+        or not 0 < valid - observed <= 30000
+        or ctx.price_condition_satisfied
+        or ctx.original_tp_price is None
+        or aggregate.tp1_exchange_order_id is not None
+        or aggregate.active_stop_price is None
+        or aggregate.average_fill_price is None
+        or facts.active_stop_quantity != aggregate.position_qty
+    ):
+        return no_change
+    long = profile.position_side == "long"
+    if price < ctx.original_tp_price if long else price > ctx.original_tp_price:
+        return no_change
+    floor = calculate_cost_adjusted_break_even(
+        side=profile.position_side,
+        entry_average_price=aggregate.post_fill_exit_plan.entry_price
+        if aggregate.post_fill_exit_plan
+        else aggregate.average_fill_price,
+        runner_quantity=aggregate.position_qty,
+        allocated_entry_fee_quote=facts.allocated_entry_fee_quote,
+        exit_taker_fee_rate=facts.exit_taker_fee_rate,
+        price_tick=facts.price_tick,
+        slippage_buffer_ticks=profile.break_even_floor.slippage_buffer_ticks,
+    )
+    floor = (
+        max(floor, aggregate.active_stop_price)
+        if long
+        else min(floor, aggregate.active_stop_price)
+    )
+    mark = facts.current_market_price
+    if mark is None or not mark.is_finite() or mark <= 0:
+        return no_change
+    if min(price, mark) <= floor if long else max(price, mark) >= floor:
+        exit_event = ExitRequested(
+            **_event_fields(aggregate, request.now_ms), reason="break_even_crossed"
+        )
+        await uow.commit_reduction(
+            event=exit_event,
+            reduction=reduce_event(aggregate, exit_event),
+            expected_version=aggregate.version,
+        )
+        return LifecycleMaintenanceResult(
+            status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+            event_id=exit_event.event_id,
+        )
+    condition = OwnerReductionPriceSatisfied(
+        **_event_fields(aggregate, request.now_ms),
+        operation_id=ctx.operation_id,
+        observed_price=price,
+        observed_at_ms=observed,
+        valid_until_ms=valid,
+        proposed_stop=floor,
+        source_digest=canonical_digest(
+            {
+                "domain": aggregate.identity.netting_domain.model_dump(mode="json"),
+                "source": "binance_futures_contract_ticker_v2",
+                "price": str(price),
+                "observed_at_ms": observed,
+                "valid_until_ms": valid,
+                "operation_id": ctx.operation_id,
+            }
+        ),
+    )
+    await uow.commit_reduction(
+        event=condition,
+        reduction=reduce_event(aggregate, condition),
+        expected_version=aggregate.version,
+    )
+    return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED,event_id=condition.event_id)

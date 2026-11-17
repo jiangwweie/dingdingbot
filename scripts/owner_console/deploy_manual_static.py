@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 MAX_BUNDLE_BYTES = 50 * 1024 * 1024
 MAX_FILES = 10000
+MOBILE_FILES = frozenset({'index.html','app.js','styles.css','sw.js','manifest.webmanifest','icon.svg'})
 STATIC_ROOT = Path("/opt/brc/owner-console/releases")
 STATIC_CURRENT = Path("/opt/brc/owner-console/current")
 
@@ -36,7 +37,8 @@ def _static_path(name):
         p.is_absolute()
         or ".." in p.parts
         or str(p) != name
-        or not (name == "index.html" or name.startswith("assets/"))
+        or not (name == "index.html" or name.startswith("assets/")
+                or len(p.parts)==2 and p.parts[0]=="mobile" and p.parts[1] in MOBILE_FILES)
     ):
         raise ValueError("archive contains nonstatic or unsafe path")
     return p
@@ -297,7 +299,7 @@ def receive(payload):
                     "15",
                     "--resolve",
                     "manual.jiaoyingpan.cloud:443:127.0.0.1",
-                    "https://manual.jiaoyingpan.cloud/trading/" + name,
+                    "https://manual.jiaoyingpan.cloud/" + (name if name.startswith("mobile/") else "trading/"+name),
                 ],
                 check=True,
                 capture_output=True,

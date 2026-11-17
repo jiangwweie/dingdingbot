@@ -2809,6 +2809,7 @@ trade_aggregates = sa.Table(
     sa.Column("active_stop_price", MONEY, nullable=True),
     _id("tp1_exchange_order_id", nullable=True),
     sa.Column("post_fill_exit_plan", JSONB(none_as_null=True), nullable=True),
+    sa.Column("owner_reduction_context", JSONB(none_as_null=True), nullable=True),
     sa.Column(
         "partial_tp_protection", sa.Boolean, nullable=False, server_default=sa.false()
     ),
@@ -3128,11 +3129,11 @@ owner_authorizations = sa.Table(
         "purpose IN ('strategy_pause', 'strategy_resume', 'entry_pause', "
         "'entry_resume', 'owner_flatten_all', 'universe_configure', "
         "'selection_mode_change', 'exit_profile_bind', "
-        "'exit_profile_retire', 'review_revise')",
+        "'exit_profile_retire', 'review_revise', 'position_reduce', 'position_close', 'protection_tighten', 'manual_tp_set', 'manual_tp_cancel')",
         name="purpose_valid",
     ),
     sa.CheckConstraint(
-        "authentication_strength IN ('session', 'totp_step_up')",
+        "authentication_strength IN ('session', 'totp_step_up', 'trusted_device_session')",
         name="auth_valid",
     ),
     sa.CheckConstraint("request_digest ~ '^sha256:[0-9a-f]{64}$'", name="digest_valid"),
@@ -3337,3 +3338,11 @@ review_enrichment_requests = sa.Table("brc_review_enrichment_requests", metadata
     sa.CheckConstraint("state IN ('pending','preview_ready','approved','applied','superseded')", name="ck_review_enrichment_state"),
     sa.CheckConstraint("state NOT IN ('approved','applied') OR owner_authorization_id IS NOT NULL",name="ck_review_enrichment_approved_authority"))
 sa.Index("ix_brc_review_enrichment_due", review_enrichment_requests.c.state, review_enrichment_requests.c.next_check_at_ms)
+
+
+from src.trading_kernel.infrastructure.owner_cooperation_schema import (
+    define_owner_cooperation_tables,
+)
+
+(owner_device_registrations, owner_device_sessions, owner_binding_grants, owner_request_nonces,
+ owner_position_operations, owner_position_operation_events, owner_device_write_evidence) = define_owner_cooperation_tables(metadata)

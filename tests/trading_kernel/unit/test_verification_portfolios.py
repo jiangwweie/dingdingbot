@@ -69,4 +69,7 @@ def test_r1_static_portfolio_targets_owner_console_v2() -> None:
     assert R1_STATIC_COMMANDS == (
         ("pnpm", "--dir", "frontend/owner-console-v2", "exec", "tsc", "-b"),
         ("pnpm", "--dir", "frontend/owner-console-v2", "build"),
+        ("node", "--check", "frontend/owner-mobile/app.js"),
+        ("node", "--check", "frontend/owner-mobile/sw.js"),
+        (".venv/bin/python", "scripts/owner_console/build_mobile.py"),
     )

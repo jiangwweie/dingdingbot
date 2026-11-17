@@ -2822,3 +2822,37 @@ async def test_admission_without_fee_authority_never_assumes_zero_cost():
     adapter=CcxtVenueAdapter(exchanges={("binance-usdm","experiment-1"):AdmissionSnapshotExchange()},clock_ms=lambda:2000)
     with pytest.raises(RuntimeError,match='requires certified conservative taker fee rate'):
         await adapter.read_entry_admission_snapshot(EntryAdmissionSnapshotRequest(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:SOLUSDT:perpetual',observed_at_ms=2000,valid_for_ms=5000))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('ticker',[
+    {'symbol':'BTCUSDT','price':'62000','time':20000000},
+    {'symbol':'ETHUSDT','price':'62000','time':20000000},
+    {'symbol':'BTCUSDT','price':'NaN','time':20000000},
+    {'symbol':'BTCUSDT','price':'62000','time':1},
+    {'symbol':'BTCUSDT','price':'62000','time':20000001},
+])
+async def test_owner_continuation_reads_contract_price_without_querying_retired_tp(ticker):
+    class ContractPriceExchange(LifecycleFactsExchange):
+        async def fapiPublicV2GetTickerPrice(self,params):
+            assert params=={'symbol':'BTCUSDT'}
+            return ticker
+    exchange=ContractPriceExchange()
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},
+        default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20000000)
+    request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(
+        venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),
+        event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),
+        expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),
+        tp1_exchange_order_id=None,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),
+        structure_window_bars=4,atr_period=14,runner_market_required=False,
+        owner_reduction_price_required=True,observed_at_ms=20000000)
+    if ticker['symbol']=='BTCUSDT' and ticker['price']=='62000' and ticker['time']==20000000:
+        result=await adapter.read_lifecycle_facts(request)
+        assert result.contract_market_price==Decimal(62000)
+        assert result.contract_price_observed_at_ms==20000000
+        assert result.contract_price_valid_until_ms==20030000
+        assert exchange.tp1_order_calls==[]
+    else:
+        with pytest.raises(RuntimeError,match='owner_contract_price'):
+            await adapter.read_lifecycle_facts(request)

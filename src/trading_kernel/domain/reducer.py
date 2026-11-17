@@ -82,6 +82,9 @@ from src.trading_kernel.domain.events import (
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
     OwnedOrphanOrderDetected,
+    OwnerReductionCommandObserved,
+    OwnerReductionPriceSatisfied,
+    OwnerReductionRecorded,
     PositionFlatConfirmed,
     PostFillStressAssessed,
     ProtectionCancelAbsenceConfirmed,
@@ -112,6 +115,7 @@ from src.trading_kernel.domain.events import (
     VacuumPostAbsenceNoFillVerified,
     VerifiedExitClosed,
 )
+from src.trading_kernel.domain.owner_reduction_context import OwnerReductionContext
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
 from src.trading_kernel.domain.trade_management import ManagementMode
 from src.trading_kernel.domain.vacuum_late_fill import (
@@ -1413,6 +1417,141 @@ def reduce_event(
                     stop_price=current.active_stop_price,
                     replaces_exchange_order_id=current.active_stop_exchange_order_id,
                     source_watermark_ms=event.occurred_at_ms,
+                ),
+            ),
+        )
+
+    if isinstance(event, OwnerReductionCommandObserved):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        return _transition(current, event, status=current.status)
+
+    if isinstance(event, OwnerReductionRecorded):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        if (
+            event.filled_quantity <= 0
+            or event.remaining_quantity <= 0
+            or current.position_qty != event.filled_quantity + event.remaining_quantity
+            or current.active_stop_price is None
+            or (
+                event.protection_price < current.active_stop_price
+                if current.identity.netting_domain.position_side == "long"
+                else event.protection_price > current.active_stop_price
+            )
+        ):
+            raise InvalidLifecycleTransition(
+                "owner reduction quantity or protection differs"
+            )
+        old = current.owner_reduction_context
+        if (
+            current.status is AggregateStatus.POSITION_PROTECTED
+            and old is None
+            and (
+                event.original_tp_order_id != current.tp1_exchange_order_id
+                or event.original_tp_price
+                != (
+                    current.post_fill_exit_plan.tp_price
+                    if current.post_fill_exit_plan
+                    else current.ticket.take_profit_prices[0]
+                )
+                or current.tp1_filled_qty != 0
+            )
+        ):
+            raise InvalidLifecycleTransition(
+                "owner reduction original TP identity differs"
+            )
+        context = OwnerReductionContext(
+            operation_id=event.operation_id,
+            cumulative_quantity=event.filled_quantity
+            + (old.cumulative_quantity if old else Decimal(0)),
+            original_tp_order_id=old.original_tp_order_id
+            if old
+            else event.original_tp_order_id,
+            original_tp_price=old.original_tp_price if old else event.original_tp_price,
+            last_reduction_observed_at_ms=event.occurred_at_ms,
+            price_condition_satisfied=current.status is AggregateStatus.RUNNER_PROTECTED
+            or (old.price_condition_satisfied if old else False),
+            condition_observed_at_ms=old.condition_observed_at_ms if old else None,
+        )
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "position_qty": event.remaining_quantity,
+                "protected_qty": event.remaining_quantity,
+                "active_stop_exchange_order_id": event.protection_order_id,
+                "active_stop_price": event.protection_price,
+                "tp1_exchange_order_id": None,
+                "owner_reduction_context": context,
+            },
+        )
+
+    if isinstance(event, OwnerReductionPriceSatisfied):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        ctx = current.owner_reduction_context
+        if (
+            ctx is None
+            or ctx.operation_id != event.operation_id
+            or ctx.original_tp_price is None
+            or ctx.price_condition_satisfied
+            or current.tp1_exchange_order_id is not None
+            or not ctx.last_reduction_observed_at_ms
+            < event.observed_at_ms
+            <= event.occurred_at_ms
+            < event.valid_until_ms
+            or current.active_stop_price is None
+            or current.active_stop_exchange_order_id is None
+        ):
+            raise InvalidLifecycleTransition(
+                "owner reduction price condition identity or time differs"
+            )
+        long = current.identity.netting_domain.position_side == "long"
+        if (
+            event.observed_price < ctx.original_tp_price
+            if long
+            else event.observed_price > ctx.original_tp_price
+        ):
+            raise InvalidLifecycleTransition(
+                "owner reduction original price not reached"
+            )
+        if (
+            not current.active_stop_price <= event.proposed_stop < event.observed_price
+            if long
+            else not event.observed_price
+            < event.proposed_stop
+            <= current.active_stop_price
+        ):
+            raise InvalidLifecycleTransition(
+                "owner reduction break even stop is not legal"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            updates={
+                "owner_reduction_context": ctx.model_copy(
+                    update={
+                        "price_condition_satisfied": True,
+                        "condition_observed_at_ms": event.observed_at_ms,
+                    }
+                ),
+                "break_even_floor_price": event.proposed_stop,
+                "pending_stop_price": event.proposed_stop,
+                "pending_stop_watermark_ms": event.observed_at_ms,
+            },
+            effects=(
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.position_qty,
+                    stop_price=event.proposed_stop,
+                    replaces_exchange_order_id=current.active_stop_exchange_order_id,
+                    source_watermark_ms=event.observed_at_ms,
                 ),
             ),
         )

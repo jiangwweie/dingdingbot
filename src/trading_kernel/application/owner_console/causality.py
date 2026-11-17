@@ -104,6 +104,9 @@ _PROTECTION_EVENTS = {
     "InitialStopAbsenceConfirmed",
 }
 _TP_RUNNER_EVENTS = {
+    "OwnerReductionCommandObserved",
+    "OwnerReductionRecorded",
+    "OwnerReductionPriceSatisfied",
     "TakeProfitConfirmed",
     "TakeProfitRejected",
     "TakeProfitOutcomeUnknown",

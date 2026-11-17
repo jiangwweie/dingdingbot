@@ -85,6 +85,7 @@ from src.trading_kernel.domain.events import (
     LeverageRejected,
     ManagedCommandOutcomeObserved,
     OwnedOrphanCancelConfirmed,
+    OwnerReductionCommandObserved,
     ProtectionCancelConfirmed,
     ProtectionCancelOutcomeUnknown,
     ProtectionCancelRejected,
@@ -270,6 +271,9 @@ async def dispatch_one_command(
             aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("claimed command has no Ticket aggregate")
+            if command.kind is ExchangeCommandKind.OWNER_REDUCE:
+                await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
+                return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
             if aggregate.management_mode is ManagementMode.REVIEW_REQUIRED:
                 await uow.exchange_commands.release_unstarted_claim(
                     command_id=command.command_id, worker_id=request.worker_id
@@ -1183,6 +1187,7 @@ async def _record_preflight_refusal(
 
 def _requires_management_feed(command: ExchangeCommand) -> bool:
     if command.kind in {
+        ExchangeCommandKind.OWNER_REDUCE,
         ExchangeCommandKind.ENTRY,
         ExchangeCommandKind.TAKE_PROFIT,
         ExchangeCommandKind.REPLACE_PROTECTION,
@@ -1197,6 +1202,7 @@ def _command_is_applicable(
     aggregate_status: AggregateStatus,
 ) -> bool:
     applicable_statuses = {
+        ExchangeCommandKind.OWNER_REDUCE: {AggregateStatus.POSITION_PROTECTED,AggregateStatus.RUNNER_PROTECTED},
         ExchangeCommandKind.SET_LEVERAGE: {AggregateStatus.LEVERAGE_PENDING},
         ExchangeCommandKind.ENTRY: {
             AggregateStatus.ENTRY_PENDING,
@@ -1271,6 +1277,11 @@ def _command_result_event(
         raise RuntimeError("SET_LEVERAGE result is invalid")
     if not isinstance(result, ExchangeCommandResult):
         raise TypeError("order command result is invalid")
+    if kind is ExchangeCommandKind.OWNER_REDUCE:
+        if not isinstance(command.payload,OrderCommandPayload) or command.payload.owner_operation_id is None:
+            raise ValueError("Owner reduction operation missing")
+        return OwnerReductionCommandObserved(**common,operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id,outcome=result.model_dump(mode="json"))
     if kind is ExchangeCommandKind.ENTRY and result.status is ExchangeCommandStatus.ACCEPTED:
         return EntryAccepted(
             **common,

@@ -250,6 +250,8 @@ async def run_lifecycle_worker_once(
         ),
         tp1_management_baseline=None if tp_baseline is None else OrderTerms.model_validate(tp_baseline),
         exact_tp_fills_required=profile.execution is not None,
+        owner_reduction_price_required=(aggregate.owner_reduction_context is not None
+            and aggregate.status is AggregateStatus.POSITION_PROTECTED),
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entry_fill_window_started_at_ms=(
             entry_order_reference.command_created_at_ms
@@ -336,7 +338,7 @@ async def run_lifecycle_worker_once(
             LifecycleMaintenanceRequest(
                 ticket_id=aggregate.identity.ticket_id,
                 facts=facts,
-                now_ms=request.now_ms,
+                now_ms=max(request.now_ms, facts.observed_at_ms),
             ),
         )
     if maintenance.status is LifecycleMaintenanceStatus.NO_CHANGE:

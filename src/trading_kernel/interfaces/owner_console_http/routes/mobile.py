@@ -1,0 +1,530 @@
+"""Mobile Owner endpoints: trusted-session reads and signed controlled writes."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+
+import sqlalchemy as sa
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from src.trading_kernel.application.owner_control import (
+    ControlMutationRequest,
+    set_global_entry_state,
+    set_strategy_entry_state,
+)
+from src.trading_kernel.domain.owner_control import StrategyEntryState
+from src.trading_kernel.domain.owner_device_authority import (
+    DEVICE_IDLE_MS,
+    DeviceWriteProof,
+)
+from src.trading_kernel.infrastructure.owner_device_credentials import (
+    public_key_thumbprint,
+)
+from src.trading_kernel.infrastructure.pg_models import (
+    management_observation_current,
+    owner_policy_current,
+    strategy_entry_controls_current,
+    strategy_selection_control_current,
+    trade_aggregates,
+    trade_tickets,
+)
+from src.trading_kernel.infrastructure.pg_owner_device_repository import (
+    PostgresOwnerDeviceRepository,
+)
+from src.trading_kernel.infrastructure.pg_owner_position_operations import (
+    PostgresOwnerPositionOperations,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+from src.trading_kernel.interfaces.owner_console_http.dependencies import (
+    get_clock_ms,
+    get_control_engine,
+    get_settings,
+)
+
+COOKIE = "__Host-brc_device_session"
+
+
+async def require_mobile_request(request: Request) -> None:
+    settings = get_settings(request)
+    if request.url.hostname != settings.public_host:
+        raise HTTPException(403, "host_mismatch")
+    if (
+        request.method != "GET"
+        and request.headers.get("origin") != settings.public_origin
+    ):
+        raise HTTPException(403, "origin_mismatch")
+    if request.url.path == "/api/owner/v1/mobile/devices/bind":
+        return
+    token = request.cookies.get(COOKIE)
+    if not token:
+        raise HTTPException(401, "device_session_required")
+    async with get_control_engine(request).connect() as c:
+        try:
+            await PostgresOwnerDeviceRepository(c).authenticate(
+                token, now_ms=get_clock_ms(request)
+            )
+        except ValueError:
+            raise HTTPException(401, "device_session_unavailable") from None
+
+
+router = APIRouter(
+    prefix="/api/owner/v1/mobile",
+    tags=["mobile-owner"],
+    dependencies=[Depends(require_mobile_request)],
+)
+
+
+class BindBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=128, repr=False)
+    public_key: dict[str, str]
+
+
+class SignedBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    proof: DeviceWriteProof
+    signature: str = Field(min_length=80, max_length=100)
+    payload: dict[str, Any]
+
+
+class GlobalControlPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    owner_policy_id: str = Field(min_length=1, max_length=160)
+    enabled: bool
+    expected_version: int = Field(gt=0)
+
+
+class StrategyControlPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    enabled: bool
+    expected_version: int = Field(gt=0)
+    strategy_group_id: str = Field(min_length=1, max_length=160)
+
+
+def serial(value):
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: serial(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [serial(v) for v in value]
+    return value
+
+
+def set_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        COOKIE,
+        token,
+        max_age=DEVICE_IDLE_MS // 1000,
+        secure=True,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    response.headers["Cache-Control"] = "no-store"
+
+
+@router.post("/devices/bind")
+async def bind(request: Request, body: BindBody, response: Response) -> dict:
+    async with get_control_engine(request).begin() as c:
+        try:
+            bound = await PostgresOwnerDeviceRepository(c).bind(
+                token=body.token,
+                public_key=body.public_key,
+                now_ms=get_clock_ms(request),
+            )
+        except ValueError:
+            raise HTTPException(403, "binding_unavailable") from None
+    token = bound.pop("session_token")
+    set_cookie(response, token)
+    return bound
+
+
+@router.get("/session")
+async def session(request: Request) -> dict:
+    async with get_control_engine(request).connect() as c:
+        d, s = await PostgresOwnerDeviceRepository(c).authenticate(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+    return {
+        "device_id": d.device_id,
+        "device_epoch": d.epoch,
+        "expires_at_ms": s.expires_at_ms,
+        "authenticated": True,
+        "key_digest": public_key_thumbprint(d.public_key),
+    }
+
+
+@router.post("/session/renew")
+async def renew(request: Request, response: Response) -> dict:
+    async with get_control_engine(request).begin() as c:
+        expiry = await PostgresOwnerDeviceRepository(c).renew(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+    set_cookie(response, request.cookies[COOKIE])
+    return {"expires_at_ms": expiry}
+
+
+@router.post("/nonces")
+async def nonce(request: Request) -> dict:
+    async with get_control_engine(request).begin() as c:
+        return await PostgresOwnerDeviceRepository(c).issue_nonce(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+
+
+async def authorize(
+    c, request: Request, body: SignedBody, purpose: str, now: int
+) -> str:
+    if body.proof.method != request.method or body.proof.path != request.url.path:
+        raise HTTPException(403, "request_proof_target_mismatch")
+    try:
+        return await PostgresOwnerDeviceRepository(c).authorize(
+            token=request.cookies[COOKIE],
+            proof=body.proof,
+            signature=body.signature,
+            body=body.payload,
+            purpose=purpose,
+            now_ms=now,
+            allow_idempotent_replay=True,
+        )
+    except ValueError:
+        raise HTTPException(403, "device_write_unavailable") from None
+
+
+@router.get("/controls")
+async def controls(request: Request) -> dict:
+    async with get_control_engine(request).connect() as c:
+        policy = (
+            (
+                await c.execute(
+                    sa.select(
+                        owner_policy_current.c.owner_policy_id,
+                        owner_policy_current.c.policy_version,
+                        owner_policy_current.c.new_entry_submit_enabled,
+                    ).limit(2)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if len(policy) != 1:
+            raise HTTPException(503, "policy_unavailable")
+        strategies = (
+            (
+                await c.execute(
+                    sa.select(strategy_entry_controls_current)
+                    .order_by(strategy_entry_controls_current.c.strategy_group_id)
+                    .limit(30)
+                )
+            )
+            .mappings()
+            .all()
+        )
+        selection = (
+            (
+                await c.execute(
+                    sa.select(
+                        strategy_selection_control_current.c.strategy_group_id,
+                        strategy_selection_control_current.c.selection_mode,
+                    ).limit(30)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    active = {"CPM-RO-001", "MI-001", "MPG-001", "BRF2-001", "SOR-1H-001"}
+    return serial(
+        {
+            "global": dict(policy[0]),
+            "strategies": [
+                dict(x) for x in strategies if x["strategy_group_id"] in active
+            ],
+            "selection": [dict(x) for x in selection],
+        }
+    )
+
+
+@router.post("/controls/global")
+async def global_control(request: Request, body: SignedBody) -> dict:
+    try:
+        payload = GlobalControlPayload.model_validate(body.payload).model_dump()
+    except ValidationError:
+        raise HTTPException(422, "invalid_control") from None
+    if payload["owner_policy_id"] != get_settings(request).owner_policy_id:
+        raise HTTPException(403, "policy_identity_mismatch")
+    now = get_clock_ms(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as u:
+        c = u._require_connection()
+        owner = await authorize(
+            c,
+            request,
+            body,
+            "entry_resume" if payload["enabled"] else "entry_pause",
+            now,
+        )
+        result = await set_global_entry_state(
+            u,
+            owner_policy_id=get_settings(request).owner_policy_id,
+            enabled=payload["enabled"],
+            request=ControlMutationRequest(
+                expected_version=payload["expected_version"],
+                owner_identity=owner,
+                reason="Owner mobile control",
+                idempotency_key=body.proof.idempotency_key,
+                now_ms=now,
+            ),
+            authentication_strength="trusted_device_session",
+        )
+        auth = await u.owner_controls.get_authorization_by_idempotency_key(
+            body.proof.idempotency_key
+        )
+        await PostgresOwnerDeviceRepository(u._require_connection()).link_authorization(
+            proof=body.proof,
+            owner_identity=owner,
+            authorization_id=None if auth is None else auth.authorization_id,
+        )
+    return {
+        "enabled": result.new_entry_submit_enabled,
+        "version": result.policy_version,
+    }
+
+
+@router.post("/controls/strategy")
+async def strategy_control(request: Request, body: SignedBody) -> dict:
+    try:
+        p = StrategyControlPayload.model_validate(body.payload).model_dump()
+    except ValidationError:
+        raise HTTPException(422, "invalid_strategy_control") from None
+    if p["strategy_group_id"] not in {
+        "CPM-RO-001",
+        "MI-001",
+        "MPG-001",
+        "BRF2-001",
+        "SOR-1H-001",
+    }:
+        raise HTTPException(422, "invalid_strategy_control")
+    now = get_clock_ms(request)
+    async with PostgresKernelUnitOfWork(get_control_engine(request)) as u:
+        owner = await authorize(
+            u._require_connection(),
+            request,
+            body,
+            "strategy_resume" if p["enabled"] else "strategy_pause",
+            now,
+        )
+        result = await set_strategy_entry_state(
+            u,
+            strategy_group_id=p["strategy_group_id"],
+            target_state=StrategyEntryState.ENABLED
+            if p["enabled"]
+            else StrategyEntryState.PAUSED,
+            request=ControlMutationRequest(
+                expected_version=p["expected_version"],
+                owner_identity=owner,
+                reason="Owner mobile control",
+                idempotency_key=body.proof.idempotency_key,
+                now_ms=now,
+            ),
+            authentication_strength="trusted_device_session",
+        )
+        auth = await u.owner_controls.get_authorization_by_idempotency_key(
+            body.proof.idempotency_key
+        )
+        await PostgresOwnerDeviceRepository(u._require_connection()).link_authorization(
+            proof=body.proof,
+            owner_identity=owner,
+            authorization_id=None if auth is None else auth.authorization_id,
+        )
+    return result.model_dump(mode="json")
+
+
+@router.get("/positions")
+async def positions(request: Request) -> dict:
+    settings = get_settings(request)
+    async with get_control_engine(request).connect() as c:
+        rows = (
+            (
+                await c.execute(
+                    sa.select(
+                        trade_tickets.c.ticket_id,
+                        trade_tickets.c.exchange_instrument_id,
+                        trade_tickets.c.position_side,
+                        trade_tickets.c.strategy_group_id,
+                        trade_tickets.c.selected_leverage,
+                        trade_aggregates.c.version,
+                        trade_aggregates.c.position_qty,
+                        trade_aggregates.c.average_fill_price,
+                        trade_aggregates.c.active_stop_price,
+                        trade_aggregates.c.protected_qty,
+                        trade_aggregates.c.management_mode,
+                        trade_aggregates.c.status,
+                        trade_aggregates.c.updated_at_ms,
+                    )
+                    .join(
+                        trade_aggregates,
+                        trade_tickets.c.ticket_id == trade_aggregates.c.ticket_id,
+                    )
+                    .where(
+                        trade_tickets.c.venue_id == settings.venue_id,
+                        trade_tickets.c.account_id == settings.account_id,
+                        trade_tickets.c.terminal_at_ms.is_(None),
+                    )
+                    .order_by(trade_tickets.c.created_at_ms)
+                    .limit(51)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    if len(rows) > 50:
+        raise HTTPException(503, "position_scope_exceeded")
+    # Trading capabilities stay closed until the evidence gate and complete
+    # operation runner have been implemented and certified.
+    return serial(
+        {
+            "items": [
+                {
+                    **dict(x),
+                    "capabilities": {
+                        "reduce": False,
+                        "close": False,
+                        "tighten": False,
+                        "tp": False,
+                    },
+                }
+                for x in rows
+            ],
+            "observed_at_ms": get_clock_ms(request),
+        }
+    )
+
+
+@router.get("/operations/{operation_id}")
+async def operation(request: Request, operation_id: str) -> dict:
+    async with get_control_engine(request).connect() as c:
+        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+        row = await PostgresOwnerPositionOperations(c).get(operation_id)
+    if row is None or row["owner_identity"] != d.owner_identity:
+        raise HTTPException(404, "operation_not_found")
+    return serial(
+        {
+            k: row[k]
+            for k in [
+                "operation_id",
+                "ticket_id",
+                "kind",
+                "state",
+                "version",
+                "first_blocker",
+                "updated_at_ms",
+                "completed_at_ms",
+            ]
+        }
+    )
+
+
+@router.get("/orders")
+async def orders(request: Request) -> dict:
+    """Display complete current snapshots; missing facts never mean no orders."""
+    from src.trading_kernel.domain.position import VenueOrderSnapshot
+
+    settings, now = get_settings(request), get_clock_ms(request)
+    async with get_control_engine(request).connect() as c:
+        rows = (
+            (
+                await c.execute(
+                    sa.select(
+                        trade_tickets.c.ticket_id,
+                        trade_tickets.c.exchange_instrument_id,
+                        trade_tickets.c.position_side,
+                        trade_aggregates.c.management_orders,
+                        management_observation_current.c.current_complete,
+                        management_observation_current.c.updated_at_ms.label(
+                            "observed_at_ms"
+                        ),
+                    )
+                    .join(
+                        trade_aggregates,
+                        trade_aggregates.c.ticket_id == trade_tickets.c.ticket_id,
+                    )
+                    .outerjoin(
+                        management_observation_current,
+                        management_observation_current.c.ticket_id
+                        == trade_tickets.c.ticket_id,
+                    )
+                    .where(
+                        trade_tickets.c.venue_id == settings.venue_id,
+                        trade_tickets.c.account_id == settings.account_id,
+                        trade_tickets.c.terminal_at_ms.is_(None),
+                    )
+                    .order_by(trade_tickets.c.created_at_ms)
+                    .limit(51)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    if len(rows) > 50:
+        raise HTTPException(503, "order_scope_exceeded")
+    items, unavailable = [], []
+    for row in rows:
+        observed = row["observed_at_ms"]
+        if (
+            not row["current_complete"]
+            or observed is None
+            or not observed <= now < observed + 30000
+            or len(row["management_orders"]) > 100
+        ):
+            unavailable.append(row["ticket_id"])
+            continue
+        current = []
+        try:
+            for raw in row["management_orders"]:
+                order = VenueOrderSnapshot.model_validate(raw)
+                terms = order.terms
+                if (
+                    terms is None
+                    or terms.identity[:4]
+                    != (
+                        settings.venue_id,
+                        settings.account_id,
+                        row["exchange_instrument_id"],
+                        row["position_side"],
+                    )
+                    or terms.exchange_order_id != order.exchange_order_id
+                    or terms.order_namespace != order.order_namespace
+                ):
+                    raise ValueError("order_snapshot_identity_invalid")
+                current.append(
+                    {
+                        "ticket_id": row["ticket_id"],
+                        "exchange_order_id": terms.exchange_order_id,
+                        "symbol": row["exchange_instrument_id"].split(":")[1],
+                        "position_side": terms.position_side,
+                        "kind": terms.order_type,
+                        "namespace": terms.order_namespace,
+                        "price": terms.price or terms.trigger_price,
+                        "quantity": terms.quantity,
+                        "remaining_quantity": order.remaining_quantity,
+                        "close_position": terms.close_position,
+                        "observed_at_ms": observed,
+                        "capabilities": {"modify": False, "cancel": False},
+                    }
+                )
+        except (ValueError, TypeError):
+            unavailable.append(row["ticket_id"])
+            continue
+        items.extend(current)
+    return serial(
+        {
+            "status": "unavailable" if unavailable else "ready",
+            "items": items,
+            "unavailable_ticket_ids": unavailable,
+            "observed_at_ms": now,
+        }
+    )

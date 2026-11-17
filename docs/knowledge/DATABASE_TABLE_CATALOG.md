@@ -4,16 +4,16 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 104 张业务表、1212 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **107 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 111 张业务表、1276 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **114 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
-| `public.brc_*` 业务表 | **104** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
+| `public.brc_*` 业务表 | **111** | 是 | [pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
 | `public.alembic_version` | **1** | 否，由 Alembic 管理 | [迁移环境](../../migrations/trading_kernel/env.py) |
 | `brc_cutover_ops` 切换日志表 | **2** | 否，独立运维 journal | [PostgresCutoverJournal](../../scripts/trading_kernel/cutover_tokyo.py) |
-| 以上三类合计 | **107** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
+| 以上三类合计 | **114** | 不能直接用 len(metadata.tables) 得到总数 | 代码目标合计；生产盘点单独见 roadmap |
 
-**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0021_manual_operational_closure`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
+**范围约束**：不统计系统表、视图、索引、sequence、临时表，也不把其他数据库算入 Trading Kernel。首尔分支代码目标结构为 `0024_owner_cooperation`（本地实现，未声明生产安装）；实际安装身份以当前生产证据为准。本页不保存逐表实时行数、业务数据样例、账户值或生产 release 身份。
 
 ## 怎样读这份目录
 
@@ -50,6 +50,8 @@
 | **App 管理权观察** | **6** | 外部订单证据和观察完整性，服务人工接管。 |
 
 | **运行诊断与终态补证据** | **2** | 失败保全与Review修订队列。 |
+
+| **可信手机设备与人工操作** | **7** | 设备绑定、签名写证据、可恢复操作及追加历史。 |
 
 ## 策略与事实语义
 
@@ -1307,7 +1309,7 @@
 <details>
 <summary>完整字段（45 列）</summary>
 
-**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`post_fill_exit_plan`、`partial_tp_protection`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
+**字段清单**：`ticket_id`、`status`、`version`、`last_event_sequence`、`management_observed_at_ms`、`manual_risk_at_stop`、`manual_risk_reason`、`management_orders`、`management_mode`、`management_revision`、`management_evidence_id`、`management_reason`、`manual_takeover_at_ms`、`entry_lane_held`、`position_qty`、`average_fill_price`、`actual_stop_risk`、`venue_reported_liquidation_price`、`post_fill_risk_status`、`post_fill_disposition`、`post_fill_stress_status`、`post_fill_stress_proof_digest`、`protected_qty`、`entry_exchange_order_id`、`initial_stop_exchange_order_id`、`active_stop_exchange_order_id`、`active_stop_price`、`tp1_exchange_order_id`、`post_fill_exit_plan`、`owner_reduction_context`、`partial_tp_protection`、`tp1_target_qty`、`tp1_filled_qty`、`break_even_floor_price`、`pending_replaced_stop_exchange_order_id`、`pending_stop_price`、`pending_stop_watermark_ms`、`runner_stop_watermark_ms`、`pending_cancel_exchange_order_id`、`entry_vacuum_id`、`entry_materialization_kind`、`exit_exchange_order_id`、`review_id`、`lifecycle_due_at_ms`、`reconciliation_due_at_ms`、`updated_at_ms`
 
 </details>
 
@@ -1876,3 +1878,80 @@ COMMIT;
 **字段清单**：`request_id`、`ticket_id`、`expected_review_id`、`state`、`owner_authorization_id`、`preview`、`preview_digest`、`last_reason`、`created_at_ms`、`next_check_at_ms`、`completed_at_ms`
 
 **维护与用途**：既有Kernel仓储写入，Owner只读核验；不作为交易权限。
+
+
+### `brc_owner_device_registrations`
+
+**职责**：一行一个可信设备注册及其撤销时间；每个Owner至多一个有效注册。
+
+**主键**：`device_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`device_id`、`owner_identity`、`epoch`、`public_key`、`key_digest`、`registered_at_ms`、`revoked_at_ms`
+
+
+### `brc_owner_device_sessions`
+
+**职责**：保存长期会话的令牌摘要、设备epoch和有效期，原始令牌不落库。
+
+**主键**：`session_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`session_id`、`device_id`、`device_epoch`、`token_digest`、`issued_at_ms`、`last_seen_at_ms`、`expires_at_ms`、`revoked_at_ms`
+
+
+### `brc_owner_binding_grants`
+
+**职责**：独立管理员签发的一次性绑定许可，API不能签发，限时消费。
+
+**主键**：`grant_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`grant_id`、`token_digest`、`owner_identity`、`replace_device`、`issued_at_ms`、`expires_at_ms`、`consumed_at_ms`
+
+
+### `brc_owner_request_nonces`
+
+**职责**：绑定会话的一次性签名挑战及其请求摘要，阻止跨请求重放。
+
+**主键**：`nonce_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`nonce_id`、`session_id`、`issued_at_ms`、`expires_at_ms`、`consumed_at_ms`、`request_digest`、`idempotency_key`
+
+
+### `brc_owner_position_operations`
+
+**职责**：一行一个人工操作意图的当前版本及进度，不直接执行交易所写入。
+
+**主键**：`operation_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`operation_id`、`ticket_id`、`kind`、`owner_identity`、`device_id`、`device_epoch`、`authorization_id`、`idempotency_key`、`request_digest`、`version`、`state`、`payload`、`first_blocker`、`created_at_ms`、`updated_at_ms`、`due_at_ms`、`completed_at_ms`
+
+
+### `brc_owner_position_operation_events`
+
+**职责**：每个操作版本的追加历史，支持解释受理、等待和失败。
+
+**主键**：`operation_id`、`version`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`operation_id`、`version`、`state`、`payload`、`occurred_at_ms`
+
+
+### `brc_owner_device_write_evidence`
+
+**职责**：保存精确签名、请求体、动作与授权关联；校验设备来源及目标。
+
+**主键**：`evidence_id`
+
+**维护与用途**：同一Kernel的设备/操作仓储维护；手机请求仅创建受控意图，交易仍经正式Command。当前实现与待接入边界见[编码状态](../superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。
+
+**字段清单**：`evidence_id`、`authorization_id`、`device_id`、`device_epoch`、`owner_identity`、`purpose`、`idempotency_key`、`payload`、`proof`、`signature`、`body_digest`、`authorized_at_ms`

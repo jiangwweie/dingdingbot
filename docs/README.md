@@ -33,6 +33,33 @@ Status: current Trading Kernel authority index
 **这是已完成的文档适配，尚未开始实现或发布；不改变当前参数或管理权。**
 新增自动处置仍服从AUTO／REVIEW_REQUIRED／永久MANUAL，首次schema升级需真实Owner暂停、人工产品自然Drain／终态保全及独立认证。
 
+### 趋势交易与人工协作：下一版讨论基线
+
+**统一实施清单：[首尔故障恢复与人工续管实施计划](superpowers/plans/2026-11-16-seoul-recovery-and-cooperation-implementation-plan.md)。**
+故障修复、人工续管、手机Web及首尔CPU150%／内存1536MiB配置统一完成后联合发布；当前仅本地实施，尚未应用。
+
+**当前优先修复：[零仓位订单流阻塞与剩余工作](superpowers/plans/2026-11-16-flat-feed-repair-and-remaining-work.md)。** 本地修复不等于生产恢复；按模块验证，随手机Web完整成品联合发布。
+
+**当前工程主线：[执行可靠性与人工协作推进范围](superpowers/plans/2026-11-16-cooperative-control-engineering-scope.md)。**
+[当前续管执行设计V1](superpowers/specs/2026-11-16-owner-cooperative-execution-v1.md)统一主动减仓后的价格条件、阶段和失败恢复。
+[技术可行性核验与编码任务](superpowers/plans/2026-11-16-cooperative-control-feasibility-and-task-cards.md)区分已通过测试、真实协议缺口与后续实现任务。
+现有策略规则保持；方案A、Regime和局部试错暂停不作为手机操作工程的依赖。
+
+**已暂缓的策略讨论入口：[趋势跟踪与减少磨损设计初版V0](superpowers/specs/2026-11-16-trend-following-low-churn-v0.md)。**
+Owner要求先落初版供思考；不新增通用Regime，MA50是现有基线，未开始编码或部署。
+
+[业务设计基线](superpowers/specs/2026-11-16-trend-cooperative-management-design-baseline.md)
+集中记录Owner确认的趋势目标、局部暂停自动恢复、按策略处理逆势、风险上限不提高、
+低频串行执行与系统内人工续管方向，并区分待定算法、已有回放及被取代的建议。
+**策略收益结构仍为讨论稿；执行可靠性与手机协作功能已开始本地编码，不代表生产已安装或新业务已激活。**
+Owner最新选择手机主屏幕Web App，以必要写操作为主、后续可封装App。
+[手机操作端设计](superpowers/specs/2026-11-16-mobile-owner-control-v1-design.md)记录已确认操作与授权目标；
+[静态交互原型](prototypes/mobile-owner-control-v1/index.html)仅使用模拟数据，不连接交易。
+原型已获Owner认可，后续详细设计见[手机授权与执行](superpowers/specs/2026-11-16-mobile-owner-control-detailed-design.md)、
+[趋势准入与退出](superpowers/specs/2026-11-16-trend-admission-lifecycle-detailed-design.md)和
+[决策与验收计划](superpowers/plans/2026-11-16-trend-mobile-design-review-and-acceptance.md)。
+**新增策略候选参数仍未激活；工程实现及未完成项见[编码状态](superpowers/plans/2026-11-16-owner-cooperation-coding-progress.md)。**
+
 ## 两条产品线与正式发布
 
 [固定工作区规则](superpowers/plans/2026-11-08-two-product-workspaces.md)定义人工 `manual-dev` 与自动 `dev` 的隔离。

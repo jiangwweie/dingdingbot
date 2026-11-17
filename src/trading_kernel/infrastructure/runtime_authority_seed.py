@@ -276,7 +276,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
             else None
         ),
@@ -315,7 +315,7 @@ async def seed_runtime_authority(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
         ),
     )
@@ -341,7 +341,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -377,7 +377,7 @@ async def seed_runtime_authority(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
             else None
         ),
@@ -390,18 +390,18 @@ async def seed_runtime_authority(
         updated_at_ms=request.seeded_at_ms,
     )
 
-    if request.schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery"}:
+    if request.schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
         policy["margin_allocation_contract"] = "wallet_allocation_v1"
     certification = {
         **(
             {"exit_configuration_required": True}
-            if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery"}
+            if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
             else {}
         ),
         **(
             {"management_feed_required": True}
             if request.schema_revision
-            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery"}
+            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
             else {}
         ),
         "stage": "entry_paused" if include_tradfi else "observation_only",
@@ -416,7 +416,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }:
         certification["product_id"] = PRODUCT_ID
     rows = [
@@ -579,7 +579,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }:
         await uow.directional_risk.initialize(venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms)
     return RuntimeAuthoritySeedResult(
@@ -633,7 +633,7 @@ async def deploy_compatible_upgrade_identity(
     source_schema_revision = metadata_rows.get("schema_revision")
     if (source_schema_revision, request.schema_revision) in {
         ("0021_manual_operational_closure", "0022_wallet_margin_allocation"),
-        ("0022_wallet_margin_allocation", "0023_management_recovery"),
+        ("0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"),
         ("0017_app_management_observation", "0018_notice_outbox_v1"),
         ("0018_notice_outbox_v1", "0019_management_evidence_v2"),
         ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),
@@ -675,7 +675,7 @@ async def deploy_compatible_upgrade_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -801,7 +801,7 @@ async def deploy_compatible_upgrade_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
             else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
@@ -882,7 +882,7 @@ async def deploy_compatible_upgrade_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
             else None
         ),
@@ -949,7 +949,7 @@ async def deploy_compatible_upgrade_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -1069,7 +1069,7 @@ async def _deploy_capability_compatible_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     } and source_schema_revision not in {
         "0011_orb_session_1h_v1",
         "0012_generic_signal_path_v1",
@@ -1083,7 +1083,7 @@ async def _deploy_capability_compatible_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }
     target_contracts = _contracts_for_schema(request.schema_revision)
     target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
@@ -1223,7 +1223,7 @@ async def _deploy_capability_compatible_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery",
+                "0023_management_recovery", "0024_owner_cooperation",
             }
             else None
         ),
@@ -1238,7 +1238,7 @@ async def _deploy_capability_compatible_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -1262,7 +1262,7 @@ async def _deploy_capability_compatible_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
                     else {}
                 ),
             )
@@ -1491,7 +1491,7 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             certification["product_id"] = PRODUCT_ID
         if request.schema_revision in {
@@ -1499,7 +1499,7 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             certification["management_feed_required"]=True
         if request.schema_revision in {
@@ -1507,12 +1507,12 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }:
             certification.pop('runtime_mode',None)
             certification.pop('management_recovery_ticket_ids',None)
             certification.pop('verified_exit_recovery_scope',None)
-        if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery"}:
+        if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
             certification["exit_configuration_required"] = True
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
@@ -1529,7 +1529,7 @@ async def _deploy_runtime_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
                     else {}
                 ),
             )
@@ -1760,7 +1760,7 @@ def _contracts_for_schema(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery",
+            "0023_management_recovery", "0024_owner_cooperation",
         }
         else tuple(c for c in contracts if c.strategy_group_id != "SOR-1H-001")
     )
@@ -1786,7 +1786,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }
 
 
@@ -1962,10 +1962,10 @@ def _seed_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }:
         payload["product_id"] = PRODUCT_ID
-    if schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery"}:
+    if schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
         payload["margin_allocation_contract"] = "wallet_allocation_v1"
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
@@ -1984,7 +1984,7 @@ def _seed_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery",
+        "0023_management_recovery", "0024_owner_cooperation",
     }:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,

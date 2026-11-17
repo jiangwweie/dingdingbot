@@ -78,6 +78,7 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
+    OwnerReductionRecorded,
     PostFillStressAssessed,
     TakeProfitCompletedForExit,
     TakeProfitFilled,
@@ -281,6 +282,83 @@ class PostgresKernelUnitOfWork:
                 )
         ticket_id = aggregate.identity.ticket_id
         current = await self.aggregates.get_for_update(ticket_id)
+
+        if isinstance(event, OwnerReductionRecorded):
+            reduction_proof = event.proof
+            if (
+                reduction_proof is None
+                or current is None
+                or reduction_proof.ticket_id != ticket_id
+                or reduction_proof.domain != current.identity.netting_domain
+            ):
+                raise UnsupportedKernelEffect(
+                    "Owner reduction requires exact readonly fill proof"
+                )
+            auth = await self.owner_controls.get_authorization(
+                reduction_proof.authorization_id
+            )
+            command = await self.exchange_commands.get(reduction_proof.command_id)
+            from src.trading_kernel.infrastructure.pg_models import (
+                owner_position_operations,
+            )
+
+            operation = (
+                (
+                    await self._require_connection().execute(
+                        sa.select(owner_position_operations)
+                        .where(
+                            owner_position_operations.c.operation_id
+                            == reduction_proof.operation_id
+                        )
+                        .with_for_update()
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if (
+                operation is None
+                or operation["authorization_id"] != reduction_proof.authorization_id
+                or operation["ticket_id"] != ticket_id
+                or operation["state"] == "previewed"
+                or auth is None
+                or auth.purpose != "position_reduce"
+                or auth.authentication_strength != "trusted_device_session"
+                or auth.target_scope.get("operation_id") != reduction_proof.operation_id
+                or auth.target_scope.get("ticket_id") != ticket_id
+                or command is None
+                or command.kind is not ExchangeCommandKind.OWNER_REDUCE
+                or command.status
+                not in {
+                    ExchangeCommandStatus.ACCEPTED,
+                    ExchangeCommandStatus.RECONCILED_ACCEPTED,
+                }
+                or command.ticket_identity != current.identity
+                or not isinstance(command.payload, OrderCommandPayload)
+                or command.payload.owner_operation_id != reduction_proof.operation_id
+                or command.payload.quantity != reduction_proof.requested_quantity
+                or command.venue_client_order_id
+                != reduction_proof.venue_client_order_id
+                or (
+                    reduction_proof.executed_quantity,
+                    reduction_proof.remaining_quantity,
+                    reduction_proof.average_price,
+                    reduction_proof.protection_order_id,
+                    reduction_proof.protection_price,
+                    reduction_proof.digest(),
+                )
+                != (
+                    event.filled_quantity,
+                    event.remaining_quantity,
+                    event.average_fill_price,
+                    event.protection_order_id,
+                    event.protection_price,
+                    event.proof_digest,
+                )
+            ):
+                raise UnsupportedKernelEffect(
+                    "Owner reduction proof differs from authorized command"
+                )
 
         if expected_version == 0:
             if current is not None:

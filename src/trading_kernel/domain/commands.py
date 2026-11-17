@@ -26,6 +26,7 @@ class CommandGenerationError(ValueError):
 
 class ExchangeCommandKind(StrEnum):
     SET_LEVERAGE = "set_leverage"
+    OWNER_REDUCE = "owner_reduce"
     ENTRY = "entry"
     INITIAL_STOP = "initial_stop"
     TAKE_PROFIT = "take_profit"
@@ -60,6 +61,7 @@ class OrderCommandPayload(BaseModel):
     source_watermark_ms: int | None = None
     required_configured_leverage: int | None = None
     leverage_verification_digest: str | None = None
+    owner_operation_id: str | None = None
 
     @field_validator("quantity")
     @classmethod
@@ -262,6 +264,9 @@ class ExchangeCommand(BaseModel):
         elif not isinstance(self.payload, OrderCommandPayload):
             raise ValueError("order command requires order payload")
         if isinstance(self.payload, OrderCommandPayload):
+            if (self.kind is ExchangeCommandKind.OWNER_REDUCE) != (self.payload.owner_operation_id is not None):
+                raise ValueError("Owner reduction requires exclusive operation identity")
+
             leverage_fields = (
                 self.payload.required_configured_leverage,
                 self.payload.leverage_verification_digest,
