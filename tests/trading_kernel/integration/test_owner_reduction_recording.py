@@ -44,6 +44,10 @@ from tests.trading_kernel.support.owner_reduction import facts
         "adapter_v2",
         "runner",
         "missing_retirement",
+        "adapter_timeout_exit",
+        "adapter_stale_exit",
+        "adapter_invalid_exit",
+        "adapter_timeout_time_exit",
     ],
 )
 async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
@@ -321,7 +325,14 @@ async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
             contract_price_observed_at_ms=6001,
             contract_price_valid_until_ms=6999 if condition == "stale" else 36001,
         )
-        if condition in {"adapter_v1", "adapter_v2"}:
+        if condition in {
+            "adapter_v1",
+            "adapter_v2",
+            "adapter_timeout_exit",
+            "adapter_stale_exit",
+            "adapter_invalid_exit",
+            "adapter_timeout_time_exit",
+        }:
             from src.trading_kernel.application.runtime_facts import (
                 LifecycleFactsRequest,
             )
@@ -345,8 +356,13 @@ async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
                 stop_price=p.stop_price,
                 stop_id="remaining-stop",
                 entry_id=entry.submitted_exchange_order_id,
-                now_ms=7000,
+                now_ms=3600000 if condition.endswith("_exit") else 7000,
             )
+            if condition.endswith("_exit"):
+                source.contract_fault = condition.split("_")[1]
+            if condition == "adapter_timeout_time_exit":
+                source.now_ms = 100 * 3600000
+                source.latest_close = "60500"
             adapter = CcxtVenueAdapter(
                 exchanges={
                     (
@@ -356,7 +372,7 @@ async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
                 },
                 default_settlement_asset="USDT",
                 default_taker_fee_rate=D(".001"),
-                clock_ms=lambda: 7000,
+                clock_ms=lambda: source.now_ms,
             )
             lifecycle_facts = await adapter.read_lifecycle_facts(
                 LifecycleFactsRequest(
@@ -389,19 +405,29 @@ async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
                     price_tick=D(".1"),
                     structure_window_bars=4,
                     atr_period=14,
-                    runner_market_required=False,
+                    runner_market_required=condition.endswith("_exit"),
                     owner_reduction_price_required=True,
                     exact_tp_fills_required=condition == "adapter_v2",
-                    observed_at_ms=7000,
+                    observed_at_ms=source.now_ms,
                 )
             )
             assert lifecycle_facts.active_stop_quantity == p.remaining_quantity
+            if condition.endswith("_exit"):
+                assert (
+                    lifecycle_facts.contract_price_blocker is not None
+                    and lifecycle_facts.market_facts is not None
+                )
         result = await maintain_ticket_lifecycle(
             u,
             LifecycleMaintenanceRequest(
                 ticket_id=t.identity.ticket_id,
                 facts=lifecycle_facts,
-                now_ms=3600000 if condition == "failure" else 7000,
+                now_ms=max(
+                    lifecycle_facts.observed_at_ms,
+                    3600000
+                    if condition == "failure" or condition.endswith("_exit")
+                    else 7000,
+                ),
             ),
         )
     async with PostgresKernelUnitOfWork(e) as u:
@@ -419,8 +445,21 @@ async def test_exact_accepted_reduction_persists_context_and_is_idempotent(
                 sum(isinstance(event, OwnerReductionPriceSatisfied) for event in events)
                 == 1
             )
-        elif condition == "failure":
+        elif condition == "failure" or condition.endswith("_exit"):
             assert result.status.value == "exit_requested"
+            if condition == "adapter_timeout_time_exit":
+                from src.trading_kernel.domain.events import ExitRequested
+
+                assert (
+                    next(
+                        event
+                        for event in reversed(events)
+                        if isinstance(event, ExitRequested)
+                    ).reason
+                    == "session_expired"
+                )
+            if condition.endswith("_exit"):
+                assert a.active_stop_exchange_order_id == proof.protection_order_id
         else:
             assert result.status.value == "no_change"
             assert not any(

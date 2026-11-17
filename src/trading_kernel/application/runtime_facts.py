@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
     TicketLifecycleFacts,
@@ -389,6 +389,7 @@ class LifecycleFactsRequest(BaseModel):
     tp1_management_baseline: OrderTerms | None = None
     exact_tp_fills_required: bool = False
     owner_reduction_price_required: bool = False
+    optional_price_timeout_seconds: float = Field(default=1.0,gt=0,le=1.0)
     tp1_exchange_order_id: str | None
     entry_fill_window_started_at_ms: int
     price_tick: Decimal

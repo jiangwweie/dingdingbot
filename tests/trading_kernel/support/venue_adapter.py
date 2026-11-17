@@ -295,6 +295,13 @@ class OwnerContinuationExchange:
         self.now_ms = now_ms
         self.stop_reads = 0
         self.stop_changes = {}
+        self.contract_fault = None
+        self.latest_close = '60000'
+
+    async def fetch_ohlcv(self,symbol,timeframe,since,limit):
+        period=3600000 if timeframe=='1h' else 900000
+        last_close=self.now_ms//period*period
+        return [[last_close-(limit-i)*period,'60000',str(max(Decimal(60100),Decimal(self.latest_close))),str(min(Decimal(59900),Decimal(self.latest_close))),self.latest_close,'10'] for i in range(limit)]
 
     async def fetch_positions(self, symbols, params):
         return [{'symbol':symbols[0],'contracts':self.quantity,'entryPrice':'60000',
@@ -308,6 +315,9 @@ class OwnerContinuationExchange:
 
     async def fapiPublicV2GetTickerPrice(self, params):
         assert params=={'symbol':'BTCUSDT'}
+        if self.contract_fault=='timeout':raise TimeoutError('test condition price timeout')
+        if self.contract_fault=='stale':return {'symbol':'BTCUSDT','price':'62000','time':1}
+        if self.contract_fault=='invalid':return {'symbol':'BTCUSDT','price':'NaN','time':self.now_ms}
         return {'symbol':'BTCUSDT','price':'62000','time':self.now_ms}
 
     async def fetch_open_orders(self, symbol, since, limit, params):

@@ -118,6 +118,14 @@ from src.trading_kernel.infrastructure.mutation_send_guard import (
 CcxtNetworkError = ccxt_errors.NetworkError
 
 
+@dataclass(frozen=True)
+class _OwnerConditionPrice:
+    price: Decimal | None = None
+    observed_at_ms: int | None = None
+    valid_until_ms: int | None = None
+    blocker: Literal["timeout","transport_unavailable","invalid_protocol","identity_or_time_invalid"] | None = None
+
+
 class _CcxtExchange(Protocol):
     def fapiPublicGetTime(self, params: Mapping[str, object]) -> object: ...
     def load_markets(self, reload: bool = False) -> object: ...
@@ -1024,35 +1032,35 @@ class CcxtVenueAdapter:
             if request.runner_market_required
             else _empty_rows()
         )
-        contract_price_call = (
-            _call_raw_exchange(exchange.fapiPublicV2GetTickerPrice,
-                {"symbol": domain.exchange_instrument_id.split(":")[1]})
-            if request.owner_reduction_price_required else _empty_value()
-        )
-        positions, entry_fills, tp1_order, candle_rows, contract_ticker = await asyncio.gather(
+        # Optional condition price has its own bounded read and typed failure.
+        # Its failure cannot erase otherwise complete position/candle facts.
+        (
+            positions,
+            entry_fills,
+            tp1_order,
+            candle_rows,
+            optional_price,
+        ) = await asyncio.gather(
             positions_call,
             entry_fills_call,
             tp1_order_call,
             candles_call,
-            contract_price_call,
+            self._read_owner_condition_price(exchange, request),
         )
-        contract_price = None
-        contract_observed = None
-        contract_valid_until = None
-        lifecycle_observed_at_ms = request.observed_at_ms
-        if request.owner_reduction_price_required:
-            lifecycle_observed_at_ms = self._clock_ms()
-            ticker = _require_mapping(contract_ticker, name="owner_contract_price")
-            try:
-                contract_price = Decimal(str(ticker["price"]))
-                contract_observed = int(str(ticker["time"]))
-            except (KeyError, ValueError, ArithmeticError):
-                raise RuntimeError("owner_contract_price_invalid") from None
-            if (ticker.get("symbol") != domain.exchange_instrument_id.split(":")[1]
-                    or not contract_price.is_finite() or contract_price <= 0
-                    or not 0 < contract_observed <= lifecycle_observed_at_ms < contract_observed + 30000):
-                raise RuntimeError("owner_contract_price_identity_or_time_invalid")
-            contract_valid_until = contract_observed + 30000
+        contract_price = optional_price.price
+        contract_observed = optional_price.observed_at_ms
+        contract_valid_until = optional_price.valid_until_ms
+        lifecycle_observed_at_ms = (
+            self._clock_ms()
+            if request.owner_reduction_price_required
+            else request.observed_at_ms
+        )
+        if (
+            contract_valid_until is not None
+            and lifecycle_observed_at_ms >= contract_valid_until
+        ):
+            optional_price = _OwnerConditionPrice(blocker="identity_or_time_invalid")
+            contract_price=contract_observed=contract_valid_until=None
         position_quantity, _, _, _ = _position_details(
             _require_list(positions, name="positions"),
             expected_symbol=symbol,
@@ -1315,6 +1323,7 @@ class CcxtVenueAdapter:
             else None
         )
         return TicketLifecycleFacts(
+            contract_price_blocker=optional_price.blocker,
             contract_market_price=contract_price,
             contract_price_observed_at_ms=contract_observed,
             contract_price_valid_until_ms=contract_valid_until,
@@ -1332,6 +1341,53 @@ class CcxtVenueAdapter:
             market_facts=market_facts,
             observed_at_ms=lifecycle_observed_at_ms,
         )
+
+    async def _read_owner_condition_price(
+        self, exchange, request: LifecycleFactsRequest
+    ) -> _OwnerConditionPrice:
+        if not request.owner_reduction_price_required:
+            return _OwnerConditionPrice()
+        symbol = request.netting_domain.exchange_instrument_id.split(":")[1]
+        try:
+            ticker = await asyncio.wait_for(
+                _call_raw_exchange(
+                    exchange.fapiPublicV2GetTickerPrice, {"symbol": symbol}
+                ),
+                timeout=request.optional_price_timeout_seconds,
+            )
+        except TimeoutError:
+            return _OwnerConditionPrice(blocker="timeout")
+        except (ccxt_errors.NetworkError, OSError):
+            return _OwnerConditionPrice(blocker="transport_unavailable")
+        except (
+            ccxt_errors.ExchangeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            RuntimeError,
+            AttributeError,
+        ):
+            return _OwnerConditionPrice(blocker="invalid_protocol")
+        try:
+            ticker = _require_mapping(ticker, name="owner_contract_price")
+            raw_price = ticker["price"]
+            raw_time = ticker["time"]
+            if not isinstance(raw_price, str) or isinstance(raw_time, bool):
+                return _OwnerConditionPrice(blocker="invalid_protocol")
+            price = Decimal(raw_price)
+            observed = int(str(raw_time))
+            if not price.is_finite() or price <= 0:
+                return _OwnerConditionPrice(blocker="invalid_protocol")
+            if (
+                ticker.get("symbol") != symbol
+                or not 0 < observed <= self._clock_ms() < observed + 30000
+            ):
+                return _OwnerConditionPrice(blocker="identity_or_time_invalid")
+            return _OwnerConditionPrice(
+                price=price, observed_at_ms=observed, valid_until_ms=observed + 30000
+            )
+        except (KeyError, ValueError, TypeError, ArithmeticError):
+            return _OwnerConditionPrice(blocker="invalid_protocol")
 
     async def read_fee_discount_capability(
         self,

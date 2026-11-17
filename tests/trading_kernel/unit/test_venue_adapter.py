@@ -2854,8 +2854,8 @@ async def test_owner_continuation_reads_contract_price_without_querying_retired_
         assert result.contract_price_valid_until_ms==20030000
         assert exchange.tp1_order_calls==[]
     else:
-        with pytest.raises(RuntimeError,match='owner_contract_price'):
-            await adapter.read_lifecycle_facts(request)
+        result=await adapter.read_lifecycle_facts(request)
+        assert result.contract_market_price is None and result.contract_price_blocker is not None
 
 
 @pytest.mark.asyncio
@@ -2877,3 +2877,47 @@ async def test_owner_reduced_v1_and_v2_read_exact_surviving_stop(exact_tp,mutati
     result=await adapter.read_lifecycle_facts(req)
     assert exchange.stop_reads==1
     assert result.active_stop_quantity==(None if mutation else Decimal('.005'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fault',['timeout','stale','wrong_symbol','malformed','hung','network','method_missing','float_price'])
+async def test_optional_owner_price_failure_preserves_primary_lifecycle_facts(fault):
+    import asyncio
+    class OptionalPriceFailure(LifecycleFactsExchange):
+        async def fapiPublicV2GetTickerPrice(self,params):
+            if fault=='timeout':raise TimeoutError('private detail must not be retained')
+            if fault=='hung':await asyncio.Event().wait()
+            if fault=='network':raise ConnectionError('private error detail')
+            if fault=='method_missing':raise AttributeError('ticker method missing')
+            if fault=='stale':return {'symbol':'BTCUSDT','price':'62000','time':1}
+            if fault=='float_price':return {'symbol':'BTCUSDT','price':62000.0,'time':20000000}
+            if fault=='wrong_symbol':return {'symbol':'ETHUSDT','price':'62000','time':20000000}
+            return {'price':'NaN'}
+    exchange=OptionalPriceFailure()
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20000000)
+    req=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),tp1_exchange_order_id=None,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=True,owner_reduction_price_required=True,optional_price_timeout_seconds=.01,observed_at_ms=20000000)
+    result=await asyncio.wait_for(adapter.read_lifecycle_facts(req),timeout=.5)
+    assert result.position_quantity==Decimal('.005') and result.market_facts is not None
+    assert result.contract_market_price is None and result.contract_price_observed_at_ms is None and result.contract_price_valid_until_ms is None
+    assert result.contract_price_blocker in {'timeout','transport_unavailable','invalid_protocol','identity_or_time_invalid'}
+
+
+@pytest.mark.asyncio
+async def test_optional_price_cancellation_is_not_swallowed_as_unavailable():
+    import asyncio
+    class CancelledPrice(LifecycleFactsExchange):
+        async def fapiPublicV2GetTickerPrice(self,params):raise asyncio.CancelledError
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):CancelledPrice()},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20000000)
+    request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),tp1_exchange_order_id=None,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,owner_reduction_price_required=True,observed_at_ms=20000000)
+    with pytest.raises(asyncio.CancelledError):await adapter.read_lifecycle_facts(request)
+
+
+@pytest.mark.asyncio
+async def test_optional_price_degradation_does_not_hide_invalid_primary_position():
+    class PrimaryFailure(LifecycleFactsExchange):
+        async def fetch_positions(self,*args):raise RuntimeError('mandatory position failure')
+        async def fapiPublicV2GetTickerPrice(self,params):raise TimeoutError
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):PrimaryFailure()},default_settlement_asset='USDT',default_taker_fee_rate=Decimal('.0005'),clock_ms=lambda:20000000)
+    request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),tp1_exchange_order_id=None,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,owner_reduction_price_required=True,observed_at_ms=20000000)
+    with pytest.raises(RuntimeError,match='mandatory position failure'):
+        await adapter.read_lifecycle_facts(request)

@@ -633,7 +633,8 @@ async def deploy_compatible_upgrade_identity(
     source_schema_revision = metadata_rows.get("schema_revision")
     if (source_schema_revision, request.schema_revision) in {
         ("0021_manual_operational_closure", "0022_wallet_margin_allocation"),
-        ("0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"),
+        ("0022_wallet_margin_allocation", "0023_management_recovery"),
+        ("0023_management_recovery", "0024_owner_cooperation"),
         ("0017_app_management_observation", "0018_notice_outbox_v1"),
         ("0018_notice_outbox_v1", "0019_management_evidence_v2"),
         ("0019_management_evidence_v2", "0020_manual_exit_regime_v1"),

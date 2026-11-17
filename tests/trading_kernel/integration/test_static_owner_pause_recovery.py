@@ -264,3 +264,53 @@ async def test_resume_without_totp_cannot_release_static_fence(head_template_eng
             selection_spec_id=generic_selection_spec(group).selection_spec_id,
         )
         assert v.state.value == "OWNER_PAUSED"
+
+
+@pytest.mark.parametrize('group',GROUPS)
+async def test_mobile_pause_resume_before_static_drain_is_honored_by_event_guards(head_template_engine,group):
+    from tests.trading_kernel.support.mobile_owner import (
+        mobile_client,
+        strategy_control,
+    )
+    engine=head_template_engine
+    await seed_generic_database(engine)
+    async with mobile_client(engine,at_ms=CUTOFF+90) as browser:
+        paused=await strategy_control(browser,group=group,enabled=False,version=1,at_ms=CUTOFF+100)
+        resumed=await strategy_control(browser,group=group,enabled=True,version=paused['control_version'],at_ms=CUTOFF+101)
+        assert resumed['entry_state']=='enabled'
+        for at in (CUTOFF+102,CUTOFF+103,CUTOFF+104,CUTOFF+105):
+            await tick(engine,group,at)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        assert await u.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=generic_selection_spec(group).selection_spec_id) is None
+    async with engine.connect() as c:
+        events=(await c.execute(sa.text('SELECT e.event_type,e.payload FROM brc_strategy_entry_vacuum_events e JOIN brc_strategy_entry_vacuums_current v USING(entry_vacuum_id) WHERE v.strategy_group_id=:group ORDER BY e.event_sequence'),{'group':group})).mappings().all()
+        assert [e['event_type'] for e in events]==['OPEN','DRAINING_ENTRY','OWNER_PAUSED','RESOLVED_OWNER_RESUME']
+        assert events[2]['payload']['resumed_before_drain'] is True
+
+
+async def test_trusted_strength_without_signed_evidence_cannot_finish_early_resume(head_template_engine):
+    from src.trading_kernel.infrastructure.pg_instrument_selection_repository import (
+        SelectionJobConflict,
+    )
+    engine=head_template_engine;group='CPM-RO-001'
+    await seed_generic_database(engine)
+    await change(engine,group,StrategyEntryState.PAUSED,1,CUTOFF+100)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        await set_strategy_entry_state(u,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+            request=ControlMutationRequest(expected_version=2,owner_identity='Owner',reason='unproven strength must not grant authority',idempotency_key='unproven-resume',now_ms=CUTOFF+101),authentication_strength='trusted_device_session')
+    await tick(engine,group,CUTOFF+102)
+    with pytest.raises(SelectionJobConflict,match='early Resume drain proof missing'):
+        await tick(engine,group,CUTOFF+103)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        vacuum=await u.instrument_selection.get_current_entry_vacuum(strategy_group_id=group,selection_spec_id=generic_selection_spec(group).selection_spec_id)
+        assert vacuum.state.value=='DRAINING_ENTRY' and vacuum.drained_at_ms is None
+
+
+async def test_all_installed_strategy_resume_predicates_include_device_evidence(head_template_engine):
+    import re
+    async with head_template_engine.connect() as c:
+        definitions=(await c.execute(sa.text("SELECT proname,prosrc FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND prosrc LIKE '%strategy_resume%' AND prosrc LIKE '%totp_step_up%'"))).all()
+    assert len(definitions)>=8
+    bare_resume=re.compile(r"purpose\s*=\s*'strategy_resume'\s+AND\s+\w+\.authentication_strength\s*=\s*'totp_step_up'")
+    remaining=[name for name,source in definitions if bare_resume.search(source)]
+    assert remaining==[],remaining

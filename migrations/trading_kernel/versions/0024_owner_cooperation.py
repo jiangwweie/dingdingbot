@@ -3,6 +3,8 @@
 Frozen additive schema; stopped/flat source and historical row preservation.
 """
 
+import re
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
@@ -343,6 +345,12 @@ def upgrade():
         ("brc_static_owner_resume_authorization(text,bigint)", "a"),
         ("brc_orb_owner_resume_matches(text,bigint)", "a"),
         ("brc_generic_vacuum_owner_resume_matches(text,text,bigint)", "resume_auth"),
+        ("brc_generic_vacuum_owner_resume_matches(text,text,bigint)", "auth"),
+        ("brc_generic_first_pause_recovery_matches(text,text,bigint)", "ra"),
+        ("brc_generic_deferred_owner_pause_matches(text,bigint)", "a"),
+        ("brc_generic_deferred_cleanup_event_guard()", "a"),
+        ("brc_generic_early_resume_drain_matches(text,bigint)", "a"),
+        ("brc_generic_early_resume_drain_event_guard()", "a"),
     ]:
         definition = c.scalar(
             sa.text("SELECT pg_get_functiondef(to_regprocedure(:signature))"),
@@ -350,19 +358,25 @@ def upgrade():
         )
         if not definition:
             raise RuntimeError("Owner Resume authority function missing")
-        marker = alias + ".authentication_strength='totp_step_up'"
-        if marker not in definition:
+        marker = re.compile(
+            r"(?<![A-Za-z0-9_])"
+            + re.escape(alias)
+            + r"\.authentication_strength\s*=\s*'totp_step_up'"
+        )
+        if not marker.search(definition):
             raise RuntimeError("Owner Resume authority predicate changed")
         c.exec_driver_sql(
-            definition.replace(
-                marker,
-                "("
-                + marker
-                + " OR brc_owner_device_authorization_valid("
-                + alias
-                + ".authorization_id,'strategy_resume',"
-                + alias
-                + ".authorized_at_ms))",
+            marker.sub(
+                lambda match, alias=alias: (
+                    "("
+                    + match.group(0)
+                    + " OR brc_owner_device_authorization_valid("
+                    + alias
+                    + ".authorization_id,'strategy_resume',"
+                    + alias
+                    + ".authorized_at_ms))"
+                ),
+                definition,
             )
         )
 

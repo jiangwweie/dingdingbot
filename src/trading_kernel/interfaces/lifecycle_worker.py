@@ -253,6 +253,7 @@ async def run_lifecycle_worker_once(
         exact_tp_fills_required=profile.execution is not None,
         owner_reduction_price_required=(aggregate.owner_reduction_context is not None
             and aggregate.status is AggregateStatus.POSITION_PROTECTED),
+        optional_price_timeout_seconds=min(1.0,request.timeout_seconds/4),
         tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
         entry_fill_window_started_at_ms=(
             entry_order_reference.command_created_at_ms
@@ -353,6 +354,7 @@ async def run_lifecycle_worker_once(
             status=LifecycleWorkerStatus.NO_CHANGE,
             ticket_id=aggregate.identity.ticket_id,
             maintenance_status=maintenance.status,
+            detail=None if facts.contract_price_blocker is None else f"owner_condition_price:{facts.contract_price_blocker}",
         )
 
     dispatched = await _dispatch_lifecycle(

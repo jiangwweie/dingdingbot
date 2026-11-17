@@ -7929,7 +7929,7 @@ async def test_owner_pause_abandons_unfenced_generic_generation(database: AsyncE
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("group", ["CPM-RO-001","MPG-001","MI-001","BRF2-001"])
-@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true"),(False,"early_resume"),(True,"early_resume"),(False,"deferred_cleanup"),(True,"deferred_cleanup")])
+@pytest.mark.parametrize("static_source,corrupt_completion", [(False,False),(True,False),(True,True),(True,"string_true"),(False,"early_resume"),(True,"early_resume"),(False,"deferred_cleanup"),(True,"deferred_cleanup"),(False,"device_early_resume"),(True,"device_early_resume"),(False,"device_deferred_cleanup"),(True,"device_deferred_cleanup")])
 async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finishes_drain(
     database: AsyncEngine, group: str,static_source: bool,corrupt_completion: bool | str,
 ) -> None:
@@ -7941,6 +7941,8 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
         stage_generic_static_selection_mode,
     )
     from src.trading_kernel.domain.owner_control import StrategyEntryState
+    device_resume=isinstance(corrupt_completion,str) and corrupt_completion.startswith('device_')
+    if device_resume:corrupt_completion=corrupt_completion.removeprefix('device_')
     deferred_cleanup=corrupt_completion=="deferred_cleanup"
     early_resume=corrupt_completion in {"early_resume","deferred_cleanup"}
     if early_resume:
@@ -7987,9 +7989,17 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
     if deferred_cleanup:
         async with PostgresKernelUnitOfWork(database) as uow:
             owner=await uow.owner_controls.get_strategy_control(group)
-            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
-                request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_before_cleanup",
-                    idempotency_key=f"deferred-resume:{group}:{static_source}",owner_identity="owner",now_ms=at+2),authentication_strength="totp_step_up")
+            if not device_resume:
+                await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="resume_before_cleanup",
+                        idempotency_key=f"deferred-resume:{group}:{static_source}",owner_identity="owner",now_ms=at+2),authentication_strength="totp_step_up")
+        if device_resume:
+            from tests.trading_kernel.support.mobile_owner import (
+                mobile_client,
+                strategy_control,
+            )
+            async with mobile_client(database,at_ms=at+2) as browser:
+                await strategy_control(browser,group=group,enabled=True,version=owner.control_version,at_ms=at+2)
         at+=1
     with patch.object(PostgresInstrumentSelectionRepository,"read_authority_clock_ms",new=AsyncMock(return_value=at+2)):
         @asynccontextmanager
@@ -8016,9 +8026,17 @@ async def test_owner_pause_during_generic_entry_drain_preserves_fence_and_finish
     if early_resume and not deferred_cleanup:
         async with PostgresKernelUnitOfWork(database) as uow:
             owner=await uow.owner_controls.get_strategy_control(group)
-            await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
-                request=ControlMutationRequest(expected_version=owner.control_version,reason="early_resume_static_or_dynamic_drain",
-                    idempotency_key=f"early-resume-drain:{group}:{static_source}",owner_identity="owner",now_ms=at+3),authentication_strength="totp_step_up")
+            if not device_resume:
+                await set_strategy_entry_state(uow,strategy_group_id=group,target_state=StrategyEntryState.ENABLED,
+                    request=ControlMutationRequest(expected_version=owner.control_version,reason="early_resume_static_or_dynamic_drain",
+                        idempotency_key=f"early-resume-drain:{group}:{static_source}",owner_identity="owner",now_ms=at+3),authentication_strength="totp_step_up")
+        if device_resume:
+            from tests.trading_kernel.support.mobile_owner import (
+                mobile_client,
+                strategy_control,
+            )
+            async with mobile_client(database,at_ms=at+3) as browser:
+                await strategy_control(browser,group=group,enabled=True,version=owner.control_version,at_ms=at+3)
         at+=1
     actual_execute = sa.ext.asyncio.AsyncConnection.execute
     async def corrupt_pause_completion(connection,statement,*args,**kwargs):

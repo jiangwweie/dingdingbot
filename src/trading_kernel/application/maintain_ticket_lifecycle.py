@@ -45,6 +45,15 @@ class LifecycleMaintenanceStatus(StrEnum):
 class TicketLifecycleFacts(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    contract_price_blocker: (
+        Literal[
+            "timeout",
+            "transport_unavailable",
+            "invalid_protocol",
+            "identity_or_time_invalid",
+        ]
+        | None
+    ) = None
     contract_market_price: Decimal | None = None
     contract_price_observed_at_ms: int | None = None
     contract_price_valid_until_ms: int | None = None
@@ -84,6 +93,17 @@ class TicketLifecycleFacts(BaseModel):
     def _validate_facts(self) -> TicketLifecycleFacts:
         if self.observed_at_ms <= 0:
             raise ValueError("lifecycle observation time must be positive")
+        if self.contract_price_blocker is not None and any(
+            value is not None
+            for value in (
+                self.contract_market_price,
+                self.contract_price_observed_at_ms,
+                self.contract_price_valid_until_ms,
+            )
+        ):
+            raise ValueError(
+                "unavailable condition price cannot carry usable price facts"
+            )
         if not Decimal(0) <= self.exit_taker_fee_rate < Decimal(1):
             raise ValueError("exit taker fee rate must be in [0, 1)")
         if self.tp1_filled_quantity > 0:
@@ -461,7 +481,8 @@ async def _maintain_owner_reduced_position(
         facts.contract_price_valid_until_ms,
     )
     if (
-        price is None
+        facts.contract_price_blocker is not None
+        or price is None
         or not price.is_finite()
         or price <= 0
         or observed is None
