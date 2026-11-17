@@ -351,3 +351,307 @@ async def test_receive_after_tick_start_is_not_a_protocol_error(
     assert result.detail == (
         None if fault is None else "management_stream_protocol_invalid"
     )
+
+
+@pytest.mark.asyncio
+async def test_deterministic_apply_failure_is_durable_bounded_and_ordered(
+    head_template_engine,
+):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.domain.reducer import InvalidLifecycleTransition
+    from src.trading_kernel.infrastructure.pg_models import (
+        failure_diagnostics,
+        trade_aggregates,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+
+    e = head_template_engine
+    t = registered_sor_long_ticket()
+    await reach_position_protected(e, t)
+    d = t.identity.netting_domain
+    scope = f"binance-usdm:{d.account_id}"
+    raw = {
+        "e": "ORDER_TRADE_UPDATE",
+        "E": 5000,
+        "T": 5000,
+        "o": {
+            "s": "BTCUSDT",
+            "c": "external-test",
+            "S": "SELL",
+            "o": "LIMIT",
+            "f": "GTC",
+            "q": "0.001",
+            "p": "65000",
+            "sp": "0",
+            "x": "CANCELED",
+            "X": "CANCELED",
+            "i": 123,
+            "z": "0",
+            "ps": "LONG",
+            "cp": False,
+            "R": False,
+            "wt": "CONTRACT_PRICE",
+            "pP": False,
+            "pm": "NONE",
+            "V": "NONE",
+            "gtd": 0,
+            "O": 5000,
+        },
+    }
+    calls = []
+    for now in [5100, 5200, 10100, 10200, 40100, 100000]:
+        async with PostgresKernelUnitOfWork(e) as u:
+            if now == 5100:
+                await u.management.start_feed(
+                    scope_key=scope,
+                    epoch_id="failure-epoch",
+                    worker_id="test",
+                    runtime_commit="a" * 40,
+                    now_ms=5000,
+                )
+
+            async def fail(ticket_id, evidence, *, attempt_at=now):
+                calls.append(attempt_at)
+                await u._connection.execute(
+                    sa.update(trade_aggregates)
+                    .where(trade_aggregates.c.ticket_id == ticket_id)
+                    .values(protected_qty=0)
+                )
+                raise InvalidLifecycleTransition("test deterministic failure")
+
+            await u.management.persist_stream_batch(
+                scope_key=scope,
+                epoch_id="failure-epoch",
+                events=[{"sequence": 1, "received_at_ms": 5001, "payload": raw}],
+                connected_at_ms=5000,
+                now_ms=now,
+                apply_observer=fail,
+                account_id=d.account_id,
+            )
+            feed = await u.management.get_feed(scope)
+            assert feed["persisted_watermark"] == 1 and feed["applied_watermark"] == 0
+            assert not await u.management.feed_ready(scope, now_ms=now)
+    assert calls == [5100, 10100, 40100]
+    async with PostgresKernelUnitOfWork(e) as u:
+        with pytest.raises(ValueError, match="unapplied"):
+            await u.management.start_feed(
+                scope_key=scope,
+                epoch_id="new-epoch",
+                worker_id="test",
+                runtime_commit="b" * 40,
+                now_ms=120000,
+            )
+    async with PostgresKernelUnitOfWork(e) as u:
+        applied = []
+
+        async def repaired(ticket_id, evidence):
+            applied.append(evidence.evidence_id)
+            return True
+
+        await u.management.persist_stream_batch(
+            scope_key=scope,
+            epoch_id="failure-epoch",
+            events=[],
+            connected_at_ms=5000,
+            now_ms=120000,
+            apply_observer=repaired,
+            account_id=d.account_id,
+            application_runtime_commit="b" * 40,
+        )
+        feed = await u.management.get_feed(scope)
+        assert feed["applied_watermark"] == 1 and len(applied) == 1
+
+    async with e.connect() as c:
+        rows = (
+            (
+                await c.execute(
+                    sa.select(failure_diagnostics).where(
+                        failure_diagnostics.c.stage == "management_stream_apply"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert len(rows) == 4
+        assert sum(x["reason_code"] == "resolved" for x in rows) == 1
+        assert (
+            await c.scalar(
+                sa.select(trade_aggregates.c.protected_qty).where(
+                    trade_aggregates.c.ticket_id == t.identity.ticket_id
+                )
+            )
+            == t.quantity
+        )
+
+
+@pytest.mark.asyncio
+async def test_flat_cancellations_apply_in_order_without_takeover_or_budget_release(
+    head_template_engine,
+):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.application.observe_trade_management import (
+        observe_trade_management,
+    )
+    from src.trading_kernel.infrastructure.pg_models import (
+        budget_reservations,
+        management_feed_current,
+        trade_aggregates,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+
+    e = head_template_engine
+    t = registered_sor_long_ticket()
+    await reach_position_protected(e, t)
+    d = t.identity.netting_domain
+    scope = f"binance-usdm:{d.account_id}"
+    raw = {
+        "e": "ORDER_TRADE_UPDATE",
+        "E": 5000,
+        "T": 5000,
+        "o": {
+            "s": "BTCUSDT",
+            "c": "external-test",
+            "S": "SELL",
+            "o": "LIMIT",
+            "f": "GTC",
+            "q": "0.001",
+            "p": "65000",
+            "sp": "0",
+            "x": "CANCELED",
+            "X": "CANCELED",
+            "i": 123,
+            "z": "0",
+            "ps": "LONG",
+            "cp": False,
+            "R": False,
+            "wt": "CONTRACT_PRICE",
+            "pP": False,
+            "pm": "NONE",
+            "V": "NONE",
+            "gtd": 0,
+            "O": 5000,
+        },
+    }
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u._connection.execute(
+            sa.update(trade_aggregates)
+            .where(trade_aggregates.c.ticket_id == t.identity.ticket_id)
+            .values(position_qty=0, status="reconciliation_pending")
+        )
+        await u.management.start_feed(
+            scope_key=scope,
+            epoch_id="flat-epoch",
+            worker_id="test",
+            runtime_commit="a" * 40,
+            now_ms=5000,
+        )
+        # Synthetic earlier prefix, no historical production cursor is mutated.
+        await u._connection.execute(
+            sa.update(management_feed_current)
+            .where(management_feed_current.c.scope_key == scope)
+            .values(persisted_watermark=161, applied_watermark=161)
+        )
+        before = await u._connection.scalar(
+            sa.select(sa.func.count())
+            .select_from(budget_reservations)
+            .where(budget_reservations.c.status == "active")
+        )
+        calls = []
+
+        async def observer(ticket_id, evidence):
+            await observe_trade_management(
+                u, ticket_id=ticket_id, evidence=evidence, now_ms=5100
+            )
+            calls.append(evidence.terms.exchange_order_id)
+            return True
+
+        second = {**raw, "o": {**raw["o"], "i": 124, "c": "external-second"}}
+        await u.management.persist_stream_batch(
+            scope_key=scope,
+            epoch_id="flat-epoch",
+            events=[
+                {"sequence": 162, "received_at_ms": 5001, "payload": raw},
+                {"sequence": 163, "received_at_ms": 5002, "payload": second},
+            ],
+            connected_at_ms=5000,
+            now_ms=5100,
+            apply_observer=observer,
+            account_id=d.account_id,
+        )
+        assert calls == ["123", "124"]
+        feed = await u.management.get_feed(scope)
+        assert feed["applied_watermark"] == 163 and feed["connection_state"] == "ready"
+        a = await u.aggregates.get(t.identity.ticket_id)
+        assert (
+            a.management_mode.value == "AUTO"
+            and a.status.value == "reconciliation_pending"
+        )
+        assert (
+            await u._connection.scalar(
+                sa.select(sa.func.count())
+                .select_from(budget_reservations)
+                .where(budget_reservations.c.status == "active")
+            )
+            == before
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_apply_rolls_back_uow_notice_and_evidence_buffers(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.application.observe_trade_management import (
+        observe_trade_management,
+    )
+    from src.trading_kernel.domain.reducer import InvalidLifecycleTransition
+    from src.trading_kernel.infrastructure.pg_models import notice_outbox
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+    from tests.trading_kernel.support.manual_management import app_evidence
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    d=t.identity.netting_domain;scope=f'binance-usdm:{d.account_id}'
+    raw={'e':'ORDER_TRADE_UPDATE','E':5000,'T':5000,'o':{'s':'BTCUSDT','c':'external-test','S':'SELL','o':'LIMIT','f':'GTC','q':'0.001','p':'65000','sp':'0','x':'NEW','X':'NEW','i':123,'z':'0','ps':'LONG','cp':False,'R':False,'wt':'CONTRACT_PRICE','pP':False,'pm':'NONE','V':'NONE','gtd':0,'O':5000}}
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u.management.start_feed(scope_key=scope,epoch_id='buffer-epoch',worker_id='w',runtime_commit='a'*40,now_ms=5000)
+        async def fail(ticket_id,item):
+            await observe_trade_management(u,ticket_id=ticket_id,evidence=app_evidence(t),now_ms=5100)
+            raise InvalidLifecycleTransition('failure after real management reduction')
+        await u.management.persist_stream_batch(scope_key=scope,epoch_id='buffer-epoch',events=[{'sequence':1,'received_at_ms':5001,'payload':raw}],connected_at_ms=5000,now_ms=5100,apply_observer=fail,account_id=d.account_id)
+        assert u._notice_changes=={}
+        assert u.management.new_evidence=={}
+        assert (await u.aggregates.get(t.identity.ticket_id)).management_mode.value=='AUTO'
+    async with e.connect() as c:
+        assert await c.scalar(sa.select(sa.func.count()).select_from(notice_outbox).where(notice_outbox.c.kind=='takeover'))==0
+
+
+@pytest.mark.asyncio
+async def test_deferred_observer_cannot_commit_partial_side_effects(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import trade_aggregates
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    d=t.identity.netting_domain;scope=f'binance-usdm:{d.account_id}'
+    raw={'e':'ORDER_TRADE_UPDATE','E':5000,'T':5000,'o':{'s':'BTCUSDT','c':'external-test','S':'SELL','o':'LIMIT','f':'GTC','q':'0.001','p':'65000','sp':'0','x':'NEW','X':'NEW','i':123,'z':'0','ps':'LONG','cp':False,'R':False,'wt':'CONTRACT_PRICE','pP':False,'pm':'NONE','V':'NONE','gtd':0,'O':5000}}
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u.management.start_feed(scope_key=scope,epoch_id='deferred-epoch',worker_id='w',runtime_commit='a'*40,now_ms=5000)
+        async def defer(ticket_id,item):
+            await u._connection.execute(sa.update(trade_aggregates).where(trade_aggregates.c.ticket_id==ticket_id).values(protected_qty=0))
+            return False
+        await u.management.persist_stream_batch(scope_key=scope,epoch_id='deferred-epoch',events=[{'sequence':1,'received_at_ms':5001,'payload':raw}],connected_at_ms=5000,now_ms=5100,apply_observer=defer,account_id=d.account_id)
+        assert (await u.aggregates.get(t.identity.ticket_id)).protected_qty==t.quantity
+        assert (await u.management.get_feed(scope))['applied_watermark']==0

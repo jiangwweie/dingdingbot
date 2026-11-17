@@ -11,6 +11,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.infrastructure.binance_management_observation import (
     parse_order_update,
 )
+from src.trading_kernel.infrastructure.pg_models import failure_diagnostics
 from src.trading_kernel.infrastructure.pg_models import (
     management_coverage_events as coverage,
 )
@@ -23,9 +24,14 @@ from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_RE
 FEED_LEASE_MS = 15000
 
 
+class _ObservationDeferred(Exception):
+    """A callback declined application; no partial effect may be committed."""
+
+
 class PostgresManagementFeed:
     def __init__(self, connection):
         self.c = connection
+        self.application_checkpoint = connection.begin_nested
 
     async def lock_receiver(self, scope_key):
         await self.c.execute(
@@ -79,6 +85,12 @@ class PostgresManagementFeed:
             and old["owner_worker_id"] != worker_id
         ):
             raise ValueError("management receiver already owns a live epoch")
+        if (
+            old is not None
+            and old["epoch_id"] != epoch_id
+            and old["applied_watermark"] < old["persisted_watermark"]
+        ):
+            raise ValueError("previous management epoch has unapplied events")
         if (
             old is not None
             and old["connected_at_ms"] is not None
@@ -148,6 +160,7 @@ class PostgresManagementFeed:
         backlog_pending=False,
         apply_observer=None,
         account_id=None,
+        application_runtime_commit=None,
     ):
         row = (
             (
@@ -166,6 +179,7 @@ class PostgresManagementFeed:
             or (worker_id is not None and row["owner_worker_id"] != worker_id)
         ):
             raise ValueError("management epoch ownership differs")
+        apply_commit = application_runtime_commit or row["runtime_commit"]
         watermark = row["persisted_watermark"]
         applied = row["applied_watermark"]
         for event in sorted(events, key=lambda e: e["sequence"]):
@@ -286,10 +300,113 @@ class PostgresManagementFeed:
                 )
                 .limit(1)
             )
-            if ticket_id is not None and (
-                apply_observer is None or not await apply_observer(ticket_id, parsed)
-            ):
-                break
+            if ticket_id is not None:
+                if apply_observer is None:
+                    break
+                # Retry diagnostics survive the failed observer savepoint. Never
+                # ACK canonical application or skip the first failed sequence.
+                previous = (
+                    (
+                        await self.c.execute(
+                            sa.select(failure_diagnostics)
+                            .where(
+                                failure_diagnostics.c.stage
+                                == "management_stream_apply",
+                                failure_diagnostics.c.subject_id == saved["event_id"],
+                            )
+                            .order_by(
+                                failure_diagnostics.c.occurred_at_ms.desc(),
+                                failure_diagnostics.c.diagnostic_id.desc(),
+                            )
+                            .limit(1)
+                        )
+                    )
+                    .mappings()
+                    .one_or_none()
+                )
+                basis = previous["basis"] if previous is not None else {}
+                same_runtime = (
+                    basis.get("runtime_commit") == apply_commit
+                    and basis.get("schema_revision") == row["schema_revision"]
+                )
+                attempts = int(basis.get("attempt", 0)) if same_runtime else 0
+                if (
+                    same_runtime
+                    and previous["reason_code"] != "resolved"
+                    and (attempts >= 3 or now_ms < int(basis.get("retry_at_ms", 0)))
+                ):
+                    gap_reason = "management_event_apply_blocked"
+                    break
+                try:
+                    async with self.application_checkpoint():
+                        if not await apply_observer(ticket_id, parsed):
+                            raise _ObservationDeferred
+                except _ObservationDeferred:
+                    break
+                except (ValueError, TypeError, KeyError, RuntimeError, AssertionError) as exc:
+                    attempt = attempts + 1
+                    await self.c.execute(
+                        insert(failure_diagnostics)
+                        .values(
+                            diagnostic_id="feed-apply:"
+                            + canonical_digest(
+                                {
+                                    "event": saved["event_id"],
+                                    "runtime": apply_commit,
+                                    "schema": row["schema_revision"],
+                                    "attempt": attempt,
+                                }
+                            ).split(":")[-1],
+                            stage="management_stream_apply",
+                            subject_id=saved["event_id"],
+                            reason_code=type(exc).__name__,
+                            occurred_at_ms=now_ms,
+                            basis={
+                                "ticket_id": ticket_id,
+                                "epoch_id": epoch_id,
+                                "sequence": saved["receive_sequence"],
+                                "payload_digest": saved["payload_digest"],
+                                "runtime_commit": apply_commit,
+                                "schema_revision": row["schema_revision"],
+                                "attempt": attempt,
+                                "retry_at_ms": now_ms
+                                + (5000 if attempt == 1 else 30000),
+                                "resolution": "blocked"
+                                if attempt >= 3
+                                else "retry_due",
+                            },
+                        )
+                        .on_conflict_do_nothing()
+                    )
+                    gap_reason = "management_event_apply_blocked"
+                    break
+                if previous is not None and previous["reason_code"] != "resolved":
+                    await self.c.execute(
+                        insert(failure_diagnostics)
+                        .values(
+                            diagnostic_id="feed-resolved:"
+                            + canonical_digest(
+                                {
+                                    "event": saved["event_id"],
+                                    "runtime": apply_commit,
+                                    "schema": row["schema_revision"],
+                                }
+                            ).split(":")[-1],
+                            stage="management_stream_apply",
+                            subject_id=saved["event_id"],
+                            reason_code="resolved",
+                            occurred_at_ms=now_ms,
+                            basis={
+                                "ticket_id": ticket_id,
+                                "sequence": saved["receive_sequence"],
+                                "runtime_commit": apply_commit,
+                                "schema_revision": row["schema_revision"],
+                                "attempt": attempts,
+                                "resolution": "applied_in_order",
+                            },
+                        )
+                        .on_conflict_do_nothing()
+                    )
             applied = saved["receive_sequence"]
         connected = (
             row["connected_at_ms"]
@@ -314,7 +431,12 @@ class PostgresManagementFeed:
             )
         )
         # A gap cannot be erased in the same connection epoch by a later healthy poll.
-        if row["health_reason"] not in (None, "stream_not_ready", "receiver_backlog"):
+        if row["health_reason"] not in (
+            None,
+            "stream_not_ready",
+            "receiver_backlog",
+            "management_event_apply_blocked",
+        ):
             ready = False
             reason = row["health_reason"]
         await self.c.execute(

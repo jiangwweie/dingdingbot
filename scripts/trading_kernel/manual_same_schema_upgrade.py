@@ -344,9 +344,11 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         )
     from scripts.trading_kernel.manual_runtime_installation import (
         install_entry_runtime_config,
+        install_manual_resource_profile,
     )
 
     install_entry_runtime_config(REPO_ROOT)
+    install_manual_resource_profile(REPO_ROOT)
     run(["systemctl", "daemon-reload"])
     if not source.get("recovery_ticket_ids"):
         run([

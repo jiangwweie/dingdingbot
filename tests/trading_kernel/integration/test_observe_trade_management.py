@@ -139,3 +139,35 @@ async def test_takeover_notice_is_after_commit_and_not_repeated(head_template_en
         await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=app_evidence(t),now_ms=5200)
     async with e.connect() as c:
         assert await c.scalar(sa.select(sa.func.count()).select_from(notice_outbox).where(notice_outbox.c.kind=='takeover'))==1
+
+
+@pytest.mark.asyncio
+async def test_flat_external_cancel_is_readonly_not_manual_takeover(head_template_engine):
+    from decimal import Decimal
+
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import trade_aggregates
+    e=head_template_engine;t=registered_sor_long_ticket()
+    await reach_position_protected(e,t)
+    from src.trading_kernel.domain.events import ManagementReviewRequired
+    from src.trading_kernel.domain.reducer import reduce_event
+    async with PostgresKernelUnitOfWork(e) as u:
+        a=await u.aggregates.get_for_update(t.identity.ticket_id)
+        event=ManagementReviewRequired(event_id='gap-test',ticket_id=t.identity.ticket_id,
+            sequence=a.last_event_sequence+1,occurred_at_ms=4000,evidence_id='gap-test',reason='collector_gap')
+        await u.commit_reduction(event=event,reduction=reduce_event(a,event),expected_version=a.version)
+    async with e.begin() as c:
+        await c.execute(sa.update(trade_aggregates).where(trade_aggregates.c.ticket_id==t.identity.ticket_id).values(position_qty=0,status='reconciliation_pending'))
+    from src.trading_kernel.domain.trade_management import OrderAction
+    observation=app_evidence(t).model_copy(update={'action':OrderAction.CANCEL})
+    async with PostgresKernelUnitOfWork(e) as u:
+        before=await u.aggregates.get(t.identity.ticket_id)
+        commands=await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
+        result=await observe_trade_management(u,ticket_id=t.identity.ticket_id,evidence=observation,now_ms=5100)
+        after=await u.aggregates.get(t.identity.ticket_id)
+        assert result.mode is ManagementMode.REVIEW_REQUIRED
+        assert after.position_qty==Decimal(0) and after.management_mode is ManagementMode.REVIEW_REQUIRED
+        assert after.version==before.version
+        assert len(await u.exchange_commands.list_for_ticket(t.identity.ticket_id))==len(commands)
+        assert await u.management.has_evidence(t.identity.ticket_id,observation.evidence_id)

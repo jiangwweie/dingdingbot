@@ -10,6 +10,7 @@ from src.trading_kernel.application.management_intents import (
     system_intents_for,
 )
 from src.trading_kernel.application.observe_trade_management import (
+    is_flat_closure_observation,
     observe_trade_management,
 )
 from src.trading_kernel.application.ports import (
@@ -79,7 +80,7 @@ async def _observe_management_once(
         a = await u.aggregates.get(ticket_id)
         if a is None:
             return "ticket_absent"
-        if a.management_mode is not ManagementMode.MANUAL and (
+        if not is_flat_closure_observation(a) and a.management_mode is not ManagementMode.MANUAL and (
             a.active_stop_exchange_order_id is None
             or a.post_fill_stress_status != "passed"
         ):

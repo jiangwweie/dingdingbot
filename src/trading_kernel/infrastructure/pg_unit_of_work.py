@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Literal
 
@@ -170,6 +172,7 @@ class PostgresKernelUnitOfWork:
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
         self._management_repository = PostgresManagementRepository(self._connection)
+        self._management_repository.application_checkpoint = self._management_application_checkpoint
         self.management = self._management_repository
         self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
@@ -237,6 +240,21 @@ class PostgresKernelUnitOfWork:
             self._transaction = None
             self._connection = None
             self._notice_changes.clear()
+
+    @asynccontextmanager
+    async def _management_application_checkpoint(self) -> AsyncIterator[None]:
+        """Rollback an observer's SQL and deferred notice state together."""
+        notices = {key: (before, list(events)) for key, (before, events) in self._notice_changes.items()}
+        evidence = {key: list(items) for key, items in self._management_repository.new_evidence.items()}
+        try:
+            async with self._require_connection().begin_nested():
+                yield
+        except BaseException:
+            self._notice_changes.clear()
+            self._notice_changes.update(notices)
+            self._management_repository.new_evidence.clear()
+            self._management_repository.new_evidence.update(evidence)
+            raise
 
     async def commit_reduction(
         self,

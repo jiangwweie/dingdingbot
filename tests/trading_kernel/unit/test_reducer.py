@@ -1916,7 +1916,7 @@ def test_protected_ticket_exits_reconciles_settles_reviews_and_terminates() -> N
         CancelProtectionOrders(
             ticket_id=ticket.identity.ticket_id,
             exchange_order_id="tp-1",
-            order_namespace="conditional",
+            order_namespace="regular",
             purpose="reconciliation_cleanup",
         ),
     )

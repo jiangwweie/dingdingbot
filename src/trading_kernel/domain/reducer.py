@@ -1845,7 +1845,7 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
-                    order_namespace="conditional",
+                    order_namespace=("regular" if cleanup_order_id == current.tp1_exchange_order_id else "conditional"),
                     purpose="reconciliation_cleanup",
                 )
             )
@@ -1898,7 +1898,7 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
-                    order_namespace="conditional",
+                    order_namespace=("regular" if cleanup_order_id == current.tp1_exchange_order_id else "conditional"),
                     purpose="reconciliation_cleanup",
                 ),
             ),

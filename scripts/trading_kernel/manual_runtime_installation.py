@@ -70,11 +70,22 @@ def install_entry_runtime_config(release: Path, *, etc: Path = Path("/etc")) -> 
     )
 
 
+def install_manual_resource_profile(release: Path, *, etc: Path = Path("/etc")) -> None:
+    """Install the Owner-approved manual-only slice override, never start units."""
+    contents = (release / "deploy/manual/systemd/kernel-resources.conf").read_text()
+    if contents != "[Slice]\nCPUQuota=150%\nMemoryMax=1536M\nTasksMax=128\n":
+        raise ValueError("manual resource profile differs from approved contract")
+    dropin = etc / "systemd/system/brc-trading-kernel.slice.d"
+    dropin.mkdir(parents=True, exist_ok=True)
+    (dropin / "manual-resources.conf").write_text(contents)
+
+
 def install_console_files(release: Path, *, etc: Path = Path("/etc")) -> None:
     """Install certified canonical units; no service is enabled or started here."""
     units = etc / "systemd/system"
     units.mkdir(parents=True, exist_ok=True)
     install_entry_runtime_config(release, etc=etc)
+    install_manual_resource_profile(release, etc=etc)
     for source in (release / "deploy/systemd").glob("*"):
         shutil.copyfile(source, units / source.name)
     for source in (release / "deploy/owner-console/systemd").glob("*.service"):

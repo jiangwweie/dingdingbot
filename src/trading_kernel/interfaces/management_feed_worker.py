@@ -41,21 +41,13 @@ async def persist_management_feed_once(
             await u.management.lock_receiver(scope)
             current = await u.management.get_feed(scope, for_update=True)
             now_ms = clock_ms()
-            if current is None or current["epoch_id"] != state["epoch_id"]:
-                await u.management.start_feed(
-                    scope_key=scope,
-                    epoch_id=state["epoch_id"],
-                    worker_id=worker_id,
-                    runtime_commit=runtime_commit,
-                    now_ms=now_ms,
-                )
-
             # Receipts can arrive while runtime certification or ownership
             # locking is awaited. Check processing time, not tick start.
             now_ms = clock_ms()
 
             async def apply_observer(ticket_id, evidence, *, observed_at_ms=now_ms):
                 from src.trading_kernel.application.observe_trade_management import (
+                    is_flat_closure_observation,
                     observe_trade_management,
                 )
                 from src.trading_kernel.domain.trade_management import ManagementMode
@@ -64,6 +56,11 @@ async def persist_management_feed_once(
                 if a is None:
                     return False
                 if evidence.exchange_event_at_ms < a.ticket.created_at_ms:
+                    return True
+                if is_flat_closure_observation(a):
+                    await observe_trade_management(
+                        u, ticket_id=ticket_id, evidence=evidence, now_ms=observed_at_ms
+                    )
                     return True
                 if a.management_mode is not ManagementMode.MANUAL and (
                     a.active_stop_exchange_order_id is None
@@ -102,6 +99,38 @@ async def persist_management_feed_once(
                 )
                 return True
 
+            if (
+                current is not None
+                and current["epoch_id"] != state["epoch_id"]
+                and current["applied_watermark"] < current["persisted_watermark"]
+            ):
+                # A reconnect must not abandon durable unapplied events. Apply
+                # the old epoch in order before starting the new receiver epoch.
+                await u.management.persist_stream_batch(
+                    scope_key=scope,
+                    epoch_id=current["epoch_id"],
+                    events=[],
+                    connected_at_ms=current["connected_at_ms"],
+                    now_ms=now_ms,
+                    apply_observer=apply_observer,
+                    account_id=state["account_id"],
+                    application_runtime_commit=runtime_commit,
+                )
+                old = await u.management.get_feed(scope)
+                if old["applied_watermark"] < old["persisted_watermark"]:
+                    return FeedTickResult(
+                        status="management_feed_recovering",
+                        detail="previous_epoch_unapplied",
+                    )
+            if current is None or current["epoch_id"] != state["epoch_id"]:
+                await u.management.start_feed(
+                    scope_key=scope,
+                    epoch_id=state["epoch_id"],
+                    worker_id=worker_id,
+                    runtime_commit=runtime_commit,
+                    now_ms=now_ms,
+                )
+
             watermark = await u.management.persist_stream_batch(
                 scope_key=scope,
                 epoch_id=state["epoch_id"],
@@ -113,6 +142,7 @@ async def persist_management_feed_once(
                 backlog_pending=state["backlog_pending"],
                 apply_observer=apply_observer,
                 account_id=state["account_id"],
+                application_runtime_commit=runtime_commit,
             )
             from src.trading_kernel.application.ports import (
                 MonitorOwnerStatus,

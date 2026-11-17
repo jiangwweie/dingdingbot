@@ -74,6 +74,11 @@ def test_console_install_keeps_all_four_trade_workers_disabled(tmp_path):
     runtime = release / "deploy/runtime"
     runtime.mkdir(parents=True)
     (runtime / "entry.env").write_text("TRADING_KERNEL_TIMEOUT_SECONDS=10\nTRADING_KERNEL_ACTION_FACT_VALIDITY_MS=30000\n")
+    resource_dir = release / "deploy/manual/systemd"
+    resource_dir.mkdir(parents=True)
+    (resource_dir / "kernel-resources.conf").write_text(
+        "[Slice]\nCPUQuota=150%\nMemoryMax=1536M\nTasksMax=128\n"
+    )
     kernel_units = release / "deploy/systemd"
     kernel_units.mkdir(parents=True)
     for role in ("observation", "entry", "lifecycle", "reconciliation"):

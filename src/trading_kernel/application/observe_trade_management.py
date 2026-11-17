@@ -1,6 +1,6 @@
 """Apply a scoped, validated external-order observation through the existing UoW.
 
-The runtime event collector is not wired yet. No network I/O or venue mutation
+No network I/O or venue mutation
 is performed by this use case, including on repeated evidence.
 """
 
@@ -11,6 +11,7 @@ from src.trading_kernel.application.ports import (
     MonitorOwnerStatus,
     MonitorStateRecord,
 )
+from src.trading_kernel.domain.aggregate import AggregateStatus, TradeAggregate
 from src.trading_kernel.domain.events import (
     ManagementReviewRequired,
     ManualTakeoverConfirmed,
@@ -22,6 +23,19 @@ from src.trading_kernel.domain.trade_management import (
     TradeManagement,
     transition_management,
 )
+
+
+def is_flat_closure_observation(aggregate: TradeAggregate) -> bool:
+    """Only post-exposure flat/closure states accept readonly residual facts."""
+    return aggregate.position_qty == 0 and aggregate.status in {
+        AggregateStatus.RECONCILIATION_PENDING,
+        AggregateStatus.CANCEL_REJECTED,
+        AggregateStatus.CANCEL_OUTCOME_UNKNOWN,
+        AggregateStatus.SETTLEMENT_PENDING,
+        AggregateStatus.REVIEW_PENDING,
+        AggregateStatus.TERMINAL,
+        AggregateStatus.MANUAL_FLAT_PENDING_ORDERS,
+    }
 
 
 async def observe_trade_management(
@@ -54,6 +68,13 @@ async def observe_trade_management(
         takeover_detected_at_ms=aggregate.manual_takeover_at_ms,
     )
     await uow.management.save_evidence(ticket_id,evidence)
+    # Flatness does not establish closure or the actor of an order change.
+    # Retain the exact evidence and schedule normal readonly reconciliation;
+    # never manufacture a MANUAL_OPEN transition for a zero-position Ticket.
+    if is_flat_closure_observation(aggregate):
+        if aggregate.status.value != "terminal":
+            await uow.aggregates.expedite_reconciliation(ticket_id, due_at_ms=now_ms)
+        return state
     if state.mode is ManagementMode.MANUAL:
         return state
     commands = await uow.management.pending_command_rows(ticket_id)
