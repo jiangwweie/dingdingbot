@@ -60,6 +60,7 @@ async def persist_management_feed_once(
                 connected_at_ms=state["connected_at_ms"],
                 now_ms=clock_ms(),
                 gap_reason=state["gap_reason"],
+                connection_observed_at_ms=state.get("connection_observed_at_ms"),
                 backlog_pending=state["backlog_pending"],
                 worker_id=worker_id,
             )
@@ -144,6 +145,7 @@ async def persist_management_feed_once(
                     apply_observer=apply_observer,
                     account_id=state["account_id"],
                     application_runtime_commit=runtime_commit,
+                    replay_only=True,
                     worker_id=worker_id,
                     backlog_pending=False
                     if active_receipt is None
@@ -192,6 +194,7 @@ async def persist_management_feed_once(
                 apply_observer=apply_observer,
                 account_id=state["account_id"],
                 application_runtime_commit=runtime_commit,
+                replay_only=True,
             )
             from src.trading_kernel.application.ports import (
                 MonitorOwnerStatus,

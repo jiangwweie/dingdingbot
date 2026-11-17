@@ -137,7 +137,7 @@ def require_inactive() -> None:
         raise ValueError("Owner API writer active")
 
 
-def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticket_ids: tuple[str,...] = (), natural_exit_recovery: bool = False) -> dict:
+def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticket_ids: tuple[str,...] = (), natural_exit_recovery: bool = False, resume_binding: dict | None = None) -> dict:
     """A same-schema upgrade is explicit and stopped, never a fresh-host bypass."""
     if not (filesystem_root / "etc/brc/trading-kernel.write-fenced").is_file():
         raise ValueError("upgrade requires the ENTRY maintenance fence")
@@ -147,6 +147,7 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
         or not (filesystem_root / "etc/brc/trading-kernel.env").is_file()
     ):
         raise ValueError("upgrade requires an installed bound runtime")
+    active_units=[]
     for unit in [
         f"brc-trading-kernel-{r}-worker.service"
         for r in ("observation", "entry", "lifecycle", "reconciliation")
@@ -160,7 +161,9 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
             ).returncode
             == 0
         ):
-            raise ValueError("all runtime and Owner writers must be stopped")
+            active_units.append(unit)
+    if active_units and resume_binding is None:
+        raise ValueError("all runtime and Owner writers must be stopped")
     if natural_exit_recovery and not recovery_ticket_ids:
         raise ValueError('natural recovery requires exact Ticket')
     if recovery_ticket_ids and (len(recovery_ticket_ids)!=1 or not re_full_ticket(recovery_ticket_ids[0])):
@@ -193,6 +196,31 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
             if exact.get('outside_scope',False) or target is None or target['ticket_id']!=recovery_ticket_ids[0] or target['reason']!='tp1_terminal_attribution_unknown' or any(i['ticket_id']!=target['ticket_id'] or i['kind'] not in {'lifecycle_facts_contradictory','lifecycle_facts_unavailable'} for i in exact['incidents']):
                 raise ValueError('natural recovery source or causal incident differs')
             identity['natural_exit_recovery']={**target,'source_commit':identity['commit'],'schema_revision':identity['schema'],'incident_ids':[i['incident_id'] for i in exact['incidents']]}
+    if resume_binding is not None:
+        origin=resume_binding['source'];target=resume_binding['target']
+        if (not resume_binding.get('baseline') or recovery_ticket_ids or not identity['paused']
+                or any(identity[k] for k in ('tickets','commands','positions','incidents'))
+                or (identity['commit'],identity['schema']) not in {(origin['commit'],origin['schema']),
+                    (origin['commit'],target['schema_revision']),(target['commit'],target['schema_revision'])}):
+            raise ValueError('interrupted upgrade database outside exact candidate')
+        if 'identity' in resume_binding.get('steps',[]) and (identity['commit'],identity['schema'])!=(target['commit'],target['schema_revision']):
+            raise ValueError('committed upgrade identity regressed')
+        if 'migration' in resume_binding.get('steps',[]) and identity['schema']!=target['schema_revision']:
+            raise ValueError('committed upgrade schema regressed')
+        if (not current.is_symlink() or str(current.resolve()) not in {resume_binding['surfaces']['kernel'],target['kernel_release']}):
+            raise ValueError('interrupted upgrade runtime surface differs')
+        if active_units:
+            if (not resume_binding.get('starting_services') or identity['commit']!=target['commit']
+                    or 'brc-trading-kernel-entry-worker.service' in active_units):
+                raise ValueError('interrupted upgrade has unapproved active writer')
+            for relative,kind in [('opt/brc/current','kernel'),('opt/brc/owner-console-api/current','api'),('opt/brc/owner-console/current','static')]:
+                if (filesystem_root/relative).resolve()!=Path(target[kind+'_release']).resolve():
+                    raise ValueError('running candidate surface differs')
+            run(['systemctl','stop',*active_units])
+            for unit in active_units:
+                if subprocess.run(['systemctl','is-active',unit],capture_output=True,timeout=10,check=False).returncode==0:
+                    raise ValueError('candidate writer did not stop for resume')
+        return identity
     if (
         identity["commit"] != (current / ".brc-runtime-commit").read_text().strip()
         or identity["schema"] != (current / ".brc-schema-revision").read_text().strip()
@@ -633,6 +661,10 @@ def main(argv=None) -> int:
         raise ValueError("unsafe protected installation directory")
     with open("/run/brc-manual-install.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        progress=ROOT/'upgrade-progress.json'
+        if args.phase=='receive-upgrade' and progress.exists():
+            saved=json.loads(progress.read_text())
+            if 'complete' not in saved.get('steps',[]):raise ValueError('finish the bound interrupted upgrade before restaging')
         if args.phase in {"receive", "receive-upgrade"}:
             result = receive_release(
                 args.commit or "",

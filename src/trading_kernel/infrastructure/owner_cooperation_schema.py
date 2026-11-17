@@ -199,6 +199,7 @@ def define_owner_cooperation_tables(metadata: sa.MetaData) -> tuple[sa.Table, ..
         sa.Column("ordinal", time, nullable=False),
         sa.Column("persisted_watermark", time, nullable=False),
         sa.Column("connected_at_ms", time),
+        sa.Column("connection_observed_at_ms",time),
         sa.Column("gap_reason", sa.String(256)),
         sa.Column("backlog_pending", sa.Boolean, nullable=False),
         sa.Column("updated_at_ms", time, nullable=False),

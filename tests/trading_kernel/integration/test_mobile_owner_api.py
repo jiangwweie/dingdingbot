@@ -369,3 +369,36 @@ async def test_binding_failure_limit_persists_and_cannot_be_bypassed_by_new_toke
                 headers={"origin": "https://owner.test"},
             )
         ).status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('submitted',[False,True,'pending'])
+async def test_rebound_owner_can_resolve_old_session_request_without_erasing_accepted_intent(head_template_engine,submitted):
+    from tests.trading_kernel.support.owner_device import keypair, sign
+    e=head_template_engine;key,jwk=keypair();_,new_jwk=keypair()
+    async with PostgresKernelUnitOfWork(e) as u:
+        await seed_runtime_authority(u,RuntimeAuthoritySeedRequest(account_id='mobile-account',runtime_commit='a'*40,schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=1000))
+    async with e.begin() as c:
+        grant=await PostgresOwnerDeviceRepository(c).issue_binding(owner_identity='Owner',replace_device=False,now_ms=2000)
+    app=FastAPI();app.state.owner_console_settings=SimpleNamespace(public_host='owner.test',public_origin='https://owner.test',owner_policy_id='policy-main',account_id='mobile-account',venue_id='binance-usdm')
+    app.state.owner_control_engine=e;now=[3000];app.state.owner_clock_ms=lambda:now[0];app.include_router(router)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url='https://owner.test') as client:
+        old=(await client.post('/api/owner/v1/mobile/devices/bind',json={'token':grant,'public_key':jwk},headers={'origin':'https://owner.test'})).json()
+        nonce=(await client.post('/api/owner/v1/mobile/nonces',headers={'origin':'https://owner.test'})).json()
+        controls=(await client.get('/api/owner/v1/mobile/controls')).json()
+        p={'owner_policy_id':'policy-main','enabled':False,'expected_version':controls['global']['policy_version']}
+        proof=DeviceWriteProof(device_id=old['device_id'],device_epoch=old['device_epoch'],method='POST',path='/api/owner/v1/mobile/controls/global',body_digest=canonical_digest(p),nonce_id=nonce['nonce_id'],idempotency_key='before-rebind',issued_at_ms=nonce['issued_at_ms'],expires_at_ms=nonce['expires_at_ms'])
+        if submitted=='pending':
+            async with e.begin() as c:
+                await PostgresOwnerDeviceRepository(c).authorize(token=client.cookies.get('__Host-brc_device_session'),proof=proof,
+                    signature=sign(key,proof),body=p,purpose='entry_pause',now_ms=now[0])
+        elif submitted:
+            response=await client.post(proof.path,json={'proof':proof.model_dump(mode='json'),'signature':sign(key,proof),'payload':p},headers={'origin':'https://owner.test'})
+            assert response.status_code==200
+        now[0]=4000
+        async with e.begin() as c:
+            grant=await PostgresOwnerDeviceRepository(c).issue_binding(owner_identity='Owner',replace_device=True,now_ms=now[0])
+        rebound=await client.post('/api/owner/v1/mobile/devices/bind',json={'token':grant,'public_key':new_jwk},headers={'origin':'https://owner.test'})
+        assert rebound.status_code==200
+        receipt=await client.get('/api/owner/v1/mobile/requests/before-rebind',params={'nonce_id':nonce['nonce_id']})
+        assert receipt.json()['state']==('pending' if submitted=='pending' else 'completed' if submitted else 'not_accepted')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stopped-flat manual upgrade: same schema or exact 0017-to-0018 notice migration."""
+"""Resume an exact stopped-flat manual upgrade without replacing its source proof."""
 
 from __future__ import annotations
 
@@ -51,7 +51,9 @@ def preservation_projection_sql(
     )
 
 
-async def read_preserved_controls(connection, source_columns: dict[str, list[str]]) -> dict:
+async def read_preserved_controls(
+    connection, source_columns: dict[str, list[str]]
+) -> dict:
     """Compare original control columns; target additions are separately constrained."""
     from sqlalchemy import text
 
@@ -65,9 +67,14 @@ async def read_preserved_controls(connection, source_columns: dict[str, list[str
         if not columns:
             raise ValueError("preserved control source columns missing")
         selected = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
-        result[key] = [dict(row) for row in (await connection.execute(
-            text('SELECT ' + selected + ' FROM "' + table + '" ORDER BY 1')
-        )).mappings()]
+        result[key] = [
+            dict(row)
+            for row in (
+                await connection.execute(
+                    text("SELECT " + selected + ' FROM "' + table + '" ORDER BY 1')
+                )
+            ).mappings()
+        ]
     return result
 
 
@@ -89,7 +96,9 @@ async def refresh_owner_read_grants(engine) -> None:
             await connection.execute(text(statement))
 
 
-async def activate(receipt: dict, source: dict, dsn: str) -> dict:
+async def activate(
+    receipt: dict, source: dict, dsn: str, *, filesystem_root: Path = Path("/")
+) -> dict:
     from hashlib import sha256
 
     from pydantic import SecretStr
@@ -118,6 +127,18 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
 
     require_upgrade_schema(source["schema"], receipt["schema_revision"])
     forward = source["schema"] != receipt["schema_revision"]
+    from scripts.trading_kernel.manual_upgrade_journal import UpgradeJournal
+
+    journal = UpgradeJournal(ROOT, receipt, source)
+    links = {
+        kind: filesystem_root / relative
+        for kind, relative in (
+            ("kernel", "opt/brc/current"),
+            ("api", "opt/brc/owner-console-api/current"),
+            ("static", "opt/brc/owner-console/current"),
+        )
+    }
+    journal.freeze_surfaces(links)
 
     secret = json.loads((ROOT / "exchange-credentials.json").read_text())
     enrolled = json.loads((ROOT / "verified-account.json").read_text())
@@ -146,6 +167,26 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         raise ValueError("fresh stopped exchange account identity or flatness differs")
 
     engine = create_async_engine(dsn)
+    try:
+        async with engine.connect() as c:
+            observed = (
+                (
+                    await c.execute(
+                        text(
+                            "SELECT system_identifier::text AS system_identifier,current_database() AS database FROM pg_control_system()"
+                        )
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        journal.freeze_database(
+            {**dict(observed), "account_id": enrolled["account_id"]}
+        )
+
+    except BaseException:
+        await engine.dispose()
+        raise
 
     async def snapshot(source_columns=None):
         async with engine.connect() as c:
@@ -212,99 +253,124 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
             return result
 
     try:
-        before = await snapshot()
-        if before["policy"][0]["new_entry_submit_enabled"] is not False:
-            raise ValueError("Owner ENTRY must remain paused for stopped upgrade")
-        write_private(
-            ROOT / "same-schema-source-preservation.json",
-            json.dumps(before, default=str, sort_keys=True) + "\n",
-            overwrite=True,
-        )
-        if forward:
-            migration_env = os.environ.copy()
-            migration_env["TRADING_KERNEL_DATABASE_URL"] = dsn
-            run(
-                [
-                    str(REPO_ROOT / ".venv/bin/python"),
-                    str(REPO_ROOT / "scripts/trading_kernel/bootstrap_schema.py"),
-                ],
-                env=migration_env,
-            )
-        account = json.loads((ROOT / "verified-account.json").read_text())["account_id"]
-        async with PostgresKernelUnitOfWork(engine) as uow:
-            request=RuntimeAuthoritySeedRequest(account_id=account,runtime_commit=receipt['commit'],schema_revision=receipt['schema_revision'],seeded_at_ms=int(time.time()*1000))
-            if source.get('recovery_ticket_ids'):
-                if forward:
-                    raise ValueError('recovery-only upgrade must keep exact schema')
-                if source.get('natural_exit_recovery'):
-                    await deploy_verified_exit_recovery_identity(uow,request,scope=source['natural_exit_recovery'])
-                else:
-                    await deploy_management_recovery_identity(uow,request,recovery_ticket_ids=tuple(source['recovery_ticket_ids']))
-            else:
-                await (deploy_compatible_upgrade_identity if forward else deploy_runtime_identity)(uow,request)
-        if forward and source["schema"]=="0017_app_management_observation":
-            async with engine.connect() as c:
-                if not await c.scalar(text("SELECT has_table_privilege('brc_kernel','brc_notice_outbox','SELECT,INSERT,UPDATE') AND has_sequence_privilege('brc_kernel','brc_notice_outbox_sequence_seq','USAGE,SELECT') AND has_table_privilege('brc_owner_console','brc_notice_outbox','SELECT')")):
-                    raise ValueError("notice runtime/read role privileges differ")
-                if await c.scalar(text("SELECT count(*) FROM brc_notice_outbox")) != 0:
-                    raise ValueError(
-                        "new notice outbox must be empty before writers start"
-                    )
-        if forward and source["schema"] == "0019_management_evidence_v2":
-            async with engine.connect() as c:
-                for name in (
-                    "brc_post_fill_exit_plans",
-                    "brc_exit_configurations",
-                    "brc_exit_configuration_current",
-                    "brc_btc_ma50_current",
-                    "brc_btc_ma50_snapshots",
-                ):
-                    if await c.scalar(text('SELECT count(*) FROM "' + name + '"')):
-                        raise ValueError(
-                            "new exit authority must remain empty before Owner activation"
+        before = journal.baseline
+        if before is None:
+            before = await snapshot()
+            if before["policy"][0]["new_entry_submit_enabled"] is not False:
+                raise ValueError("Owner ENTRY must remain paused for stopped upgrade")
+            journal.freeze_baseline(before)
+            before = journal.baseline
+        if not journal.done("preservation"):
+            if forward:
+                migration_env = os.environ.copy()
+                migration_env["TRADING_KERNEL_DATABASE_URL"] = dsn
+                run(
+                    [
+                        str(REPO_ROOT / ".venv/bin/python"),
+                        str(REPO_ROOT / "scripts/trading_kernel/bootstrap_schema.py"),
+                    ],
+                    env=migration_env,
+                )
+            journal.complete_step("migration")
+            account = json.loads((ROOT / "verified-account.json").read_text())[
+                "account_id"
+            ]
+            async with PostgresKernelUnitOfWork(engine) as uow:
+                request = RuntimeAuthoritySeedRequest(
+                    account_id=account,
+                    runtime_commit=receipt["commit"],
+                    schema_revision=receipt["schema_revision"],
+                    seeded_at_ms=int(time.time() * 1000),
+                )
+                if source.get("recovery_ticket_ids"):
+                    if forward:
+                        raise ValueError("recovery-only upgrade must keep exact schema")
+                    if source.get("natural_exit_recovery"):
+                        await deploy_verified_exit_recovery_identity(
+                            uow, request, scope=source["natural_exit_recovery"]
                         )
-        await refresh_owner_read_grants(engine)
-        after = await snapshot(before["preserved_columns"])
-        if before != after:
-            raise ValueError(
-                "current Universe/history or Owner controls changed during upgrade"
-            )
+                    else:
+                        await deploy_management_recovery_identity(
+                            uow,
+                            request,
+                            recovery_ticket_ids=tuple(source["recovery_ticket_ids"]),
+                        )
+                else:
+                    await (
+                        deploy_compatible_upgrade_identity
+                        if forward
+                        else deploy_runtime_identity
+                    )(uow, request)
+            journal.complete_step("identity")
+            if forward and source["schema"] == "0017_app_management_observation":
+                async with engine.connect() as c:
+                    if not await c.scalar(
+                        text(
+                            "SELECT has_table_privilege('brc_kernel','brc_notice_outbox','SELECT,INSERT,UPDATE') AND has_sequence_privilege('brc_kernel','brc_notice_outbox_sequence_seq','USAGE,SELECT') AND has_table_privilege('brc_owner_console','brc_notice_outbox','SELECT')"
+                        )
+                    ):
+                        raise ValueError("notice runtime/read role privileges differ")
+                    if (
+                        await c.scalar(text("SELECT count(*) FROM brc_notice_outbox"))
+                        != 0
+                    ):
+                        raise ValueError(
+                            "new notice outbox must be empty before writers start"
+                        )
+            if forward and source["schema"] == "0019_management_evidence_v2":
+                async with engine.connect() as c:
+                    for name in (
+                        "brc_post_fill_exit_plans",
+                        "brc_exit_configurations",
+                        "brc_exit_configuration_current",
+                        "brc_btc_ma50_current",
+                        "brc_btc_ma50_snapshots",
+                    ):
+                        if await c.scalar(text('SELECT count(*) FROM "' + name + '"')):
+                            raise ValueError(
+                                "new exit authority must remain empty before Owner activation"
+                            )
+            await refresh_owner_read_grants(engine)
+            after = await snapshot(before["preserved_columns"])
+            if before != json.loads(json.dumps(after, default=str)):
+                raise ValueError(
+                    "current Universe/history or Owner controls changed during upgrade"
+                )
+        else:
+            async with engine.connect() as c:
+                identities = dict(
+                    (
+                        await c.execute(
+                            text(
+                                "SELECT metadata_key,metadata_value FROM brc_schema_metadata WHERE metadata_key IN ('runtime_commit','schema_revision')"
+                            )
+                        )
+                    ).all()
+                )
+                if identities != {
+                    "runtime_commit": receipt["commit"],
+                    "schema_revision": receipt["schema_revision"],
+                }:
+                    raise ValueError(
+                        "installed identity differs from resumed candidate"
+                    )
+                controls = await read_preserved_controls(c, before["preserved_columns"])
+                if any(
+                    json.loads(json.dumps(controls[key], default=str)) != before[key]
+                    for key in controls
+                ):
+                    raise ValueError("Owner controls changed after preserved upgrade")
     finally:
         await engine.dispose()
-    env_path = Path("/etc/brc/trading-kernel.env")
-    values = {
-        k: json.loads(v)
-        for k, v in (line.split("=", 1) for line in env_path.read_text().splitlines())
-    }
-    if values["TRADING_KERNEL_RUNTIME_COMMIT"] != source["commit"]:
-        raise ValueError("source Worker environment commit differs")
-    values["TRADING_KERNEL_RUNTIME_COMMIT"] = receipt["commit"]
-    values["TRADING_KERNEL_SCHEMA_REVISION"] = receipt["schema_revision"]
-    write_private(
-        env_path,
-        "".join(k + "=" + json.dumps(v) + "\n" for k, v in values.items()),
-        overwrite=True,
-    )
-    for kind, path in [
-        ("kernel", "/opt/brc/current"),
-        ("api", "/opt/brc/owner-console-api/current"),
-        ("static", "/opt/brc/owner-console/current"),
-    ]:
-        current = Path(path)
-        if not current.is_symlink() or (
-            kind != "static"
-            and (current / ".brc-runtime-commit").read_text().strip()
-            != source["commit"]
-        ):
-            raise ValueError("source surface differs during stopped activation")
-        pending = current.with_name(current.name + ".pending-manual-upgrade")
-        if os.path.lexists(pending):
-            raise ValueError("unexpected pending release link")
-        pending.symlink_to(receipt[kind + "_release"], target_is_directory=True)
-        os.replace(pending, current)
+    journal.complete_step("preservation")
+    env_path = filesystem_root / "etc/brc/trading-kernel.env"
+    journal.update_environment(env_path)
+    for kind, current in links.items():
+        journal.switch_surface(kind, current)
+        journal.complete_step(kind)
     # Publish only the certified canonical Console routes. Authentication and TOTP remain unchanged.
     canonical = REPO_ROOT / "deploy/owner-console/nginx/owner-console.locations.conf"
-    Path("/etc/nginx/snippets/brc-manual-owner.locations.conf").write_text(
+    (filesystem_root / "etc/nginx/snippets/brc-manual-owner.locations.conf").write_text(
         canonical.read_text()
     )
     run(["nginx", "-t"])
@@ -315,10 +381,12 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         "0019_management_evidence_v2",
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
-        "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation",
+        "0022_wallet_margin_allocation",
+        "0023_management_recovery",
+        "0024_owner_cooperation",
     }:
-        credential = Path("/etc/brc/notification-credentials/feishu_webhook")
-        private_env = Path("/etc/brc/notification-credentials/feishu.env")
+        credential = filesystem_root / "etc/brc/notification-credentials/feishu_webhook"
+        private_env = filesystem_root / "etc/brc/notification-credentials/feishu.env"
         if credential.is_file():
             from src.trading_kernel.infrastructure.feishu_notice import FeishuChannel
 
@@ -335,8 +403,9 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
                 overwrite=True,
             )
             credential.unlink()
-        dropin = Path(
-            "/etc/systemd/system/brc-trading-kernel-reconciliation-worker.service.d/notifications.conf"
+        dropin = (
+            filesystem_root
+            / "etc/systemd/system/brc-trading-kernel-reconciliation-worker.service.d/notifications.conf"
         )
         dropin.parent.mkdir(parents=True, exist_ok=True)
         dropin.write_text(
@@ -347,19 +416,25 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         install_manual_resource_profile,
     )
 
-    install_entry_runtime_config(REPO_ROOT)
-    install_manual_resource_profile(REPO_ROOT)
+    install_entry_runtime_config(REPO_ROOT, etc=filesystem_root / "etc")
+    install_manual_resource_profile(REPO_ROOT, etc=filesystem_root / "etc")
     run(["systemctl", "daemon-reload"])
+    journal.complete_step("configuration")
+    journal.complete_step("starting_services")
     if not source.get("recovery_ticket_ids"):
-        run([
-            "systemctl", "start", "brc-owner-console-api.service",
-            "brc-trading-kernel-observation-worker.service",
-            "brc-trading-kernel-lifecycle-worker.service",
-            "brc-trading-kernel-reconciliation-worker.service",
-        ])
+        run(
+            [
+                "systemctl",
+                "start",
+                "brc-owner-console-api.service",
+                "brc-trading-kernel-observation-worker.service",
+                "brc-trading-kernel-lifecycle-worker.service",
+                "brc-trading-kernel-reconciliation-worker.service",
+            ]
+        )
     run(["systemctl", "reload", "nginx"])
     result = {
-        "status": "notice_schema_upgraded_entry_fenced"
+        "status": "forward_schema_upgraded_entry_fenced"
         if forward
         else "same_schema_upgraded_entry_fenced",
         "schema_revision": receipt["schema_revision"],
@@ -369,11 +444,13 @@ async def activate(receipt: dict, source: dict, dsn: str) -> dict:
         "owner_policy_changed": False,
         "entry_worker_started": False,
     }
+    journal.complete_step("services")
     write_private(
         ROOT / "same-schema-upgrade.json",
         json.dumps(result, sort_keys=True) + "\n",
         overwrite=True,
     )
+    journal.complete_step("complete")
     return result
 
 
@@ -384,7 +461,7 @@ def main():
     p.add_argument("--machine-id", required=True)
     p.add_argument("--public-ip", required=True)
     p.add_argument("--recovery-ticket-id")
-    p.add_argument("--natural-exit-recovery",action="store_true")
+    p.add_argument("--natural-exit-recovery", action="store_true")
     a = p.parse_args()
     if os.geteuid() != 0:
         raise ValueError("root required")
@@ -404,9 +481,29 @@ def main():
     )
     with open("/run/brc-manual-install.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        source = require_stopped_upgrade(recovery_ticket_ids=() if a.recovery_ticket_id is None else (a.recovery_ticket_id,),natural_exit_recovery=a.natural_exit_recovery)
-        if source != prepared["source"]:
+        from scripts.trading_kernel.manual_upgrade_journal import UpgradeJournal
+
+        progress = ROOT / "upgrade-progress.json"
+        journal = (
+            UpgradeJournal(ROOT, receipt, prepared["source"])
+            if progress.exists()
+            else None
+        )
+        resume_binding = (
+            None
+            if journal is None or journal.baseline is None
+            else journal.resume_binding()
+        )
+        observed = require_stopped_upgrade(
+            recovery_ticket_ids=()
+            if a.recovery_ticket_id is None
+            else (a.recovery_ticket_id,),
+            natural_exit_recovery=a.natural_exit_recovery,
+            resume_binding=resume_binding,
+        )
+        if resume_binding is None and observed != prepared["source"]:
             raise ValueError("stopped upgrade source changed after staging")
+        source = prepared["source"]
         print(
             json.dumps(
                 asyncio.run(

@@ -596,7 +596,7 @@ async def request_receipt(
     async with get_control_engine(request).begin() as c:
         repository = PostgresOwnerDeviceRepository(c)
         await repository._lock()
-        device, session = await repository.authenticate(
+        device, _session = await repository.authenticate(
             request.cookies[COOKIE], now_ms=get_clock_ms(request)
         )
         row = (
@@ -612,14 +612,41 @@ async def request_receipt(
             .one_or_none()
         )
         if row is None and nonce_id is not None and len(nonce_id) <= 160:
-            from src.trading_kernel.infrastructure.pg_models import owner_request_nonces
+            from src.trading_kernel.infrastructure.pg_models import (
+                owner_device_registrations,
+                owner_device_sessions,
+                owner_request_nonces,
+            )
 
             nonce = (
                 (
                     await c.execute(
-                        sa.select(owner_request_nonces).where(
+                        sa.select(
+                            owner_request_nonces,
+                            owner_device_sessions.c.revoked_at_ms.label(
+                                "session_revoked"
+                            ),
+                            owner_device_sessions.c.expires_at_ms.label(
+                                "session_expiry"
+                            ),
+                            owner_device_registrations.c.revoked_at_ms.label(
+                                "device_revoked"
+                            ),
+                        )
+                        .join(
+                            owner_device_sessions,
+                            owner_device_sessions.c.session_id
+                            == owner_request_nonces.c.session_id,
+                        )
+                        .join(
+                            owner_device_registrations,
+                            owner_device_registrations.c.device_id
+                            == owner_device_sessions.c.device_id,
+                        )
+                        .where(
                             owner_request_nonces.c.nonce_id == nonce_id,
-                            owner_request_nonces.c.session_id == session.session_id,
+                            owner_device_registrations.c.owner_identity
+                            == device.owner_identity,
                         )
                     )
                 )
@@ -629,7 +656,12 @@ async def request_receipt(
             if (
                 nonce is not None
                 and nonce["consumed_at_ms"] is None
-                and nonce["expires_at_ms"] <= get_clock_ms(request)
+                and (
+                    nonce["expires_at_ms"] <= get_clock_ms(request)
+                    or nonce["device_revoked"] is not None
+                    or nonce["session_revoked"] is not None
+                    or nonce["session_expiry"] <= get_clock_ms(request)
+                )
             ):
                 return {"state": "not_accepted"}
     if row is None or row["result_payload"] is None:

@@ -4,7 +4,7 @@
 
 ## 数量与统计口径
 
-**当前 tracked Kernel schema 定义 113 张业务表、1290 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **116 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
+**当前 tracked Kernel schema 定义 113 张业务表、1291 个业务字段。**此外，数据库有 **1 张 Alembic 版本表**；切换日志组件另定义 **2 张运维表**。这三个集合合并是 **116 张非系统持久表**的统计口径，不能把仅 public schema、仅 brc_ 前缀或包含 pg_catalog 的数量混为同一答案。
 
 | 范围 | 数量 | 是否属于 Kernel metadata | 依据 |
 | --- | --- | --- | --- |
@@ -1976,4 +1976,4 @@ COMMIT;
 
 **维护与用途**：现有Kernel仓储按精确scope维护；接收持久化不授予交易权限，已提交原始事件不可跳过。
 
-**字段清单**：`scope_key`、`epoch_id`、`ordinal`、`persisted_watermark`、`connected_at_ms`、`gap_reason`、`backlog_pending`、`updated_at_ms`、`completed_at_ms`
+**字段清单**：`scope_key`、`epoch_id`、`ordinal`、`persisted_watermark`、`connected_at_ms`、`connection_observed_at_ms`、`gap_reason`、`backlog_pending`、`updated_at_ms`、`completed_at_ms`

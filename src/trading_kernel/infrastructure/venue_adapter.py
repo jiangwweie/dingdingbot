@@ -778,9 +778,10 @@ class CcxtVenueAdapter:
                 continue
             for old in exchange.management_closed_batches:
                 states.append({'venue_id':venue,'account_id':account,'epoch_id':old['epoch_id'],
-                    'connected_at_ms':old['connected_at_ms'],'gap_reason':old['gap_reason'],
+                    'connected_at_ms':old['connected_at_ms'],'connection_observed_at_ms':None,'gap_reason':old['gap_reason'],
                     'backlog_pending':len(old['events'])>128,'events':[{**event,'account_id':account} for event in list(old['events'])[:128]]})
             states.append({'venue_id':venue,'account_id':account,'epoch_id':exchange.management_epoch_id,
+                'connection_observed_at_ms':self._clock_ms() if exchange._management_connected_ms is not None and exchange.management_receive_gap is None else None,
                 'connected_at_ms':exchange._management_connected_ms,'gap_reason':exchange.management_receive_gap,'backlog_pending':len(exchange.management_pending_events)>128,
                 'events':[{**event,'account_id':account} for event in list(exchange.management_pending_events)[:128]]})
         return states

@@ -21,6 +21,18 @@ const b64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replace
 function canonical(value){if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value)}
 async function digest(body){return 'sha256:'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(body))))).map(x=>x.toString(16).padStart(2,'0')).join('')}
 async function signed(path,payload,key=crypto.randomUUID()){
+ if(!navigator.locks?.request)throw Error('当前浏览器不支持操作互斥，请使用新版Safari');
+ return navigator.locks.request('brc-owner-write',{mode:'exclusive'},()=>sendSigned(path,payload,key));
+}
+async function clearPendingWrite(proof){
+ const d=await db();
+ await new Promise((resolve,reject)=>{
+  const tx=d.transaction('keys','readwrite'),storage=tx.objectStore('keys'),r=storage.get('pending-write');
+  r.onsuccess=()=>{const p=r.result?.proof;if(p&&p.idempotency_key===proof.idempotency_key&&p.device_id===proof.device_id&&p.nonce_id===proof.nonce_id)storage.put(null,'pending-write')};
+  tx.oncomplete=()=>{d.close();resolve()};tx.onerror=()=>{d.close();reject(tx.error)};
+ });
+}
+async function sendSigned(path,payload,key){
  if(!session||!deviceKey)throw Error('设备未绑定');
  if(await getKey('pending-write'))throw Error('上次操作结果待核实，请刷新');
  const n=await request('/nonces',{method:'POST',body:'{}'});
@@ -31,22 +43,26 @@ async function signed(path,payload,key=crypto.randomUUID()){
  await storeKey(packet,'pending-write');
  try{
   const result=await request(path,{method:'POST',body:JSON.stringify(packet)});
-  await storeKey(null,'pending-write');return result;
+  await clearPendingWrite(proof);return result;
  }catch(error){
   // A known client rejection is terminal. Timeout, disconnect and 5xx remain
   // unknown and survive page closure. No new UUID or automatic write retry.
-  if(error.status>=400&&error.status<500&&error.status!==408)await storeKey(null,'pending-write');
+  if(error.status>=400&&error.status<500&&error.status!==408)await clearPendingWrite(proof);
   else throw Error('操作结果待核实，请刷新');
   throw error;
  }
 }
 async function resolvePendingWrite(){
+ if(!navigator.locks?.request)return !await getKey('pending-write');
+ return navigator.locks.request('brc-owner-write',{mode:'exclusive'},resolveStoredPendingWrite);
+}
+async function resolveStoredPendingWrite(){
  const pending=await getKey('pending-write');
  if(!pending)return true;
  try{
   const receipt=await request('/requests/'+encodeURIComponent(pending.proof.idempotency_key)+'?nonce_id='+encodeURIComponent(pending.proof.nonce_id));
   if(receipt.state==='completed'||receipt.state==='not_accepted'){
-   await storeKey(null,'pending-write');notice(receipt.state==='completed'?'上次操作已核实':'上次操作未受理，可重新操作');return true;
+   await clearPendingWrite(pending.proof);notice(receipt.state==='completed'?'上次操作已核实':'上次操作未受理，可重新操作');return true;
   }
  }catch{}
  return false;

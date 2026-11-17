@@ -103,8 +103,15 @@ class PostgresManagementFeed:
         gap_reason=None,
         backlog_pending=False,
         worker_id=None,
+        connection_observed_at_ms=None,
     ):
         """Persist receipt independently of ordered application; never grant ready."""
+        if connection_observed_at_ms is not None and (
+            connected_at_ms is None
+            or gap_reason is not None
+            or not connected_at_ms <= connection_observed_at_ms <= now_ms
+        ):
+            raise ValueError("connection health observation differs from receiver")
         await self.lock_receiver(scope_key)
         current = await self.get_feed(scope_key, for_update=True)
         if (
@@ -157,6 +164,7 @@ class PostgresManagementFeed:
                     else 0,
                 ),
                 "connected_at_ms": connected_at_ms,
+                "connection_observed_at_ms": connection_observed_at_ms,
                 "gap_reason": None,
                 "backlog_pending": backlog_pending,
                 "updated_at_ms": now_ms,
@@ -246,6 +254,11 @@ class PostgresManagementFeed:
             .values(
                 persisted_watermark=watermark,
                 connected_at_ms=row["connected_at_ms"] or connected_at_ms,
+                connection_observed_at_ms=max(
+                    row["connection_observed_at_ms"] or 0,
+                    connection_observed_at_ms or 0,
+                )
+                or None,
                 gap_reason=reason,
                 backlog_pending=backlog_pending,
                 updated_at_ms=now_ms,
@@ -284,9 +297,12 @@ class PostgresManagementFeed:
             and old["applied_watermark"] < old["persisted_watermark"]
         ):
             raise ValueError("previous management epoch has unapplied events")
-        if old is not None and old['epoch_id']!=epoch_id:
-            received_old=await self.received_epoch(scope_key,old['epoch_id'])
-            if received_old is not None and (received_old['persisted_watermark']>old['applied_watermark'] or received_old['backlog_pending']):
+        if old is not None and old["epoch_id"] != epoch_id:
+            received_old = await self.received_epoch(scope_key, old["epoch_id"])
+            if received_old is not None and (
+                received_old["persisted_watermark"] > old["applied_watermark"]
+                or received_old["backlog_pending"]
+            ):
                 raise ValueError("previous management epoch has unapplied receipts")
         if (
             old is not None
@@ -386,6 +402,7 @@ class PostgresManagementFeed:
         apply_observer=None,
         account_id=None,
         application_runtime_commit=None,
+        replay_only=False,
     ):
         row = (
             (
@@ -414,6 +431,9 @@ class PostgresManagementFeed:
             gap_reason=gap_reason,
             backlog_pending=backlog_pending,
             worker_id=worker_id,
+            connection_observed_at_ms=None
+            if replay_only or connected_at_ms is None or gap_reason is not None
+            else now_ms,
         )
         receipt = (
             (
@@ -641,7 +661,13 @@ class PostgresManagementFeed:
                 lease_until_ms=now_ms + FEED_LEASE_MS,
                 connection_state="ready" if ready else "gap",
                 connected_at_ms=connected,
-                last_successful_at_ms=now_ms if ready else row["last_successful_at_ms"],
+                last_successful_at_ms=max(
+                    row["last_successful_at_ms"] or 0,
+                    receipt["connection_observed_at_ms"] or 0,
+                )
+                or None
+                if ready
+                else row["last_successful_at_ms"],
                 health_reason=reason,
                 revision=row["revision"] + 1,
             )
@@ -657,7 +683,14 @@ class PostgresManagementFeed:
                     epoch_id=epoch_id,
                     kind="connected" if ready else "gap",
                     from_ms=connected or now_ms,
-                    to_ms=now_ms,
+                    to_ms=(
+                        receipt["connection_observed_at_ms"]
+                        or row["last_successful_at_ms"]
+                        or connected
+                        or now_ms
+                    )
+                    if ready
+                    else now_ms,
                     receive_watermark=watermark,
                     reason=reason,
                     occurred_at_ms=now_ms,

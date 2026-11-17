@@ -200,6 +200,7 @@ async def test_durable_receiver_acknowledges_only_after_commit_and_identity_gate
                     "venue_id": "binance-usdm",
                     "account_id": t.identity.netting_domain.account_id,
                     "epoch_id": "durable-e",
+                    "connection_observed_at_ms":6000,
                     "events": [],
                     "connected_at_ms": 1000,
                     "gap_reason": None,
@@ -305,6 +306,7 @@ async def test_receive_after_tick_start_is_not_a_protocol_error(
                     "venue_id": "binance-usdm",
                     "account_id": t.identity.netting_domain.account_id,
                     "epoch_id": "clock-race",
+                    "connection_observed_at_ms":processed_at_ms,
                     "connected_at_ms": raw["tick_started_ms"] - 100,
                     "events": [
                         {
@@ -686,7 +688,7 @@ async def test_reconnect_persists_new_epoch_while_old_application_blocked_and_su
         def management_feed_batches(self):
             return [{'venue_id':'binance-usdm','account_id':t.identity.netting_domain.account_id,'epoch_id':self.epoch,
                 'events':[{'sequence':1,'received_at_ms':6001,'payload':{**raw,'E':6000,'T':6000,'o':{**raw['o'],'i':9002,'O':6000}}}],
-                'connected_at_ms':6000,'gap_reason':None,'backlog_pending':False}]
+                'connected_at_ms':6000,'connection_observed_at_ms':7000,'gap_reason':None,'backlog_pending':False}]
         def acknowledge_management_events(self,epoch,watermark):self.acks.append((epoch,watermark))
     source=Source()
     result=await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=7000,clock_ms=lambda:7000)
@@ -712,7 +714,7 @@ async def test_reconnect_persists_new_epoch_while_old_application_blocked_and_su
     class RestartedSource:
         def management_feed_batches(self):
             return [{'venue_id':'binance-usdm','account_id':t.identity.netting_domain.account_id,'epoch_id':'after-process-restart',
-                'events':[],'connected_at_ms':9000,'gap_reason':None,'backlog_pending':False}]
+                'events':[],'connected_at_ms':9000,'connection_observed_at_ms':9000,'gap_reason':None,'backlog_pending':False}]
         def acknowledge_management_events(self,*args):pass
     restarted=RestartedSource()
     for now in (9000,10000):
@@ -752,7 +754,8 @@ async def test_new_epoch_cannot_overtake_unflushed_pages_of_closed_receiver(head
     exchange=SimpleNamespace(management_closed_batches=deque([{'epoch_id':'paged-old','events':deque({'sequence':i,'received_at_ms':5001,'payload':{**raw,'o':{**raw['o'],'i':9000+i}}} for i in range(1,131)), 'connected_at_ms':5000,'gap_reason':None}]),
         management_epoch_id='live-new',management_pending_events=deque([{'sequence':1,'received_at_ms':6001,'payload':{**raw,'o':{**raw['o'],'i':9999}}}]),
         _management_connected_ms=6000,management_receive_gap=None)
-    source=CcxtVenueAdapter(exchanges={('binance-usdm',t.identity.netting_domain.account_id):exchange},clock_ms=lambda:8000)
+    receiver_clock=[7000]
+    source=CcxtVenueAdapter(exchanges={('binance-usdm',t.identity.netting_domain.account_id):exchange},clock_ms=lambda:receiver_clock[0])
     scope=management_scope('binance-usdm',t.identity.netting_domain.account_id)
     await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=7000,clock_ms=lambda:7000)
     async with PostgresKernelUnitOfWork(e) as u:
@@ -760,6 +763,7 @@ async def test_new_epoch_cannot_overtake_unflushed_pages_of_closed_receiver(head
         assert feed['epoch_id']=='paged-old' and feed['applied_watermark']==128
         assert not await u.management.feed_ready(scope,now_ms=7000)
         assert (await u.management.received_epoch(scope,'live-new'))['persisted_watermark']==1
+    receiver_clock[0]=8000
     await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),source,worker_id='receiver',runtime_commit='kernel-test-head',now_ms=8000,clock_ms=lambda:8000)
     async with PostgresKernelUnitOfWork(e) as u:
         assert (await u.management.get_feed(scope))['epoch_id']=='live-new'
@@ -774,3 +778,36 @@ async def test_epoch_switch_checks_received_tail_not_only_old_applied_row(head_t
         await u.management.persist_received_batch(scope_key='scope',epoch_id='old',events=[{'sequence':1,'received_at_ms':1100,'payload':{'e':'unknown'}}],connected_at_ms=1000,now_ms=1200,worker_id='receiver')
         with pytest.raises(ValueError,match='unapplied'):
             await u.management.start_feed(scope_key='scope',epoch_id='new',worker_id='receiver',runtime_commit='a'*40,now_ms=1300)
+
+
+@pytest.mark.asyncio
+async def test_old_epoch_replay_never_fills_real_disconnect_interval(head_template_engine):
+    from src.trading_kernel.interfaces.management_feed_worker import (
+        management_scope,
+        persist_management_feed_once,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+    e=head_template_engine;t=registered_sor_long_ticket();await reach_position_protected(e,t)
+    scope=management_scope('binance-usdm',t.identity.netting_domain.account_id)
+    async with PostgresKernelUnitOfWork(e) as u:
+        await u.management.start_feed(scope_key=scope,epoch_id='before-disconnect',worker_id='receiver',runtime_commit='kernel-test-head',now_ms=1000)
+        await u.management.persist_stream_batch(scope_key=scope,epoch_id='before-disconnect',events=[],connected_at_ms=1000,now_ms=1100)
+    class Source:
+        def management_feed_batches(self):
+            return [{'venue_id':'binance-usdm','account_id':t.identity.netting_domain.account_id,'epoch_id':'after-restart','events':[],
+                'connected_at_ms':10000,'connection_observed_at_ms':10000,'gap_reason':None,'backlog_pending':False}]
+        def acknowledge_management_events(self,*args):pass
+    await persist_management_feed_once(lambda:PostgresKernelUnitOfWork(e),Source(),worker_id='receiver',runtime_commit='kernel-test-head',now_ms=10000,clock_ms=lambda:10000)
+    async with PostgresKernelUnitOfWork(e) as u:
+        assert not await u.management.continuity_covers(scope,2000,9000)
+        assert await u.management.continuity_covers(scope,10000,10000)
+        import sqlalchemy as sa
+
+        from src.trading_kernel.infrastructure.pg_models import (
+            management_coverage_events,
+        )
+        ended=(await u._require_connection().execute(sa.select(management_coverage_events.c.to_ms).where(management_coverage_events.c.epoch_id=='before-disconnect',management_coverage_events.c.kind=='epoch_closed'))).scalar_one()
+        assert ended==1100
