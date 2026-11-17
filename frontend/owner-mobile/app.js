@@ -9,7 +9,9 @@ const heading=t=>`<div class="row"><h2>${esc(t)}</h2><button class="close" data-
 async function request(path,options={}){
  if(!navigator.onLine)throw Error('网络未连接');
  const response=await fetch(API+path,{signal:AbortSignal.timeout(15000),...options,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json',...options.headers}});
- let body={};try{body=await response.json()}catch{}
+ let body;
+ try{body=await response.json()}catch{throw Error('响应正文不可用，操作结果待核实，请刷新')}
+ if(!body||typeof body!=='object'||Array.isArray(body))throw Error('响应格式无效，操作结果待核实，请刷新');
  if(response.status===401){session=null;renderBinding();throw Error('设备授权已失效，请重新绑定')}
  if(!response.ok){const error=Error(body.message||body.detail||body.code||`请求失败 ${response.status}`);error.status=response.status;throw error;}
  return body;
@@ -20,6 +22,15 @@ async function storeKey(key,slot='active'){const d=await db();await new Promise(
 const b64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
 function canonical(value){if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value)}
 async function digest(body){return 'sha256:'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(body))))).map(x=>x.toString(16).padStart(2,'0')).join('')}
+function validWriteResult(path,payload,result){
+ if(!result||typeof result!=='object'||Array.isArray(result)||!payload||typeof payload.enabled!=='boolean'||!Number.isSafeInteger(payload.expected_version)||payload.expected_version<=0)return false;
+ const versionOK=v=>Number.isSafeInteger(v)&&v>0&&(v===payload.expected_version||v===payload.expected_version+1);
+ if(path==='/controls/global')return typeof result.enabled==='boolean'&&result.enabled===payload.enabled&&versionOK(result.version);
+ if(path==='/controls/strategy')return result.strategy_group_id===payload.strategy_group_id&&
+  result.entry_state===(payload.enabled?'enabled':'paused')&&versionOK(result.control_version)&&
+  typeof result.last_event_id==='string'&&result.last_event_id.length>0&&Number.isSafeInteger(result.updated_at_ms)&&result.updated_at_ms>0;
+ return false;
+}
 async function signed(path,payload,key=crypto.randomUUID()){
  if(!navigator.locks?.request)throw Error('当前浏览器不支持操作互斥，请使用新版Safari');
  return navigator.locks.request('brc-owner-write',{mode:'exclusive'},()=>sendSigned(path,payload,key));
@@ -43,6 +54,7 @@ async function sendSigned(path,payload,key){
  await storeKey(packet,'pending-write');
  try{
   const result=await request(path,{method:'POST',body:JSON.stringify(packet)});
+  if(!validWriteResult(path,payload,result))throw Error('操作结果待核实，请刷新');
   await clearPendingWrite(proof);return result;
  }catch(error){
   // A known client rejection is terminal. Timeout, disconnect and 5xx remain
@@ -61,7 +73,9 @@ async function resolveStoredPendingWrite(){
  if(!pending)return true;
  try{
   const receipt=await request('/requests/'+encodeURIComponent(pending.proof.idempotency_key)+'?nonce_id='+encodeURIComponent(pending.proof.nonce_id));
-  if(receipt.state==='completed'||receipt.state==='not_accepted'){
+  if(receipt&&typeof receipt==='object'&&!Array.isArray(receipt)&&
+      (receipt.state==='not_accepted'||receipt.state==='completed'&&
+       validWriteResult(pending.proof.path.slice(API.length),pending.payload,receipt.result))){
    await clearPendingWrite(pending.proof);notice(receipt.state==='completed'?'上次操作已核实':'上次操作未受理，可重新操作');return true;
   }
  }catch{}

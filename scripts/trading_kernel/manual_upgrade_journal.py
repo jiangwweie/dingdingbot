@@ -67,13 +67,6 @@ class UpgradeJournal:
             json.dumps(self.state, default=str, sort_keys=True) + "\n",
             overwrite=True,
         )
-        with self.path.open("rb") as f:
-            os.fsync(f.fileno())
-        fd = os.open(self.path.parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
 
     @property
     def baseline(self):
@@ -187,11 +180,4 @@ class UpgradeJournal:
             "".join(k + "=" + json.dumps(v) + "\n" for k, v in expected.items()),
             overwrite=True,
         )
-        with path.open("rb") as stream:
-            os.fsync(stream.fileno())
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
         self.complete_step("environment")

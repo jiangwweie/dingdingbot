@@ -64,13 +64,29 @@ def write_private(path: Path, value: str, *, mode=0o600, overwrite=False) -> Non
             raise ValueError("private installation state has unsafe permissions")
         if path.read_text() != value:
             raise ValueError("existing private installation state differs")
+        # A previous attempt may have published the same value but failed its
+        # directory sync. Revalidate durability before acknowledging a retry.
+        with path.open("rb") as existing:
+            os.fsync(existing.fileno())
+        directory=os.open(path.parent,os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         return
     fd, temp = tempfile.mkstemp(prefix=".brc-", dir=path.parent)
     try:
         os.fchmod(fd, mode)
         with os.fdopen(fd, "w") as stream:
             stream.write(value)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temp, path)
+        directory=os.open(path.parent,os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
