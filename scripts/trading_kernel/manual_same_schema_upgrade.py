@@ -338,15 +338,11 @@ async def activate(
                 )
         else:
             async with engine.connect() as c:
-                identities = dict(
-                    (
-                        await c.execute(
-                            text(
-                                "SELECT metadata_key,metadata_value FROM brc_schema_metadata WHERE metadata_key IN ('runtime_commit','schema_revision')"
-                            )
-                        )
+                identities: dict[str,str] = {
+                    str(row[0]):str(row[1]) for row in (
+                        await c.execute(text("SELECT metadata_key,metadata_value FROM brc_schema_metadata WHERE metadata_key IN ('runtime_commit','schema_revision')"))
                     ).all()
-                )
+                }
                 if identities != {
                     "runtime_commit": receipt["commit"],
                     "schema_revision": receipt["schema_revision"],
