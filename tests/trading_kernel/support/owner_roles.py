@@ -5,6 +5,8 @@ import sqlalchemy as sa
 
 async def apply_owner_control_grants(engine):
     sql=(Path(__file__).resolve().parents[3]/'deploy/owner-console/postgresql/owner-console-control-role.sql').read_text()
+    # Statement separators inside line comments are not SQL delimiters.
+    sql='\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--'))
     grants='GRANT USAGE ON SCHEMA public TO brc_owner_control;'+sql.split('GRANT USAGE ON SCHEMA public TO brc_owner_control;',1)[1]
     async with engine.begin() as connection:
         exists=await connection.scalar(sa.text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='brc_owner_control')"))

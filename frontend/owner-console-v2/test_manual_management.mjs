@@ -63,7 +63,7 @@ const overviewManualClean = mapActiveTicketToOverviewEpisode(
 );
 assert.equal(overviewManualClean.management_mode, 'MANUAL');
 assert.equal(overviewManualClean.is_protected, false);
-assert.equal(overviewManualClean.protection_state, '人工管理 · 以当前订单为准');
+assert.equal(overviewManualClean.protection_state, '人工管理 · 以 App 当前订单为准');
 
 const overviewReview = mapActiveTicketToOverviewEpisode(
   {
