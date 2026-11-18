@@ -1,9 +1,12 @@
 from decimal import Decimal as D
+
 import pytest
 
 from src.trading_kernel.domain.commands import (
-    OrderCommandPayload,
     ExchangeCommandKind as K,
+)
+from src.trading_kernel.domain.commands import (
+    OrderCommandPayload,
 )
 from src.trading_kernel.domain.owner_command_prices import owner_command_price_blocker
 

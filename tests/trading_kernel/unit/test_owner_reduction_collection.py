@@ -1,11 +1,14 @@
-from decimal import Decimal as D
 
 import pytest
 
-from src.trading_kernel.domain.owner_reduction import OwnerReductionPhase, OwnerReductionState
-from src.trading_kernel.infrastructure.owner_reduction_source import collect_owner_reduction
-from tests.trading_kernel.support.owner_reduction import preview
-from tests.trading_kernel.support.owner_reduction import aggregate
+from src.trading_kernel.domain.owner_reduction import (
+    OwnerReductionPhase,
+    OwnerReductionState,
+)
+from src.trading_kernel.infrastructure.owner_reduction_source import (
+    collect_owner_reduction,
+)
+from tests.trading_kernel.support.owner_reduction import aggregate, preview
 
 
 class Reader:
@@ -38,7 +41,9 @@ class Reader:
 
 
 def commands(a):
-    from src.trading_kernel.domain.commands import ExchangeCommand, ExchangeCommandKind as K, ExchangeCommandStatus as S, OrderCommandPayload
+    from src.trading_kernel.domain.commands import ExchangeCommand, OrderCommandPayload
+    from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+    from src.trading_kernel.domain.commands import ExchangeCommandStatus as S
     def make(kind, oid, client, payload):
         return ExchangeCommand(command_id=client, ticket_identity=a.identity, management_revision=1,
             kind=kind, generation=1, idempotency_key=client, venue_client_order_id=client, payload=payload,

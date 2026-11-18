@@ -6,19 +6,28 @@ from unittest.mock import AsyncMock
 import pytest
 import sqlalchemy as sa
 from fastapi import FastAPI
-from httpx import ASGITransport,AsyncClient
+from httpx import ASGITransport, AsyncClient
 
-from src.trading_kernel.application.advance_owner_position_operation import advance_owner_position_operation
-from src.trading_kernel.application.owner_operation_facts import OwnerPositionObservation
+from src.trading_kernel.application.advance_owner_position_operation import (
+    advance_owner_position_operation,
+)
+from src.trading_kernel.application.owner_operation_facts import (
+    OwnerPositionObservation,
+)
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.owner_device_authority import DeviceWriteProof
 from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+from src.trading_kernel.infrastructure.pg_signal_repository import (
+    PostgresSignalRepository,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.pg_signal_repository import PostgresSignalRepository
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from src.trading_kernel.interfaces.owner_console_http.routes.mobile import router,COOKIE
-from tests.trading_kernel.support.owner_reduction import setup_operation,facts
+from src.trading_kernel.interfaces.owner_console_http.routes.mobile import (
+    COOKIE,
+    router,
+)
 from tests.trading_kernel.support.owner_device import sign
+from tests.trading_kernel.support.owner_reduction import facts, setup_operation
 
 
 @pytest.mark.asyncio

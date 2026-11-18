@@ -1,11 +1,15 @@
 """Raw Binance schema is parsed before any phone preview can use a fact."""
 import json
 from pathlib import Path
-from decimal import Decimal as D
+
 import pytest
 
-from src.trading_kernel.infrastructure.owner_position_source import collect_owner_position
-from src.trading_kernel.domain.commands import ExchangeCommand,ExchangeCommandKind as K,ExchangeCommandStatus as S,OrderCommandPayload
+from src.trading_kernel.domain.commands import ExchangeCommand, OrderCommandPayload
+from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+from src.trading_kernel.domain.commands import ExchangeCommandStatus as S
+from src.trading_kernel.infrastructure.owner_position_source import (
+    collect_owner_position,
+)
 from tests.trading_kernel.support.owner_reduction import aggregate
 
 FIXTURES=Path(__file__).resolve().parents[1]/'fixtures/management_protocol_v2'
@@ -14,7 +18,7 @@ FIXTURES=Path(__file__).resolve().parents[1]/'fixtures/management_protocol_v2'
 @pytest.mark.asyncio
 @pytest.mark.parametrize('fault',[None,'wrong_client','wrong_quantity','unowned_open','stale_price','timeout','missing_stop','stop_no_longer_new','changed_stop_price','duplicate_stop'])
 async def test_raw_owner_position_collection_is_exact_and_bounded(fault):
-    a=aggregate();d=a.identity.netting_domain
+    a=aggregate();
     stop=json.loads((FIXTURES/'bnb_stop_cancelled.json').read_text())
     stop.update(algoId='stop',clientAlgoId='our-stop',symbol='BTCUSDT',side='SELL',positionSide='LONG',
         quantity=str(a.position_qty),triggerPrice=str(a.active_stop_price),algoStatus='NEW',createTime=2000,updateTime=3000)

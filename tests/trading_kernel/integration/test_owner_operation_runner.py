@@ -3,15 +3,24 @@ from decimal import Decimal as D
 import pytest
 import sqlalchemy as sa
 
-from src.trading_kernel.application.advance_owner_position_operation import advance_owner_position_operation
-from src.trading_kernel.application.owner_operation_facts import OwnerReductionObservation
+from src.trading_kernel.application.advance_owner_position_operation import (
+    advance_owner_position_operation,
+)
+from src.trading_kernel.application.owner_operation_facts import (
+    OwnerReductionObservation,
+)
 from src.trading_kernel.domain.commands import ExchangeCommandKind as K
-from src.trading_kernel.domain.owner_reduction import OwnerReductionState
-from src.trading_kernel.infrastructure.pg_owner_position_operations import PostgresOwnerPositionOperations
-from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
+from src.trading_kernel.infrastructure.pg_owner_position_operations import (
+    PostgresOwnerPositionOperations,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
-from tests.trading_kernel.support.owner_reduction import setup_operation, accept_signed_operation, facts
+from tests.trading_kernel.support.owner_reduction import (
+    accept_signed_operation,
+    facts,
+    setup_operation,
+)
 
 
 @pytest.mark.asyncio
@@ -32,11 +41,13 @@ async def test_runner_converts_protection_before_cancelling_tp_and_is_restartabl
             self.calls += 1
             return OwnerReductionObservation(facts=facts(aggregate, observed_at_ms=7000, valid_until_ms=10000,
                 reduction_operation_id=op['operation_id']), protection_close_position=False)
-    from src.trading_kernel.infrastructure.pg_signal_repository import PostgresSignalRepository
+    from src.trading_kernel.infrastructure.pg_signal_repository import (
+        PostgresSignalRepository,
+    )
     monkeypatch.setattr(PostgresSignalRepository,'get_instrument_rules',AsyncMock(return_value=object()))
     source = Source()
     factory = lambda: PostgresKernelUnitOfWork(e)
-    kwargs = dict(now_ms=7000, timeout_seconds=1, runtime_commit='kernel-test-head', schema_revision=CURRENT_SCHEMA_REVISION)
+    kwargs = {'now_ms': 7000, 'timeout_seconds': 1, 'runtime_commit': 'kernel-test-head', 'schema_revision': CURRENT_SCHEMA_REVISION}
     assert await advance_owner_position_operation(factory, source, **kwargs) == 'protection_converting'
     async with factory() as u:
         cmds = await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
@@ -52,15 +63,18 @@ async def test_runner_converts_protection_before_cancelling_tp_and_is_restartabl
 @pytest.mark.asyncio
 async def test_real_command_chain_records_reduction_and_releases_operation(head_template_engine,monkeypatch):
     from unittest.mock import AsyncMock
-    from src.trading_kernel.domain.owner_reduction_proof import OwnerReductionProof
+
     from src.trading_kernel.domain.exit_execution import EntryFill
+    from src.trading_kernel.domain.owner_reduction_proof import OwnerReductionProof
+    from src.trading_kernel.infrastructure.pg_signal_repository import (
+        PostgresSignalRepository,
+    )
     from tests.trading_kernel.support.command_dispatch import dispatch_for_ticket
     from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
-    from src.trading_kernel.infrastructure.pg_signal_repository import PostgresSignalRepository
     monkeypatch.setattr('src.trading_kernel.application.owner_operation_exit.read_original_operation_exit',AsyncMock(return_value=None))
     monkeypatch.setattr(PostgresSignalRepository,'get_instrument_rules',AsyncMock(return_value=object()))
     e=head_template_engine
-    t,device,p,key=await setup_operation(e)
+    _t,device,p,key=await setup_operation(e)
     async with e.begin() as c:
         r=PostgresOwnerPositionOperations(c)
         op=await r.create_preview(preview=p,owner_identity='Owner',device_id=device['device_id'],device_epoch=1,
@@ -74,7 +88,7 @@ async def test_real_command_chain_records_reduction_and_releases_operation(head_
         executed=False
         async def read_owner_reduction(self,*,aggregate,state,commands,authorization_id,accepted_order_ids):
             a=aggregate
-            values=dict(observed_at_ms=self.at,valid_until_ms=self.at+3000,reduction_operation_id=op['operation_id'])
+            values={'observed_at_ms': self.at,'valid_until_ms': self.at+3000,'reduction_operation_id': op['operation_id']}
             if self.tp_cancelled:values.update(tp_state='cancelled')
             proof=None
             if self.executed:

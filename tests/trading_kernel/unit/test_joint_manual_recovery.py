@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import Mock
+
 import pytest
+
 from scripts.trading_kernel import manual_joint_recovery as joint
 
 

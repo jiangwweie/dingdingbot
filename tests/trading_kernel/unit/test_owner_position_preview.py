@@ -1,7 +1,10 @@
 from decimal import Decimal as D
+
 import pytest
 
-from src.trading_kernel.domain.owner_position_operation import preview_position_operation
+from src.trading_kernel.domain.owner_position_operation import (
+    preview_position_operation,
+)
 from tests.trading_kernel.support.owner_reduction import aggregate, facts
 
 

@@ -1,15 +1,29 @@
-import pytest
-import sqlalchemy as sa
 from decimal import Decimal as D
 
-from src.trading_kernel.domain.owner_position_operation import preview_position_operation
-from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-from src.trading_kernel.infrastructure.pg_owner_position_operations import PostgresOwnerPositionOperations
+import pytest
+import sqlalchemy as sa
+
+from src.trading_kernel.application.advance_owner_adjustment import (
+    advance_owner_adjustment,
+)
+from src.trading_kernel.domain.owner_position_operation import (
+    preview_position_operation,
+)
 from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
-from src.trading_kernel.application.advance_owner_adjustment import advance_owner_adjustment
-from tests.trading_kernel.support.owner_reduction import setup_operation,accept_signed_operation,facts
-from tests.trading_kernel.support.owner_operation_source import OwnerOperationSource,OwnerOperationVenue
+from src.trading_kernel.infrastructure.pg_owner_position_operations import (
+    PostgresOwnerPositionOperations,
+)
+from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from tests.trading_kernel.support.command_dispatch import dispatch_for_ticket
+from tests.trading_kernel.support.owner_operation_source import (
+    OwnerOperationSource,
+    OwnerOperationVenue,
+)
+from tests.trading_kernel.support.owner_reduction import (
+    accept_signed_operation,
+    facts,
+    setup_operation,
+)
 
 
 @pytest.mark.asyncio

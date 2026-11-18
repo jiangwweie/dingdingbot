@@ -365,8 +365,10 @@ def test_protection_and_exit_may_retry_after_authoritative_rejection() -> None:
 
 def test_close_all_payload_keeps_exposure_bound_but_has_no_venue_amount():
     from decimal import Decimal
-    from src.trading_kernel.domain.commands import OrderCommandPayload
+
     from pydantic import ValidationError
+
+    from src.trading_kernel.domain.commands import OrderCommandPayload
     p=OrderCommandPayload(side='sell',quantity=Decimal('.01'),order_type='stop_market',reduce_only=False,stop_price=Decimal(59000),close_position=True)
     assert p.venue_quantity is None and p.quantity==Decimal('.01')
     with pytest.raises(ValidationError):OrderCommandPayload.model_validate({**p.model_dump(),'reduce_only':True})

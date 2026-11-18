@@ -1,12 +1,22 @@
 from decimal import Decimal as D
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
 
-from src.trading_kernel.application.owner_operation_exit import read_original_operation_exit
-from src.trading_kernel.domain.exit_policy import registered_exit_profiles,LifecycleMarketFacts
-from src.trading_kernel.domain.order_attribution import TicketOrderReference,OrderRole,OrderNamespace
+from src.trading_kernel.application.owner_operation_exit import (
+    read_original_operation_exit,
+)
 from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+from src.trading_kernel.domain.exit_policy import (
+    LifecycleMarketFacts,
+    registered_exit_profiles,
+)
+from src.trading_kernel.domain.order_attribution import (
+    OrderNamespace,
+    OrderRole,
+    TicketOrderReference,
+)
 from tests.trading_kernel.support.owner_reduction import aggregate
 
 

@@ -1,9 +1,13 @@
-import pytest
-from unittest.mock import AsyncMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from src.trading_kernel.application.owner_operation_expiration import expire_unstarted_owner_commands
-from src.trading_kernel.domain.commands import ExchangeCommandKind as K,ExchangeCommandStatus as S
+import pytest
+
+from src.trading_kernel.application.owner_operation_expiration import (
+    expire_unstarted_owner_commands,
+)
+from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+from src.trading_kernel.domain.commands import ExchangeCommandStatus as S
 from tests.trading_kernel.support.owner_reduction import aggregate
 
 

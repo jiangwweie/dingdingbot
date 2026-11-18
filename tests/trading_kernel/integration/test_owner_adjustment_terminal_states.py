@@ -334,13 +334,13 @@ async def test_pending_unknown_cancellation_does_not_erase_irreversible_reprevie
         )
         old_tp = next(c for c in cmds if c.kind is K.TAKE_PROFIT)
     from src.trading_kernel.application.recover_unknown_command import (
-        recover_unknown_command,
         RecoverUnknownCommandRequest,
+        recover_unknown_command,
     )
     from src.trading_kernel.domain.venue_truth import (
-        VenueTruthSnapshot,
         VenueLookupStatus,
         VenueOrderTruth,
+        VenueTruthSnapshot,
     )
 
     class ExactCancelTruth:

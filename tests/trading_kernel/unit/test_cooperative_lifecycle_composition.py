@@ -1,22 +1,24 @@
 from decimal import Decimal as D
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
+
 from src.trading_kernel.application.maintain_ticket_lifecycle import (
-    maintain_ticket_lifecycle,
     LifecycleMaintenanceRequest,
     TicketLifecycleFacts,
+    maintain_ticket_lifecycle,
 )
 from src.trading_kernel.domain.aggregate import AggregateStatus as A
+from src.trading_kernel.domain.exit_execution import EntryFill, TpFillEvidence
 from src.trading_kernel.domain.exit_policy import (
-    registered_exit_profiles,
+    ExitDecisionKind,
     LifecycleMarketFacts,
     evaluate_profile_runner_exit,
-    ExitDecisionKind,
+    registered_exit_profiles,
 )
 from src.trading_kernel.domain.manual_profit_plan import ManualProfitPlan
 from src.trading_kernel.domain.reducer import reduce_event
-from src.trading_kernel.domain.exit_execution import TpFillEvidence, EntryFill
 from tests.trading_kernel.support.owner_reduction import aggregate
 
 
@@ -164,6 +166,8 @@ async def test_exact_natural_tp_is_accounted_even_when_a_sent_owner_write_is_unk
     u.owner_position_operations.transition = AsyncMock()
     from src.trading_kernel.domain.commands import (
         ExchangeCommandKind as K,
+    )
+    from src.trading_kernel.domain.commands import (
         ExchangeCommandStatus as S,
     )
 
@@ -202,7 +206,7 @@ async def test_exact_natural_tp_is_accounted_even_when_a_sent_owner_write_is_unk
 
 @pytest.mark.asyncio
 async def test_runner_manual_tp_preserves_original_absolute_exit():
-    from src.trading_kernel.domain.exit_policy import TimeStopRule, TimeStopMode
+    from src.trading_kernel.domain.exit_policy import TimeStopMode, TimeStopRule
 
     a = aggregate().model_copy(
         update={
@@ -266,7 +270,7 @@ async def test_new_fill_invalidates_an_unstarted_owner_protection_request_withou
         source_watermark_ms=6000,
     )
     a = reduce_event(a, ev).aggregate
-    u, box, events, _ = fake_uow(a)
+    u, box, _events, _ = fake_uow(a)
     row = {
         "operation_id": "op",
         "version": 3,
@@ -275,6 +279,8 @@ async def test_new_fill_invalidates_an_unstarted_owner_protection_request_withou
     }
     from src.trading_kernel.domain.commands import (
         ExchangeCommandKind as K,
+    )
+    from src.trading_kernel.domain.commands import (
         ExchangeCommandStatus as S,
     )
 
@@ -310,6 +316,8 @@ async def test_new_fill_invalidates_an_unstarted_owner_protection_request_withou
 async def test_unknown_order_blocks_owner_side_effects_but_exact_fill_does_not_repeat():
     from src.trading_kernel.domain.commands import (
         ExchangeCommandKind as K,
+    )
+    from src.trading_kernel.domain.commands import (
         ExchangeCommandStatus as S,
     )
 

@@ -90,13 +90,21 @@ async def accept_signed_operation(
 
 
 async def setup_operation(e):
-    from src.trading_kernel.infrastructure.pg_owner_device_repository import PostgresOwnerDeviceRepository
-    from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
-    from tests.trading_kernel.support.lifecycle import registered_sor_long_ticket, reach_position_protected
-    from src.trading_kernel.domain.owner_reduction import preview_owner_reduction
     import base64
 
     from cryptography.hazmat.primitives.asymmetric import ec
+
+    from src.trading_kernel.domain.owner_reduction import preview_owner_reduction
+    from src.trading_kernel.infrastructure.pg_owner_device_repository import (
+        PostgresOwnerDeviceRepository,
+    )
+    from src.trading_kernel.infrastructure.pg_unit_of_work import (
+        PostgresKernelUnitOfWork,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
 
     t = registered_sor_long_ticket()
     await reach_position_protected(e, t)

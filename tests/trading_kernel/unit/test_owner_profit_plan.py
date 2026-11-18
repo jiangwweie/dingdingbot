@@ -1,6 +1,9 @@
 from decimal import Decimal as D
 
-from src.trading_kernel.domain.events import OwnerProfitPlanInstalled, OwnerProfitPlanCancelled
+from src.trading_kernel.domain.events import (
+    OwnerProfitPlanCancelled,
+    OwnerProfitPlanInstalled,
+)
 from src.trading_kernel.domain.reducer import reduce_event
 from tests.trading_kernel.support.reducer_states import position_protected_aggregate
 

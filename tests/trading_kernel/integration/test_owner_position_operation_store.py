@@ -164,8 +164,11 @@ async def test_submit_records_real_device_authority_but_not_exchange_command(
 
 @pytest.mark.asyncio
 async def test_finished_reduction_releases_adjustment_but_keeps_audit(head_template_engine):
+    from src.trading_kernel.domain.owner_reduction import (
+        OwnerReductionPhase,
+        OwnerReductionState,
+    )
     from tests.trading_kernel.support.owner_reduction import accept_signed_operation
-    from src.trading_kernel.domain.owner_reduction import OwnerReductionState, OwnerReductionPhase
     e = head_template_engine
     _t, b, p, key = await setup(e)
     async with e.begin() as c:
@@ -185,10 +188,13 @@ async def test_finished_reduction_releases_adjustment_but_keeps_audit(head_templ
 
 @pytest.mark.asyncio
 async def test_send_gate_honours_revocation_and_stale_operation_facts(head_template_engine):
-    from src.trading_kernel.domain.commands import ExchangeCommand,ExchangeCommandKind as K,ExchangeCommandStatus as S,OrderCommandPayload
+    import sqlalchemy as sa
+
+    from src.trading_kernel.domain.commands import ExchangeCommand, OrderCommandPayload
+    from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+    from src.trading_kernel.domain.commands import ExchangeCommandStatus as S
     from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
     from tests.trading_kernel.support.owner_reduction import accept_signed_operation
-    import sqlalchemy as sa
     e=head_template_engine
     _t,b,p,key=await setup(e)
     async with e.begin() as c:
@@ -198,7 +204,9 @@ async def test_send_gate_honours_revocation_and_stale_operation_facts(head_templ
         await c.execute(sa.update(runtime_capabilities_current).where(runtime_capabilities_current.c.capability_key=='exchange_commands').values(
             certification={'product_id':'brc-app-manual-v1','owner_cooperation':'owner-cooperation-v1'}))
         cid='owner-gated-command'
-        from src.trading_kernel.infrastructure.pg_repositories import PostgresAggregateRepository
+        from src.trading_kernel.infrastructure.pg_repositories import (
+            PostgresAggregateRepository,
+        )
         a=await PostgresAggregateRepository(c).get(p.ticket_id)
         command=ExchangeCommand(command_id=cid,ticket_identity=a.identity,management_revision=a.management_revision,kind=K.OWNER_REDUCE,
             generation=1,idempotency_key=cid,venue_client_order_id='owner-gated-client',payload=OrderCommandPayload(side='sell',quantity=p.reduction_quantity,
@@ -219,11 +227,16 @@ async def test_send_gate_honours_revocation_and_stale_operation_facts(head_templ
     ('protection_tighten',{'price':D(59500)},D(59400),D(59500),'owner_new_stop_crossed'),
 ])
 async def test_real_send_gate_rechecks_proposed_instruction_price(head_template_engine,kind,preview_terms,current,proposed,reason):
-    from src.trading_kernel.domain.owner_position_operation import preview_position_operation
-    from src.trading_kernel.domain.commands import ExchangeCommand,ExchangeCommandKind as K,ExchangeCommandStatus as S,OrderCommandPayload
+    import sqlalchemy as sa
+
+    from src.trading_kernel.domain.commands import ExchangeCommand, OrderCommandPayload
+    from src.trading_kernel.domain.commands import ExchangeCommandKind as K
+    from src.trading_kernel.domain.commands import ExchangeCommandStatus as S
+    from src.trading_kernel.domain.owner_position_operation import (
+        preview_position_operation,
+    )
     from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
     from tests.trading_kernel.support.owner_reduction import accept_signed_operation
-    import sqlalchemy as sa
     e=head_template_engine;_t,b,_p,key=await setup(e)
     async with PostgresKernelUnitOfWork(e) as u:a=await u.aggregates.get(_t.identity.ticket_id)
     p=preview_position_operation(aggregate=a,facts=facts(a,observed_at_ms=6000,valid_until_ms=9000),kind=kind,

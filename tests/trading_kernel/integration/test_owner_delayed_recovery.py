@@ -1,5 +1,7 @@
 from unittest.mock import AsyncMock
+
 import pytest
+
 from src.trading_kernel.application.advance_owner_adjustment import (
     advance_owner_adjustment,
 )
@@ -8,17 +10,21 @@ from src.trading_kernel.application.advance_owner_position_operation import (
 )
 from src.trading_kernel.domain.commands import (
     ExchangeCommandKind as K,
-    ExchangeCommandStatus as S,
+)
+from src.trading_kernel.domain.commands import (
     ExchangeCommandResult,
+)
+from src.trading_kernel.domain.commands import (
+    ExchangeCommandStatus as S,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+from tests.trading_kernel.support.command_dispatch import dispatch_for_ticket
 from tests.trading_kernel.support.owner_delay_scenarios import (
-    accepted_operation,
     DelayedSource,
+    accepted_operation,
 )
 from tests.trading_kernel.support.owner_operation_source import OwnerOperationVenue
-from tests.trading_kernel.support.command_dispatch import dispatch_for_ticket
 
 
 @pytest.mark.asyncio
@@ -42,7 +48,6 @@ async def test_full_close_refreshes_facts_after_restart_before_dispatch(
     assert await tick(7000) == "tp_cancelling"
     await dispatch_for_ticket(e, venue, t.identity.ticket_id, now_ms=7100)
     assert await tick(8000) == "closure_pending"
-    before = source.calls
     restarted = DelayedSource()
     restarted.at = 15000
     async with factory() as u:
@@ -119,8 +124,8 @@ async def test_original_tp_restoration_keeps_its_phase_until_delayed_dispatch(
 
     # Rejection is an expected result, so dispatch through the actual application.
     from src.trading_kernel.application.dispatch_exchange_command import (
-        dispatch_one_command,
         DispatchCommandRequest,
+        dispatch_one_command,
     )
 
     await dispatch_one_command(
@@ -174,12 +179,13 @@ async def test_natural_partial_tp_hands_back_before_old_owner_size_can_send(
     head_template_engine, monkeypatch, kind
 ):
     from decimal import Decimal as D
+
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
-        maintain_ticket_lifecycle,
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
+        maintain_ticket_lifecycle,
     )
-    from src.trading_kernel.domain.exit_execution import TpFillEvidence, EntryFill
+    from src.trading_kernel.domain.exit_execution import EntryFill, TpFillEvidence
 
     e = head_template_engine
     t, op = await accepted_operation(
@@ -249,10 +255,11 @@ async def test_pending_unknown_owner_write_keeps_receipt_but_natural_fill_is_dur
     head_template_engine,
 ):
     from decimal import Decimal as D
+
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
-        maintain_ticket_lifecycle,
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
+        maintain_ticket_lifecycle,
     )
     from src.trading_kernel.domain.commands import (
         ExchangeCommand,
@@ -260,7 +267,7 @@ async def test_pending_unknown_owner_write_keeps_receipt_but_natural_fill_is_dur
         build_command_id,
         build_venue_client_order_id,
     )
-    from src.trading_kernel.domain.exit_execution import TpFillEvidence, EntryFill
+    from src.trading_kernel.domain.exit_execution import EntryFill, TpFillEvidence
 
     e = head_template_engine
     t, op = await accepted_operation(e, "position_reduce")
@@ -393,7 +400,6 @@ async def test_manual_tp_is_not_prepared_after_protection_conversion_crosses_tar
 async def test_late_original_tp_fill_aborts_unstarted_full_close_and_hands_back(
     head_template_engine,
 ):
-    from decimal import Decimal as D
 
     e = head_template_engine
     t, op = await accepted_operation(e, "position_close")
@@ -452,25 +458,27 @@ async def test_completed_manual_tp_installation_keeps_real_runner_tracking(
     head_template_engine,
 ):
     from decimal import Decimal as D
+
+    import sqlalchemy as sa
+
     from src.trading_kernel.application.maintain_ticket_lifecycle import (
-        maintain_ticket_lifecycle,
         LifecycleMaintenanceRequest,
         TicketLifecycleFacts,
+        maintain_ticket_lifecycle,
     )
+    from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
     from src.trading_kernel.domain.owner_position_operation import (
         preview_position_operation,
     )
-    from src.trading_kernel.domain.exit_policy import LifecycleMarketFacts
     from src.trading_kernel.infrastructure.pg_models import runtime_capabilities_current
     from src.trading_kernel.infrastructure.pg_owner_position_operations import (
         PostgresOwnerPositionOperations,
     )
     from tests.trading_kernel.support.owner_reduction import (
-        setup_operation,
-        facts,
         accept_signed_operation,
+        facts,
+        setup_operation,
     )
-    import sqlalchemy as sa
 
     e = head_template_engine
     t, b, _p, key = await setup_operation(e)
