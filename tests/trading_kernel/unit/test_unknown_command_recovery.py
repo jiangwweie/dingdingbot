@@ -245,6 +245,34 @@ def test_visible_wrong_cancel_target_is_identity_contradiction() -> None:
     assert result.reason == "cancel_target_order_id_mismatch"
 
 
+def test_visible_wrong_cancel_namespace_is_identity_contradiction() -> None:
+    command = _cancel_command()
+    assert isinstance(command.payload, CancelCommandPayload)
+    result = decide_unknown_recovery(
+        command,
+        _truth(
+            lookup_status=VenueLookupStatus.VISIBLE,
+            order=VenueOrderTruth(
+                exchange_order_id=command.payload.exchange_order_id,
+                venue_client_order_id="brc-original-stop",
+                exchange_instrument_id=(
+                    command.ticket_identity.netting_domain.exchange_instrument_id
+                ),
+                position_side="long",
+                order_side="sell",
+                quantity=Decimal("0.001"),
+                reduce_only=True,
+                order_namespace="conditional",
+                is_open=False,
+            ),
+            observed_at_ms=2_500,
+        ),
+        visibility_deadline_ms=2_000,
+    )
+    assert result.status is UnknownRecoveryStatus.IDENTITY_CONTRADICTION
+    assert result.reason == "cancel_target_order_namespace_mismatch"
+
+
 def test_initial_stop_absence_is_not_hidden_by_open_position_quantity() -> None:
     result = decide_unknown_recovery(
         _reduce_only_command(ExchangeCommandKind.INITIAL_STOP),

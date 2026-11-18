@@ -539,6 +539,8 @@ async def test_terminal_unknown_cancel_confirms_target_removal_and_resolves_unkn
 ) -> None:
     ticket, command = await _make_unknown_cancel(dispatch_engine)
     assert isinstance(command.payload, CancelCommandPayload)
+    # Cleanup now retires the regular TP before conditional protection.
+    assert command.payload.order_namespace == "regular"
 
     result = await recover_unknown_command(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
@@ -547,15 +549,15 @@ async def test_terminal_unknown_cancel_confirms_target_removal_and_resolves_unkn
                 lookup_status=VenueLookupStatus.VISIBLE,
                 order=VenueOrderTruth(
                     exchange_order_id=command.payload.exchange_order_id,
-                    venue_client_order_id="brc-original-stop",
+                    venue_client_order_id="brc-original-tp",
                     exchange_instrument_id=(
                         ticket.identity.netting_domain.exchange_instrument_id
                     ),
                     position_side=ticket.identity.netting_domain.position_side,
                     order_side="sell",
-                    quantity=ticket.quantity,
+                    quantity=ticket.take_profit_quantities[0],
                     reduce_only=True,
-                    order_namespace="conditional",
+                    order_namespace="regular",
                     is_open=False,
                 ),
                 position_quantity=Decimal(0),
@@ -591,6 +593,8 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
 ) -> None:
     ticket, command = await _make_unknown_cancel(dispatch_engine)
     assert isinstance(command.payload, CancelCommandPayload)
+    # Cleanup now retires the regular TP before conditional protection.
+    assert command.payload.order_namespace == "regular"
 
     result = await recover_unknown_command(
         lambda: PostgresKernelUnitOfWork(dispatch_engine),
@@ -599,15 +603,15 @@ async def test_still_open_unknown_cancel_is_marked_absent_and_becomes_retryable(
                 lookup_status=VenueLookupStatus.VISIBLE,
                 order=VenueOrderTruth(
                     exchange_order_id=command.payload.exchange_order_id,
-                    venue_client_order_id="brc-original-stop",
+                    venue_client_order_id="brc-original-tp",
                     exchange_instrument_id=(
                         ticket.identity.netting_domain.exchange_instrument_id
                     ),
                     position_side=ticket.identity.netting_domain.position_side,
                     order_side="sell",
-                    quantity=ticket.quantity,
+                    quantity=ticket.take_profit_quantities[0],
                     reduce_only=True,
-                    order_namespace="conditional",
+                    order_namespace="regular",
                 ),
                 position_quantity=Decimal(0),
                 matching_fill_quantity=Decimal(0),
