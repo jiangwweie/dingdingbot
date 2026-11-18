@@ -1,7 +1,7 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-14
+last_verified: 2026-11-18
 ---
 
 # Main Control Roadmap
@@ -11,7 +11,10 @@ last_verified: 2026-11-14
 ### Manual product identity and evidence boundary
 
 **This branch is the Seoul App manual-takeover product**: default AUTO retains
-Initial Stop/TP1/Runner; confirmed external App intervention permanently transfers
+Initial Stop/TP1/Runner. The deployed Owner mobile cooperation path now supports
+controlled reduction, tightening, manual TP and close through durable operations;
+ordinary system-originated adjustments retain automatic management under the
+approved cooperation contract. Confirmed external App intervention permanently transfers
 the whole Ticket to MANUAL. REVIEW_REQUIRED means unproven attribution, not
 confirmed takeover. MANUAL permits readonly observation/accounting/closure only;
 its residual orders remain Owner-managed and opposite-side instrument reuse is
@@ -22,20 +25,56 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `d70e0b6dbe4d60ef8478c9ac6236aa596bf42e7d` |
-| Production tag | `manual-runtime-2026.11.13.2` |
-| Production schema | `0023_management_recovery` |
+| Production commit | `32f5227133a48733476e89f1afbd31e885e1f476` |
+| Production tag | `manual-runtime-2026.11.18.1`, local annotated tag at the exact release commit |
+| Production schema | `0024_owner_cooperation` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `d70e0b6dbe4d60ef8478c9ac6236aa596bf42e7d` — exact certified V2 release, public HTML/JS/CSS hashes verified |
+| Static frontend commit | `32f5227133a48733476e89f1afbd31e885e1f476` — joint V2/mobile release, HTTPS asset hashes verified |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
-| Owner posture | See latest dated Seoul snapshot below; not refreshed by this documentation task |
-| Remaining acceptance | natural App takeover; natural order/protection and real Feishu acceptance/phone receipt need independent direct evidence |
+| Owner posture | Genuine Policy18 Resume/TOTP verified on 2026-11-18; new ENTRY enabled, official operational fence removed |
+| Remaining acceptance | natural App takeover; iPhone binding/background lifecycle, actual notification receipt and natural controlled-operation/Stop interleaving remain independently unverified |
 
 The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Owner cooperation0024 installed and genuine Owner restoration verified, 2026-11-18
+
+Owner explicitly authorized deployment and paused new ENTRY through the Console
+(Policy17, genuine session-authorized pause). Independent host/product/account/PG
+identity and actual venue flatness passed, then all five writers stopped behind
+the maintenance fence. The source-schema maintenance capsule used signed GETs,
+exact execution conservation and normal Kernel settlement to close XRP, BNB and
+BTC together, retire the proven-unstarted wrong-namespace cleanup command and
+replay the original Feed through163/163. No venue write or direct budget/cursor
+repair occurred. Preserved historical management mode remains REVIEW_REQUIRED;
+closure did not manufacture MANUAL or restore AUTO.
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Main candidate | Exact production reference above; Kernel R4/API R2/Static R1 PASS. R4:2430 Unit/Architecture,2095 Integration,77 Full-chain, Ruff/Mypy293 and Golden/Core parity961 snapshots/23064 decisions. Four periodic-resource cases are officially excluded, not claimed PASS |
+| Source maintenance tool | Exact `3e607bf457a6c48dcbc3a03630b441a2e9e437f1`/0023, independent R4 PASS:2237 Unit/Architecture,1992 Integration,77 Full-chain, Ruff/Mypy267 and Golden/Core parity PASS |
+| Source-history fix | First rollback preview correctly refused tickets older than its3day discovery bound. Signed GET availability and quantity evidence supported a strictly bounded7day history query; exact orders, full-page refusal, conservation and fresh30s current proof remained mandatory. New tool was independently certified and staged before preview/apply |
+| Backup | Stopped server dump and local copy/restore-list verified, SHA256 `db23fb8bb6de3c5964548677eff8b6b49a803fe8b78c53d7a599260aafa9a6de`. Earlier local restore rehearsal recovered28 Tickets/358 events/113 Commands with exact source identity |
+| Recovery | Three-ticket preview/apply economic digest identical; all three terminal, active budget/domain occupation0, internal positions0, unresolved Commands0 and open Incidents0. Historical net economics remain unavailable where fee/funding evidence is incomplete |
+| Forward migration | Official0023→0024 installer passed original-column/history and Owner/Selection/control preservation, journal and exact identity checks; Kernel/API/static links switched together |
+| Preservation query | Source diagnostic table89872rows caused the5s snapshot query to time out before migration. Temporary admin-only work_mem128MB allowed the unchanged query/digest within the unchanged timeout; default4MB restored afterward. No diagnostics were deleted and Kernel-role configuration was unchanged |
+| Runtime | Five services active/NRestarts0; four Kernel processes exact production SHA/0024; new private Feed epoch ready with valid lease and matching watermarks. Retained old epoch replay is distinct from new connection coverage |
+| Resource profile | Actual shared cgroup CPU150%, MemoryMax1610612736bytes/1536MiB, TasksMax128; all four workers share the slice, parent limits do not reduce it, sampled OOM counters0 |
+| Installed read/restore |14/14 real Entry fact rounds PASS, current seven-member account probe flat/order-free, certified5x/Cross/independent sides. Official promoter returned prepared_owner_paused; later genuine Policy18 entry_resume/TOTP authorization matches its event time. Fresh readonly certification passes integrity, flatness, management Feed, current-entry recovery and Owner Resume proof |
+| Mobile delivery | `/mobile/`200; all six mobile static files match deployed hashes, V2 assets match HTTPS hashes; unauthenticated mobile session/positions/operations401. No private browser session or test order used; device binding and real iPhone acceptance not claimed |
+| Current authority | Actual resolver VALID/static_baseline28/28 CPM/MI/MPG/BRF2 scopes and VALID14/14 existing SOR-1H scopes. Readiness rows still retain the16:00 pause labels until a later natural closed-bar refresh; they do not override the fresh authority decision. No strategy or Selection control was changed |
+| Preserved display issue | One historical CPM/BTC Universe monitor still says OWNER_ACTION_REQUIRED:unowned_open_order while current certification is eligible, account has no open orders and current promotion/entry authority passes. It remains visible and is not claimed fixed |
+
+Final readonly restoration sample observed no new Signals/Tickets since Resume,
+no open Incident and no current-invocation fault samples. This is operational
+restoration evidence, not a natural profitable trade or full iPhone acceptance.
+Evidence directory: `.local/manual-cooperation-deploy-20261118/`; procedure and
+acceptance boundaries are indexed by the
+[deployment evidence map](../superpowers/plans/2026-11-18-owner-cooperation-deployment-evidence.md).
+The older0023 installation snapshots below remain historical evidence.
 
 ### Management recovery0023 installed — genuine Owner restoration complete, verified2026-11-14
 
