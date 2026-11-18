@@ -1645,6 +1645,12 @@ _APP_MANAGEMENT_SOURCE_COLUMNS = frozenset(
         "manual_risk_reason",
         "manual_risk_at_stop",
         "management_observed_at_ms",
+        "owner_reduction_context",
+        "active_stop_close_position",
+        "pending_stop_close_position",
+        "protection_return_status",
+        "protection_operation_id",
+        "manual_profit_plan",
     }
 )
 
@@ -1689,6 +1695,15 @@ def _without_app_management_columns(
             "brc_order_command_baselines",
             "brc_management_coverage_events",
             "brc_management_feed_current",
+            "brc_management_receive_epochs",
+            "brc_owner_device_registrations",
+            "brc_owner_device_sessions",
+            "brc_owner_binding_grants",
+            "brc_owner_request_nonces",
+            "brc_owner_position_operations",
+            "brc_owner_position_operation_events",
+            "brc_owner_device_write_evidence",
+            "brc_owner_binding_limits",
         }
     }
 
@@ -3130,25 +3145,11 @@ async def _generic_owner_recovery_preservation_manifest(
         raise ValueError("Generic owner recovery requires exact source/target")
     tables=[]
     count=0
-    for name, table in sorted(metadata.tables.items()):
-        if name in {
-            "brc_failure_diagnostics",
-            "brc_review_enrichment_requests",
-            "brc_post_fill_exit_plans",
-            "brc_exit_configurations",
-            "brc_exit_configuration_current",
-            "brc_btc_ma50_current",
-            "brc_btc_ma50_snapshots",
-            "brc_management_order_evidence",
-            "brc_management_observation_current",
-            "brc_notice_outbox",
-            "brc_management_stream_events",
-            "brc_order_command_baselines",
-            "brc_management_coverage_events",
-            "brc_management_feed_current",
-        }:
-            continue
-        columns=_without_app_management_columns({name:tuple(table.c.keys())})[name]
+    source_columns = _without_app_management_columns(
+        {name: tuple(table.c.keys()) for name, table in metadata.tables.items()}
+    )
+    for name, columns in sorted(source_columns.items()):
+        table = metadata.tables[name]
         rows=[dict(r) for r in (await connection.execute(sa.select(*(table.c[c] for c in columns)))).mappings()]
         canonical=sorted((_canonical_value(r) for r in rows),key=lambda r:json.dumps(r,sort_keys=True))
         item={"table":name,"columns":list(columns),"rows":canonical,"row_count":len(rows)}
