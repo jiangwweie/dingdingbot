@@ -784,6 +784,20 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/instruments/refresh",
         "/api/owner/v1/instruments/universes/preview",
         "/api/owner/v1/instruments/universes/apply",
+        "/api/owner/v1/mobile/devices/bind",
+        "/api/owner/v1/mobile/session",
+        "/api/owner/v1/mobile/session/renew",
+        "/api/owner/v1/mobile/nonces",
+        "/api/owner/v1/mobile/controls",
+        "/api/owner/v1/mobile/controls/global",
+        "/api/owner/v1/mobile/controls/strategy",
+        "/api/owner/v1/mobile/positions",
+        "/api/owner/v1/mobile/operations/{operation_id}",
+        "/api/owner/v1/mobile/orders",
+        "/api/owner/v1/mobile/requests/{idempotency_key}",
+        "/api/owner/v1/mobile/operations/preview",
+        "/api/owner/v1/mobile/operations/submit",
+        "/api/owner/v1/mobile/operations",
     }
     assert not any(
         method in path_item
