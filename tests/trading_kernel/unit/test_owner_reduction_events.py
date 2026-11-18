@@ -182,3 +182,13 @@ def test_proven_retired_initial_stop_is_cleared_but_unproven_stop_is_kept():
         reduce_event(a, recorded(a)).aggregate.initial_stop_exchange_order_id
         == a.initial_stop_exchange_order_id
     )
+
+
+def test_late_reduction_result_is_retained_when_original_exit_won():
+    from src.trading_kernel.domain.events import OwnerReductionCommandObserved
+    a=position_protected_aggregate().model_copy(update={'status':AggregateStatus.EXIT_ACCEPTED})
+    ev=OwnerReductionCommandObserved(event_id='late',ticket_id=a.identity.ticket_id,sequence=a.last_event_sequence+1,
+        occurred_at_ms=7000,operation_id='op',command_id='close',outcome={'status':'accepted'})
+    result=reduce_event(a,ev)
+    assert result.aggregate.status is AggregateStatus.EXIT_ACCEPTED and result.aggregate.position_qty==a.position_qty
+    assert not result.effects

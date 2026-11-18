@@ -13,6 +13,7 @@ from pydantic import (
     Field,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from src.trading_kernel.domain.instrument_identity import (
@@ -49,7 +50,8 @@ class BinanceAlgoOrderSnapshot(BaseModel):
     side: str
     position_side: str = Field(alias="positionSide")
     order_type: str = Field(alias="orderType")
-    quantity: Decimal
+    quantity: Decimal | None = None
+    close_position: bool = Field(alias="closePosition", default=False, strict=True)
     algo_status: str = Field(alias="algoStatus")
     actual_order_id: str | None = Field(alias="actualOrderId", default=None)
     actual_quantity: Decimal | None = Field(alias="actualQty", default=None)
@@ -83,12 +85,18 @@ class BinanceAlgoOrderSnapshot(BaseModel):
         normalized = str(value or "").strip()
         return normalized or None
 
-    @field_validator("quantity")
-    @classmethod
-    def _require_positive_quantity(cls, value: Decimal) -> Decimal:
-        if not value.is_finite() or value <= 0:
+    @model_validator(mode="after")
+    def _quantity_mode(self) -> BinanceAlgoOrderSnapshot:
+        if self.close_position:
+            if self.quantity not in {None, Decimal(0)} or self.order_type not in {
+                "STOP_MARKET",
+                "TAKE_PROFIT_MARKET",
+            }:
+                raise ValueError("Binance close-all quantity mode differs")
+            return self.model_copy(update={"quantity": None})
+        if self.quantity is None or not self.quantity.is_finite() or self.quantity <= 0:
             raise ValueError("Binance quantity must be finite and positive")
-        return value
+        return self
 
     @field_validator("actual_quantity")
     @classmethod
@@ -166,7 +174,10 @@ async def resolve_binance_order_identity(
         actual=snapshot.order_type,
         expected=expectation.order_type.upper(),
     )
-    if snapshot.quantity != expectation.quantity:
+    if (
+        snapshot.close_position != expectation.close_position
+        or snapshot.quantity != expectation.quantity
+    ):
         raise BinanceAlgoOrderAttributionError(
             "Binance quantity differs from frozen command identity"
         )
@@ -176,12 +187,21 @@ async def resolve_binance_order_identity(
             raise BinanceAlgoOrderAttributionError(
                 "Binance actualQty is unavailable for executable algo order"
             )
-        if snapshot.actual_quantity <= 0 or snapshot.actual_quantity > expectation.quantity:
+        if snapshot.actual_quantity <= 0 or (
+            expectation.quantity is not None
+            and snapshot.actual_quantity > expectation.quantity
+        ):
             raise BinanceAlgoOrderAttributionError(
                 "Binance actualQty exceeds frozen command quantity or is zero"
             )
-        if snapshot.actual_quantity < expectation.quantity and snapshot.algo_status != "FINISHED":
-            raise BinanceAlgoOrderAttributionError("partial algo execution is not finished")
+        if (
+            expectation.close_position
+            or expectation.quantity is not None
+            and snapshot.actual_quantity < expectation.quantity
+        ) and snapshot.algo_status != "FINISHED":
+            raise BinanceAlgoOrderAttributionError(
+                "partial algo execution is not finished"
+            )
         return ResolvedOrderIdentity(
             reference=reference,
             resolution_status="executable",

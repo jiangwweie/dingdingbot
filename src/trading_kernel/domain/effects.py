@@ -36,6 +36,8 @@ class PrepareTakeProfitCommand(_Effect):
 
 
 class PrepareProtectionReplacementCommand(_Effect):
+    close_position: bool = False
+    owner_operation_id: str | None = None
     ticket_id: str
     quantity: Decimal
     stop_price: Decimal
@@ -44,6 +46,7 @@ class PrepareProtectionReplacementCommand(_Effect):
 
 
 class PrepareExitCommand(_Effect):
+    owner_operation_id: str | None = None
     ticket_id: str
     quantity: Decimal
     reason: str

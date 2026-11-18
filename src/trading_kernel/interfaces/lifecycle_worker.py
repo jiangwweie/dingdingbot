@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from enum import StrEnum
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -39,6 +40,7 @@ from src.trading_kernel.domain.exit_policy import TimeStopMode
 from src.trading_kernel.domain.order_attribution import OrderRole
 
 _LIFECYCLE_COMMAND_KINDS = (
+    ExchangeCommandKind.OWNER_REDUCE,
     ExchangeCommandKind.INITIAL_STOP,
     ExchangeCommandKind.TAKE_PROFIT,
     ExchangeCommandKind.REPLACE_PROTECTION,
@@ -121,14 +123,30 @@ async def run_lifecycle_worker_once(
         now_ms=request.now_ms,
         lease_until_ms=request.lease_until_ms,
     )
-    if (
-        control_operation is not None
-        and control_operation.state.value in {"blocked", "needs_intervention"}
-    ):
+    if control_operation is not None and control_operation.state.value in {
+        "blocked",
+        "needs_intervention",
+    }:
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.NO_CHANGE,
             detail=f"owner_control:{control_operation.state.value}",
         )
+
+    from src.trading_kernel.application.advance_owner_position_operation import (
+        advance_owner_position_operation,
+    )
+    from src.trading_kernel.application.owner_operation_facts import (
+        OwnerOperationFactsSource,
+    )
+
+    await advance_owner_position_operation(
+        uow_factory,
+        cast(OwnerOperationFactsSource, facts_source),
+        now_ms=request.now_ms,
+        timeout_seconds=request.timeout_seconds,
+        runtime_commit=request.runtime_commit,
+        schema_revision=request.schema_revision,
+    )
 
     dispatched = await _dispatch_lifecycle(
         uow_factory,
@@ -137,7 +155,10 @@ async def run_lifecycle_worker_once(
         ticket_id=None,
     )
     if dispatched.status is DispatchCommandStatus.DEFERRED:
-        return LifecycleWorkerResult(status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,detail="management_feed_not_ready")
+        return LifecycleWorkerResult(
+            status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
+            detail="management_feed_not_ready",
+        )
     if dispatched.status is not DispatchCommandStatus.NO_COMMAND:
         return LifecycleWorkerResult(
             status=(
@@ -166,16 +187,29 @@ async def run_lifecycle_worker_once(
         )
         rules = await uow.signals.get_instrument_rules(
             aggregate.identity.netting_domain.venue_id,
-            aggregate.identity.netting_domain.exchange_instrument_id
+            aggregate.identity.netting_domain.exchange_instrument_id,
         )
         order_references = await uow.exchange_commands.list_order_references(
             aggregate.identity.ticket_id
         )
+        active_adjustment = await uow.owner_position_operations.active_for_ticket(
+            aggregate.identity.ticket_id
+        )
     if aggregate.management_mode.value != "AUTO":
         async with uow_factory() as uow:
-            await uow.aggregates.expedite_reconciliation(aggregate.identity.ticket_id,due_at_ms=request.now_ms)
-            await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="lifecycle",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
-        return LifecycleWorkerResult(status=LifecycleWorkerStatus.NO_CHANGE,ticket_id=aggregate.identity.ticket_id,detail="readonly_management_reconciliation_required")
+            await uow.aggregates.expedite_reconciliation(
+                aggregate.identity.ticket_id, due_at_ms=request.now_ms
+            )
+            await uow.aggregates.schedule_next_check(
+                aggregate.identity.ticket_id,
+                work_kind="lifecycle",
+                due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+            )
+        return LifecycleWorkerResult(
+            status=LifecycleWorkerStatus.NO_CHANGE,
+            ticket_id=aggregate.identity.ticket_id,
+            detail="readonly_management_reconciliation_required",
+        )
     if profile_record is None or rules is None:
         async with uow_factory() as uow:
             await uow.aggregates.schedule_next_check(
@@ -209,9 +243,22 @@ async def run_lifecycle_worker_once(
             detail="entry_command_or_exposure_missing",
         )
     async with uow_factory() as uow:
-        baseline_rows=await uow.management.command_rows_for_order(aggregate.identity.ticket_id,"regular",aggregate.tp1_exchange_order_id or "")
+        baseline_rows = await uow.management.command_rows_for_order(
+            aggregate.identity.ticket_id,
+            "regular",
+            aggregate.tp1_exchange_order_id or "",
+        )
     from src.trading_kernel.domain.trade_management import OrderTerms
-    tp_baseline=next((r["result_payload"].get("management_baseline") or r["result_payload"].get("venue_payload",{}).get("management_baseline") for r in baseline_rows if r["result_payload"]),None)
+
+    tp_baseline = next(
+        (
+            r["result_payload"].get("management_baseline")
+            or r["result_payload"].get("venue_payload", {}).get("management_baseline")
+            for r in baseline_rows
+            if r["result_payload"]
+        ),
+        None,
+    )
     profile = profile_record.profile
     applicable_time_stop_bars = (
         None
@@ -249,15 +296,17 @@ async def run_lifecycle_worker_once(
             None,
         ),
         expected_active_stop_price=aggregate.active_stop_price,
-        tp1_management_baseline=None if tp_baseline is None else OrderTerms.model_validate(tp_baseline),
+        tp1_management_baseline=None
+        if tp_baseline is None
+        else OrderTerms.model_validate(tp_baseline),
         exact_tp_fills_required=profile.execution is not None,
-        owner_reduction_price_required=(aggregate.owner_reduction_context is not None
-            and aggregate.status is AggregateStatus.POSITION_PROTECTED),
-        optional_price_timeout_seconds=min(1.0,request.timeout_seconds/4),
-        tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
-        entry_fill_window_started_at_ms=(
-            entry_order_reference.command_created_at_ms
+        owner_reduction_price_required=(
+            aggregate.owner_reduction_context is not None
+            and aggregate.status is AggregateStatus.POSITION_PROTECTED
         ),
+        optional_price_timeout_seconds=min(1.0, request.timeout_seconds / 4),
+        tp1_exchange_order_id=aggregate.tp1_exchange_order_id,
+        entry_fill_window_started_at_ms=(entry_order_reference.command_created_at_ms),
         price_tick=rules.price_tick,
         structure_window_bars=profile.runner.lookback_bars,
         atr_period=profile.runner.atr_period,
@@ -280,7 +329,7 @@ async def run_lifecycle_worker_once(
                 uow,
                 ticket_id=aggregate.identity.ticket_id,
                 error_type=type(exc).__name__,
-                reason_code=getattr(exc,"code",None),
+                reason_code=getattr(exc, "code", None),
                 now_ms=request.now_ms,
                 due_at_ms=request.now_ms + request.idle_poll_interval_ms,
             )
@@ -298,7 +347,10 @@ async def run_lifecycle_worker_once(
         )
 
     expected_position_quantity: Decimal | None = aggregate.position_qty
-    if aggregate.status is AggregateStatus.POSITION_PROTECTED:
+    if aggregate.tp1_exchange_order_id is not None and (
+        aggregate.status is AggregateStatus.POSITION_PROTECTED
+        or aggregate.manual_profit_plan is not None
+    ):
         if (
             aggregate.tp1_filled_qty
             <= facts.tp1_filled_quantity
@@ -321,10 +373,19 @@ async def run_lifecycle_worker_once(
                 due_at_ms=request.now_ms + request.idle_poll_interval_ms,
             )
         async with uow_factory() as uow:
-            await record_reconciliation_wait(uow, key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}",
-                reason="external_flat_internal_live" if facts.position_quantity == 0 else "venue_position_differs_from_ticket_projection",
-                now_ms=request.now_ms, allowed_delay_ms=max(request.idle_poll_interval_ms * 3, int(request.timeout_seconds * 1000) * 3),
-                ticket_id=aggregate.identity.ticket_id)
+            await record_reconciliation_wait(
+                uow,
+                key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}",
+                reason="external_flat_internal_live"
+                if facts.position_quantity == 0
+                else "venue_position_differs_from_ticket_projection",
+                now_ms=request.now_ms,
+                allowed_delay_ms=max(
+                    request.idle_poll_interval_ms * 3,
+                    int(request.timeout_seconds * 1000) * 3,
+                ),
+                ticket_id=aggregate.identity.ticket_id,
+            )
         return LifecycleWorkerResult(
             status=LifecycleWorkerStatus.RECONCILIATION_REQUIRED,
             ticket_id=aggregate.identity.ticket_id,
@@ -332,7 +393,11 @@ async def run_lifecycle_worker_once(
         )
 
     async with uow_factory() as uow:
-        await resolve_reconciliation_wait(uow, key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}", now_ms=request.now_ms)
+        await resolve_reconciliation_wait(
+            uow,
+            key=f"reconciliation-mismatch:{aggregate.identity.ticket_id}",
+            now_ms=request.now_ms,
+        )
 
     async with uow_factory() as uow:
         maintenance = await maintain_ticket_lifecycle(
@@ -341,6 +406,7 @@ async def run_lifecycle_worker_once(
                 ticket_id=aggregate.identity.ticket_id,
                 facts=facts,
                 now_ms=max(request.now_ms, facts.observed_at_ms),
+                owner_adjustment_pending=active_adjustment is not None,
             ),
         )
     if maintenance.status is LifecycleMaintenanceStatus.NO_CHANGE:
@@ -354,7 +420,9 @@ async def run_lifecycle_worker_once(
             status=LifecycleWorkerStatus.NO_CHANGE,
             ticket_id=aggregate.identity.ticket_id,
             maintenance_status=maintenance.status,
-            detail=None if facts.contract_price_blocker is None else f"owner_condition_price:{facts.contract_price_blocker}",
+            detail=None
+            if facts.contract_price_blocker is None
+            else f"owner_condition_price:{facts.contract_price_blocker}",
         )
 
     dispatched = await _dispatch_lifecycle(
@@ -364,8 +432,13 @@ async def run_lifecycle_worker_once(
         ticket_id=aggregate.identity.ticket_id,
     )
     if dispatched.status is DispatchCommandStatus.DEFERRED:
-        return LifecycleWorkerResult(status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,ticket_id=aggregate.identity.ticket_id,
-            command_id=dispatched.command_id,dispatch_status=dispatched.status,detail='management_feed_not_ready')
+        return LifecycleWorkerResult(
+            status=LifecycleWorkerStatus.FACTS_UNAVAILABLE,
+            ticket_id=aggregate.identity.ticket_id,
+            command_id=dispatched.command_id,
+            dispatch_status=dispatched.status,
+            detail="management_feed_not_ready",
+        )
     return LifecycleWorkerResult(
         status=(
             LifecycleWorkerStatus.SUPERSEDED

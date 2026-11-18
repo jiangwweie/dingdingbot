@@ -38,6 +38,15 @@ class PostgresManagementRepository(PostgresManagementFeed):
 
         ticket = (await self.c.execute(sa.select(trade_tickets).where(trade_tickets.c.ticket_id == ticket_id))).mappings().one()
         mode = await self.c.scalar(sa.select(trade_aggregates.c.management_mode).where(trade_aggregates.c.ticket_id == ticket_id))
+        from src.trading_kernel.domain.verified_exit_closure import (
+            VerifiedExitClosureProof,
+        )
+        from src.trading_kernel.infrastructure.pg_models import trade_events
+        closed=(await self.c.execute(sa.select(trade_events.c.payload).where(trade_events.c.ticket_id==ticket_id,
+            trade_events.c.event_type=='VerifiedExitClosed').order_by(trade_events.c.sequence.desc()).limit(1))).scalar_one_or_none()
+        if closed is not None:
+            proof=VerifiedExitClosureProof.model_validate(closed['proof'])
+            return tuple(o.reference for o in proof.orders if isinstance(o.reference,ExternalExitOrderReference))
         if mode != ManagementMode.MANUAL.value:
             return ()
         rows = (await self.c.execute(sa.select(evidence.c.payload).where(evidence.c.ticket_id == ticket_id,

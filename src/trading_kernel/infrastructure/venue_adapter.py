@@ -944,6 +944,39 @@ class CcxtVenueAdapter:
             raise RuntimeError("complete entry quantity differs from frozen entry")
         return facts
 
+    async def read_owner_position(self, *, aggregate, commands, accepted_order_ids, operation_id=None):
+        from src.trading_kernel.infrastructure.owner_position_source import (
+            collect_owner_position,
+        )
+        domain = aggregate.identity.netting_domain
+        exchange, _ = self._resolve_exchange_and_symbol(venue_id=domain.venue_id, account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id)
+        class Reader:
+            async def read(self, name, params):
+                methods = {'orders':'fapiPrivateGetOpenOrders','algos':'fapiPrivateGetOpenAlgoOrders','order':'fapiPrivateGetOrder','algo_order':'fapiPrivateGetAlgoOrder',
+                    'trades':'fapiPrivateGetUserTrades','positions':'fapiPrivateV3GetPositionRisk',
+                    'mode':'fapiPrivateGetPositionSideDual','ticker':'fapiPublicV2GetTickerPrice'}
+                return await _call_raw_exchange(getattr(exchange,methods[name]),params)
+        return await collect_owner_position(Reader(), aggregate=aggregate, commands=commands,
+            accepted_order_ids=accepted_order_ids, operation_id=operation_id, clock_ms=self._clock_ms)
+
+    async def read_owner_reduction(self, *, aggregate, state, authorization_id, commands, accepted_order_ids):
+        from src.trading_kernel.infrastructure.owner_reduction_source import (
+            collect_owner_reduction,
+        )
+        domain = aggregate.identity.netting_domain
+        exchange, _ = self._resolve_exchange_and_symbol(venue_id=domain.venue_id, account_id=domain.account_id,
+            exchange_instrument_id=domain.exchange_instrument_id)
+        adapter = self
+        class Reader:
+            async def read(self, name, params):
+                methods = {'orders':'fapiPrivateGetOpenOrders','algos':'fapiPrivateGetOpenAlgoOrders','order':'fapiPrivateGetOrder', 'algo_order':'fapiPrivateGetAlgoOrder',
+                    'trades':'fapiPrivateGetUserTrades', 'positions':'fapiPrivateV3GetPositionRisk',
+                    'mode':'fapiPrivateGetPositionSideDual', 'ticker':'fapiPublicV2GetTickerPrice'}
+                return await _call_raw_exchange(getattr(exchange, methods[name]), params)
+        return await collect_owner_reduction(Reader(), aggregate=aggregate, state=state, authorization_id=authorization_id,
+            commands=commands, accepted_order_ids=accepted_order_ids, clock_ms=adapter._clock_ms)
+
     async def read_verified_exit(self, *, aggregate, references, incident_ids):
         from src.trading_kernel.infrastructure.verified_exit_source import (
             collect_verified_exit,
@@ -1295,6 +1328,7 @@ class CcxtVenueAdapter:
                     )
                     and terms.client_order_id == stop_reference.venue_client_order_id
                     and terms.quantity == expectation.quantity
+                    and terms.close_position == expectation.close_position
                     and terms.side == expectation.side
                     and terms.position_side == expectation.position_side
                     and terms.order_type == expectation.order_type.upper()
@@ -1306,7 +1340,7 @@ class CcxtVenueAdapter:
                 ):
                     matched.append(terms)
             if len(matched) == 1:
-                active_stop_quantity=matched[0].quantity
+                active_stop_quantity=position_quantity if matched[0].close_position else matched[0].quantity
         allocated_entry_fee = (
             entry_fee_quote * position_quantity / request.entry_quantity
         )
@@ -1601,6 +1635,10 @@ class CcxtVenueAdapter:
             raise TypeError("unsupported venue command payload")
 
         params["newClientOrderId"] = request.venue_client_order_id
+        if request.payload.close_position:
+            if request.payload.side != ('sell' if request.position_side=='long' else 'buy'):
+                raise ValueError('close-all order must close the exact hedge side')
+            params['closePosition']=True
         if request.payload.reduce_only and request.venue_id != "binance-usdm":
             params["reduceOnly"] = True
         if request.payload.time_in_force is not None:
@@ -1613,7 +1651,7 @@ class CcxtVenueAdapter:
             symbol,
             request.payload.order_type,
             request.payload.side,
-            request.payload.quantity,
+            request.payload.venue_quantity,
             request.payload.limit_price,
             params,
             clock_ms=self._clock_ms,
@@ -1789,6 +1827,8 @@ class CcxtVenueAdapter:
         else:
             lookup_order_id = None
             lookup_params = {"origClientOrderId": request.venue_client_order_id}
+            if isinstance(request.payload, OrderCommandPayload) and request.payload.close_position:
+                lookup_params = {"clientAlgoId": request.venue_client_order_id, "conditional": True}
         try:
             order_response = await _call_raw_exchange(
                 exchange.fetch_order,
@@ -1856,10 +1896,17 @@ class CcxtVenueAdapter:
                 order_namespace=(
                     request.payload.order_namespace
                     if isinstance(request.payload, CancelCommandPayload)
-                    else "regular"
+                    else "conditional" if isinstance(request.payload, OrderCommandPayload) and request.payload.close_position else "regular"
                 ),
             )
         )
+        trade_lookup_id=order.exchange_order_id if order is not None else None
+        if order is not None and order.order_namespace=="conditional":
+            response_map=order_response if isinstance(order_response,Mapping) else {}
+            raw_info=response_map.get("info")
+            raw_info=raw_info if isinstance(raw_info,Mapping) else {}
+            trade_lookup_id=str(raw_info.get("actualOrderId") or "").strip()
+            if trade_lookup_id in {"","0"}:trade_lookup_id=None
         fills = (
             _require_list(
                 await _call_raw_exchange(
@@ -1867,15 +1914,15 @@ class CcxtVenueAdapter:
                     symbol,
                     None,
                     100,
-                    {"orderId": order.exchange_order_id},
+                    {"orderId": trade_lookup_id},
                 ),
                 name="fills",
             )
-            if order is not None
+            if order is not None and trade_lookup_id is not None
             else []
         )
         matching_fills = _matching_fill_facts(
-            fills, exchange_order_id=(order.exchange_order_id if order else None),
+            fills, exchange_order_id=trade_lookup_id,
         )
         return VenueTruthSnapshot(
             exchange_observed_at_ms=exchange_time_ms,
@@ -2057,7 +2104,8 @@ def _parse_order_truth(
         exchange_instrument_id=exchange_instrument_id,
         position_side=position_side,
         order_side=order_side,
-        quantity=Decimal(str(value.get("amount") or "0")),
+        quantity=None if raw_info.get("closePosition") is True else Decimal(str(value.get("amount") or "0")),
+        close_position=raw_info.get("closePosition") is True,
         reduce_only=bool(value.get("reduceOnly", False)),
         order_namespace=order_namespace,
         is_open=known_open or _unified_order_is_open(value),

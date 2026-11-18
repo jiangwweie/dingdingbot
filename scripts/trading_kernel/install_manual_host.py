@@ -240,7 +240,7 @@ def build_artifacts(repo_root: Path, commit: str) -> bytes:
     with tempfile.TemporaryDirectory(prefix="brc-manual-static-") as directory:
         dest = Path(directory)
         raw = subprocess.check_output(
-            ("git", "archive", "--format=tar", commit, "frontend/owner-console-v2"),
+            ("git", "archive", "--format=tar", commit, "frontend/owner-console-v2", "frontend/owner-mobile"),
             cwd=repo_root,
         )
         from scripts.trading_kernel.manual_host_bootstrap import extract_plain_archive
@@ -251,6 +251,8 @@ def build_artifacts(repo_root: Path, commit: str) -> bytes:
             subprocess.run(
                 args, cwd=frontend, check=True, capture_output=True, timeout=300
             )
+        from scripts.owner_console.build_mobile import build_mobile
+        build_mobile(dest / "frontend/owner-mobile", frontend / "dist/mobile")
         static_buffer = io.BytesIO()
         with tarfile.open(fileobj=static_buffer, mode="w:gz") as archive:
             archive.add(frontend / "dist", arcname="dist")

@@ -401,3 +401,11 @@ def test_second_reduction_reuses_retired_tp_condition_without_recancelling():
     assert p.cancel_tp_order_id is None and p.tp_trigger_price==a.owner_reduction_context.original_tp_price
     decision=advance_owner_reduction(state(p),f,now_ms=3000)
     assert decision.action=='prepare_reduction'
+
+
+def test_confirmed_protection_conversion_keeps_original_preview_and_authority():
+    s = state().model_copy(update={'confirmed_protection_order_id': 'close-all', 'started_at_ms': 3000})
+    d = advance_owner_reduction(s, facts(protection_order_id='close-all', observed_at_ms=40000,
+        valid_until_ms=43000), now_ms=40000)
+    assert d.action == 'cancel_original_tp'
+    assert d.state.preview.protection_order_id == s.preview.protection_order_id

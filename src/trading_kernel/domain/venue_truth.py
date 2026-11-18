@@ -40,7 +40,8 @@ class VenueOrderTruth(BaseModel):
     exchange_instrument_id: str
     position_side: Literal["long", "short"]
     order_side: Literal["buy", "sell"]
-    quantity: Decimal
+    quantity: Decimal | None
+    close_position: bool = False
     reduce_only: bool
     order_namespace: Literal["regular", "conditional"] = "regular"
     is_open: bool = True
@@ -60,10 +61,16 @@ class VenueOrderTruth(BaseModel):
 
     @field_validator("quantity")
     @classmethod
-    def _require_positive_quantity(cls, value: Decimal) -> Decimal:
-        if value <= 0:
+    def _require_positive_quantity(cls, value: Decimal | None) -> Decimal | None:
+        if value is not None and (not value.is_finite() or value <= 0):
             raise ValueError("venue order truth quantity must be positive")
         return value
+
+    @model_validator(mode="after")
+    def quantity_mode(self):
+        if self.close_position != (self.quantity is None) or self.close_position and self.order_namespace != "conditional":
+            raise ValueError("venue truth quantity mode differs")
+        return self
 
 
 class VenueTruthSnapshot(BaseModel):
@@ -293,9 +300,14 @@ def order_identity_contradiction(
         return "command_kind_not_order_lookup"
     if order.order_side != command.payload.side:
         return "order_side_mismatch"
-    if order.quantity != command.payload.quantity:
+    if order.close_position != command.payload.close_position:
+        return "close_position_mismatch"
+    if order.quantity != command.payload.venue_quantity:
         return "quantity_mismatch"
-    if order.reduce_only != command.payload.reduce_only:
+    if order.reduce_only != command.payload.reduce_only and not (
+        domain.venue_id=="binance-usdm" and command.payload.reduce_only
+        and order.order_side==("sell" if domain.position_side=="long" else "buy")
+    ):
         return "reduce_only_mismatch"
     return None
 

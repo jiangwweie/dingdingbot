@@ -49,11 +49,18 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
         previous is not None
         and previous["owner_status"] == MonitorOwnerStatus.NEEDS_INTERVENTION
     )
-    recovered = (was_failed or previous is not None and previous["summary"] == "trade_closed_economics_incomplete" and state.summary == "review_economics_completed") and state.owner_status in {
+    recovered = (
+        was_failed
+        or previous is not None
+        and previous["summary"] == "trade_closed_economics_incomplete"
+        and state.summary == "review_economics_completed"
+    ) and state.owner_status in {
         MonitorOwnerStatus.COMPLETED,
         MonitorOwnerStatus.RUNNING,
     }
-    if not (failed and (not was_failed or previous["summary"] != state.summary) or recovered):
+    if not (
+        failed and (not was_failed or previous["summary"] != state.summary) or recovered
+    ):
         return
     kind = "runtime_fault" if failed else "runtime_recovered"
     digest = sha256(state.monitor_key.encode()).hexdigest()
@@ -66,8 +73,10 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
             f"【首尔】{subject}{'异常待处理' if failed else '检查恢复'}｜{clock:%m-%d %H:%M}",
             "系统已记录异常，需要检查控制台"
             if failed
-            else "盈亏核算已补齐" if state.summary == "review_economics_completed"
-            else "交易已收尾，盈亏数据仍待补齐" if state.summary == "trade_closed_economics_incomplete"
+            else "盈亏核算已补齐"
+            if state.summary == "review_economics_completed"
+            else "交易已收尾，盈亏数据仍待补齐"
+            if state.summary == "trade_closed_economics_incomplete"
             else "该项检查已恢复；其他门槛仍独立生效",
             "当前持仓与保护以控制台和 App 为准",
             "https://manual.jiaoyingpan.cloud/trading/",
@@ -156,4 +165,60 @@ async def read_delivery_summary(connection: AsyncConnection):
         pending_count_capped=row["pending"] > 500,
         failed_count_capped=row["failed"] > 500,
         last_accepted_at_ms=row["accepted"],
+    )
+
+
+async def enqueue_position_operation_notice(
+    connection: AsyncConnection, row: dict
+) -> None:
+    """Display-only result delivery; never used to decide an operation transition."""
+    labels = {
+        "handed_to_lifecycle": "原止盈已成交，人工操作已结束，继续自动管理",
+        "natural_tp_reconciling": "原止盈成交已记账，在途指令待核实",
+        "repreview_required": "旧止盈操作已结束，需重新预览并确认",
+        "completed": "操作完成",
+        "wait_price": "减仓完成，余仓自动续管",
+        "runner_continuing": "减仓完成，Runner继续",
+        "closed": "交易收尾完成",
+        "failed": "操作失败",
+        "rejected": "操作未执行",
+        "revoked": "操作授权已撤销",
+        "review_required": "操作结果待核实",
+        "restore_required": "原计划恢复待核实",
+    }
+    if row["state"] not in labels:
+        return
+    key = sha256(
+        f"owner-operation:{row['operation_id']}:{row['state']}:feishu".encode()
+    ).hexdigest()
+    await connection.execute(
+        insert(notice_outbox)
+        .values(
+            notice_key=key,
+            stream_key=row["ticket_id"],
+            ticket_id=row["ticket_id"],
+            kind="owner_operation",
+            state_version=row["version"],
+            snapshot={
+                "operation_id": row["operation_id"],
+                "ticket_id": row["ticket_id"],
+                "state": row["state"],
+                "version": row["version"],
+                "reason": row["first_blocker"],
+            },
+            payload="【首尔】"
+            + labels[row["state"]]
+            + "\n操作："
+            + row["operation_id"]
+            + "\n"
+            + (row["first_blocker"] or ""),
+            template_version="seoul-owner-operation-v1",
+            channel="feishu",
+            status="pending",
+            attempts=0,
+            next_attempt_at_ms=row["updated_at_ms"],
+            created_at_ms=row["updated_at_ms"],
+            updated_at_ms=row["updated_at_ms"],
+        )
+        .on_conflict_do_nothing(index_elements=["notice_key"])
     )

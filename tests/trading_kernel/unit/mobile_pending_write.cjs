@@ -51,5 +51,8 @@ function tab(){
  const confirmed=await vm.runInContext(command,first);assert.equal(confirmed.enabled,false);assert.equal(store.get('pending-write'),null);
  assert.equal(vm.runInContext("validWriteResult('/controls/strategy',{strategy_group_id:'BRF2-001',enabled:true,expected_version:2},{strategy_group_id:'BRF2-001',entry_state:'enabled',control_version:3,last_event_id:'event',updated_at_ms:3000})",first),true);
  assert.equal(vm.runInContext("validWriteResult('/controls/strategy',{strategy_group_id:'BRF2-001',enabled:true,expected_version:2},{strategy_group_id:'MI-001',entry_state:'enabled',control_version:3,last_event_id:'event',updated_at_ms:3000})",first),false);
+ assert.equal(vm.runInContext("validWriteResult('/operations/submit',{operation_id:'op',ticket_id:'t',expected_version:2},{operation_id:'op',ticket_id:'t',state:'accepted',version:3})",first),true);
+ assert.equal(vm.runInContext("validWriteResult('/operations/submit',{operation_id:'op',ticket_id:'t',expected_version:2},{operation_id:'other',ticket_id:'t',state:'accepted',version:3})",first),false);
+ assert.equal(vm.runInContext("exactFraction('0.007',50)",first),'0.0035');
  process.stdout.write('pending-write timeout and readonly recovery passed; cross-tab mutex, identity clear and invalid 200 body passed\n');
 })().catch(e=>{process.stderr.write(String(e.stack)+'\n');process.exitCode=1});

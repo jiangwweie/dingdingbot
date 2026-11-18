@@ -2921,3 +2921,39 @@ async def test_optional_price_degradation_does_not_hide_invalid_primary_position
     request=LifecycleFactsRequest(ticket_id='ticket-1',netting_domain=NettingDomain(venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long'),event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3',timeframe='1h',entry_quantity=Decimal('.01'),expected_position_quantity=Decimal('.005'),entry_order_reference=_entry_order_reference(),tp1_exchange_order_id=None,entry_fill_window_started_at_ms=1000,price_tick=Decimal('.1'),structure_window_bars=4,atr_period=14,runner_market_required=False,owner_reduction_price_required=True,observed_at_ms=20000000)
     with pytest.raises(RuntimeError,match='mandatory position failure'):
         await adapter.read_lifecycle_facts(request)
+
+
+@pytest.mark.asyncio
+async def test_close_all_stop_does_not_send_fixed_quantity_or_reduce_only():
+    from src.trading_kernel.application.ports import VenueCommandRequest
+    from src.trading_kernel.domain.commands import OrderCommandPayload
+    exchange=FakeAsyncExchange()
+    adapter=CcxtVenueAdapter(exchanges={('binance-usdm','experiment-1'):exchange},clock_ms=lambda:3000)
+    await adapter.execute(VenueCommandRequest(command_id='owner-stop',kind=ExchangeCommandKind.REPLACE_PROTECTION,
+        venue_id='binance-usdm',account_id='experiment-1',exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long',
+        venue_client_order_id='owner-stop-client',payload=OrderCommandPayload(side='sell',quantity=Decimal('.01'),order_type='stop_market',stop_price=Decimal(59000),reduce_only=False,close_position=True),deadline_at_ms=10000))
+    assert exchange.call[3] is None
+    assert exchange.call[5]['closePosition'] is True and 'reduceOnly' not in exchange.call[5]
+
+
+@pytest.mark.asyncio
+async def test_close_all_surviving_stop_covers_actual_remainder():
+    from tests.trading_kernel.support.venue_adapter import OwnerContinuationExchange
+    exchange = OwnerContinuationExchange(quantity='.005', stop_price='59000')
+    exchange.stop_changes = {'quantity': '0', 'closePosition': True}
+    adapter = CcxtVenueAdapter(exchanges={('binance-usdm', 'experiment-1'): exchange},
+        default_settlement_asset='USDT', default_taker_fee_rate=Decimal('.0005'), clock_ms=lambda: 20000000)
+    stop = TicketOrderReference(command_id='stop-command', command_kind=ExchangeCommandKind.REPLACE_PROTECTION,
+        role=OrderRole.EXIT, namespace=OrderNamespace.CONDITIONAL, venue_client_order_id='stop-client',
+        submitted_exchange_order_id='stop-remaining', command_created_at_ms=3000,
+        conditional_expectation=ConditionalOrderExpectation(exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',
+            position_side='long', side='sell', order_type='stop_market', quantity=None, close_position=True))
+    req = LifecycleFactsRequest(ticket_id='ticket-1', netting_domain=NettingDomain(venue_id='binance-usdm',
+        account_id='experiment-1', exchange_instrument_id='binance-usdm:BTCUSDT:perpetual', position_side='long'),
+        event_spec_id='event_spec:CPM-RO-001:CPM-LONG:v3', timeframe='1h', entry_quantity=Decimal('.01'),
+        expected_position_quantity=Decimal('.005'), entry_order_reference=_entry_order_reference(), tp1_exchange_order_id=None,
+        active_stop_reference=stop, expected_active_stop_price=Decimal(59000), entry_fill_window_started_at_ms=1000,
+        price_tick=Decimal('.1'), structure_window_bars=4, atr_period=14, runner_market_required=False,
+        owner_reduction_price_required=True, observed_at_ms=20000000)
+    facts = await adapter.read_lifecycle_facts(req)
+    assert facts.active_stop_quantity == Decimal('.005')

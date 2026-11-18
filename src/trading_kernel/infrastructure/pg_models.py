@@ -2807,9 +2807,14 @@ trade_aggregates = sa.Table(
     _id("initial_stop_exchange_order_id", nullable=True),
     _id("active_stop_exchange_order_id", nullable=True),
     sa.Column("active_stop_price", MONEY, nullable=True),
+    sa.Column("active_stop_close_position", sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column("pending_stop_close_position", sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column("protection_return_status", SHORT_TEXT, nullable=True),
+    sa.Column("protection_operation_id", sa.String(160), nullable=True),
     _id("tp1_exchange_order_id", nullable=True),
     sa.Column("post_fill_exit_plan", JSONB(none_as_null=True), nullable=True),
     sa.Column("owner_reduction_context", JSONB(none_as_null=True), nullable=True),
+    sa.Column("manual_profit_plan", JSONB(none_as_null=True), nullable=True),
     sa.Column(
         "partial_tp_protection", sa.Boolean, nullable=False, server_default=sa.false()
     ),

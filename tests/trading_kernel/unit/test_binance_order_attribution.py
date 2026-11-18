@@ -264,3 +264,15 @@ async def test_finished_stop_can_execute_only_remaining_quantity_without_changin
         "quantity":"0.0005","actualQty":"0.0004","algoStatus":"FINISHED"}
     resolved=await resolve_binance_order_identity(exchange=_AlgoExchange(response),reference=_reference(namespace=OrderNamespace.CONDITIONAL),observed_at_ms=10_000)
     assert resolved.actual_order_id=="1085699838084"
+
+
+@pytest.mark.asyncio
+async def test_close_all_condition_resolves_actual_quantity_from_execution_not_creation():
+    reference=_reference(namespace=OrderNamespace.CONDITIONAL)
+    reference=reference.model_copy(update={'conditional_expectation':ConditionalOrderExpectation(
+        exchange_instrument_id='binance-usdm:BTCUSDT:perpetual',position_side='long',side='sell',order_type='stop_market',quantity=None,close_position=True)})
+    response={'algoId':reference.submitted_exchange_order_id,'clientAlgoId':reference.venue_client_order_id,
+        'symbol':'BTCUSDT','side':'SELL','positionSide':'LONG','orderType':'STOP_MARKET','quantity':'0','closePosition':True,
+        'algoStatus':'FINISHED','actualOrderId':'child-1','actualQty':'.0002'}
+    resolved=await resolve_binance_order_identity(exchange=_AlgoExchange(response),reference=reference,observed_at_ms=10000)
+    assert resolved.actual_order_id=='child-1'

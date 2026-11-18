@@ -79,9 +79,18 @@ from src.trading_kernel.domain.events import (
     ManagementReviewRequired,
     ManualPositionObserved,
     ManualTakeoverConfirmed,
+    NaturalTakeProfitRecorded,
     OwnedOrderAbsenceConfirmed,
     OwnedOrphanCancelConfirmed,
     OwnedOrphanOrderDetected,
+    OwnerAutomaticTpRestoreRequested,
+    OwnerOperationCommandObserved,
+    OwnerPositionExitAborted,
+    OwnerPositionExitRequested,
+    OwnerProfitPlanCancelled,
+    OwnerProfitPlanInstalled,
+    OwnerProfitPlanRetired,
+    OwnerProtectionRequested,
     OwnerReductionCommandObserved,
     OwnerReductionPriceSatisfied,
     OwnerReductionRecorded,
@@ -115,6 +124,7 @@ from src.trading_kernel.domain.events import (
     VacuumPostAbsenceNoFillVerified,
     VerifiedExitClosed,
 )
+from src.trading_kernel.domain.manual_profit_plan import ManualProfitPlan
 from src.trading_kernel.domain.owner_reduction_context import OwnerReductionContext
 from src.trading_kernel.domain.post_fill_risk import PostFillDisposition
 from src.trading_kernel.domain.trade_management import ManagementMode
@@ -146,77 +156,192 @@ def reduce_event(
 
     if isinstance(event, VerifiedExitClosed):
         proof = event.proof
-        if current.status in {AggregateStatus.SETTLEMENT_PENDING, AggregateStatus.REVIEW_PENDING, AggregateStatus.TERMINAL}:
+        if current.status in {
+            AggregateStatus.SETTLEMENT_PENDING,
+            AggregateStatus.REVIEW_PENDING,
+            AggregateStatus.TERMINAL,
+        }:
             raise InvalidLifecycleTransition("verified closure already recorded")
-        if (proof.ticket_id != current.identity.ticket_id or proof.domain != current.identity.netting_domain
-            or proof.entry_quantity != current.ticket.quantity or proof.expected_version != current.version
+        if (
+            proof.ticket_id != current.identity.ticket_id
+            or proof.domain != current.identity.netting_domain
+            or proof.entry_quantity != current.ticket.quantity
+            or proof.expected_version != current.version
             or proof.management_revision != current.management_revision
             or not proof.observed_at_ms <= event.occurred_at_ms < proof.valid_until_ms
             or current.post_fill_stress_status != "passed"
-            or min(f.occurred_at_ms for f in proof.entry_fills) < current.ticket.created_at_ms):
-            raise InvalidLifecycleTransition("verified exit proof differs from protected Ticket")
-        identities={(o.reference.namespace.value,o.reference.submitted_exchange_order_id) for o in proof.orders}
-        for namespace,order_id in [("regular",current.entry_exchange_order_id),("regular",current.tp1_exchange_order_id),("conditional",current.initial_stop_exchange_order_id),("conditional",current.active_stop_exchange_order_id)]:
-            if order_id is not None and (namespace,order_id) not in identities:
-                raise InvalidLifecycleTransition("verified exit omits known order identity")
+            or min(f.occurred_at_ms for f in proof.entry_fills)
+            < current.ticket.created_at_ms
+        ):
+            raise InvalidLifecycleTransition(
+                "verified exit proof differs from protected Ticket"
+            )
+        identities = {
+            (o.reference.namespace.value, o.reference.submitted_exchange_order_id)
+            for o in proof.orders
+        }
+        for namespace, order_id in [
+            ("regular", current.entry_exchange_order_id),
+            ("regular", current.tp1_exchange_order_id),
+            ("conditional", current.initial_stop_exchange_order_id),
+            ("conditional", current.active_stop_exchange_order_id),
+        ]:
+            if order_id is not None and (namespace, order_id) not in identities:
+                raise InvalidLifecycleTransition(
+                    "verified exit omits known order identity"
+                )
         domain = current.identity.netting_domain
-        return _transition(current, event, status=AggregateStatus.SETTLEMENT_PENDING,
-            updates={"position_qty":Decimal(0),"protected_qty":Decimal(0),"management_orders":(),
-                "initial_stop_exchange_order_id":None,"active_stop_exchange_order_id":None,"active_stop_price":None,
-                "tp1_exchange_order_id":None,"pending_replaced_stop_exchange_order_id":None,
-                "pending_cancel_exchange_order_id":None,"pending_stop_price":None,"entry_lane_held":False},
-            effects=(ResolveExactClosureIncidents(ticket_id=current.identity.ticket_id,incident_ids=proof.incident_ids),
-                ReleaseCapitalAuthorities(ticket_id=current.identity.ticket_id,
-                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",netting_domain_key=domain.key(),
-                    notional=current.ticket.notional,risk_at_stop=current.ticket.risk_at_stop,
-                    reserved_margin=current.ticket.reserved_margin,released_at_ms=event.occurred_at_ms)))
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.SETTLEMENT_PENDING,
+            updates={
+                "position_qty": Decimal(0),
+                "protected_qty": Decimal(0),
+                "management_orders": (),
+                "initial_stop_exchange_order_id": None,
+                "active_stop_exchange_order_id": None,
+                "active_stop_price": None,
+                "tp1_exchange_order_id": None,
+                "pending_replaced_stop_exchange_order_id": None,
+                "pending_cancel_exchange_order_id": None,
+                "pending_stop_price": None,
+                "entry_lane_held": False,
+            },
+            effects=(
+                ResolveExactClosureIncidents(
+                    ticket_id=current.identity.ticket_id,
+                    incident_ids=proof.incident_ids,
+                ),
+                ReleaseCapitalAuthorities(
+                    ticket_id=current.identity.ticket_id,
+                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
+                    netting_domain_key=domain.key(),
+                    notional=current.ticket.notional,
+                    risk_at_stop=current.ticket.risk_at_stop,
+                    reserved_margin=current.ticket.reserved_margin,
+                    released_at_ms=event.occurred_at_ms,
+                ),
+            ),
+        )
 
     if isinstance(event, ManagementReviewCleared):
-        if current.management_mode is not ManagementMode.REVIEW_REQUIRED or current.management_reason not in {"collector_gap","order_history_incomplete_or_command_unknown","kernel_order_not_matched_to_command","known_order_creation_time_or_terms_drift"}:
-            raise InvalidLifecycleTransition("only a proven observation gap may clear review")
-        if not 0<event.coverage_from_ms<=current.ticket.created_at_ms or event.coverage_until_ms>event.occurred_at_ms:
-            raise InvalidLifecycleTransition("review clearance requires complete Ticket history")
-        return _transition(current,event,status=current.status,updates={"management_mode":ManagementMode.AUTO,
-            "management_revision":current.management_revision+1,"management_reason":None,"management_evidence_id":None})
+        if (
+            current.management_mode is not ManagementMode.REVIEW_REQUIRED
+            or current.management_reason
+            not in {
+                "collector_gap",
+                "order_history_incomplete_or_command_unknown",
+                "kernel_order_not_matched_to_command",
+                "known_order_creation_time_or_terms_drift",
+            }
+        ):
+            raise InvalidLifecycleTransition(
+                "only a proven observation gap may clear review"
+            )
+        if (
+            not 0 < event.coverage_from_ms <= current.ticket.created_at_ms
+            or event.coverage_until_ms > event.occurred_at_ms
+        ):
+            raise InvalidLifecycleTransition(
+                "review clearance requires complete Ticket history"
+            )
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "management_mode": ManagementMode.AUTO,
+                "management_revision": current.management_revision + 1,
+                "management_reason": None,
+                "management_evidence_id": None,
+            },
+        )
     if isinstance(event, ManualPositionObserved):
         if current.management_mode is not ManagementMode.MANUAL:
-            raise InvalidLifecycleTransition("manual position requires manual management")
-        if event.quantity>current.position_qty:
-            raise InvalidLifecycleTransition("manual exposure increase is outside scope")
+            raise InvalidLifecycleTransition(
+                "manual position requires manual management"
+            )
+        if event.quantity > current.position_qty:
+            raise InvalidLifecycleTransition(
+                "manual exposure increase is outside scope"
+            )
         if not event.facts_complete:
-            return _transition(current,event,status=current.status)
-        manual_updates={"position_qty":event.quantity,"protected_qty":event.protected_quantity,
-            "management_observed_at_ms":event.occurred_at_ms,"manual_risk_at_stop":event.risk_at_stop,
-            "manual_risk_reason":event.risk_reason,"management_orders":event.orders}
-        if event.quantity>0:
-            return _transition(current,event,status=AggregateStatus.MANUAL_OPEN,updates=manual_updates)
+            return _transition(current, event, status=current.status)
+        manual_updates = {
+            "position_qty": event.quantity,
+            "protected_qty": event.protected_quantity,
+            "management_observed_at_ms": event.occurred_at_ms,
+            "manual_risk_at_stop": event.risk_at_stop,
+            "manual_risk_reason": event.risk_reason,
+            "management_orders": event.orders,
+        }
+        if event.quantity > 0:
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.MANUAL_OPEN,
+                updates=manual_updates,
+            )
         if event.orders or not event.commands_resolved:
-            return _transition(current,event,status=AggregateStatus.MANUAL_FLAT_PENDING_ORDERS,updates=manual_updates)
-        domain=current.identity.netting_domain
-        return _transition(current,event,status=AggregateStatus.SETTLEMENT_PENDING,
-            updates={**manual_updates,"protected_qty":Decimal(0),"active_stop_exchange_order_id":None,
-                "initial_stop_exchange_order_id":None,"tp1_exchange_order_id":None,
-                "pending_cancel_exchange_order_id":None,"pending_replaced_stop_exchange_order_id":None},
-            effects=(ResolveTicketIncidentsAtClosure(ticket_id=current.identity.ticket_id),
-                ReleaseCapitalAuthorities(ticket_id=current.identity.ticket_id,
-                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",netting_domain_key=domain.key(),
-                    notional=current.ticket.notional,risk_at_stop=current.ticket.risk_at_stop,
-                    reserved_margin=current.ticket.reserved_margin,released_at_ms=event.occurred_at_ms)))
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.MANUAL_FLAT_PENDING_ORDERS,
+                updates=manual_updates,
+            )
+        domain = current.identity.netting_domain
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.SETTLEMENT_PENDING,
+            updates={
+                **manual_updates,
+                "protected_qty": Decimal(0),
+                "active_stop_exchange_order_id": None,
+                "initial_stop_exchange_order_id": None,
+                "tp1_exchange_order_id": None,
+                "pending_cancel_exchange_order_id": None,
+                "pending_replaced_stop_exchange_order_id": None,
+            },
+            effects=(
+                ResolveTicketIncidentsAtClosure(ticket_id=current.identity.ticket_id),
+                ReleaseCapitalAuthorities(
+                    ticket_id=current.identity.ticket_id,
+                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
+                    netting_domain_key=domain.key(),
+                    notional=current.ticket.notional,
+                    risk_at_stop=current.ticket.risk_at_stop,
+                    reserved_margin=current.ticket.reserved_margin,
+                    released_at_ms=event.occurred_at_ms,
+                ),
+            ),
+        )
     if isinstance(event, ManagedCommandOutcomeObserved):
         if current.management_mode is ManagementMode.AUTO:
-            raise InvalidLifecycleTransition("automatic command results require normal lifecycle reduction")
+            raise InvalidLifecycleTransition(
+                "automatic command results require normal lifecycle reduction"
+            )
         if not event.command_id.strip():
             raise InvalidLifecycleTransition("managed command result identity missing")
-        return _transition(current,event,status=current.status)
+        return _transition(current, event, status=current.status)
     if isinstance(event, ManualTakeoverConfirmed):
         if current.management_mode is ManagementMode.MANUAL:
             raise InvalidLifecycleTransition("manual takeover cannot be applied twice")
-        if (current.initial_stop_exchange_order_id is None and not (current.post_fill_stress_status=="passed" and current.active_stop_exchange_order_id is not None)) or current.position_qty <= 0:
+        if (
+            current.initial_stop_exchange_order_id is None
+            and not (
+                current.post_fill_stress_status == "passed"
+                and current.active_stop_exchange_order_id is not None
+            )
+        ) or current.position_qty <= 0:
             raise InvalidLifecycleTransition(
                 "manual takeover requires confirmed initial protection"
             )
-        if current.entry_lane_held and current.post_fill_stress_status!="passed":
-            raise InvalidLifecycleTransition("manual takeover requires settled protected entry")
+        if current.entry_lane_held and current.post_fill_stress_status != "passed":
+            raise InvalidLifecycleTransition(
+                "manual takeover requires settled protected entry"
+            )
         return _transition(
             current,
             event,
@@ -227,9 +352,11 @@ def reduce_event(
                 "management_evidence_id": event.evidence_id,
                 "management_reason": event.reason,
                 "manual_takeover_at_ms": event.occurred_at_ms,
-                "entry_lane_held":False,
+                "entry_lane_held": False,
             },
-            effects=(ReleaseEntryLane(ticket_id=current.identity.ticket_id),) if current.entry_lane_held else (),
+            effects=(ReleaseEntryLane(ticket_id=current.identity.ticket_id),)
+            if current.entry_lane_held
+            else (),
         )
     if isinstance(event, ManagementReviewRequired):
         if current.management_mode is ManagementMode.MANUAL:
@@ -248,8 +375,21 @@ def reduce_event(
             },
         )
     if current.management_mode is not ManagementMode.AUTO and not (
-        (current.management_mode is ManagementMode.MANUAL and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised)))
-        or (current.position_qty==0 and current.protected_qty==0 and current.status in {AggregateStatus.SETTLEMENT_PENDING,AggregateStatus.REVIEW_PENDING,AggregateStatus.TERMINAL} and isinstance(event,(BudgetSettled,ReviewRecorded,ReviewRevised)))
+        (
+            current.management_mode is ManagementMode.MANUAL
+            and isinstance(event, (BudgetSettled, ReviewRecorded, ReviewRevised))
+        )
+        or (
+            current.position_qty == 0
+            and current.protected_qty == 0
+            and current.status
+            in {
+                AggregateStatus.SETTLEMENT_PENDING,
+                AggregateStatus.REVIEW_PENDING,
+                AggregateStatus.TERMINAL,
+            }
+            and isinstance(event, (BudgetSettled, ReviewRecorded, ReviewRevised))
+        )
     ):
         raise InvalidLifecycleTransition(
             "manual or unresolved management forbids automatic lifecycle reduction"
@@ -268,7 +408,9 @@ def reduce_event(
                 "confirmed leverage differs from immutable Ticket"
             )
         if event.leverage_verified_at_ms <= 0:
-            raise InvalidLifecycleTransition("leverage confirmation time must be positive")
+            raise InvalidLifecycleTransition(
+                "leverage confirmation time must be positive"
+            )
         if not str(event.leverage_verification_digest or "").startswith("sha256:"):
             raise InvalidLifecycleTransition("leverage confirmation requires a digest")
         leverage_confirmed_effects: list[KernelEffect] = [
@@ -314,9 +456,7 @@ def reduce_event(
             (
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
-                ProjectTerminalOwnerState(
-                    ticket_id=current.identity.ticket_id
-                ),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
             )
         )
         return _transition(
@@ -403,9 +543,7 @@ def reduce_event(
             effects=(
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
-                ProjectTerminalOwnerState(
-                    ticket_id=current.identity.ticket_id
-                ),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
             ),
         )
 
@@ -427,9 +565,7 @@ def reduce_event(
                 ),
                 ReleaseBudget(ticket_id=current.identity.ticket_id),
                 ReleaseEntryLane(ticket_id=current.identity.ticket_id),
-                ProjectTerminalOwnerState(
-                    ticket_id=current.identity.ticket_id
-                ),
+                ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),
             ),
         )
 
@@ -451,7 +587,9 @@ def reduce_event(
                 "Vacuum full fill requires exact Vacuum lineage"
             )
         if event.filled_qty != current.ticket.quantity:
-            raise InvalidLifecycleTransition("full entry fill must equal Ticket quantity")
+            raise InvalidLifecycleTransition(
+                "full entry fill must equal Ticket quantity"
+            )
         if event.average_fill_price <= 0:
             raise InvalidLifecycleTransition("average fill price must be positive")
         assessment = event.post_fill_risk
@@ -798,7 +936,8 @@ def reduce_event(
             != build_venue_client_order_id(expected_command_id)
             or current.position_qty != 0
             or event.filled_qty > current.ticket.quantity
-            or event.attribution_digest != vacuum_late_fill_proof_digest(
+            or event.attribution_digest
+            != vacuum_late_fill_proof_digest(
                 ticket_id=current.identity.ticket_id,
                 entry_command_id=event.entry_command_id,
                 exchange_order_id=event.exchange_order_id,
@@ -834,9 +973,11 @@ def reduce_event(
             event.entry_vacuum_id != current.entry_vacuum_id
             or event.exchange_order_id != current.entry_exchange_order_id
             or event.entry_command_id != expected_command_id
-            or event.venue_client_order_id != build_venue_client_order_id(expected_command_id)
+            or event.venue_client_order_id
+            != build_venue_client_order_id(expected_command_id)
             or current.position_qty != 0
-            or event.proof_digest != vacuum_no_fill_proof_digest(
+            or event.proof_digest
+            != vacuum_no_fill_proof_digest(
                 ticket_id=current.identity.ticket_id,
                 entry_command_id=event.entry_command_id,
                 exchange_order_id=event.exchange_order_id,
@@ -889,8 +1030,7 @@ def reduce_event(
         _require_status(current, AggregateStatus.ENTRY_VACUUM_CANCELLED)
         if (
             event.entry_vacuum_id != current.entry_vacuum_id
-            or
-            event.requested_qty != current.ticket.quantity
+            or event.requested_qty != current.ticket.quantity
             or event.final_filled_qty != current.position_qty
             or event.average_fill_price != current.average_fill_price
             or event.post_fill_risk.disposition is not PostFillDisposition.NORMAL
@@ -903,8 +1043,7 @@ def reduce_event(
             )
         if (
             current.ticket.selection_authority_id is not None
-            and event.selection_authority_id
-            != current.ticket.selection_authority_id
+            and event.selection_authority_id != current.ticket.selection_authority_id
         ):
             raise InvalidLifecycleTransition(
                 "retained Vacuum partial Authority differs from Ticket birth"
@@ -971,7 +1110,9 @@ def reduce_event(
             },
         )
         if event.protected_qty != current.position_qty:
-            raise InvalidLifecycleTransition("initial stop does not cover exact position")
+            raise InvalidLifecycleTransition(
+                "initial stop does not cover exact position"
+            )
         if not str(event.exchange_order_id or "").strip():
             raise InvalidLifecycleTransition("initial stop order identity is required")
         initial_stop_effects: list[KernelEffect] = []
@@ -988,7 +1129,10 @@ def reduce_event(
             "active_stop_exchange_order_id": event.exchange_order_id.strip(),
             "active_stop_price": current.ticket.initial_stop_price,
         }
-        if current.post_fill_disposition is PostFillDisposition.FLATTEN_AFTER_PROTECTION:
+        if (
+            current.post_fill_disposition
+            is PostFillDisposition.FLATTEN_AFTER_PROTECTION
+        ):
             return _transition(
                 current,
                 event,
@@ -1031,8 +1175,7 @@ def reduce_event(
             != current.identity.netting_domain.account_id
             or request.account_snapshot.exchange_instrument_id
             != current.identity.netting_domain.exchange_instrument_id
-            or request.evaluated_side
-            != current.identity.netting_domain.position_side
+            or request.evaluated_side != current.identity.netting_domain.position_side
             or request.reference_entry_price != event.average_fill_price
             or request.initial_stop_price != event.initial_stop_price
             or request.post_stop_stress_multiple
@@ -1164,7 +1307,9 @@ def reduce_event(
         _require_status(current, AggregateStatus.PROTECTION_PENDING)
         reason = str(event.reason or "").strip()
         if not reason:
-            raise InvalidLifecycleTransition("unknown initial stop outcome requires reason")
+            raise InvalidLifecycleTransition(
+                "unknown initial stop outcome requires reason"
+            )
         return _transition(
             current,
             event,
@@ -1237,7 +1382,9 @@ def reduce_event(
         if not exchange_order_id:
             raise InvalidLifecycleTransition("TP1 acceptance requires order identity")
         if event.target_qty != current.tp1_target_qty:
-            raise InvalidLifecycleTransition("TP1 accepted quantity differs from Ticket")
+            raise InvalidLifecycleTransition(
+                "TP1 accepted quantity differs from Ticket"
+            )
         tp1_confirm_effects: tuple[KernelEffect, ...] = ()
         if current.status is AggregateStatus.TP1_OUTCOME_UNKNOWN:
             tp1_confirm_effects = (
@@ -1331,7 +1478,12 @@ def reduce_event(
         )
 
     if isinstance(event, TakeProfitCompletedForExit):
-        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+            if current.manual_profit_plan is not None
+            else {AggregateStatus.POSITION_PROTECTED},
+        )
         if (
             event.filled_qty != current.tp1_target_qty
             or event.filled_qty < current.tp1_filled_qty
@@ -1353,8 +1505,41 @@ def reduce_event(
             },
         )
 
+    if isinstance(event, NaturalTakeProfitRecorded):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        filled = event.cumulative_filled_qty
+        remaining = current.position_qty - (filled - current.tp1_filled_qty)
+        if (
+            not current.tp1_filled_qty < filled <= current.tp1_target_qty
+            or remaining <= 0
+            or event.tp_fill_evidence.quantity != filled
+            or event.tp_fill_evidence.exchange_order_id != current.tp1_exchange_order_id
+            or event.tp_fill_evidence.vwap != event.average_fill_price
+        ):
+            raise InvalidLifecycleTransition("natural TP cumulative evidence differs")
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "position_qty": remaining,
+                "tp1_filled_qty": filled,
+                "protected_qty": remaining
+                if event.protection_covers_remainder
+                else Decimal(0),
+            },
+        )
+
     if isinstance(event, TakeProfitProgressed):
-        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+            if current.manual_profit_plan is not None
+            else {AggregateStatus.POSITION_PROTECTED},
+        )
         filled = event.cumulative_filled_qty
         if (
             not current.tp1_filled_qty < filled < current.tp1_target_qty
@@ -1393,13 +1578,28 @@ def reduce_event(
                 ),
             )
         if event.protection_covers_remainder:
+            progress_updates["protected_qty"] = remaining
             return _transition(
                 current, event, status=current.status, updates=progress_updates
             )
         if not event.replacement_safety_verified:
-            return _transition(current,event,status=AggregateStatus.EXIT_PENDING,updates=progress_updates,
-                effects=(OpenIncident(ticket_id=current.identity.ticket_id,incident_kind="partial_tp_protection_unproven"),
-                    PrepareExitCommand(ticket_id=current.identity.ticket_id,quantity=remaining,reason="partial_tp_protection_unproven")))
+            return _transition(
+                current,
+                event,
+                status=AggregateStatus.EXIT_PENDING,
+                updates=progress_updates,
+                effects=(
+                    OpenIncident(
+                        ticket_id=current.identity.ticket_id,
+                        incident_kind="partial_tp_protection_unproven",
+                    ),
+                    PrepareExitCommand(
+                        ticket_id=current.identity.ticket_id,
+                        quantity=remaining,
+                        reason="partial_tp_protection_unproven",
+                    ),
+                ),
+            )
         return _transition(
             current,
             event,
@@ -1408,10 +1608,12 @@ def reduce_event(
                 **progress_updates,
                 "partial_tp_protection": True,
                 "pending_stop_price": current.active_stop_price,
+                "pending_stop_close_position": current.active_stop_close_position,
                 "pending_stop_watermark_ms": event.occurred_at_ms,
             },
             effects=(
                 PrepareProtectionReplacementCommand(
+                    close_position=current.active_stop_close_position,
                     ticket_id=current.identity.ticket_id,
                     quantity=remaining,
                     stop_price=current.active_stop_price,
@@ -1421,11 +1623,178 @@ def reduce_event(
             ),
         )
 
-    if isinstance(event, OwnerReductionCommandObserved):
+    if isinstance(event, OwnerPositionExitRequested):
         _require_status_in(
             current,
             {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
         )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.EXIT_PENDING,
+            updates={
+                "protection_return_status": current.status,
+                "protection_operation_id": event.operation_id,
+            },
+            effects=(
+                PrepareExitCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.position_qty,
+                    reason="owner_position_close",
+                    owner_operation_id=event.operation_id,
+                ),
+            ),
+        )
+
+    if isinstance(event, OwnerPositionExitAborted):
+        _require_status(current, AggregateStatus.EXIT_PENDING)
+        if (
+            current.protection_operation_id != event.operation_id
+            or current.protection_return_status is None
+        ):
+            raise InvalidLifecycleTransition("Owner exit source differs")
+        return _transition(
+            current,
+            event,
+            status=current.protection_return_status,
+            updates={"protection_return_status": None, "protection_operation_id": None},
+        )
+
+    if isinstance(event, OwnerAutomaticTpRestoreRequested):
+        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        if (
+            current.tp1_exchange_order_id != event.original_tp_order_id
+            or current.tp1_filled_qty != 0
+            or current.owner_reduction_context is not None
+            or current.manual_profit_plan is not None
+        ):
+            raise InvalidLifecycleTransition("original TP restoration source differs")
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.TP1_PENDING,
+            effects=(
+                PrepareTakeProfitCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.tp1_target_qty,
+                    limit_price=current.post_fill_exit_plan.tp_price
+                    if current.post_fill_exit_plan
+                    else current.ticket.take_profit_prices[0],
+                ),
+            ),
+        )
+
+    if isinstance(event, OwnerProfitPlanRetired):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        evidence = event.evidence
+        terms = evidence.terms
+        if (
+            event.exchange_order_id != current.tp1_exchange_order_id
+            or terms.exchange_order_id != event.exchange_order_id
+            or evidence.action.value not in {"cancel", "expired"}
+            or not evidence.coverage_complete
+            or evidence.known_command_outcome_pending
+            or evidence.executed_quantity != current.tp1_filled_qty
+            or terms.order_namespace != "regular"
+            or terms.order_type != "LIMIT"
+            or terms.price is None
+            or terms.quantity is None
+        ):
+            raise InvalidLifecycleTransition(
+                "retired TP requires exact terminal evidence"
+            )
+        retired_plan = ManualProfitPlan(
+            source_kind=event.source_kind,
+            operation_id=event.operation_id,
+            command_id=event.command_id,
+            exchange_order_id=event.exchange_order_id,
+            price=terms.price,
+            target_quantity=terms.quantity,
+            prior_tp_filled_quantity=current.tp1_filled_qty,
+            started_from_runner=current.status is AggregateStatus.RUNNER_PROTECTED,
+            cancelled=True,
+        )
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={"tp1_exchange_order_id": None, "manual_profit_plan": retired_plan},
+        )
+
+    if isinstance(event, OwnerProfitPlanInstalled):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        if (
+            event.replaces_exchange_order_id != current.tp1_exchange_order_id
+            or event.quantity <= 0
+            or event.quantity > current.position_qty
+            or event.price <= 0
+        ):
+            raise InvalidLifecycleTransition("manual TP source or quantity differs")
+        manual_plan = ManualProfitPlan(
+            operation_id=event.operation_id,
+            command_id=event.command_id,
+            exchange_order_id=event.exchange_order_id,
+            price=event.price,
+            target_quantity=event.quantity,
+            prior_tp_filled_quantity=current.tp1_filled_qty,
+            started_from_runner=current.status is AggregateStatus.RUNNER_PROTECTED,
+        )
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "manual_profit_plan": manual_plan,
+                "tp1_exchange_order_id": event.exchange_order_id,
+                "tp1_target_qty": event.quantity,
+                "tp1_filled_qty": Decimal(0),
+                "owner_reduction_context": None,
+            },
+        )
+
+    if isinstance(event, OwnerProfitPlanCancelled):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        cancelled_plan = current.manual_profit_plan
+        if (
+            cancelled_plan is None
+            or event.exchange_order_id != current.tp1_exchange_order_id
+        ):
+            raise InvalidLifecycleTransition("manual TP cancellation differs")
+        return _transition(
+            current,
+            event,
+            status=current.status,
+            updates={
+                "tp1_exchange_order_id": None,
+                "manual_profit_plan": cancelled_plan.model_copy(
+                    update={"cancelled": True}
+                ),
+            },
+        )
+
+    if isinstance(event, OwnerOperationCommandObserved):
+        if current.status is AggregateStatus.TERMINAL:
+            raise InvalidLifecycleTransition(
+                "terminal Ticket cannot accept a new Owner command"
+            )
+        return _transition(current, event, status=current.status)
+
+    if isinstance(event, OwnerReductionCommandObserved):
+        # An original failure/Stop exit may win after a close request crossed the
+        # transport boundary. Retain the result without replaying the old stage.
+        if current.status is AggregateStatus.TERMINAL:
+            raise InvalidLifecycleTransition(
+                "terminal Ticket forbids new Owner execution"
+            )
         return _transition(current, event, status=current.status)
 
     if isinstance(event, OwnerReductionRecorded):
@@ -1560,10 +1929,12 @@ def reduce_event(
                 ),
                 "break_even_floor_price": event.proposed_stop,
                 "pending_stop_price": event.proposed_stop,
+                "pending_stop_close_position": current.active_stop_close_position,
                 "pending_stop_watermark_ms": event.observed_at_ms,
             },
             effects=(
                 PrepareProtectionReplacementCommand(
+                    close_position=current.active_stop_close_position,
                     ticket_id=current.identity.ticket_id,
                     quantity=current.position_qty,
                     stop_price=event.proposed_stop,
@@ -1574,11 +1945,18 @@ def reduce_event(
         )
 
     if isinstance(event, TakeProfitFilled):
-        _require_status(current, AggregateStatus.POSITION_PROTECTED)
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+            if current.manual_profit_plan is not None
+            else {AggregateStatus.POSITION_PROTECTED},
+        )
         if event.filled_qty != current.tp1_target_qty:
             raise InvalidLifecycleTransition("TP1 fill must equal the frozen target")
         if event.average_fill_price <= 0 or event.runner_floor_price <= 0:
-            raise InvalidLifecycleTransition("TP1 fill and runner floor must be positive")
+            raise InvalidLifecycleTransition(
+                "TP1 fill and runner floor must be positive"
+            )
         if current.active_stop_exchange_order_id is None:
             raise InvalidLifecycleTransition("TP1 fill has no active stop to replace")
         runner_qty = current.position_qty - (event.filled_qty - current.tp1_filled_qty)
@@ -1594,17 +1972,71 @@ def reduce_event(
                 "tp1_exchange_order_id": None,
                 "break_even_floor_price": event.runner_floor_price,
                 "pending_stop_price": event.runner_floor_price,
+                "pending_stop_close_position": current.active_stop_close_position,
                 "pending_stop_watermark_ms": event.occurred_at_ms,
             },
             effects=(
                 PrepareProtectionReplacementCommand(
+                    close_position=current.active_stop_close_position,
                     ticket_id=current.identity.ticket_id,
                     quantity=runner_qty,
                     stop_price=event.runner_floor_price,
-                    replaces_exchange_order_id=(
-                        current.active_stop_exchange_order_id
-                    ),
+                    replaces_exchange_order_id=(current.active_stop_exchange_order_id),
                     source_watermark_ms=event.occurred_at_ms,
+                ),
+            ),
+        )
+
+    if isinstance(event, OwnerProtectionRequested):
+        _require_status_in(
+            current,
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+        )
+        if (
+            not event.operation_id.strip()
+            or current.active_stop_exchange_order_id is None
+            or current.active_stop_price is None
+            or current.position_qty <= 0
+            or event.stop_price <= 0
+            or event.source_watermark_ms <= 0
+            or current.protected_qty != current.position_qty
+        ):
+            raise InvalidLifecycleTransition("Owner protection source incomplete")
+        tighter = (
+            event.stop_price > current.active_stop_price
+            if current.identity.netting_domain.position_side == "long"
+            else event.stop_price < current.active_stop_price
+        )
+        conversion = event.close_position and not current.active_stop_close_position
+        if (
+            not tighter
+            and not (conversion and event.stop_price == current.active_stop_price)
+            or current.active_stop_close_position
+            and not event.close_position
+        ):
+            raise InvalidLifecycleTransition(
+                "Owner protection must tighten or convert exact protection"
+            )
+        return _transition(
+            current,
+            event,
+            status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
+            updates={
+                "protection_return_status": current.status,
+                "protection_operation_id": event.operation_id,
+                "pending_stop_price": event.stop_price,
+                "pending_stop_watermark_ms": event.source_watermark_ms,
+                "pending_stop_close_position": event.close_position,
+            },
+            effects=(
+                PrepareProtectionReplacementCommand(
+                    ticket_id=current.identity.ticket_id,
+                    quantity=current.position_qty,
+                    stop_price=event.stop_price,
+                    close_position=event.close_position,
+                    owner_operation_id=event.operation_id,
+                    replaces_exchange_order_id=current.active_stop_exchange_order_id,
+                    source_watermark_ms=event.source_watermark_ms,
                 ),
             ),
         )
@@ -1612,7 +2044,9 @@ def reduce_event(
     if isinstance(event, RunnerStopRequested):
         _require_status(current, AggregateStatus.RUNNER_PROTECTED)
         if current.active_stop_exchange_order_id is None:
-            raise InvalidLifecycleTransition("runner move requires active stop identity")
+            raise InvalidLifecycleTransition(
+                "runner move requires active stop identity"
+            )
         if current.active_stop_price is None:
             raise InvalidLifecycleTransition("runner move requires active stop price")
         if event.stop_price <= 0 or event.source_watermark_ms <= 0:
@@ -1629,16 +2063,16 @@ def reduce_event(
             status=AggregateStatus.RUNNER_REPLACEMENT_PENDING,
             updates={
                 "pending_stop_price": event.stop_price,
+                "pending_stop_close_position": current.active_stop_close_position,
                 "pending_stop_watermark_ms": event.source_watermark_ms,
             },
             effects=(
                 PrepareProtectionReplacementCommand(
+                    close_position=current.active_stop_close_position,
                     ticket_id=current.identity.ticket_id,
                     quantity=current.position_qty,
                     stop_price=event.stop_price,
-                    replaces_exchange_order_id=(
-                        current.active_stop_exchange_order_id
-                    ),
+                    replaces_exchange_order_id=(current.active_stop_exchange_order_id),
                     source_watermark_ms=event.source_watermark_ms,
                 ),
             ),
@@ -1664,7 +2098,8 @@ def reduce_event(
         if event.replaces_exchange_order_id != current.active_stop_exchange_order_id:
             raise InvalidLifecycleTransition("replaced stop identity mismatch")
         if (
-            event.stop_price != current.pending_stop_price
+            event.close_position != current.pending_stop_close_position
+            or event.stop_price != current.pending_stop_price
             or event.source_watermark_ms != current.pending_stop_watermark_ms
         ):
             raise InvalidLifecycleTransition("replacement terms differ from request")
@@ -1692,18 +2127,34 @@ def reduce_event(
                 "protected_qty": event.protected_qty,
                 "active_stop_exchange_order_id": exchange_order_id,
                 "active_stop_price": event.stop_price,
+                "active_stop_close_position": event.close_position,
                 "pending_replaced_stop_exchange_order_id": (
                     event.replaces_exchange_order_id
                 ),
                 "pending_stop_price": None,
                 "pending_stop_watermark_ms": None,
-                "runner_stop_watermark_ms": event.source_watermark_ms,
+                "runner_stop_watermark_ms": current.runner_stop_watermark_ms
+                if current.protection_return_status is not None
+                else event.source_watermark_ms,
             },
             effects=tuple(replacement_confirm_effects),
         )
 
     if isinstance(event, ProtectionReplacementRejected):
         _require_status(current, AggregateStatus.RUNNER_REPLACEMENT_PENDING)
+        if current.protection_return_status is not None:
+            return _transition(
+                current,
+                event,
+                status=current.protection_return_status,
+                updates={
+                    "protection_return_status": None,
+                    "protection_operation_id": None,
+                    "pending_stop_price": None,
+                    "pending_stop_watermark_ms": None,
+                    "pending_stop_close_position": False,
+                },
+            )
         if not str(event.reason or "").strip():
             raise InvalidLifecycleTransition(
                 "protection replacement rejection requires reason"
@@ -1782,12 +2233,12 @@ def reduce_event(
                     incident_kind="protection_replacement_outcome_unknown",
                 ),
                 PrepareProtectionReplacementCommand(
+                    close_position=current.pending_stop_close_position,
+                    owner_operation_id=current.protection_operation_id,
                     ticket_id=current.identity.ticket_id,
                     quantity=current.position_qty,
                     stop_price=current.pending_stop_price,
-                    replaces_exchange_order_id=(
-                        current.active_stop_exchange_order_id
-                    ),
+                    replaces_exchange_order_id=(current.active_stop_exchange_order_id),
                     source_watermark_ms=current.pending_stop_watermark_ms,
                 ),
             ),
@@ -1811,6 +2262,7 @@ def reduce_event(
             status=AggregateStatus.EXIT_PENDING,
             effects=(
                 PrepareExitCommand(
+                    owner_operation_id=event.owner_operation_id,
                     ticket_id=current.identity.ticket_id,
                     quantity=current.position_qty,
                     reason=reason,
@@ -1907,7 +2359,9 @@ def reduce_event(
         )
         exchange_order_id = str(event.exchange_order_id or "").strip()
         if not exchange_order_id:
-            raise InvalidLifecycleTransition("controlled flatten requires order identity")
+            raise InvalidLifecycleTransition(
+                "controlled flatten requires order identity"
+            )
         flatten_accept_effects: tuple[KernelEffect, ...] = ()
         if current.status is AggregateStatus.CONTROLLED_FLATTEN_OUTCOME_UNKNOWN:
             flatten_accept_effects = (
@@ -1927,7 +2381,9 @@ def reduce_event(
     if isinstance(event, ControlledFlattenRejected):
         _require_status(current, AggregateStatus.CONTROLLED_FLATTEN_PENDING)
         if not str(event.reason or "").strip():
-            raise InvalidLifecycleTransition("controlled flatten rejection requires reason")
+            raise InvalidLifecycleTransition(
+                "controlled flatten rejection requires reason"
+            )
         return _transition(
             current,
             event,
@@ -1943,7 +2399,9 @@ def reduce_event(
     if isinstance(event, ControlledFlattenOutcomeUnknown):
         _require_status(current, AggregateStatus.CONTROLLED_FLATTEN_PENDING)
         if not str(event.reason or "").strip():
-            raise InvalidLifecycleTransition("unknown controlled flatten requires reason")
+            raise InvalidLifecycleTransition(
+                "unknown controlled flatten requires reason"
+            )
         return _transition(
             current,
             event,
@@ -2001,15 +2459,17 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
-                    order_namespace=("regular" if cleanup_order_id == current.tp1_exchange_order_id else "conditional"),
+                    order_namespace=(
+                        "regular"
+                        if cleanup_order_id == current.tp1_exchange_order_id
+                        else "conditional"
+                    ),
                     purpose="reconciliation_cleanup",
                 )
             )
         if current.entry_lane_held:
             updates["entry_lane_held"] = False
-            flat_effects.append(
-                ReleaseEntryLane(ticket_id=current.identity.ticket_id)
-            )
+            flat_effects.append(ReleaseEntryLane(ticket_id=current.identity.ticket_id))
         return _transition(
             current,
             event,
@@ -2037,7 +2497,9 @@ def reduce_event(
         )
         cleanup_order_id = _next_cleanup_order_id(current)
         if cleanup_order_id is None:
-            raise InvalidLifecycleTransition("external flat has no owned order identity")
+            raise InvalidLifecycleTransition(
+                "external flat has no owned order identity"
+            )
         return _transition(
             current,
             event,
@@ -2054,7 +2516,11 @@ def reduce_event(
                 CancelProtectionOrders(
                     ticket_id=current.identity.ticket_id,
                     exchange_order_id=cleanup_order_id,
-                    order_namespace=("regular" if cleanup_order_id == current.tp1_exchange_order_id else "conditional"),
+                    order_namespace=(
+                        "regular"
+                        if cleanup_order_id == current.tp1_exchange_order_id
+                        else "conditional"
+                    ),
                     purpose="reconciliation_cleanup",
                 ),
             ),
@@ -2114,7 +2580,10 @@ def reduce_event(
 
     if isinstance(event, ProtectionCancelConfirmed):
         if current.status is AggregateStatus.RUNNER_OLD_STOP_CANCEL_PENDING:
-            if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
+            if (
+                event.exchange_order_id
+                != current.pending_replaced_stop_exchange_order_id
+            ):
                 raise InvalidLifecycleTransition(
                     "runner replaced-stop cancel identity mismatch"
                 )
@@ -2126,10 +2595,18 @@ def reduce_event(
             return _transition(
                 current,
                 event,
-                status=AggregateStatus.POSITION_PROTECTED
-                if current.partial_tp_protection
-                else AggregateStatus.RUNNER_PROTECTED,
-                updates={**runner_cancel_updates, "partial_tp_protection": False},
+                status=current.protection_return_status
+                or (
+                    AggregateStatus.POSITION_PROTECTED
+                    if current.partial_tp_protection
+                    else AggregateStatus.RUNNER_PROTECTED
+                ),
+                updates={
+                    **runner_cancel_updates,
+                    "partial_tp_protection": False,
+                    "protection_return_status": None,
+                    "protection_operation_id": None,
+                },
             )
         _require_status(current, AggregateStatus.RECONCILIATION_PENDING)
         if event.exchange_order_id != current.pending_cancel_exchange_order_id:
@@ -2166,7 +2643,9 @@ def reduce_event(
         if event.exchange_order_id != current.pending_replaced_stop_exchange_order_id:
             raise InvalidLifecycleTransition("unknown replaced-stop identity mismatch")
         if not str(event.reason or "").strip():
-            raise InvalidLifecycleTransition("unknown replaced-stop cancel requires reason")
+            raise InvalidLifecycleTransition(
+                "unknown replaced-stop cancel requires reason"
+            )
         return _transition(
             current,
             event,
@@ -2327,7 +2806,7 @@ def reduce_event(
                 risk_at_stop=current.ticket.risk_at_stop,
                 reserved_margin=current.ticket.reserved_margin,
                 released_at_ms=event.occurred_at_ms,
-            )
+            ),
         ]
         return _transition(
             current,
@@ -2354,11 +2833,7 @@ def reduce_event(
             event,
             status=AggregateStatus.TERMINAL,
             updates={"review_id": review_id},
-            effects=(
-                ProjectTerminalOwnerState(
-                    ticket_id=current.identity.ticket_id
-                ),
-            ),
+            effects=(ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),),
         )
 
     if isinstance(event, ReviewRevised):
@@ -2366,9 +2841,7 @@ def reduce_event(
         review_id = str(event.review_id or "").strip()
         supersedes_review_id = str(event.supersedes_review_id or "").strip()
         if not review_id or not supersedes_review_id:
-            raise InvalidLifecycleTransition(
-                "review revision identities are required"
-            )
+            raise InvalidLifecycleTransition("review revision identities are required")
         if current.review_id != supersedes_review_id:
             raise InvalidLifecycleTransition(
                 "review revision supersedes identity differs from current pointer"
@@ -2382,11 +2855,7 @@ def reduce_event(
             event,
             status=AggregateStatus.TERMINAL,
             updates={"review_id": review_id},
-            effects=(
-                ProjectTerminalOwnerState(
-                    ticket_id=current.identity.ticket_id
-                ),
-            ),
+            effects=(ProjectTerminalOwnerState(ticket_id=current.identity.ticket_id),),
         )
 
     raise InvalidLifecycleTransition(f"unsupported event: {type(event).__name__}")
@@ -2476,9 +2945,7 @@ def _post_fill_updates(event: EntryFilled) -> dict[str, object]:
         "position_qty": event.filled_qty,
         "average_fill_price": event.average_fill_price,
         "actual_stop_risk": assessment.actual_stop_risk,
-        "venue_reported_liquidation_price": (
-            event.venue_reported_liquidation_price
-        ),
+        "venue_reported_liquidation_price": (event.venue_reported_liquidation_price),
         "post_fill_risk_status": assessment.status,
         "post_fill_disposition": assessment.disposition,
     }

@@ -122,7 +122,7 @@ async def trusted_owner_authorization_matches(
 
 
 async def _source_matches(c, row, proof: DeviceWriteProof) -> bool:
-    if row["purpose"] != "position_reduce":
+    if row["purpose"] not in {"position_reduce","position_close","protection_tighten","manual_tp_set","manual_tp_cancel"}:
         return _control_matches(row, proof)
     from src.trading_kernel.infrastructure.pg_models import (
         owner_position_operations as operations,
@@ -134,7 +134,6 @@ async def _source_matches(c, row, proof: DeviceWriteProof) -> bool:
         or proof.path != "/api/owner/v1/mobile/operations/submit"
         or set(payload) != {"operation_id", "ticket_id", "expected_version"}
         or type(payload["expected_version"]) is not int
-        or payload["expected_version"] != 1
     ):
         return False
     op = (
@@ -148,7 +147,7 @@ async def _source_matches(c, row, proof: DeviceWriteProof) -> bool:
         .mappings()
         .one_or_none()
     )
-    if op is None:
+    if op is None or payload["expected_version"] != op["payload"].get("preview_version", 1):
         return False
     expected_scope = {
         "operation_id": op["operation_id"],

@@ -33,7 +33,14 @@ class ConditionalOrderExpectation(BaseModel):
     position_side: Literal["long", "short"]
     side: Literal["buy", "sell"]
     order_type: Literal["stop_market", "take_profit_market"]
-    quantity: Decimal
+    quantity: Decimal | None
+    close_position: bool = False
+
+    @model_validator(mode="after")
+    def quantity_mode(self):
+        if self.close_position != (self.quantity is None):
+            raise ValueError("conditional quantity mode differs")
+        return self
 
     @field_validator("exchange_instrument_id", mode="before")
     @classmethod
@@ -45,7 +52,9 @@ class ConditionalOrderExpectation(BaseModel):
 
     @field_validator("quantity")
     @classmethod
-    def _require_positive_quantity(cls, value: Decimal) -> Decimal:
+    def _require_positive_quantity(cls, value: Decimal | None) -> Decimal | None:
+        if value is None:
+            return None
         if not value.is_finite() or value <= 0:
             raise ValueError(
                 "conditional expectation quantity must be finite and positive"
@@ -100,9 +109,7 @@ class TicketOrderReference(BaseModel):
                     "conditional order requires frozen command expectation"
                 )
         elif self.conditional_expectation is not None:
-            raise ValueError(
-                "regular order forbids conditional command expectation"
-            )
+            raise ValueError("regular order forbids conditional command expectation")
         return self
 
 
@@ -121,9 +128,15 @@ class ExternalExitOrderReference(BaseModel):
 
     @model_validator(mode="after")
     def _valid(self):
-        if not all(v.strip() for v in (self.ticket_id, self.exposure_episode_id, self.evidence_id)):
+        if not all(
+            v.strip()
+            for v in (self.ticket_id, self.exposure_episode_id, self.evidence_id)
+        ):
             raise ValueError("external exit evidence identities required")
-        if not 0 < self.order_created_at_ms <= self.evidence_at_ms or not self.terms.reduces_position:
+        if (
+            not 0 < self.order_created_at_ms <= self.evidence_at_ms
+            or not self.terms.reduces_position
+        ):
             raise ValueError("external exit requires exact reducing order and time")
         return self
 
@@ -151,11 +164,21 @@ class ExternalExitOrderReference(BaseModel):
     def conditional_expectation(self) -> ConditionalOrderExpectation | None:
         if self.namespace is OrderNamespace.REGULAR:
             return None
-        if self.terms.quantity is None or self.terms.order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
-            raise ValueError("external conditional exit requires exact supported quantity")
-        return ConditionalOrderExpectation(exchange_instrument_id=self.terms.exchange_instrument_id,
-            position_side=self.terms.position_side, side=self.terms.side,
-            order_type=cast(Literal["stop_market", "take_profit_market"],self.terms.order_type.lower()), quantity=self.terms.quantity)
+        if self.terms.order_type not in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+            raise ValueError(
+                "external conditional exit requires exact supported quantity"
+            )
+        return ConditionalOrderExpectation(
+            exchange_instrument_id=self.terms.exchange_instrument_id,
+            position_side=self.terms.position_side,
+            side=self.terms.side,
+            order_type=cast(
+                Literal["stop_market", "take_profit_market"],
+                self.terms.order_type.lower(),
+            ),
+            quantity=self.terms.quantity,
+            close_position=self.terms.close_position,
+        )
 
 
 class ResolvedOrderIdentity(BaseModel):
@@ -235,8 +258,12 @@ class AttributedTradeFill(BaseModel):
 
     @model_validator(mode="after")
     def _exclusive_source(self):
-        if bool(self.command_id and self.command_id.strip()) == bool(self.external_evidence_id and self.external_evidence_id.strip()):
-            raise ValueError("fill requires exactly one command or verified external evidence")
+        if bool(self.command_id and self.command_id.strip()) == bool(
+            self.external_evidence_id and self.external_evidence_id.strip()
+        ):
+            raise ValueError(
+                "fill requires exactly one command or verified external evidence"
+            )
         if self.external_evidence_id is not None and self.role is not OrderRole.EXIT:
             raise ValueError("external evidence is only valid for exit fills")
         return self
@@ -271,7 +298,14 @@ def attribution_digest(fills: tuple[AttributedTradeFill, ...]) -> str:
     return canonical_digest(
         tuple(
             sorted(
-                ({k:v for k,v in fill.model_dump(mode="python").items() if not (k == "external_evidence_id" and v is None)} for fill in fills),
+                (
+                    {
+                        k: v
+                        for k, v in fill.model_dump(mode="python").items()
+                        if not (k == "external_evidence_id" and v is None)
+                    }
+                    for fill in fills
+                ),
                 key=lambda value: (
                     str(value["exchange_trade_id"]),
                     str(value["exchange_order_id"]),

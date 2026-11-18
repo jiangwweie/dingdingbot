@@ -244,10 +244,15 @@ class VacuumLateFillAttributed(_TicketEvent):
 
     @model_validator(mode="after")
     def _validate_attribution(self) -> VacuumLateFillAttributed:
-        if any(not value.strip() for value in (
-            self.entry_vacuum_id, self.entry_command_id,
-            self.exchange_order_id, self.venue_client_order_id,
-        )):
+        if any(
+            not value.strip()
+            for value in (
+                self.entry_vacuum_id,
+                self.entry_command_id,
+                self.exchange_order_id,
+                self.venue_client_order_id,
+            )
+        ):
             raise ValueError("late fill attribution requires exact identities")
         if (
             self.filled_qty <= 0
@@ -255,9 +260,12 @@ class VacuumLateFillAttributed(_TicketEvent):
             or not self.filled_qty.is_finite()
             or not self.average_fill_price.is_finite()
         ):
-            raise ValueError("late fill attribution requires positive finite quantity and price")
+            raise ValueError(
+                "late fill attribution requires positive finite quantity and price"
+            )
         if not (
-            0 < self.position_observed_at_ms
+            0
+            < self.position_observed_at_ms
             <= self.venue_observed_at_ms
             <= self.occurred_at_ms
         ):
@@ -280,13 +288,19 @@ class VacuumPostAbsenceNoFillVerified(_TicketEvent):
 
     @model_validator(mode="after")
     def _validate_proof(self) -> VacuumPostAbsenceNoFillVerified:
-        if any(not value.strip() for value in (
-            self.entry_vacuum_id, self.entry_command_id,
-            self.exchange_order_id, self.venue_client_order_id,
-        )):
+        if any(
+            not value.strip()
+            for value in (
+                self.entry_vacuum_id,
+                self.entry_command_id,
+                self.exchange_order_id,
+                self.venue_client_order_id,
+            )
+        ):
             raise ValueError("post-absence no-fill proof requires exact identities")
         if not (
-            0 < self.position_observed_at_ms
+            0
+            < self.position_observed_at_ms
             <= self.venue_observed_at_ms
             <= self.occurred_at_ms
         ):
@@ -309,25 +323,29 @@ class VacuumPartialRetained(_TicketEvent):
     quantity_step: Decimal
     effective_tp1_qty: Decimal
     effective_runner_qty: Decimal
-    materialization_kind: Literal["VACUUM_PARTIAL_RETAINED"] = (
-        "VACUUM_PARTIAL_RETAINED"
-    )
+    materialization_kind: Literal["VACUUM_PARTIAL_RETAINED"] = "VACUUM_PARTIAL_RETAINED"
     post_fill_risk: PostFillRiskDecision
 
     @model_validator(mode="after")
     def _validate_retained_materialization(self) -> VacuumPartialRetained:
         if not self.entry_vacuum_id.strip():
             raise ValueError("retained partial requires Vacuum identity")
-        if self.selection_authority_id is not None and not self.selection_authority_id.strip():
+        if (
+            self.selection_authority_id is not None
+            and not self.selection_authority_id.strip()
+        ):
             raise ValueError("retained partial Authority identity cannot be blank")
-        if min(
-            self.requested_qty,
-            self.final_filled_qty,
-            self.average_fill_price,
-            self.quantity_step,
-            self.effective_tp1_qty,
-            self.effective_runner_qty,
-        ) <= 0:
+        if (
+            min(
+                self.requested_qty,
+                self.final_filled_qty,
+                self.average_fill_price,
+                self.quantity_step,
+                self.effective_tp1_qty,
+                self.effective_runner_qty,
+            )
+            <= 0
+        ):
             raise ValueError("retained partial quantities and price must be positive")
         if not self.final_filled_qty < self.requested_qty:
             raise ValueError("retained partial must be smaller than requested quantity")
@@ -433,6 +451,13 @@ class TakeProfitCompletedForExit(_TicketEvent):
     filled_qty: Decimal
 
 
+class NaturalTakeProfitRecorded(_TicketEvent):
+    tp_fill_evidence: TpFillEvidence
+    cumulative_filled_qty: Decimal
+    average_fill_price: Decimal
+    protection_covers_remainder: bool
+
+
 class TakeProfitProgressed(_TicketEvent):
     tp_fill_evidence: TpFillEvidence | None = None
     cumulative_filled_qty: Decimal
@@ -454,7 +479,15 @@ class RunnerStopRequested(_TicketEvent):
     source_watermark_ms: int
 
 
+class OwnerProtectionRequested(_TicketEvent):
+    operation_id: str
+    stop_price: Decimal
+    close_position: bool
+    source_watermark_ms: int
+
+
 class ProtectionReplacementConfirmed(_TicketEvent):
+    close_position: bool = False
     exchange_order_id: str
     protected_qty: Decimal
     stop_price: Decimal
@@ -475,6 +508,7 @@ class ProtectionReplacementAbsenceConfirmed(_TicketEvent):
 
 
 class ExitRequested(_TicketEvent):
+    owner_operation_id: str | None = None
     reason: str
 
 
@@ -628,10 +662,56 @@ class ManualPositionObserved(_TicketEvent):
 
     @model_validator(mode="after")
     def valid_quantities(self):
-        if any(not x.is_finite() or x<0 for x in (self.quantity,self.protected_quantity)):
+        if any(
+            not x.is_finite() or x < 0 for x in (self.quantity, self.protected_quantity)
+        ):
             raise ValueError("manual quantities must be finite and nonnegative")
-        if self.protected_quantity>self.quantity:raise ValueError("protection exceeds position")
+        if self.protected_quantity > self.quantity:
+            raise ValueError("protection exceeds position")
         return self
+
+
+class OwnerPositionExitRequested(_TicketEvent):
+    operation_id: str
+
+
+class OwnerPositionExitAborted(_TicketEvent):
+    operation_id: str
+
+
+class OwnerAutomaticTpRestoreRequested(_TicketEvent):
+    operation_id: str
+    original_tp_order_id: str
+
+
+class OwnerProfitPlanRetired(_TicketEvent):
+    operation_id: str
+    command_id: str
+    exchange_order_id: str
+    source_kind: Literal["manual", "retired_automatic"]
+    evidence: OrderEvidence
+
+
+class OwnerProfitPlanInstalled(_TicketEvent):
+    evidence: OrderEvidence | None = None
+    operation_id: str
+    command_id: str
+    exchange_order_id: str
+    replaces_exchange_order_id: str | None
+    price: Decimal
+    quantity: Decimal
+
+
+class OwnerProfitPlanCancelled(_TicketEvent):
+    evidence: OrderEvidence | None = None
+    operation_id: str
+    exchange_order_id: str
+
+
+class OwnerOperationCommandObserved(_TicketEvent):
+    operation_id: str = Field(min_length=1)
+    command_id: str = Field(min_length=1)
+    outcome: dict[str, JsonValue]
 
 
 class OwnerReductionCommandObserved(_TicketEvent):
@@ -645,31 +725,38 @@ class OwnerReductionRecorded(_TicketEvent):
     operation_id: str = Field(min_length=1)
     command_id: str = Field(min_length=1)
     exchange_order_id: str = Field(min_length=1)
-    filled_quantity: Decimal = Field(gt=0,allow_inf_nan=False)
-    average_fill_price: Decimal = Field(gt=0,allow_inf_nan=False)
-    remaining_quantity: Decimal = Field(gt=0,allow_inf_nan=False)
+    filled_quantity: Decimal = Field(gt=0, allow_inf_nan=False)
+    average_fill_price: Decimal = Field(gt=0, allow_inf_nan=False)
+    remaining_quantity: Decimal = Field(gt=0, allow_inf_nan=False)
     original_tp_order_id: str | None
-    original_tp_price: Decimal | None = Field(default=None,gt=0,allow_inf_nan=False)
+    original_tp_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
     protection_order_id: str = Field(min_length=1)
-    protection_price: Decimal = Field(gt=0,allow_inf_nan=False)
+    protection_price: Decimal = Field(gt=0, allow_inf_nan=False)
     proof_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 class OwnerReductionPriceSatisfied(_TicketEvent):
     operation_id: str = Field(min_length=1)
-    observed_price: Decimal = Field(gt=0,allow_inf_nan=False)
+    observed_price: Decimal = Field(gt=0, allow_inf_nan=False)
     observed_at_ms: int = Field(gt=0)
     valid_until_ms: int = Field(gt=0)
-    proposed_stop: Decimal = Field(gt=0,allow_inf_nan=False)
+    proposed_stop: Decimal = Field(gt=0, allow_inf_nan=False)
     source_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 TradeEvent = (
-    OwnerReductionCommandObserved
+    OwnerPositionExitRequested
+    | OwnerPositionExitAborted
+    | OwnerAutomaticTpRestoreRequested
+    | OwnerProfitPlanRetired
+    | OwnerProfitPlanInstalled
+    | OwnerProfitPlanCancelled
+    | OwnerOperationCommandObserved
+    | OwnerReductionCommandObserved
     | OwnerReductionRecorded
     | OwnerReductionPriceSatisfied
-    |     VerifiedExitClosed |
-    TicketIssued
+    | VerifiedExitClosed
+    | TicketIssued
     | ManualTakeoverConfirmed
     | ManagementReviewRequired
     | ManualPositionObserved
@@ -708,8 +795,10 @@ TradeEvent = (
     | TakeProfitOutcomeUnknown
     | TakeProfitAbsenceConfirmed
     | TakeProfitFilled
+    | NaturalTakeProfitRecorded
     | TakeProfitProgressed
     | TakeProfitCompletedForExit
+    | OwnerProtectionRequested
     | RunnerStopRequested
     | ProtectionReplacementConfirmed
     | ProtectionReplacementRejected

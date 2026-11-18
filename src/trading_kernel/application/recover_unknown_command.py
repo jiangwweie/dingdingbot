@@ -43,6 +43,8 @@ from src.trading_kernel.domain.events import (
     InitialStopAbsenceConfirmed,
     InitialStopConfirmed,
     ManagedCommandOutcomeObserved,
+    OwnerOperationCommandObserved,
+    OwnerReductionCommandObserved,
     ProtectionCancelAbsenceConfirmed,
     ProtectionReplacementAbsenceConfirmed,
     ProtectionReplacementConfirmed,
@@ -240,6 +242,12 @@ async def recover_unknown_command(
                 exchange_order_id=str(decision.exchange_order_id),
                 observed_at_ms=decision.observed_at_ms,
             )
+        elif (current_command.kind is ExchangeCommandKind.CANCEL_ORDER
+            and isinstance(current_command.payload,CancelCommandPayload)
+            and current_command.payload.purpose=="owner_tp"
+            and decision.status is UnknownRecoveryStatus.RECONCILED_ABSENT):
+            await uow.exchange_commands.mark_cancel_reconciled_absent(ticket_id=aggregate.identity.ticket_id,
+                exchange_order_id=current_command.payload.exchange_order_id,observed_at_ms=decision.observed_at_ms)
         elif (
             current_command.kind is not ExchangeCommandKind.CANCEL_ORDER
             or decision.status is UnknownRecoveryStatus.CANCEL_TARGET_STILL_OPEN
@@ -296,6 +304,17 @@ def _recovery_event(
         "sequence": sequence,
         "occurred_at_ms": decision.observed_at_ms,
     }
+    if command.kind is ExchangeCommandKind.TAKE_PROFIT and isinstance(command.payload, OrderCommandPayload) and command.payload.owner_operation_id is not None:
+        return OwnerOperationCommandObserved(**common, operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id, outcome={"recovery_status":decision.status.value})
+    if command.kind is ExchangeCommandKind.OWNER_REDUCE:
+        assert isinstance(command.payload, OrderCommandPayload) and command.payload.owner_operation_id is not None
+        return OwnerReductionCommandObserved(**common, operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id, outcome={"recovery_status": decision.status.value})
+    if command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload, CancelCommandPayload) and command.payload.purpose == "owner_tp":
+        assert command.payload.owner_operation_id is not None
+        return OwnerOperationCommandObserved(**common, operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id, outcome={"recovery_status": decision.status.value})
     if decision.status is UnknownRecoveryStatus.RECONCILED_SUBMITTED:
         exchange_order_id = str(decision.exchange_order_id or "").strip()
         if command.kind is ExchangeCommandKind.ENTRY:
@@ -330,6 +349,7 @@ def _recovery_event(
                 **common,
                 exchange_order_id=exchange_order_id,
                 protected_qty=payload.quantity,
+                close_position=payload.close_position,
                 stop_price=payload.stop_price,
                 replaces_exchange_order_id=payload.replaces_exchange_order_id,
                 source_watermark_ms=payload.source_watermark_ms,

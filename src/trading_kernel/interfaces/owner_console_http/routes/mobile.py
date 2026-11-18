@@ -434,18 +434,39 @@ async def positions(request: Request) -> dict:
         )
     if len(rows) > 50:
         raise HTTPException(503, "position_scope_exceeded")
-    # Trading capabilities stay closed until the evidence gate and complete
-    # operation runner have been implemented and certified.
+    async with get_control_engine(request).connect() as c:
+        from src.trading_kernel.infrastructure.pg_models import (
+            owner_position_operations as ops,
+        )
+        busy_ids=set((await c.execute(sa.select(ops.c.ticket_id).where(ops.c.ticket_id.in_([x['ticket_id'] for x in rows]),
+            ops.c.completed_at_ms.is_(None),ops.c.state.notin_(['previewed','preview_requested'])))).scalars())
+        try:
+            await require_position_capability(c, request)
+            capable = True
+        except HTTPException:
+            capable = False
     return serial(
         {
             "items": [
                 {
                     **dict(x),
                     "capabilities": {
-                        "reduce": False,
-                        "close": False,
-                        "tighten": False,
-                        "tp": False,
+                        "reduce": capable
+                        and x["ticket_id"] not in busy_ids
+                        and x["management_mode"] == "AUTO"
+                        and x["position_qty"] > 0,
+                        "close": capable
+                        and x["ticket_id"] not in busy_ids
+                        and x["management_mode"] == "AUTO"
+                        and x["position_qty"] > 0,
+                        "tighten": capable
+                        and x["ticket_id"] not in busy_ids
+                        and x["management_mode"] == "AUTO"
+                        and x["position_qty"] > 0,
+                        "tp": capable
+                        and x["ticket_id"] not in busy_ids
+                        and x["management_mode"] == "AUTO"
+                        and x["position_qty"] > 0,
                     },
                 }
                 for x in rows
@@ -464,21 +485,7 @@ async def operation(request: Request, operation_id: str) -> dict:
         row = await PostgresOwnerPositionOperations(c).get(operation_id)
     if row is None or row["owner_identity"] != d.owner_identity:
         raise HTTPException(404, "operation_not_found")
-    return serial(
-        {
-            k: row[k]
-            for k in [
-                "operation_id",
-                "ticket_id",
-                "kind",
-                "state",
-                "version",
-                "first_blocker",
-                "updated_at_ms",
-                "completed_at_ms",
-            ]
-        }
-    )
+    return serial(operation_view(row))
 
 
 @router.get("/orders")
@@ -667,3 +674,181 @@ async def request_receipt(
     if row is None or row["result_payload"] is None:
         return {"state": "pending"}
     return {"state": "completed", "result": row["result_payload"]}
+
+
+class PositionPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ticket_id: str = Field(min_length=1, max_length=160)
+    kind: str = Field(
+        pattern=r"^(position_reduce|position_close|protection_tighten|manual_tp_set|manual_tp_cancel)$"
+    )
+    quantity: str | None = Field(
+        default=None, pattern=r"^(?:\d+(?:\.\d+)?|\.\d+)$", max_length=40
+    )
+    price: str | None = Field(
+        default=None, pattern=r"^(?:\d+(?:\.\d+)?|\.\d+)$", max_length=40
+    )
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+def operation_view(row):
+    return {
+        **{
+            k: row[k]
+            for k in (
+                "operation_id",
+                "ticket_id",
+                "kind",
+                "state",
+                "version",
+                "first_blocker",
+                "updated_at_ms",
+                "completed_at_ms",
+            )
+        },
+        "preview": row["payload"].get("preview"),
+        "result": row["payload"].get("result"),
+    }
+
+
+async def require_position_capability(c, request):
+    from src.trading_kernel.infrastructure.pg_models import (
+        runtime_capabilities_current as caps,
+    )
+
+    row = (
+        (
+            await c.execute(
+                sa.select(caps).where(caps.c.capability_key == "exchange_commands")
+            )
+        )
+        .mappings()
+        .one_or_none()
+    )
+    if (
+        row is None
+        or not row["enabled"]
+        or row["certification"].get("owner_cooperation") != "owner-cooperation-v1"
+    ):
+        raise HTTPException(409, "position_operations_unavailable")
+
+
+@router.post("/operations/preview")
+async def preview_position(request: Request, body: PositionPreviewBody) -> dict:
+    settings = get_settings(request)
+    async with get_control_engine(request).begin() as c:
+        await require_position_capability(c, request)
+        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+        ticket = (
+            (
+                await c.execute(
+                    sa.select(trade_tickets).where(
+                        trade_tickets.c.ticket_id == body.ticket_id,
+                        trade_tickets.c.venue_id == settings.venue_id,
+                        trade_tickets.c.account_id == settings.account_id,
+                        trade_tickets.c.terminal_at_ms.is_(None),
+                    )
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if ticket is None:
+            raise HTTPException(404, "ticket_not_found")
+        try:
+            row = await PostgresOwnerPositionOperations(c).request_preview(
+                ticket_id=body.ticket_id,
+                kind=body.kind,
+                parameters={"quantity": body.quantity, "price": body.price},
+                owner_identity=d.owner_identity,
+                device_id=d.device_id,
+                device_epoch=d.epoch,
+                idempotency_key=body.idempotency_key,
+                now_ms=get_clock_ms(request),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return serial(operation_view(row))
+
+
+@router.post("/operations/submit")
+async def submit_position(request: Request, body: SignedBody) -> dict:
+    if (
+        set(body.payload) != {"operation_id", "ticket_id", "expected_version"}
+        or type(body.payload["expected_version"]) is not int
+        or body.payload["expected_version"] <= 0
+        or not all(
+            isinstance(body.payload[k], str) and 0 < len(body.payload[k]) <= 160
+            for k in ["operation_id", "ticket_id"]
+        )
+    ):
+        raise HTTPException(422, "invalid_position_operation")
+    async with get_control_engine(request).begin() as c:
+        await require_position_capability(c, request)
+        repo = PostgresOwnerPositionOperations(c)
+        row = await repo.get(body.payload["operation_id"])
+        if row is None or row["ticket_id"] != body.payload["ticket_id"]:
+            raise HTTPException(404, "operation_not_found")
+        owner = await authorize(c, request, body, row["kind"], get_clock_ms(request))
+        receipt = await PostgresOwnerDeviceRepository(c).write_receipt(body.proof)
+        if receipt is not None:
+            return receipt
+        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
+            request.cookies[COOKIE], now_ms=get_clock_ms(request)
+        )
+        if body.payload["expected_version"] != row["payload"].get("preview_version", 1):
+            raise HTTPException(409, "preview_version_changed")
+        try:
+            accepted = await repo.accept(
+                operation_id=row["operation_id"],
+                owner_identity=owner,
+                device_id=d.device_id,
+                device_epoch=d.epoch,
+                idempotency_key=body.proof.idempotency_key,
+                proof=body.proof,
+                now_ms=await PostgresOwnerDeviceRepository(c).write_authorized_at(
+                    body.proof
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {
+            "operation_id": accepted["operation_id"],
+            "ticket_id": accepted["ticket_id"],
+            "state": "accepted",
+            "version": accepted["version"],
+        }
+
+
+@router.get("/operations")
+async def operation_list(request: Request) -> dict:
+    from src.trading_kernel.infrastructure.pg_models import (
+        owner_position_operations as ops,
+    )
+
+    now = get_clock_ms(request)
+    async with get_control_engine(request).connect() as c:
+        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
+            request.cookies[COOKIE], now_ms=now
+        )
+        rows = (
+            (
+                await c.execute(
+                    sa.select(ops)
+                    .where(
+                        ops.c.owner_identity == d.owner_identity,
+                        sa.or_(
+                            ops.c.completed_at_ms.is_(None),
+                            ops.c.completed_at_ms >= now - 86400000,
+                        ),
+                    )
+                    .order_by(ops.c.updated_at_ms.desc(), ops.c.operation_id)
+                    .limit(50)
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return serial({"items": [operation_view(dict(r)) for r in rows]})

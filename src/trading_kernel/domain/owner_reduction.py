@@ -104,6 +104,8 @@ class OwnerReductionState(_Frozen):
     operation_id: str = Field(min_length=1)
     preview: OwnerReductionPreview
     phase: OwnerReductionPhase
+    started_at_ms: int | None = Field(default=None, gt=0)
+    confirmed_protection_order_id: str | None = Field(default=None, min_length=1)
     actual_reduction_quantity: Decimal = Field(
         default=Decimal(0), ge=0, allow_inf_nan=False
     )
@@ -195,6 +197,8 @@ def preview_owner_reduction(
         or f.protected_quantity != a.position_qty
     ):
         raise ValueError("protection_unproven")
+    if a.manual_profit_plan is not None and not a.manual_profit_plan.cancelled:
+        raise ValueError("independent_profit_plan_active")
     runner = a.status is AggregateStatus.RUNNER_PROTECTED
     waiting = not runner and a.owner_reduction_context is not None
     target = (
@@ -341,7 +345,7 @@ def advance_owner_reduction(
             )
         if f.reduction_state != "not_sent" or f.reduction_filled_quantity != 0:
             return result("reconcile", "reduction_already_started")
-        if now_ms >= p.expires_at_ms:
+        if now_ms >= (p.expires_at_ms if state.started_at_ms is None else state.started_at_ms + 120000):
             return result(
                 "rejected"
                 if state.phase is OwnerReductionPhase.PREVIEWED
@@ -354,7 +358,7 @@ def advance_owner_reduction(
         if (
             f.position_quantity != p.source_quantity
             or f.tp_filled_quantity != p.source_tp_filled_quantity
-            or f.protection_order_id != p.protection_order_id
+            or f.protection_order_id != (state.confirmed_protection_order_id or p.protection_order_id)
             or f.stop_price != p.stop_price
             or f.protected_quantity != p.source_quantity
         ):

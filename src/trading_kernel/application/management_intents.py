@@ -117,7 +117,8 @@ def system_intents_for(
             if (
                 t.side != payload["side"]
                 or t.order_type != payload["order_type"].upper()
-                or t.quantity != Decimal(payload["quantity"])
+                or t.close_position != payload.get('close_position',False)
+                or t.quantity != (None if payload.get('close_position',False) else Decimal(payload["quantity"]))
                 or t.price
                 != (
                     None

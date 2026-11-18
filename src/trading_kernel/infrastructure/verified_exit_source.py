@@ -12,6 +12,7 @@ from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
@@ -38,7 +39,7 @@ async def collect_verified_exit(
     reader: ClosureReader,
     *,
     aggregate: TradeAggregate,
-    references: tuple[TicketOrderReference, ...],
+    references: tuple[TicketOrderReference | ExternalExitOrderReference, ...],
     incident_ids: tuple[str, ...],
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> VerifiedExitClosureProof:

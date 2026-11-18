@@ -168,3 +168,36 @@ def test_partial_owner_reduction_is_accounted_separately_from_final_exit(same_ti
     proof=VerifiedExitClosureProof.model_validate(p)
     assert proof.exit_quantity==proof.entry_quantity
     assert proof.exit_reason==('concurrent_exit_fills' if same_time else 'initial_stop_triggered')
+
+
+def test_close_all_closure_uses_executions_and_preserves_conservation():
+    p = proof_payload()
+    stop = p['orders'][1]
+    stop['terms'].update(quantity=None, close_position=True, reduce_only=False)
+    stop['reference']['conditional_expectation'].update(quantity=None, close_position=True)
+    proof = VerifiedExitClosureProof.model_validate(p)
+    assert proof.exit_quantity == proof.entry_quantity
+    p['exit_fills'][0]['quantity'] = '0.00001'
+    with pytest.raises(ValueError, match='conserve'):
+        VerifiedExitClosureProof.model_validate(p)
+
+def test_verified_external_close_can_complete_after_a_real_partial_system_tp():
+    from copy import deepcopy
+    from decimal import Decimal as D
+    p=proof_payload()
+    stop=p['orders'][1]
+    stop.update(status='CANCELED',executed_quantity='0',actual_order_id=None)
+    own_tp=deepcopy(p['orders'][0])
+    half=D(p['entry_quantity'])/2
+    own_tp['reference'].update(command_id='tp',command_kind='take_profit',role='exit',submitted_exchange_order_id='14',venue_client_order_id='tp')
+    own_tp['terms'].update(exchange_order_id='14',client_order_id='tp',side='sell',quantity=str(half))
+    own_tp['executed_quantity']=str(half)
+    external=deepcopy(own_tp)
+    external['terms'].update(exchange_order_id='15',client_order_id='app-close')
+    external['reference']={'ticket_id':p['ticket_id'],'exposure_episode_id':'episode', 'evidence_id':'external-proof',
+        'terms':external['terms'],'order_created_at_ms':2500,'evidence_at_ms':3000}
+    p['orders'] += [own_tp,external]
+    p['exit_fills']=[{'trade_id':'tp-fill','order_id':'14','quantity':str(half),'price':'61000','occurred_at_ms':2900},
+        {'trade_id':'external-fill','order_id':'15','quantity':str(half),'price':'62000','occurred_at_ms':3000}]
+    proof=VerifiedExitClosureProof.model_validate(p)
+    assert proof.exit_quantity==proof.entry_quantity and proof.exit_reason=='verified_external_exit'

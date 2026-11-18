@@ -71,6 +71,7 @@ from src.trading_kernel.domain.incident_blocking import (
     EntryBlockScope,
     canonical_entry_block_key,
 )
+from src.trading_kernel.domain.manual_profit_plan import ManualProfitPlan
 from src.trading_kernel.domain.margin_allocation import MarginAllocation
 from src.trading_kernel.domain.order_attribution import (
     ConditionalOrderExpectation,
@@ -847,7 +848,8 @@ class PostgresExchangeCommandRepository:
                             Literal["stop_market", "take_profit_market"],
                             payload.order_type,
                         ),
-                        quantity=payload.quantity,
+                        quantity=None if payload.close_position else payload.quantity,
+                        close_position=payload.close_position,
                     )
                 )
             else:
@@ -3624,10 +3626,15 @@ def _aggregate_values(
         "initial_stop_exchange_order_id": aggregate.initial_stop_exchange_order_id,
         "active_stop_exchange_order_id": aggregate.active_stop_exchange_order_id,
         "active_stop_price": aggregate.active_stop_price,
+        "active_stop_close_position": aggregate.active_stop_close_position,
+        "pending_stop_close_position": aggregate.pending_stop_close_position,
+        "protection_return_status": aggregate.protection_return_status,
+        "protection_operation_id": aggregate.protection_operation_id,
         "tp1_exchange_order_id": aggregate.tp1_exchange_order_id,
         "post_fill_exit_plan": None
         if aggregate.post_fill_exit_plan is None
         else aggregate.post_fill_exit_plan.model_dump(mode="json"),
+        "manual_profit_plan": None if aggregate.manual_profit_plan is None else aggregate.manual_profit_plan.model_dump(mode="json"),
         "owner_reduction_context": None if aggregate.owner_reduction_context is None else aggregate.owner_reduction_context.model_dump(mode="json"),
         "partial_tp_protection": aggregate.partial_tp_protection,
         "tp1_target_qty": aggregate.tp1_target_qty,
@@ -3903,6 +3910,11 @@ def _aggregate_from_row(
         post_fill_exit_plan=None
         if row["post_fill_exit_plan"] is None
         else PostFillExitPlan.model_validate(row["post_fill_exit_plan"]),
+        active_stop_close_position=row["active_stop_close_position"],
+        pending_stop_close_position=row["pending_stop_close_position"],
+        protection_return_status=None if row["protection_return_status"] is None else AggregateStatus(row["protection_return_status"]),
+        protection_operation_id=row["protection_operation_id"],
+        manual_profit_plan=None if row["manual_profit_plan"] is None else ManualProfitPlan.model_validate(row["manual_profit_plan"]),
         owner_reduction_context=None if row["owner_reduction_context"] is None else OwnerReductionContext.model_validate(row["owner_reduction_context"]),
         partial_tp_protection=bool(row["partial_tp_protection"]),
         tp1_target_qty=Decimal(row["tp1_target_qty"]),

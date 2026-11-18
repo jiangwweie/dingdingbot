@@ -127,7 +127,7 @@ def _define_frozen_tables(metadata: sa.MetaData) -> tuple[sa.Table, ...]:
         operations.c.ticket_id,
         unique=True,
         postgresql_where=sa.and_(
-            operations.c.completed_at_ms.is_(None), operations.c.state != "previewed"
+            operations.c.completed_at_ms.is_(None), operations.c.state.notin_(("previewed", "preview_requested"))
         ),
     )
     sa.Index(
@@ -287,6 +287,11 @@ def upgrade():
         "brc_trade_aggregates",
         sa.Column("owner_reduction_context", JSONB(none_as_null=True), nullable=True),
     )
+    op.add_column("brc_trade_aggregates", sa.Column("active_stop_close_position", sa.Boolean, nullable=False, server_default=sa.false()))
+    op.add_column("brc_trade_aggregates", sa.Column("pending_stop_close_position", sa.Boolean, nullable=False, server_default=sa.false()))
+    op.add_column("brc_trade_aggregates", sa.Column("protection_return_status", sa.String(64), nullable=True))
+    op.add_column("brc_trade_aggregates", sa.Column("protection_operation_id", sa.String(160), nullable=True))
+    op.add_column("brc_trade_aggregates", sa.Column("manual_profit_plan", JSONB(none_as_null=True), nullable=True))
     m = sa.MetaData()
     sa.Table(
         "brc_trade_tickets", m, sa.Column("ticket_id", sa.String(160), primary_key=True)

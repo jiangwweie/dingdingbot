@@ -389,3 +389,17 @@ def _truth(
         observed_at_ms=observed_at_ms,
         reason=reason,
     )
+
+
+def test_close_all_unknown_requires_exact_mode_without_fixed_order_quantity():
+    from src.trading_kernel.domain.venue_truth import order_identity_contradiction
+    c = _entry_command()
+    payload = OrderCommandPayload(side='sell', quantity=c.payload.quantity, order_type='stop_market',
+        reduce_only=False, close_position=True, stop_price=Decimal(59000),
+        replaces_exchange_order_id='old', source_watermark_ms=1000)
+    c = c.model_copy(update={'kind': ExchangeCommandKind.REPLACE_PROTECTION, 'payload': payload})
+    o = VenueOrderTruth(exchange_order_id='algo', venue_client_order_id=c.venue_client_order_id,
+        exchange_instrument_id=c.ticket_identity.netting_domain.exchange_instrument_id, position_side='long',
+        order_side='sell', quantity=None, reduce_only=False, close_position=True, order_namespace='conditional')
+    assert order_identity_contradiction(c, o) is None
+    assert order_identity_contradiction(c, o.model_copy(update={'close_position': False})) == 'close_position_mismatch'

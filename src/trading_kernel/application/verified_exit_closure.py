@@ -7,7 +7,9 @@ from decimal import Decimal
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.events import VerifiedExitClosed
+from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.reducer import reduce_event
+from src.trading_kernel.domain.trade_management import OrderAction, OrderEvidence
 from src.trading_kernel.domain.verified_exit_closure import VerifiedExitClosureProof
 
 CAUSAL_CLOSURE_INCIDENTS = frozenset(
@@ -47,11 +49,23 @@ async def record_verified_exit(
         raise ValueError("closure has unknown command")
     references = await uow.exchange_commands.list_order_references(proof.ticket_id)
     if {r.command_id: r for r in references} != {
-        o.reference.command_id: o.reference for o in proof.orders
+        o.reference.command_id: o.reference for o in proof.orders if isinstance(o.reference,TicketOrderReference)
     }:
         raise ValueError("closure does not cover exact durable orders")
     commands = {r["command_id"]: r for r in rows}
     for o in proof.orders:
+        if not isinstance(o.reference,TicketOrderReference):
+            reference=o.reference
+            evidence=OrderEvidence(evidence_id=reference.evidence_id,action=OrderAction.TRADE,
+                terms=reference.terms,created_at_ms=reference.order_created_at_ms,
+                exchange_event_at_ms=reference.evidence_at_ms,received_at_ms=proof.observed_at_ms,
+                executed_quantity=o.executed_quantity,coverage_complete=True,known_command_outcome_pending=False)
+            if (reference.ticket_id!=proof.ticket_id or reference.exposure_episode_id!=a.identity.exposure_episode_id
+                or o.executed_quantity<=0 or evidence.terms.order_namespace!='regular'
+                or evidence.terms.order_type not in {'MARKET','LIMIT'}):
+                raise ValueError("external closure source differs")
+            await uow.management.save_evidence(proof.ticket_id,evidence)
+            continue
         row = commands[o.reference.command_id]
         p = row["request_payload"]
         t = o.terms
@@ -63,8 +77,9 @@ async def record_verified_exit(
         if saved is not None and OrderTerms.model_validate(saved) != t:
             raise ValueError("closure terms differ from persisted baseline")
         if (
-            t.reduce_only != p["reduce_only"]
-            or t.close_position
+            (t.reduce_only != p["reduce_only"] and not (
+                proof.domain.venue_id=="binance-usdm" and p["reduce_only"] and t.reduces_position))
+            or t.close_position != p.get("close_position",False)
             or t.time_in_force != (p.get("time_in_force") or "GTC")
         ):
             raise ValueError("closure order instruction differs")
@@ -72,7 +87,7 @@ async def record_verified_exit(
             row["status"] not in {"accepted", "reconciled_accepted"}
             or t.side != p["side"]
             or t.order_type.lower() != p["order_type"]
-            or t.quantity != Decimal(p["quantity"])
+            or t.quantity != (None if p.get("close_position",False) else Decimal(p["quantity"]))
         ):
             raise ValueError("closure terms differ from original command")
         for term, key in [(t.price, "limit_price"), (t.trigger_price, "stop_price")]:

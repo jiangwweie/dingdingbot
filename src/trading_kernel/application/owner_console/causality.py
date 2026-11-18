@@ -105,6 +105,14 @@ _PROTECTION_EVENTS = {
 }
 _TP_RUNNER_EVENTS = {
     "OwnerReductionCommandObserved",
+    "OwnerOperationCommandObserved",
+    "OwnerPositionExitRequested",
+    "OwnerPositionExitAborted",
+    "OwnerAutomaticTpRestoreRequested",
+    "OwnerProfitPlanRetired",
+    "OwnerProfitPlanInstalled",
+    "OwnerProfitPlanCancelled",
+    "OwnerProtectionRequested",
     "OwnerReductionRecorded",
     "OwnerReductionPriceSatisfied",
     "TakeProfitConfirmed",
@@ -112,6 +120,7 @@ _TP_RUNNER_EVENTS = {
     "TakeProfitOutcomeUnknown",
     "TakeProfitAbsenceConfirmed",
     "TakeProfitFilled",
+    "NaturalTakeProfitRecorded",
     "TakeProfitProgressed",
     "TakeProfitCompletedForExit",
     "RunnerStopRequested",

@@ -28,6 +28,7 @@ from src.trading_kernel.application.ports import (
     ManagementRepository,
     MonitorRepository,
     OwnerControlRepository,
+    OwnerPositionOperationRepository,
     PositionRepository,
     ReviewRepository,
     RuntimeIncidentRecord,
@@ -78,6 +79,12 @@ from src.trading_kernel.domain.effects import (
 )
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
+    NaturalTakeProfitRecorded,
+    OwnerAutomaticTpRestoreRequested,
+    OwnerProfitPlanCancelled,
+    OwnerProfitPlanInstalled,
+    OwnerProfitPlanRetired,
+    OwnerProtectionRequested,
     OwnerReductionRecorded,
     PostFillStressAssessed,
     TakeProfitCompletedForExit,
@@ -173,7 +180,9 @@ class PostgresKernelUnitOfWork:
         self._connection = await self._engine.connect()
         self._transaction = await self._connection.begin()
         self._management_repository = PostgresManagementRepository(self._connection)
-        self._management_repository.application_checkpoint = self._management_application_checkpoint
+        self._management_repository.application_checkpoint = (
+            self._management_application_checkpoint
+        )
         self.management = self._management_repository
         self.directional_risk = PostgresDirectionalRiskRepository(self._connection)
         self.tickets = PostgresTicketRepository(self._connection)
@@ -185,6 +194,13 @@ class PostgresKernelUnitOfWork:
         self.incidents = PostgresIncidentRepository(self._connection)
         self.monitors = PostgresMonitorRepository(self._connection)
         self.owner_controls = PostgresOwnerControlRepository(self._connection)
+        from src.trading_kernel.infrastructure.pg_owner_position_operations import (
+            PostgresOwnerPositionOperations,
+        )
+
+        self.owner_position_operations: OwnerPositionOperationRepository = (
+            PostgresOwnerPositionOperations(self._connection)
+        )
         self.positions = PostgresPositionRepository(self._connection)
         self.reviews = PostgresReviewRepository(self._connection)
         self.entry_admission = PostgresEntryAdmissionRepository(self._connection)
@@ -245,8 +261,14 @@ class PostgresKernelUnitOfWork:
     @asynccontextmanager
     async def _management_application_checkpoint(self) -> AsyncIterator[None]:
         """Rollback an observer's SQL and deferred notice state together."""
-        notices = {key: (before, list(events)) for key, (before, events) in self._notice_changes.items()}
-        evidence = {key: list(items) for key, items in self._management_repository.new_evidence.items()}
+        notices = {
+            key: (before, list(events))
+            for key, (before, events) in self._notice_changes.items()
+        }
+        evidence = {
+            key: list(items)
+            for key, items in self._management_repository.new_evidence.items()
+        }
         try:
             async with self._require_connection().begin_nested():
                 yield
@@ -334,7 +356,12 @@ class PostgresKernelUnitOfWork:
                         )
                         or evidence.action
                         not in {OrderAction.CANCEL, OrderAction.EXPIRED}
-                        or evidence.action is not (OrderAction.CANCEL if retired.status=="CANCELED" else OrderAction.EXPIRED)
+                        or evidence.action
+                        is not (
+                            OrderAction.CANCEL
+                            if retired.status == "CANCELED"
+                            else OrderAction.EXPIRED
+                        )
                         or evidence.executed_quantity != 0
                         or evidence.received_at_ms != retired.observed_at_ms
                         or not evidence.coverage_complete
@@ -425,6 +452,138 @@ class PostgresKernelUnitOfWork:
                     "Owner reduction proof differs from authorized command"
                 )
 
+        if isinstance(event, OwnerProfitPlanRetired):
+            retirement = await self.owner_position_operations.get(
+                event.operation_id, for_update=True
+            )
+            original = await self.exchange_commands.get(event.command_id)
+            source_rows = await self.management.command_rows_for_order(
+                ticket_id, "regular", event.exchange_order_id
+            )
+            if (
+                current is None
+                or retirement is None
+                or retirement["ticket_id"] != ticket_id
+                or retirement["kind"]
+                not in {"manual_tp_set", "manual_tp_cancel", "position_close"}
+                or retirement["completed_at_ms"] is not None
+                or not any(
+                    r["command_kind"] == "cancel_order"
+                    and r["status"]
+                    in {"accepted", "reconciled_accepted", "reconciled_absent"}
+                    and r["request_payload"].get("owner_operation_id")
+                    == event.operation_id
+                    and r["request_payload"].get("exchange_order_id")
+                    == event.exchange_order_id
+                    and r["request_payload"].get("order_namespace") == "regular"
+                    for r in source_rows
+                )
+                or original is None
+                or original.kind is not ExchangeCommandKind.TAKE_PROFIT
+                or original.status
+                not in {
+                    ExchangeCommandStatus.ACCEPTED,
+                    ExchangeCommandStatus.RECONCILED_ACCEPTED,
+                }
+                or original.ticket_identity != current.identity
+                or not isinstance(original.payload, OrderCommandPayload)
+                or original.venue_client_order_id
+                != event.evidence.terms.client_order_id
+                or original.payload.limit_price != event.evidence.terms.price
+                or original.payload.quantity != event.evidence.terms.quantity
+                or event.source_kind
+                != (
+                    "manual"
+                    if original.payload.owner_operation_id is not None
+                    else "retired_automatic"
+                )
+                or not any(
+                    r["command_id"] == event.command_id
+                    and r["result_payload"].get("exchange_order_id")
+                    == event.exchange_order_id
+                    for r in source_rows
+                )
+                or event.evidence.terms.identity[:4]
+                != (
+                    current.identity.netting_domain.venue_id,
+                    current.identity.netting_domain.account_id,
+                    current.identity.netting_domain.exchange_instrument_id,
+                    current.identity.netting_domain.position_side,
+                )
+            ):
+                raise UnsupportedKernelEffect(
+                    "retired TP differs from durable operation/order source"
+                )
+            await self.management.save_evidence(ticket_id, event.evidence)
+        if isinstance(event, (OwnerProfitPlanInstalled, OwnerProfitPlanCancelled)):
+            plan_operation = await self.owner_position_operations.get(
+                event.operation_id, for_update=True
+            )
+            expected_kind = (
+                "manual_tp_set"
+                if isinstance(event, OwnerProfitPlanInstalled)
+                else "manual_tp_cancel"
+            )
+            evidence = event.evidence
+            if (
+                current is None
+                or plan_operation is None
+                or plan_operation["kind"] != expected_kind
+                or plan_operation["ticket_id"] != ticket_id
+                or evidence is None
+                or evidence.terms.exchange_order_id != event.exchange_order_id
+                or not evidence.coverage_complete
+                or evidence.known_command_outcome_pending
+                or evidence.terms.identity[:4]
+                != (
+                    current.identity.netting_domain.venue_id,
+                    current.identity.netting_domain.account_id,
+                    current.identity.netting_domain.exchange_instrument_id,
+                    current.identity.netting_domain.position_side,
+                )
+                or not await self.owner_position_operations.authority_current(
+                    plan_operation, management_revision=current.management_revision
+                )
+            ):
+                raise UnsupportedKernelEffect("manual TP operation source differs")
+            if isinstance(event, OwnerProfitPlanInstalled):
+                plan_command = await self.exchange_commands.get(event.command_id)
+                if (
+                    plan_command is None
+                    or plan_command.status
+                    not in {
+                        ExchangeCommandStatus.ACCEPTED,
+                        ExchangeCommandStatus.RECONCILED_ACCEPTED,
+                    }
+                    or not isinstance(plan_command.payload, OrderCommandPayload)
+                    or plan_command.payload.owner_operation_id != event.operation_id
+                    or plan_command.payload.limit_price != event.price
+                    or plan_command.payload.quantity != event.quantity
+                    or plan_command.venue_client_order_id
+                    != evidence.terms.client_order_id
+                ):
+                    raise UnsupportedKernelEffect("manual TP command differs")
+            elif evidence.action.value not in {"cancel", "expired"}:
+                raise UnsupportedKernelEffect("manual TP cancellation unproven")
+            await self.management.save_evidence(ticket_id, evidence)
+        if isinstance(event, OwnerProtectionRequested):
+            protection_op = await self.owner_position_operations.get(
+                event.operation_id, for_update=True
+            )
+            if (
+                current is None
+                or protection_op is None
+                or protection_op["ticket_id"] != ticket_id
+                or protection_op["completed_at_ms"] is not None
+                or protection_op["kind"]
+                not in {"position_reduce", "protection_tighten", "manual_tp_set"}
+                or not await self.owner_position_operations.authority_current(
+                    protection_op, management_revision=current.management_revision
+                )
+            ):
+                raise UnsupportedKernelEffect(
+                    "Owner protection lacks current operation authority"
+                )
         if expected_version == 0:
             if current is not None:
                 raise AggregateVersionConflict("Ticket aggregate already exists")
@@ -477,17 +636,22 @@ class PostgresKernelUnitOfWork:
                 raise UnsupportedKernelEffect(
                     "post-fill plan differs from frozen execution profile"
                 )
-        if (
-            isinstance(
-                event,
-                (TakeProfitFilled, TakeProfitProgressed, TakeProfitCompletedForExit),
-            )
-            and aggregate.post_fill_exit_plan is not None
+        if isinstance(
+            event,
+            (
+                TakeProfitFilled,
+                TakeProfitProgressed,
+                TakeProfitCompletedForExit,
+                NaturalTakeProfitRecorded,
+            ),
+        ) and (
+            aggregate.post_fill_exit_plan is not None
+            or isinstance(event, NaturalTakeProfitRecorded)
         ):
             proof = event.tp_fill_evidence
             filled = (
                 event.cumulative_filled_qty
-                if isinstance(event, TakeProfitProgressed)
+                if isinstance(event, (TakeProfitProgressed, NaturalTakeProfitRecorded))
                 else event.filled_qty
             )
             if (
@@ -568,10 +732,26 @@ class PostgresKernelUnitOfWork:
                 )
                 continue
             if isinstance(effect, PrepareTakeProfitCommand):
-                generation = await self._next_retryable_generation(
-                    aggregate=aggregate,
-                    kind=ExchangeCommandKind.TAKE_PROFIT,
-                )
+                if isinstance(event, OwnerAutomaticTpRestoreRequested):
+                    op = await self.owner_position_operations.get(
+                        event.operation_id, for_update=True
+                    )
+                    if (
+                        op is None
+                        or op["ticket_id"] != ticket_id
+                        or op["payload"].get("facts", {}).get("tp_state") != "cancelled"
+                    ):
+                        raise UnsupportedKernelEffect(
+                            "original TP restore lacks terminal source fact"
+                        )
+                    generation = await self.exchange_commands.next_generation(
+                        ticket_id=ticket_id, kind=ExchangeCommandKind.TAKE_PROFIT
+                    )
+                else:
+                    generation = await self._next_retryable_generation(
+                        aggregate=aggregate,
+                        kind=ExchangeCommandKind.TAKE_PROFIT,
+                    )
                 await self.exchange_commands.add(
                     _take_profit_command(
                         aggregate,
@@ -797,7 +977,9 @@ class PostgresKernelUnitOfWork:
                 if {i.incident_id for i in actual} != set(effect.incident_ids):
                     raise UnsupportedKernelEffect("closure incident set changed")
                 for incident in actual:
-                    await self.incidents.resolve(incident.incident_id, resolved_at_ms=event.occurred_at_ms)
+                    await self.incidents.resolve(
+                        incident.incident_id, resolved_at_ms=event.occurred_at_ms
+                    )
                 continue
             if isinstance(effect, ResolveTicketIncidentsAtClosure):
                 await self.incidents.resolve_all_open_for_ticket(
@@ -1068,6 +1250,7 @@ def _exit_command(
         kind=ExchangeCommandKind.EXIT,
         generation=generation,
         payload=OrderCommandPayload(
+            owner_operation_id=effect.owner_operation_id,
             side=_closing_side(aggregate),
             quantity=effect.quantity,
             order_type="market",
@@ -1115,7 +1298,9 @@ def _protection_replacement_command(
             side=_closing_side(aggregate),
             quantity=effect.quantity,
             order_type="stop_market",
-            reduce_only=True,
+            reduce_only=not effect.close_position,
+            close_position=effect.close_position,
+            owner_operation_id=effect.owner_operation_id,
             stop_price=effect.stop_price,
             replaces_exchange_order_id=effect.replaces_exchange_order_id,
             source_watermark_ms=effect.source_watermark_ms,

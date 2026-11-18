@@ -121,7 +121,7 @@ def define_owner_cooperation_tables(metadata: sa.MetaData) -> tuple[sa.Table, ..
         operations.c.ticket_id,
         unique=True,
         postgresql_where=sa.and_(
-            operations.c.completed_at_ms.is_(None), operations.c.state != "previewed"
+            operations.c.completed_at_ms.is_(None), operations.c.state.notin_(("previewed", "preview_requested"))
         ),
     )
     sa.Index(

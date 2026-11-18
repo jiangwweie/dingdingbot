@@ -62,6 +62,11 @@ class OrderCommandPayload(BaseModel):
     required_configured_leverage: int | None = None
     leverage_verification_digest: str | None = None
     owner_operation_id: str | None = None
+    close_position: bool = False
+
+    @property
+    def venue_quantity(self) -> Decimal | None:
+        return None if self.close_position else self.quantity
 
     @field_validator("quantity")
     @classmethod
@@ -82,6 +87,11 @@ class OrderCommandPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_order_shape(self) -> OrderCommandPayload:
+        if self.close_position and (
+            self.reduce_only
+            or self.order_type not in {"stop_market", "take_profit_market"}
+        ):
+            raise ValueError("close-all requires market trigger without reduce-only")
         if self.order_type == "limit":
             if self.limit_price is None:
                 raise ValueError("limit order requires limit_price")
@@ -116,7 +126,9 @@ class OrderCommandPayload(BaseModel):
                 or not isinstance(self.required_configured_leverage, int)
                 or self.required_configured_leverage <= 0
             ):
-                raise ValueError("entry leverage requirement must be a positive integer")
+                raise ValueError(
+                    "entry leverage requirement must be a positive integer"
+                )
             if not _SHA256_DIGEST.fullmatch(
                 str(self.leverage_verification_digest or "")
             ):
@@ -134,8 +146,10 @@ class CancelCommandPayload(BaseModel):
         "selection_vacuum_entry",
         "reconciliation_cleanup",
         "runner_old_stop",
+        "owner_tp",
     ]
     entry_vacuum_id: str | None = None
+    owner_operation_id: str | None = None
 
     @field_validator("exchange_order_id", mode="before")
     @classmethod
@@ -153,6 +167,8 @@ class CancelCommandPayload(BaseModel):
 
     @model_validator(mode="after")
     def _validate_vacuum_lineage(self) -> CancelCommandPayload:
+        if (self.purpose == "owner_tp") != (self.owner_operation_id is not None):
+            raise ValueError("Owner cancellation requires exclusive operation identity")
         if (self.purpose == "selection_vacuum_entry") != (
             self.entry_vacuum_id is not None
         ):
@@ -238,11 +254,17 @@ class ExchangeCommand(BaseModel):
 
     @model_validator(mode="after")
     def _validate_command(self) -> ExchangeCommand:
-        if self.kind in {
-            ExchangeCommandKind.SET_LEVERAGE,
-            ExchangeCommandKind.ENTRY,
-        } and self.generation != 1:
-            raise ValueError(f"{self.kind.value.upper()} command cannot have a retry generation")
+        if (
+            self.kind
+            in {
+                ExchangeCommandKind.SET_LEVERAGE,
+                ExchangeCommandKind.ENTRY,
+            }
+            and self.generation != 1
+        ):
+            raise ValueError(
+                f"{self.kind.value.upper()} command cannot have a retry generation"
+            )
         if self.deadline_at_ms <= self.created_at_ms:
             raise ValueError("command deadline must be after creation")
         if (
@@ -257,15 +279,22 @@ class ExchangeCommand(BaseModel):
                 raise ValueError("SET_LEVERAGE command requires leverage payload")
             return self
         if self.venue_client_order_id is None:
-            raise ValueError("order command requires deterministic venue_client_order_id")
+            raise ValueError(
+                "order command requires deterministic venue_client_order_id"
+            )
         if self.kind is ExchangeCommandKind.CANCEL_ORDER:
             if not isinstance(self.payload, CancelCommandPayload):
                 raise ValueError("cancel command requires cancel payload")
         elif not isinstance(self.payload, OrderCommandPayload):
             raise ValueError("order command requires order payload")
         if isinstance(self.payload, OrderCommandPayload):
-            if (self.kind is ExchangeCommandKind.OWNER_REDUCE) != (self.payload.owner_operation_id is not None):
-                raise ValueError("Owner reduction requires exclusive operation identity")
+            if (self.kind is ExchangeCommandKind.OWNER_REDUCE and self.payload.owner_operation_id is None
+                or self.payload.owner_operation_id is not None and self.kind not in {
+                    ExchangeCommandKind.OWNER_REDUCE, ExchangeCommandKind.REPLACE_PROTECTION,
+                    ExchangeCommandKind.TAKE_PROFIT, ExchangeCommandKind.EXIT}):
+                raise ValueError(
+                    "Owner reduction requires exclusive operation identity"
+                )
 
             leverage_fields = (
                 self.payload.required_configured_leverage,
@@ -277,7 +306,9 @@ class ExchangeCommand(BaseModel):
                         "ENTRY command requires leverage verification evidence"
                     )
             elif any(value is not None for value in leverage_fields):
-                raise ValueError("only ENTRY command allows leverage verification evidence")
+                raise ValueError(
+                    "only ENTRY command allows leverage verification evidence"
+                )
             has_replacement_metadata = (
                 self.payload.replaces_exchange_order_id is not None
                 or self.payload.source_watermark_ms is not None
@@ -394,14 +425,10 @@ def require_next_generation_allowed(
         raise CommandGenerationError(f"{kind.value.upper()} is never retried")
     if prior_status is ExchangeCommandStatus.OUTCOME_UNKNOWN:
         raise CommandGenerationError("unknown outcome must be reconciled first")
-    if (
-        kind is ExchangeCommandKind.REPLACE_PROTECTION
-        and prior_status
-        in {
-            ExchangeCommandStatus.ACCEPTED,
-            ExchangeCommandStatus.RECONCILED_ACCEPTED,
-        }
-    ):
+    if kind is ExchangeCommandKind.REPLACE_PROTECTION and prior_status in {
+        ExchangeCommandStatus.ACCEPTED,
+        ExchangeCommandStatus.RECONCILED_ACCEPTED,
+    }:
         return
     if prior_status not in {
         ExchangeCommandStatus.REJECTED,

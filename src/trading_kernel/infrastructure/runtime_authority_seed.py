@@ -942,6 +942,7 @@ async def deploy_compatible_upgrade_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
+        certification.pop("owner_cooperation",None)
         if request.schema_revision in {
             "0016_app_manual_takeover_v1",
             "0017_app_management_observation",
@@ -1484,6 +1485,7 @@ async def _deploy_runtime_identity(
         )
     for capability in capabilities:
         certification = dict(capability["certification"])
+        certification.pop("owner_cooperation",None)
         if request.schema_revision in {
             "0016_app_manual_takeover_v1",
             "0017_app_management_observation",
@@ -1515,6 +1517,8 @@ async def _deploy_runtime_identity(
             certification.pop('verified_exit_recovery_scope',None)
         if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
             certification["exit_configuration_required"] = True
+        if request.schema_revision=="0024_owner_cooperation" and capability["capability_key"]=="exchange_commands":
+            certification["owner_cooperation"]="owner-cooperation-v1"
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
             sa.update(runtime_capabilities_current)

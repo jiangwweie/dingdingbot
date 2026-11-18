@@ -271,9 +271,6 @@ async def dispatch_one_command(
             aggregate = await uow.aggregates.get(command.ticket_identity.ticket_id)
             if aggregate is None:
                 raise RuntimeError("claimed command has no Ticket aggregate")
-            if command.kind is ExchangeCommandKind.OWNER_REDUCE:
-                await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
-                return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
             if aggregate.management_mode is ManagementMode.REVIEW_REQUIRED:
                 await uow.exchange_commands.release_unstarted_claim(
                     command_id=command.command_id, worker_id=request.worker_id
@@ -478,6 +475,9 @@ async def dispatch_one_command(
                     )
                 ):
                     raise VenueSendBlocked("management_stream_not_applied")
+            owner_blocker = await gate_uow.owner_position_operations.command_send_blocker(actual, latest, now_ms=sampled)
+            if owner_blocker is not None:
+                raise VenueSendBlocked(owner_blocker)
             if actual.kind is ExchangeCommandKind.ENTRY:
                 domain = actual.ticket_identity.netting_domain
                 policy = await gate_uow.entry_admission.get_owner_policy(
@@ -1194,7 +1194,7 @@ def _requires_management_feed(command: ExchangeCommand) -> bool:
         ExchangeCommandKind.EXIT,
     }:
         return True
-    return command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload,CancelCommandPayload) and command.payload.purpose in {'runner_old_stop','reconciliation_cleanup'}
+    return command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload,CancelCommandPayload) and command.payload.purpose in {'runner_old_stop','reconciliation_cleanup','owner_tp'}
 
 
 def _command_is_applicable(
@@ -1224,6 +1224,10 @@ def _command_is_applicable(
             AggregateStatus.RECONCILIATION_PENDING,
         },
     }
+    if command.kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload, CancelCommandPayload) and command.payload.purpose == "owner_tp":
+        return aggregate_status in {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+    if isinstance(command.payload, OrderCommandPayload) and command.payload.owner_operation_id is not None and command.kind is ExchangeCommandKind.TAKE_PROFIT:
+        return aggregate_status in {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
     if command.kind is not ExchangeCommandKind.CANCEL_ORDER:
         return aggregate_status in applicable_statuses[command.kind]
     if not isinstance(command.payload, CancelCommandPayload):
@@ -1277,6 +1281,15 @@ def _command_result_event(
         raise RuntimeError("SET_LEVERAGE result is invalid")
     if not isinstance(result, ExchangeCommandResult):
         raise TypeError("order command result is invalid")
+    if kind is ExchangeCommandKind.CANCEL_ORDER and isinstance(command.payload, CancelCommandPayload) and command.payload.purpose == "owner_tp":
+        from src.trading_kernel.domain.events import OwnerOperationCommandObserved
+        assert command.payload.owner_operation_id is not None
+        return OwnerOperationCommandObserved(**common, operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id, outcome=result.model_dump(mode="json"))
+    if kind is ExchangeCommandKind.TAKE_PROFIT and isinstance(command.payload, OrderCommandPayload) and command.payload.owner_operation_id is not None:
+        from src.trading_kernel.domain.events import OwnerOperationCommandObserved
+        return OwnerOperationCommandObserved(**common, operation_id=command.payload.owner_operation_id,
+            command_id=command.command_id, outcome=result.model_dump(mode="json"))
     if kind is ExchangeCommandKind.OWNER_REDUCE:
         if not isinstance(command.payload,OrderCommandPayload) or command.payload.owner_operation_id is None:
             raise ValueError("Owner reduction operation missing")
@@ -1321,6 +1334,7 @@ def _command_result_event(
                 **common,
                 exchange_order_id=str(result.exchange_order_id),
                 protected_qty=payload.quantity,
+                close_position=payload.close_position,
                 stop_price=payload.stop_price,
                 replaces_exchange_order_id=payload.replaces_exchange_order_id,
                 source_watermark_ms=payload.source_watermark_ms,

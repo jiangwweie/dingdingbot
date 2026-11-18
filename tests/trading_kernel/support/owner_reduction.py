@@ -74,7 +74,7 @@ async def accept_signed_operation(
         proof=proof,
         signature=sign(key, proof),
         body=payload,
-        purpose="position_reduce",
+        purpose=operation["kind"],
         now_ms=now_ms,
     )
     accepted = await PostgresOwnerPositionOperations(connection).accept(
@@ -87,3 +87,50 @@ async def accept_signed_operation(
         now_ms=now_ms,
     )
     return accepted, proof
+
+
+async def setup_operation(e):
+    from src.trading_kernel.infrastructure.pg_owner_device_repository import PostgresOwnerDeviceRepository
+    from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
+    from tests.trading_kernel.support.lifecycle import registered_sor_long_ticket, reach_position_protected
+    from src.trading_kernel.domain.owner_reduction import preview_owner_reduction
+    import base64
+
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    t = registered_sor_long_ticket()
+    await reach_position_protected(e, t)
+    key = ec.generate_private_key(ec.SECP256R1())
+    k = key.public_key().public_numbers()
+    enc = lambda n: (
+        base64.urlsafe_b64encode(n.to_bytes(32, "big")).rstrip(b"=").decode()
+    )
+    async with e.begin() as c:
+        r = PostgresOwnerDeviceRepository(c)
+        g = await r.issue_binding(
+            owner_identity="Owner", replace_device=False, now_ms=5000
+        )
+        b = await r.bind(
+            token=g,
+            public_key={"kty": "EC", "crv": "P-256", "x": enc(k.x), "y": enc(k.y)},
+            now_ms=5001,
+        )
+    async with PostgresKernelUnitOfWork(e) as u:
+        a = await u.aggregates.get(t.identity.ticket_id)
+        p = preview_owner_reduction(
+            aggregate=a,
+            facts=facts(a, observed_at_ms=6000, valid_until_ms=9000),
+            requested_quantity=a.position_qty / 2,
+            quantity_step=D(".0001"),
+            minimum_quantity=D(".0001"),
+            minimum_notional=D(1),
+            now_ms=6000,
+        )
+    return t, b, p, key
+
+
+def preview(a=None):
+    from src.trading_kernel.domain.owner_reduction import preview_owner_reduction
+    a = a or aggregate()
+    return preview_owner_reduction(aggregate=a, facts=facts(a), requested_quantity=a.position_qty/2,
+        quantity_step=D(".0001"), minimum_quantity=D(".0001"), minimum_notional=D(1), now_ms=3000)

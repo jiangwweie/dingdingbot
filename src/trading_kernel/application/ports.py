@@ -144,6 +144,8 @@ from src.trading_kernel.domain.owner_control import (
     StrategyEntryControl,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
+from src.trading_kernel.domain.owner_position_operation import OwnerPositionPreview
+from src.trading_kernel.domain.owner_reduction import OwnerReductionPreview
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
@@ -2560,7 +2562,19 @@ class ManagementRepository(Protocol):
     async def account_blocker(self, venue_id: str, account_id: str, now_ms: int) -> str | None: ...
 
 
+class OwnerPositionOperationRepository(Protocol):
+    async def ready_preview(self, row: dict, preview: OwnerReductionPreview | OwnerPositionPreview, *, now_ms: int) -> None: ...
+    async def get(self, operation_id: str, *, for_update: bool = False) -> dict | None: ...
+    async def active_for_ticket(self, ticket_id: str) -> dict | None: ...
+    async def due(self, *, now_ms: int, limit: int = 20) -> tuple[dict, ...]: ...
+    async def transition(self, *, operation_id: str, expected_version: int, state: str,
+        payload: dict, reason: str | None, now_ms: int, completed: bool = False) -> dict: ...
+    async def authority_current(self, row: dict, *, management_revision: int) -> bool: ...
+    async def command_send_blocker(self, command: ExchangeCommand, aggregate: TradeAggregate, *, now_ms: int) -> str | None: ...
+
+
 class KernelUnitOfWork(Protocol):
+    owner_position_operations: OwnerPositionOperationRepository
     management: ManagementRepository
     directional_risk: DirectionalRiskRepository
     tickets: TicketRepository

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.identities import NettingDomain
 from src.trading_kernel.domain.order_attribution import (
+    ExternalExitOrderReference,
     OrderNamespace,
     OrderRole,
     TicketOrderReference,
@@ -21,7 +22,7 @@ from src.trading_kernel.domain.trade_management import OrderTerms
 
 class VerifiedClosureOrder(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    reference: TicketOrderReference
+    reference: TicketOrderReference | ExternalExitOrderReference
     terms: OrderTerms
     status: Literal[
         "FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "FINISHED", "REJECTED"
@@ -39,8 +40,12 @@ class VerifiedClosureOrder(BaseModel):
             or r.namespace.value != t.order_namespace
         ):
             raise ValueError("closure order differs from durable identity")
-        if t.quantity is None or self.executed_quantity > t.quantity:
+        if not t.close_position and (
+            t.quantity is None or self.executed_quantity > t.quantity
+        ):
             raise ValueError("closure execution exceeds original order")
+        if isinstance(r,ExternalExitOrderReference) and r.terms!=t:
+            raise ValueError("external closure terms differ from verified reference")
         if r.namespace is OrderNamespace.CONDITIONAL:
             e = r.conditional_expectation
             if e is None or (
@@ -49,12 +54,14 @@ class VerifiedClosureOrder(BaseModel):
                 t.side,
                 t.order_type.lower(),
                 t.quantity,
+                t.close_position,
             ) != (
                 e.exchange_instrument_id,
                 e.position_side,
                 e.side,
                 e.order_type,
                 e.quantity,
+                e.close_position,
             ):
                 raise ValueError("closure conditional terms differ")
             if self.executed_quantity > 0 and (
@@ -195,16 +202,21 @@ class VerifiedExitClosureProof(BaseModel):
 
     @property
     def exit_reason(self) -> str:
-        latest=max(f.occurred_at_ms for f in self.exit_fills)
-        order_by_id={o.executable_id:o for o in self.orders}
-        kinds={order_by_id[f.order_id].reference.command_kind.value for f in self.exit_fills if f.occurred_at_ms==latest}
-        if len(kinds)!=1:
+        latest = max(f.occurred_at_ms for f in self.exit_fills)
+        order_by_id = {o.executable_id: o for o in self.orders}
+        kinds=set()
+        for fill in self.exit_fills:
+            if fill.occurred_at_ms==latest:
+                ref=order_by_id[fill.order_id].reference
+                kinds.add(ref.command_kind.value if isinstance(ref,TicketOrderReference) else "external_exit")
+        if len(kinds) != 1:
             return "concurrent_exit_fills"
         return {
             "initial_stop": "initial_stop_triggered",
             "replace_protection": "runner_stop",
             "take_profit": "take_profit_triggered",
             "owner_reduce": "owner_reduction",
+            "external_exit": "verified_external_exit",
         }.get(next(iter(kinds)), "strategy_exit")
 
     def digest(self) -> str:

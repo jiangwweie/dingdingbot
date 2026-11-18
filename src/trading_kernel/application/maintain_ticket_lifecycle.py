@@ -14,6 +14,7 @@ from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.events import (
     ExitRequested,
     ManagementReviewRequired,
+    NaturalTakeProfitRecorded,
     OwnerReductionPriceSatisfied,
     RunnerStopRequested,
     TakeProfitCompletedForExit,
@@ -115,6 +116,7 @@ class TicketLifecycleFacts(BaseModel):
 
 
 class LifecycleMaintenanceRequest(BaseModel):
+    owner_adjustment_pending: bool = False
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     ticket_id: str
@@ -169,10 +171,164 @@ async def maintain_ticket_lifecycle(
     if profile.position_side != aggregate.identity.netting_domain.position_side:
         raise ValueError("ExitProfile side differs from Ticket Netting Domain")
 
-    if aggregate.status is AggregateStatus.POSITION_PROTECTED and aggregate.owner_reduction_context is not None:
+    if (
+        request.owner_adjustment_pending
+        and request.facts.tp1_filled_quantity > aggregate.tp1_filled_qty
+    ):
+        row = await uow.owner_position_operations.active_for_ticket(request.ticket_id)
+        if row is None:
+            request = request.model_copy(update={"owner_adjustment_pending": False})
+        else:
+            from src.trading_kernel.application.handoff_owner_operation import (
+                handoff_natural_tp,
+            )
+
+            commands = tuple(
+                await uow.exchange_commands.list_for_ticket(request.ticket_id)
+            )
+            handed = await handoff_natural_tp(
+                uow,
+                aggregate=aggregate,
+                row=row,
+                commands=commands,
+                filled_quantity=request.facts.tp1_filled_quantity,
+                position_quantity=request.facts.position_quantity,
+                now_ms=request.now_ms,
+            )
+            if handed:
+                aggregate = await uow.aggregates.get_for_update(request.ticket_id)
+                assert aggregate is not None
+                request = request.model_copy(update={"owner_adjustment_pending": False})
+            else:
+                filled = request.facts.tp1_filled_quantity
+                proof = request.facts.tp_fill_evidence
+                remaining = aggregate.position_qty - (filled - aggregate.tp1_filled_qty)
+                if (
+                    proof is None
+                    or remaining <= 0
+                    or remaining != request.facts.position_quantity
+                ):
+                    await uow.aggregates.expedite_reconciliation(
+                        request.ticket_id, due_at_ms=request.now_ms
+                    )
+                    return LifecycleMaintenanceResult(
+                        status=LifecycleMaintenanceStatus.NO_CHANGE
+                    )
+                recorded = NaturalTakeProfitRecorded(
+                    **_event_fields(aggregate, request.now_ms),
+                    tp_fill_evidence=proof,
+                    cumulative_filled_qty=filled,
+                    average_fill_price=proof.vwap,
+                    protection_covers_remainder=request.facts.active_stop_quantity
+                    == remaining,
+                )
+                await uow.commit_reduction(
+                    event=recorded,
+                    reduction=reduce_event(aggregate, recorded),
+                    expected_version=aggregate.version,
+                )
+                await uow.owner_position_operations.transition(
+                    operation_id=row["operation_id"],
+                    expected_version=row["version"],
+                    state="natural_tp_reconciling",
+                    payload=row["payload"],
+                    reason="natural_tp_recorded_owner_results_pending",
+                    now_ms=request.now_ms,
+                )
+                aggregate = await uow.aggregates.get_for_update(request.ticket_id)
+                assert aggregate is not None
+                # Continue original failure/expiry evaluation after accounting;
+                # the pending Owner effect still blocks new TP/Runner writes.
+    if request.owner_adjustment_pending:
+        # While an Owner operation owns this Ticket, original failure/expiry exits
+        # keep priority, but TP/Runner writes must not race that operation.
+        market = request.facts.market_facts
+        decision = None
+        if (
+            market is not None
+            and request.facts.position_quantity == aggregate.position_qty
+        ):
+            if (
+                aggregate.status is AggregateStatus.POSITION_PROTECTED
+                and aggregate.tp1_filled_qty < aggregate.tp1_target_qty
+            ):
+                decision = evaluate_profile_pre_tp1_exit(
+                    profile=profile,
+                    market_facts=market,
+                    observed_at_ms=request.facts.observed_at_ms,
+                    pre_tp1_reclaim_price=aggregate.ticket.pre_tp1_reclaim_price,
+                    exposure_session_end_ms=aggregate.ticket.exposure_session_end_ms,
+                )
+            elif (
+                aggregate.status is AggregateStatus.RUNNER_PROTECTED
+                and aggregate.active_stop_price
+                and aggregate.break_even_floor_price
+            ):
+                decision = evaluate_profile_runner_exit(
+                    profile=profile,
+                    current_stop=aggregate.active_stop_price,
+                    break_even_floor=aggregate.break_even_floor_price,
+                    price_tick=request.facts.price_tick,
+                    last_runner_watermark_ms=aggregate.runner_stop_watermark_ms or 0,
+                    market_facts=market,
+                )
+        if decision is not None and decision.kind is ExitDecisionKind.EXIT:
+            exit_event = ExitRequested(
+                **_event_fields(aggregate, request.now_ms), reason=decision.reason
+            )
+            await uow.commit_reduction(
+                event=exit_event,
+                reduction=reduce_event(aggregate, exit_event),
+                expected_version=aggregate.version,
+            )
+            return LifecycleMaintenanceResult(
+                status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+                event_id=exit_event.event_id,
+            )
+        return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+
+    if (
+        aggregate.manual_profit_plan is not None
+        and aggregate.manual_profit_plan.cancelled
+        and aggregate.status is AggregateStatus.POSITION_PROTECTED
+    ):
+        # Quantity exit was explicitly cancelled; keep original failure/time exits,
+        # without inventing a completed TP or restoring the retired automatic order.
+        market = request.facts.market_facts
+        if market is not None:
+            decision = evaluate_profile_pre_tp1_exit(
+                profile=profile,
+                market_facts=market,
+                observed_at_ms=request.facts.observed_at_ms,
+                pre_tp1_reclaim_price=aggregate.ticket.pre_tp1_reclaim_price,
+                exposure_session_end_ms=aggregate.ticket.exposure_session_end_ms,
+            )
+            if decision.kind is ExitDecisionKind.EXIT:
+                ev = ExitRequested(
+                    **_event_fields(aggregate, request.now_ms), reason=decision.reason
+                )
+                await uow.commit_reduction(
+                    event=ev,
+                    reduction=reduce_event(aggregate, ev),
+                    expected_version=aggregate.version,
+                )
+                return LifecycleMaintenanceResult(
+                    status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
+                    event_id=ev.event_id,
+                )
+        return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+
+    if (
+        aggregate.status is AggregateStatus.POSITION_PROTECTED
+        and aggregate.owner_reduction_context is not None
+    ):
         return await _maintain_owner_reduced_position(uow, aggregate, profile, request)
 
-    if aggregate.status is AggregateStatus.POSITION_PROTECTED:
+    if (
+        aggregate.status is AggregateStatus.POSITION_PROTECTED
+        or aggregate.manual_profit_plan is not None
+        and aggregate.tp1_exchange_order_id is not None
+    ):
         target = aggregate.tp1_target_qty
         filled = request.facts.tp1_filled_quantity
         if filled < aggregate.tp1_filled_qty:
@@ -181,12 +337,21 @@ async def maintain_ticket_lifecycle(
             )
         if filled > target:
             raise ValueError("TP1 cumulative fill exceeds frozen target")
-        if (filled < target and request.facts.tp1_order_terminal and request.facts.tp1_terminal_attribution == "natural"
-            and request.facts.active_stop_quantity != aggregate.position_qty-(filled-aggregate.tp1_filled_qty)):
+        if (
+            filled < target
+            and request.facts.tp1_order_terminal
+            and request.facts.tp1_terminal_attribution == "natural"
+            and request.facts.active_stop_quantity
+            != aggregate.position_qty - (filled - aggregate.tp1_filled_qty)
+        ):
             # A known natural terminal update may race a position snapshot.
             # Reconciliation proves full exit before any budget release or new write.
-            await uow.aggregates.expedite_reconciliation(aggregate.identity.ticket_id,due_at_ms=request.now_ms)
-            return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+            await uow.aggregates.expedite_reconciliation(
+                aggregate.identity.ticket_id, due_at_ms=request.now_ms
+            )
+            return LifecycleMaintenanceResult(
+                status=LifecycleMaintenanceStatus.NO_CHANGE
+            )
         if (
             filled < target
             and request.facts.tp1_order_terminal
@@ -222,7 +387,10 @@ async def maintain_ticket_lifecycle(
                     and market.holding_bars >= profile.time_stop.max_holding_bars
                 ):
                     exit_reason = "absolute_time_stop_hit"
-            else:
+            elif (
+                aggregate.manual_profit_plan is None
+                or not aggregate.manual_profit_plan.started_from_runner
+            ):
                 decision = evaluate_profile_pre_tp1_exit(
                     profile=profile,
                     market_facts=market,
@@ -257,7 +425,10 @@ async def maintain_ticket_lifecycle(
                     status=LifecycleMaintenanceStatus.EXIT_REQUESTED,
                     event_id=progress.event_id,
                 )
-            if aggregate.status is not AggregateStatus.POSITION_PROTECTED:
+            if aggregate.status is not AggregateStatus.POSITION_PROTECTED and not (
+                aggregate.status is AggregateStatus.RUNNER_PROTECTED
+                and aggregate.manual_profit_plan is not None
+            ):
                 return LifecycleMaintenanceResult(
                     status=LifecycleMaintenanceStatus.PARTIAL_TP_RECORDED,
                     event_id=progress.event_id,
@@ -291,6 +462,8 @@ async def maintain_ticket_lifecycle(
                 event_id=exit_event.event_id,
             )
         if filled < target:
+            if aggregate.status is AggregateStatus.RUNNER_PROTECTED:
+                return await _maintain_runner(uow, aggregate, profile, request)
             return LifecycleMaintenanceResult(
                 status=LifecycleMaintenanceStatus.NO_CHANGE
             )
@@ -309,9 +482,7 @@ async def maintain_ticket_lifecycle(
             allocated_entry_fee_quote=request.facts.allocated_entry_fee_quote,
             exit_taker_fee_rate=request.facts.exit_taker_fee_rate,
             price_tick=request.facts.price_tick,
-            slippage_buffer_ticks=(
-                profile.break_even_floor.slippage_buffer_ticks
-            ),
+            slippage_buffer_ticks=(profile.break_even_floor.slippage_buffer_ticks),
         )
         if aggregate.active_stop_price is not None:
             floor = (
@@ -374,52 +545,54 @@ async def maintain_ticket_lifecycle(
         )
 
     if aggregate.status is AggregateStatus.RUNNER_PROTECTED:
-        if request.facts.position_quantity != aggregate.position_qty:
-            raise ValueError("runner venue quantity differs from Ticket projection")
-        if request.facts.market_facts is None:
-            return LifecycleMaintenanceResult(
-                status=LifecycleMaintenanceStatus.NO_CHANGE
-            )
-        if (
-            aggregate.active_stop_price is None
-            or aggregate.break_even_floor_price is None
-        ):
-            raise ValueError("runner protection lacks its active and floor prices")
-        decision = evaluate_profile_runner_exit(
-            profile=profile,
-            current_stop=aggregate.active_stop_price,
-            break_even_floor=aggregate.break_even_floor_price,
-            price_tick=request.facts.price_tick,
-            last_runner_watermark_ms=aggregate.runner_stop_watermark_ms or 0,
-            market_facts=request.facts.market_facts,
-        )
-        if decision.kind is ExitDecisionKind.NO_CHANGE:
-            return LifecycleMaintenanceResult(
-                status=LifecycleMaintenanceStatus.NO_CHANGE
-            )
-        if decision.kind is ExitDecisionKind.MOVE_STOP:
-            if decision.proposed_stop is None:
-                raise RuntimeError("runner move decision lacks a stop price")
-            event: TradeEvent = RunnerStopRequested(
-                **_event_fields(aggregate, request.now_ms),
-                stop_price=decision.proposed_stop,
-                source_watermark_ms=decision.source_watermark_ms,
-            )
-            status = LifecycleMaintenanceStatus.RUNNER_MOVE_REQUESTED
-        else:
-            event = ExitRequested(
-                **_event_fields(aggregate, request.now_ms),
-                reason=decision.reason,
-            )
-            status = LifecycleMaintenanceStatus.EXIT_REQUESTED
-        await uow.commit_reduction(
-            event=event,
-            reduction=reduce_event(aggregate, event),
-            expected_version=aggregate.version,
-        )
-        return LifecycleMaintenanceResult(status=status, event_id=event.event_id)
+        return await _maintain_runner(uow, aggregate, profile, request)
 
     return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+
+
+async def _maintain_runner(
+    uow: KernelUnitOfWork,
+    aggregate: TradeAggregate,
+    profile: ExitProfile,
+    request: LifecycleMaintenanceRequest,
+) -> LifecycleMaintenanceResult:
+    if request.facts.position_quantity != aggregate.position_qty:
+        raise ValueError("runner venue quantity differs from Ticket projection")
+    if request.facts.market_facts is None:
+        return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+    if aggregate.active_stop_price is None or aggregate.break_even_floor_price is None:
+        raise ValueError("runner protection lacks its active and floor prices")
+    decision = evaluate_profile_runner_exit(
+        profile=profile,
+        current_stop=aggregate.active_stop_price,
+        break_even_floor=aggregate.break_even_floor_price,
+        price_tick=request.facts.price_tick,
+        last_runner_watermark_ms=aggregate.runner_stop_watermark_ms or 0,
+        market_facts=request.facts.market_facts,
+    )
+    if decision.kind is ExitDecisionKind.NO_CHANGE:
+        return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.NO_CHANGE)
+    if decision.kind is ExitDecisionKind.MOVE_STOP:
+        if decision.proposed_stop is None:
+            raise RuntimeError("runner move decision lacks a stop price")
+        event: TradeEvent = RunnerStopRequested(
+            **_event_fields(aggregate, request.now_ms),
+            stop_price=decision.proposed_stop,
+            source_watermark_ms=decision.source_watermark_ms,
+        )
+        status = LifecycleMaintenanceStatus.RUNNER_MOVE_REQUESTED
+    else:
+        event = ExitRequested(
+            **_event_fields(aggregate, request.now_ms),
+            reason=decision.reason,
+        )
+        status = LifecycleMaintenanceStatus.EXIT_REQUESTED
+    await uow.commit_reduction(
+        event=event,
+        reduction=reduce_event(aggregate, event),
+        expected_version=aggregate.version,
+    )
+    return LifecycleMaintenanceResult(status=status, event_id=event.event_id)
 
 
 def _event_fields(
@@ -555,4 +728,7 @@ async def _maintain_owner_reduced_position(
         reduction=reduce_event(aggregate, condition),
         expected_version=aggregate.version,
     )
-    return LifecycleMaintenanceResult(status=LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED,event_id=condition.event_id)
+    return LifecycleMaintenanceResult(
+        status=LifecycleMaintenanceStatus.BREAK_EVEN_REQUESTED,
+        event_id=condition.event_id,
+    )
