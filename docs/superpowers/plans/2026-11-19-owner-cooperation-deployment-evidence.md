@@ -36,6 +36,14 @@ Owner完成真实暂停后，部署程序仅验证授权与当前状态。精确
 | 真实采集与准备 | `promotion.json`：14轮真实只读事实采集及官方prepared_owner_paused |
 | 核算修复现场 | `repair-verification.json`：旧XRP预览就绪、原Review仍保留，安装后核算错误0 |
 
+## 真实Owner恢复与最终核验
+
+Owner在部署完成后执行真实恢复。只读查询匹配恢复事件与TOTP授权，安装后的正式认证确认Owner恢复有效、新开仓开关开启、管理Feed与准入恢复门禁通过；五服务正常且无维护围栏。当前选择授权逐范围核验通过，原暂停策略仍保持暂停。
+
+恢复时旧readiness保留上一轮暂停标签，实时授权校验已经通过，不将历史投影当作当前拒绝。恢复后新进程日志未发现新的故障，当前账户空仓、无残单、无未决命令或活动事故；没有创建测试交易。
+
+证据：`owner-resumed-chain.json`、`installed-postflight.json`、`current-entry-authority.json`、`sor-entry-authority.json`、`patrol.json`、`live-preflight.json`；最终摘要见`deployment-summary.json`。这完成部署与Owner运行恢复，不代替下一笔自然交易的实际操作验收。
+
 ## 验收边界
 
 手机减仓和自动续管已有本地原始协议／PG／签名链路证据，安装字节及运行身份已核实；**没有为了实盘验收创建测试单或重新发送Owner此前失败的减仓**。下一笔自然持仓的实际操作、Stop交错和真机长期后台仍分别验收。

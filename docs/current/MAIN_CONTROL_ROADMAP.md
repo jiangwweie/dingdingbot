@@ -32,7 +32,7 @@ blocked until closure. Full business rules live in the
 | Static frontend commit | `0e10ea41150bb29f3297471324ddb6072133248c` — price precision and on-demand operation guide, HTTPS asset hashes verified |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
-| Owner posture | Genuine Policy19 pause verified on 2026-11-19; installed and official prepared_owner_paused, new ENTRY remains paused awaiting genuine Owner restoration |
+| Owner posture | Genuine Policy20 Resume/TOTP verified on 2026-11-19 at11:38:40 Asia/Shanghai; new ENTRY enabled, official operational fence removed |
 | Remaining acceptance | natural App takeover; iPhone binding/background lifecycle, actual notification receipt and natural controlled-operation/Stop interleaving remain independently unverified |
 
 The latest dated Seoul snapshot below owns recorded posture; action-time PG and
@@ -40,7 +40,7 @@ exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
 
-### Cooperation reliability repair installed, Owner restoration pending, 2026-11-19
+### Cooperation reliability repair installed and Owner restoration verified, 2026-11-19
 
 Owner authorized deployment after a readonly server/program patrol and genuinely paused global ENTRY (Policy19). The exact candidate above passed R4/API/static certification. Stopped-flat official same-schema installation preserved **111 tables /97135 historical rows**, existing Owner/strategy/selection controls and device registration. Kernel/API/static switched jointly; no exchange test order or old failed phone request was submitted.
 
@@ -53,7 +53,8 @@ Owner authorized deployment after a readonly server/program patrol and genuinely
 | Preserved maintenance boundary | Temporary DB CPU0.5→1.5 and admin sort memory128MB let the unchanged preservation query pass within the unchanged5s bound. CPU0.5 and default work_mem4MB restored; application roles/risk/history unchanged |
 | Installed state | Schema0024 unchanged; new Feed ready0/0, installed integrity/flatness/management/entry-recovery PASS; five services active after official promoter. Owner read-role Overview normal; desktop and all six mobile asset hashes match; unauthenticated private APIs401 |
 | Repairs observed | Former XRP enrichment RuntimeError now preview_ready/last_reason null; no post-install review error. Existing Review remains incomplete pending formal Owner approval. Installed independent static preflight now passes0024 |
-| Activation |14/14 real GET fact rounds PASS, longest6413ms with23587ms validity remaining; official promoter prepared_owner_paused. Global Policy19 remains paused until real Owner Resume |
+| Activation |14/14 real GET fact rounds PASS, longest6413ms with23587ms validity remaining; official promoter prepared_owner_paused, followed by genuine Policy20 entry_resume/TOTP at11:38:40. Installed certification confirms owner_entry_resume_authorized, entry_recovery_ready, management_feed_pass and flatness_pass; operational fence absent |
+| Current authority and final patrol | BRF2/MI/MPG21/21 valid static scopes, SOR-1H14/14 valid selection scopes; CPM7scopes correctly blocked by its existing pause. Latest readiness projections retain11:00 pause labels until natural refresh; they do not override fresh authority. Five services active/NRestarts0, Feed ready0/0, no current-invocation faults, Commands/Incidents0, no exposure or open venue orders at readonly verification |
 | Retained observations | CPM remains Owner-paused. Old retired SOR input insufficiency and terminal-Ticket monitors remain historical; neither is asserted to be a current active-trade fault |
 
 Evidence is in `.local/owner-repair-deploy-20261119/`; the [deployment evidence map](../superpowers/plans/2026-11-19-owner-cooperation-deployment-evidence.md) records procedure and limits. Natural controlled reduction/Stop interleaving, iPhone background/PWA update and actual notification receipt remain separate acceptance. No stable return, strategy advantage or flawless-runtime claim follows from deployment checks.
