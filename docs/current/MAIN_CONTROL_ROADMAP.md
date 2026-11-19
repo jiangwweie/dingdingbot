@@ -25,20 +25,38 @@ blocked until closure. Full business rules live in the
 | Current production reference | Last directly verified value |
 | --- | --- |
 | Product | `brc-app-manual-v1` / independent Seoul server and Binance subaccount |
-| Production commit | `32f5227133a48733476e89f1afbd31e885e1f476` |
-| Production tag | `manual-runtime-2026.11.18.1`, local annotated tag at the exact release commit |
+| Production commit | `0e10ea41150bb29f3297471324ddb6072133248c` |
+| Production tag | `manual-runtime-2026.11.19.1`, local annotated tag at the exact release commit |
 | Production schema | `0024_owner_cooperation` |
 | Production-commit certification | Exact R4, Owner API and static PASS; later documentation commits do not replace that runtime identity |
-| Static frontend commit | `32f5227133a48733476e89f1afbd31e885e1f476` — joint V2/mobile release, HTTPS asset hashes verified |
+| Static frontend commit | `0e10ea41150bb29f3297471324ddb6072133248c` — price precision and on-demand operation guide, HTTPS asset hashes verified |
 | Integration branch | `manual-dev` |
 | Runtime topology | Observation, Entry, Lifecycle, Reconciliation persistent Workers plus independent Owner API |
-| Owner posture | Genuine Policy18 Resume/TOTP verified on 2026-11-18; new ENTRY enabled, official operational fence removed |
+| Owner posture | Genuine Policy19 pause verified on 2026-11-19; installed and official prepared_owner_paused, new ENTRY remains paused awaiting genuine Owner restoration |
 | Remaining acceptance | natural App takeover; iPhone binding/background lifecycle, actual notification receipt and natural controlled-operation/Stop interleaving remain independently unverified |
 
 The latest dated Seoul snapshot below owns recorded posture; action-time PG and
 exchange reads still decide permission. Older Seoul restoration/pause entries
 and inherited Tokyo records are historical evidence, not competing current state.
 A documentation commit does not re-certify, redeploy or change trading policy.
+
+### Cooperation reliability repair installed, Owner restoration pending, 2026-11-19
+
+Owner authorized deployment after a readonly server/program patrol and genuinely paused global ENTRY (Policy19). The exact candidate above passed R4/API/static certification. Stopped-flat official same-schema installation preserved **111 tables /97135 historical rows**, existing Owner/strategy/selection controls and device registration. Kernel/API/static switched jointly; no exchange test order or old failed phone request was submitted.
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Exact certification | R4:2490 Unit/Architecture,2102 Integration,77 Full-chain; Ruff/Mypy294 and Golden/Core961 snapshots/23064 decisions PASS. API and Static exact certificates PASS; four periodic resource cases excluded |
+| Certification correction | Initial R4 stopped at missing frozen-cache configuration; no certificate produced. Full official R4 rerun with the verified cache passed; no stitched certificate |
+| Server preflight | Five services active/NRestarts0; NTP synced, failed units0; no OOM/I/O error/segfault in bounded24h kernel logs; PG lock waits/long transactions/deadlocks0. Flat internal/venue account, current Commands/Incidents0 |
+| Backup | Stopped dump server/local SHA256 `6b9fca61c4fe28611c4d18fd536be1f53b5de7788718ced704d2d72207b95ea3`; local restore-list verified |
+| Preserved maintenance boundary | Temporary DB CPU0.5→1.5 and admin sort memory128MB let the unchanged preservation query pass within the unchanged5s bound. CPU0.5 and default work_mem4MB restored; application roles/risk/history unchanged |
+| Installed state | Schema0024 unchanged; new Feed ready0/0, installed integrity/flatness/management/entry-recovery PASS; five services active after official promoter. Owner read-role Overview normal; desktop and all six mobile asset hashes match; unauthenticated private APIs401 |
+| Repairs observed | Former XRP enrichment RuntimeError now preview_ready/last_reason null; no post-install review error. Existing Review remains incomplete pending formal Owner approval. Installed independent static preflight now passes0024 |
+| Activation |14/14 real GET fact rounds PASS, longest6413ms with23587ms validity remaining; official promoter prepared_owner_paused. Global Policy19 remains paused until real Owner Resume |
+| Retained observations | CPM remains Owner-paused. Old retired SOR input insufficiency and terminal-Ticket monitors remain historical; neither is asserted to be a current active-trade fault |
+
+Evidence is in `.local/owner-repair-deploy-20261119/`; the [deployment evidence map](../superpowers/plans/2026-11-19-owner-cooperation-deployment-evidence.md) records procedure and limits. Natural controlled reduction/Stop interleaving, iPhone background/PWA update and actual notification receipt remain separate acceptance. No stable return, strategy advantage or flawless-runtime claim follows from deployment checks.
 
 ### Owner cooperation0024 installed and genuine Owner restoration verified, 2026-11-18
 
@@ -54,7 +72,7 @@ closure did not manufacture MANUAL or restore AUTO.
 
 | Boundary | Direct evidence |
 | --- | --- |
-| Main candidate | Exact production reference above; Kernel R4/API R2/Static R1 PASS. R4:2430 Unit/Architecture,2095 Integration,77 Full-chain, Ruff/Mypy293 and Golden/Core parity961 snapshots/23064 decisions. Four periodic-resource cases are officially excluded, not claimed PASS |
+| Main candidate | Historical candidate recorded in the2026-11-18 deployment evidence; Kernel R4/API R2/Static R1 PASS. R4:2430 Unit/Architecture,2095 Integration,77 Full-chain, Ruff/Mypy293 and Golden/Core parity961 snapshots/23064 decisions. Four periodic-resource cases are officially excluded, not claimed PASS |
 | Source maintenance tool | Exact `3e607bf457a6c48dcbc3a03630b441a2e9e437f1`/0023, independent R4 PASS:2237 Unit/Architecture,1992 Integration,77 Full-chain, Ruff/Mypy267 and Golden/Core parity PASS |
 | Source-history fix | First rollback preview correctly refused tickets older than its3day discovery bound. Signed GET availability and quantity evidence supported a strictly bounded7day history query; exact orders, full-page refusal, conservation and fresh30s current proof remained mandatory. New tool was independently certified and staged before preview/apply |
 | Backup | Stopped server dump and local copy/restore-list verified, SHA256 `db23fb8bb6de3c5964548677eff8b6b49a803fe8b78c53d7a599260aafa9a6de`. Earlier local restore rehearsal recovered28 Tickets/358 events/113 Commands with exact source identity |
