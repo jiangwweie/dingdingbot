@@ -51,6 +51,8 @@ def preview_position_operation(
         or f.ticket_id != a.identity.ticket_id
         or f.management_revision != a.management_revision
         or f.position_quantity != a.position_qty
+        or f.tp_order_id != a.tp1_exchange_order_id
+        or f.tp_filled_quantity != a.tp1_filled_qty
         or f.position_quantity <= 0
         or not f.observed_at_ms <= now_ms < f.valid_until_ms
         or f.unresolved_other_command

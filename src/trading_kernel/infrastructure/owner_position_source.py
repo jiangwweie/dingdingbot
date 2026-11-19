@@ -80,6 +80,8 @@ async def collect_owner_position(
             or t.close_position != payload.close_position
             or t.price != payload.limit_price
             or t.trigger_price != payload.stop_price
+            or payload.time_in_force is not None
+            and t.time_in_force != payload.time_in_force
             or t.working_type not in {None, "CONTRACT_PRICE"}
             or t.price_protect
             or evidence.exchange_event_at_ms < command.created_at_ms
@@ -195,12 +197,18 @@ async def collect_owner_position(
         or any(Decimal(p["positionAmt"]) != 0 for p in positions if p not in own)
     ):
         raise ValueError("owner_position_scope_differs")
-    quantity = abs(Decimal(own[0]["positionAmt"]))
+    signed_quantity = Decimal(own[0]["positionAmt"])
+    if (signed_quantity < 0 and d.position_side == "long") or (
+        signed_quantity > 0 and d.position_side == "short"
+    ):
+        raise ValueError("owner_position_sign_differs")
+    quantity = abs(signed_quantity)
     stop = next(
         (
             o
             for o in observations
-            if o.evidence.terms.exchange_order_id == a.active_stop_exchange_order_id
+            if o.evidence.terms.order_namespace == "conditional"
+            and o.evidence.terms.exchange_order_id == a.active_stop_exchange_order_id
         ),
         None,
     )
@@ -208,11 +216,18 @@ async def collect_owner_position(
         (
             o
             for o in observations
-            if o.evidence.terms.exchange_order_id == a.tp1_exchange_order_id
+            if o.evidence.terms.order_namespace == "regular"
+            and o.evidence.terms.exchange_order_id == a.tp1_exchange_order_id
         ),
         None,
     )
-    tp_fill = Decimal(0) if tp is None else tp.evidence.executed_quantity
+    if (a.active_stop_exchange_order_id is not None and stop is None) or (
+        a.tp1_exchange_order_id is not None and tp is None
+    ):
+        raise ValueError("owner_active_order_identity_missing")
+    # A retired order has no new venue observation. Its already recorded fills
+    # remain accounting truth; an active TP must still supply its exact facts.
+    tp_fill = a.tp1_filled_qty if tp is None else tp.evidence.executed_quantity
     tp_state = (
         "absent"
         if tp is None
@@ -226,6 +241,21 @@ async def collect_owner_position(
         if tp.status == "NEW"
         else "unknown"
     )
+    if tp is not None and tp.status in {"NEW", "PARTIALLY_FILLED"}:
+        from src.trading_kernel.infrastructure.owner_tp_snapshot import (
+            require_current_tp_snapshot,
+        )
+
+        tp_command = next(c for c in selected if c.command_id == tp.command_id)
+        assert isinstance(tp_command.payload, OrderCommandPayload)
+        require_current_tp_snapshot(
+            regular_orders, payload=tp_command.payload, domain=d,
+            order_id=tp.evidence.terms.exchange_order_id,
+            client_id=str(tp_command.venue_client_order_id),
+            previous_executed_quantity=tp.evidence.executed_quantity,
+            previous_updated_at_ms=tp.evidence.exchange_event_at_ms,
+            observed_at_ms=now,
+        )
     stop_live = (
         stop is not None
         and stop.status == "NEW"

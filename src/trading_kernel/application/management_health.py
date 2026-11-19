@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -13,12 +14,13 @@ if TYPE_CHECKING:
 
 
 async def management_feed_is_current(
-    uow, *, venue_id, account_id, runtime_commit, now_ms
+    uow, *, venue_id, account_id, runtime_commit, now_ms, clock_ms=None
 ):
     return await uow.management.feed_ready(
         f"{PRODUCT_ID}:{venue_id}:{account_id}",
         now_ms=now_ms,
         runtime_commit=runtime_commit,
+        **({"clock_ms": clock_ms} if clock_ms is not None else {}),
     )
 
 
@@ -46,8 +48,10 @@ async def read_management_feed_readiness(
     account_id: str,
     runtime_commit: str | None,
     now_ms: int,
+    clock_ms: Callable[[], int] | None = None,
 ) -> ManagementFeedReadiness:
     scope = f"{PRODUCT_ID}:{venue_id}:{account_id}"
     return await management.read_readiness(
-        scope, required=required, runtime_commit=runtime_commit, now_ms=now_ms
+        scope, required=required, runtime_commit=runtime_commit, now_ms=now_ms,
+        **({"clock_ms": clock_ms} if clock_ms is not None else {}),
     )

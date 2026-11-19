@@ -37,8 +37,10 @@ async def overview(request: Request) -> ApiEnvelope[OwnerOverview]:
         lambda repository: repository.read_overview_facts(
             shanghai_day_start_ms(now_ms),
             now_ms,
+            clock_ms=lambda: get_clock_ms(request),
         ),
     )
+    now_ms = facts.observed_at_ms
     data = build_owner_overview(facts, now_ms=now_ms)
     return envelope(
         data,

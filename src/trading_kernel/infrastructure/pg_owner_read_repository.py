@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any, Literal, cast
@@ -884,6 +884,8 @@ class PostgresOwnerReadRepository:
         self,
         day_start_ms: int,
         now_ms: int,
+        *,
+        clock_ms: Callable[[], int] | None = None,
     ) -> OverviewFacts:
         """Read one bounded overview snapshot on the caller's transaction."""
 
@@ -892,6 +894,12 @@ class PostgresOwnerReadRepository:
             .mappings()
             .all()
         )
+        if clock_ms is not None:
+            # The first SELECT above pins the RR snapshot. Sample after the
+            # connection/snapshot wait so its heartbeat cannot be newer than now.
+            now_ms = clock_ms()
+            offset = 8 * 60 * 60 * 1000
+            day_start_ms = ((now_ms + offset) // 86_400_000) * 86_400_000 - offset
         authority = authority_rows[0] if len(authority_rows) == 1 else None
         venue_id = None if authority is None else str(authority["venue_id"])
         account_id = None if authority is None else str(authority["account_id"])

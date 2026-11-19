@@ -268,6 +268,17 @@ async def collect_owner_reduction(
     ):
         raise ValueError("owner_position_sign_differs")
     quantity = abs(signed)
+    if tp_id and tp["status"] in {"NEW", "PARTIALLY_FILLED"}:
+        from src.trading_kernel.infrastructure.owner_tp_snapshot import (
+            require_current_tp_snapshot,
+        )
+
+        require_current_tp_snapshot(
+            regular_orders, payload=tp_cmd.payload, domain=d,
+            order_id=tp_id, client_id=tp_cmd.venue_client_order_id,
+            previous_executed_quantity=tp_fill,
+            previous_updated_at_ms=int(tp["updateTime"]), observed_at_ms=now,
+        )
     if not stop_triggered:
         from src.trading_kernel.infrastructure.owner_stop_snapshot import (
             require_current_stop_snapshot,

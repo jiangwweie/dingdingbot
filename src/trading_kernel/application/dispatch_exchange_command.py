@@ -291,7 +291,7 @@ async def dispatch_one_command(
                 )
                 d=command.ticket_identity.netting_domain
                 if not await management_feed_is_current(uow,venue_id=d.venue_id,account_id=d.account_id,
-                    runtime_commit=request.runtime_commit,now_ms=clock_ms()):
+                    runtime_commit=request.runtime_commit,now_ms=clock_ms(),clock_ms=clock_ms):
                     await uow.exchange_commands.release_unstarted_claim(command_id=command.command_id,worker_id=request.worker_id)
                     return DispatchCommandResult(status=DispatchCommandStatus.DEFERRED,command_id=command.command_id)
             if not _command_is_applicable(command, aggregate.status):
@@ -406,7 +406,7 @@ async def dispatch_one_command(
             blocked=blocked or not capability.enabled or capability.certified_commit!=request.runtime_commit or capability.schema_revision!=request.schema_revision
             if _requires_management_feed(command):
                 blocked=blocked or not await management_feed_is_current(uow,venue_id=d.venue_id,account_id=d.account_id,
-                    runtime_commit=request.runtime_commit,now_ms=clock_ms())
+                    runtime_commit=request.runtime_commit,now_ms=clock_ms(),clock_ms=clock_ms)
                 if command.kind is not ExchangeCommandKind.ENTRY:
                     blocked=blocked or not await uow.management.ticket_stream_is_applied(command.ticket_identity.ticket_id)
         if blocked:
@@ -466,6 +466,7 @@ async def dispatch_one_command(
                     account_id=domain.account_id,
                     runtime_commit=request.runtime_commit,
                     now_ms=sampled,
+                    clock_ms=clock_ms,
                 ):
                     raise VenueSendBlocked("management_feed_not_ready")
                 if (
@@ -907,6 +908,7 @@ async def _preflight_new_entry_mutation(
                 account_id=domain.account_id,
                 runtime_commit=request.runtime_commit,
                 now_ms=clock_ms(),
+                clock_ms=clock_ms,
             ):
                 return refused(EntryDispatchPreflightStatus.RUNTIME_FENCED)
         evaluated_at_ms = clock_ms()

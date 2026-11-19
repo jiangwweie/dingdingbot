@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#181a20"><meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>BRC · 操作帮助交互原型</title><link rel="stylesheet" href="./styles.css"><script src="./app.js" defer></script>
+</head>
+<body>
+<div class="workspace">
+<aside class="review">
+ <div class="eyebrow"><span class="brand-mark">B</span> BRC / PRODUCT PREVIEW</div>
+ <h1>先表达意图，<br>再确认变化。</h1>
+ <p class="intro">操作帮助，放在你需要的时候。</p>
+ <div class="journey" aria-label="原型流程">
+  <button data-act="home"><span>01</span><div>持仓入口<small>日常操作，保持直接</small></div><b>↗</b></button>
+  <button data-act="guide"><span>02</span><div>按意图选择<small>只展开你关心的结果</small></div><b>↗</b></button>
+  <button data-act="detail" data-id="reduce"><span>03</span><div>看清操作影响<small>表单 → 预览 → 模拟结果</small></div><b>↗</b></button>
+ </div>
+ <div class="demo-settings"><div class="eyebrow">切换演示状态</div><div class="scenario" role="group" aria-label="演示持仓阶段"><button data-act="scenario" data-id="before" aria-pressed="true">TP1 前</button><button data-act="scenario" data-id="runner" aria-pressed="false">Runner 中</button><button data-act="scenario" data-id="manual" aria-pressed="false">人工止盈中</button></div><button class="reset" data-act="reset">↺ 重置演示</button></div>
+ <div class="review-foot"><span class="demo-dot"></span>独立交互原型 · 模拟数据<br><span>不连接账户，不发送真实交易。</span></div>
+</aside>
+<section class="device" aria-label="手机操作原型">
+ <div class="statusbar"><b>9:41</b><div class="island"></div><span>▥ ▰</span></div>
+ <header class="top"><button class="logo" data-act="home" aria-label="返回持仓首页"><span class="brand-mark">B</span> BRC</button><button class="proto-badge" data-act="demo-settings">交互原型 <span>⌄</span></button></header>
+ <main id="screen" tabindex="-1"></main>
+ <nav id="nav" aria-label="主要页面"></nav>
+ <div id="overlay" class="overlay" hidden><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1"></section></div>
+ <div id="toast" role="status" class="toast" hidden></div>
+ <div class="home-bar"></div>
+</section>
+</div>
+</body></html>

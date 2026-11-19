@@ -20,7 +20,7 @@ class Reader:
     async def read(self, name, params):
         self.calls.append((name, params))
         a = self.a
-        if name=='orders':return []
+        if name=='orders':return [await self.read('order', {})] if a.tp1_exchange_order_id else []
         if name=='algos':return [await self.read('algo_order',{})]
         if name == 'mode':
             return {'dualSidePosition': True}
@@ -36,7 +36,7 @@ class Reader:
         if name == 'order':
             return {'orderId': a.tp1_exchange_order_id, 'clientOrderId': 'tp-client', 'symbol': 'BTCUSDT',
                 'side': 'SELL', 'positionSide': 'LONG', 'type': 'LIMIT', 'origQty': str(a.tp1_target_qty),
-                'executedQty': '0', 'price': str(a.ticket.take_profit_prices[0]), 'timeInForce': 'GTC', 'status': 'NEW'}
+                'executedQty': '0', 'price': str(a.ticket.take_profit_prices[0]), 'timeInForce': 'GTC', 'status': 'NEW', 'updateTime': 4000}
         raise AssertionError(name)
 
 
@@ -95,3 +95,26 @@ async def test_newer_open_order_snapshot_must_confirm_the_exact_live_stop(change
     with pytest.raises(ValueError,match='stop_snapshot'):
         await collect_owner_reduction(SnapshotReader(a),aggregate=a,state=state,authorization_id='auth',
             commands=commands(a),accepted_order_ids={'stop-client':a.active_stop_exchange_order_id,'tp-client':a.tp1_exchange_order_id},clock_ms=lambda:5000)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change', ['missing', 'changed', 'filled'])
+async def test_reduction_collection_cannot_use_tp_observation_contradicted_by_newer_snapshot(change):
+    a = aggregate()
+    state = OwnerReductionState(operation_id='op', preview=preview(a), phase=OwnerReductionPhase.PREVIEWED)
+
+    class ChangedTp(Reader):
+        async def read(self, name, params):
+            if name == 'orders':
+                tp = await super().read('order', {})
+                if change == 'missing':
+                    return []
+                return [{**tp, **({'price': '64000'} if change == 'changed' else
+                                 {'status': 'PARTIALLY_FILLED', 'executedQty': '.0001'})}]
+            return await super().read(name, params)
+
+    with pytest.raises(ValueError, match='owner_tp_snapshot'):
+        await collect_owner_reduction(ChangedTp(a), aggregate=a, state=state,
+            authorization_id='auth', commands=commands(a),
+            accepted_order_ids={'stop-client': a.active_stop_exchange_order_id, 'tp-client': a.tp1_exchange_order_id},
+            clock_ms=lambda: 5000)

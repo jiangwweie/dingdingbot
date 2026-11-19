@@ -202,7 +202,7 @@ async def persist_management_feed_once(
             )
 
             ready = await u.management.feed_ready(
-                scope, now_ms=now_ms, runtime_commit=runtime_commit
+                scope, now_ms=now_ms, runtime_commit=runtime_commit, clock_ms=clock_ms
             )
             feed = await u.management.get_feed(scope)
             if not ready:

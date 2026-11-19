@@ -188,9 +188,17 @@ def activate_static(
 
 
 def _runtime_snapshot(expected_commit):
+    schemas = set()
     for path in ["/opt/brc/current", "/opt/brc/owner-console-api/current"]:
         if (Path(path) / ".brc-runtime-commit").read_text().strip() != expected_commit:
             raise ValueError("installed kernel/API identity differs")
+        schema = (Path(path) / ".brc-schema-revision").read_text().strip()
+        if not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", schema):
+            raise ValueError("installed schema identity missing or invalid")
+        schemas.add(schema)
+    if len(schemas) != 1:
+        raise ValueError("installed kernel/API schema identity differs")
+    expected_schema = schemas.pop()
     if Path("/etc/brc/trading-kernel.write-fenced").exists():
         raise ValueError("unexpected trading maintenance fence")
     units = {}
@@ -214,6 +222,7 @@ def _runtime_snapshot(expected_commit):
     query = """BEGIN READ ONLY; SET LOCAL statement_timeout='5s'; SELECT json_build_object(
     'system',(SELECT system_identifier::text FROM pg_control_system()),
     'account',(SELECT account_id FROM brc_runtime_profiles WHERE runtime_profile_id='tiny-live-v1'),
+    'alembic_revision',(SELECT version_num FROM alembic_version),
     'identity',(SELECT json_agg(to_jsonb(t) ORDER BY metadata_key) FROM brc_schema_metadata t WHERE metadata_key IN ('runtime_commit','schema_revision','seed_identity')),
     'policy',(SELECT json_agg(to_jsonb(t) ORDER BY owner_policy_id) FROM brc_owner_policy_current t),
     'controls',(SELECT json_agg(to_jsonb(t) ORDER BY strategy_group_id) FROM brc_strategy_entry_controls_current t),
@@ -246,10 +255,11 @@ def _runtime_snapshot(expected_commit):
     identity = {row["metadata_key"]: row["metadata_value"] for row in facts["identity"]}
     if (
         identity.get("runtime_commit") != expected_commit
-        or identity.get("schema_revision") != "0019_management_evidence_v2"
+        or identity.get("schema_revision") != expected_schema
+        or facts["alembic_revision"] != expected_schema
     ):
         raise ValueError("current database runtime identity differs")
-    if any(
+    if not facts["capability"] or any(
         row["certified_commit"] != expected_commit
         or row["schema_revision"] != identity["schema_revision"]
         or row["certification"].get("product_id") != "brc-app-manual-v1"
@@ -257,6 +267,7 @@ def _runtime_snapshot(expected_commit):
     ):
         raise ValueError("current capability identity differs")
     return {
+        "schema_revision": expected_schema,
         "policy_version": facts["policy"][0]["policy_version"],
         "new_entry_submit_enabled": facts["policy"][0]["new_entry_submit_enabled"],
         "kernel": str(Path("/opt/brc/current").resolve()),

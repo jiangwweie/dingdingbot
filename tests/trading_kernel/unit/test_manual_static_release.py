@@ -167,3 +167,51 @@ def test_mobile_bundle_rejects_files_outside_shell_allowlist(tmp_path,path):
     target.parent.mkdir(parents=True,exist_ok=True)
     target.write_text('should not be published')
     with pytest.raises(ValueError):static_bundle(d)
+
+
+@pytest.mark.parametrize('fault', [None, 'api_schema', 'kernel_schema', 'db_schema', 'alembic', 'empty_capability'])
+def test_static_preflight_binds_installed_kernel_api_database_and_capabilities(monkeypatch, fault):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import scripts.owner_console.deploy_manual_static as release
+    from src.trading_kernel.infrastructure.runtime_identity import (
+        CURRENT_SCHEMA_REVISION,
+    )
+
+    commit = 'a' * 40
+    schemas = {'kernel': CURRENT_SCHEMA_REVISION, 'api': CURRENT_SCHEMA_REVISION}
+    if fault in {'api_schema', 'kernel_schema'}:
+        schemas[fault.split('_')[0]] = '0019_management_evidence_v2'
+    original_read = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if str(path).startswith('/opt/brc/'):
+            if path.name == '.brc-runtime-commit':
+                return commit
+            if path.name == '.brc-schema-revision':
+                return schemas['api' if 'owner-console-api' in str(path) else 'kernel']
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', read)
+    original_exists = Path.exists
+    monkeypatch.setattr(Path, 'exists', lambda path: False if str(path).startswith('/etc/brc/') else original_exists(path))
+    schema = '0019_management_evidence_v2' if fault == 'db_schema' else CURRENT_SCHEMA_REVISION
+    facts = {'system': '7705780580898177062', 'account': 'binance-manual-1290716840',
+        'alembic_revision': '0019_management_evidence_v2' if fault == 'alembic' else CURRENT_SCHEMA_REVISION,
+        'identity': [{'metadata_key': 'runtime_commit', 'metadata_value': commit},
+                     {'metadata_key': 'schema_revision', 'metadata_value': schema}],
+        'policy': [{'policy_version': 18, 'new_entry_submit_enabled': True}], 'controls': [],
+        'capability': [] if fault == 'empty_capability' else [{'certified_commit': commit,
+            'schema_revision': schema, 'certification': {'product_id': 'brc-app-manual-v1'}}]}
+
+    def run(args, **kwargs):
+        return SimpleNamespace(stdout='ActiveState=active\nMainPID=10\nNRestarts=0\n' if args[0] == 'systemctl' else json.dumps(facts))
+
+    monkeypatch.setattr(release.subprocess, 'run', run)
+    if fault is None:
+        assert release._runtime_snapshot(commit)['new_entry_submit_enabled']
+    else:
+        with pytest.raises(ValueError, match='identity|schema|capability'):
+            release._runtime_snapshot(commit)

@@ -13,6 +13,7 @@ from src.trading_kernel.domain.events import (
     TradeEvent,
     VerifiedExitClosed,
 )
+from src.trading_kernel.domain.verified_exit_closure import VerifiedExitClosureProof
 
 
 class _ReviewWindow(BaseModel):
@@ -44,6 +45,25 @@ def _review_window(
     if len(entry_events) != 1 or not flat_events:
         return None
     entry = entry_events[0]
+    verified = [event for event in flat_events if isinstance(event, VerifiedExitClosed)]
+    if verified:
+        if len(verified) != 1:
+            raise ValueError("review requires one verified exit proof")
+        # Proof validation compares actual venue entry/exit fills. The entry
+        # event's occurrence time is a local confirmation, possibly after exit.
+        proof = VerifiedExitClosureProof.model_validate(verified[0].proof.model_dump())
+        if (
+            proof.ticket_id != entry.ticket_id
+            or proof.entry_quantity != entry.filled_qty
+            or proof.exit_time_ms > verified[0].occurred_at_ms
+        ):
+            raise ValueError("review verified exit differs from entry lineage")
+        return _ReviewWindow(
+            entry_time_ms=exposure_started_at_ms,
+            exit_time_ms=proof.exit_time_ms,
+            executed_entry_quantity=entry.filled_qty,
+            external_flat=False,
+        )
     exit_event = min(
         (event for event in flat_events if event.occurred_at_ms >= entry.occurred_at_ms),
         key=lambda event: event.occurred_at_ms,
@@ -53,7 +73,7 @@ def _review_window(
         return None
     return _ReviewWindow(
         entry_time_ms=exposure_started_at_ms,
-        exit_time_ms=exit_event.proof.exit_time_ms if isinstance(exit_event,VerifiedExitClosed) else exit_event.occurred_at_ms,
+        exit_time_ms=exit_event.occurred_at_ms,
         executed_entry_quantity=entry.filled_qty,
         external_flat=isinstance(exit_event, (ExternalFlatDetected,ManualPositionObserved)),
     )

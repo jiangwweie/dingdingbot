@@ -1442,7 +1442,7 @@ async def test_sparse_review_filter_fails_closed_beyond_candidate_cap(
         await engine.dispose()
 
 
-async def test_overview_reads_eleven_bounded_selects_in_supplied_transaction(
+async def test_overview_reads_ten_bounded_selects_in_supplied_transaction(
     owner_read_dsn: str,
 ) -> None:
     now_ms = 1_800_000_010_000
@@ -1485,7 +1485,8 @@ async def test_overview_reads_eleven_bounded_selects_in_supplied_transaction(
             if statement.startswith(("select", "with"))
             and "count(*) from brc_owner_policy_current" not in statement
         ]
-        assert len(overview_selects) == 11
+        # Feed readiness now reuses the same row; the former duplicate SELECT is gone.
+        assert len(overview_selects) == 10
         assert "brc_owner_policy_current" in overview_selects[0]
         assert "limit" in overview_selects[0]
         assert "brc_capacity_claims" in overview_selects[1]
@@ -1507,11 +1508,11 @@ async def test_overview_reads_eleven_bounded_selects_in_supplied_transaction(
         )
         assert "brc_trade_tickets.terminal_at_ms >=" in overview_selects[6]
         assert "limit" in overview_selects[6]
-        assert "brc_notice_outbox" in overview_selects[-4]
-        assert "limit" in overview_selects[-4]
-        assert "brc_runtime_capabilities_current" in overview_selects[-3]
-        assert "capability_key =" in overview_selects[-3]
-        for feed_query in overview_selects[-2:]:
+        assert "brc_notice_outbox" in overview_selects[-3]
+        assert "limit" in overview_selects[-3]
+        assert "brc_runtime_capabilities_current" in overview_selects[-2]
+        assert "capability_key =" in overview_selects[-2]
+        for feed_query in overview_selects[-1:]:
             assert "brc_management_feed_current" in feed_query
             assert "scope_key =" in feed_query
         assert "count(*) over" not in " ".join(overview_selects)

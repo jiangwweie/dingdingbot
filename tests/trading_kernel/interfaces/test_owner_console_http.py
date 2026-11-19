@@ -216,7 +216,11 @@ class _RepositorySpy:
         self,
         day_start_ms: int,
         now_ms: int,
+        *,
+        clock_ms=None,
     ) -> OverviewFacts:
+        if clock_ms is not None:
+            now_ms = clock_ms()
         self.overview_requests.append((day_start_ms, now_ms))
         if self.overview_facts_override is not None:
             return self.overview_facts_override

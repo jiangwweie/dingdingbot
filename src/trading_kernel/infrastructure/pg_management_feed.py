@@ -50,17 +50,22 @@ class PostgresManagementFeed:
         return None if row is None else dict(row)
 
     async def current_gap_started_at(self, scope_key, epoch_id):
-        return await self.c.scalar(
-            sa.select(coverage.c.occurred_at_ms)
+        latest = (await self.c.execute(
+            sa.select(coverage.c.kind, coverage.c.occurred_at_ms)
             .where(
                 coverage.c.scope_key == scope_key,
                 coverage.c.epoch_id == epoch_id,
-                coverage.c.kind.in_(("gap", "epoch_started")),
+                coverage.c.kind.in_(("gap", "epoch_started", "connected", "epoch_closed")),
             )
             .order_by(
                 coverage.c.occurred_at_ms.desc(), coverage.c.coverage_event_id.desc()
             )
             .limit(1)
+        )).mappings().one_or_none()
+        return (
+            latest["occurred_at_ms"]
+            if latest is not None and latest["kind"] in {"gap", "epoch_started"}
+            else None
         )
 
     async def received_epoch(self, scope_key, epoch_id):
@@ -715,8 +720,13 @@ class PostgresManagementFeed:
             and (runtime_commit is None or row["runtime_commit"] == runtime_commit)
         )
 
-    async def feed_ready(self, scope_key, *, now_ms, runtime_commit=None):
+    async def feed_ready(self, scope_key, *, now_ms, runtime_commit=None, clock_ms=None):
         row = await self.get_feed(scope_key)
+        if clock_ms is not None:
+            now_ms = clock_ms()
+        return await self._feed_row_ready(scope_key, row, now_ms=now_ms, runtime_commit=runtime_commit, clock_ms=clock_ms)
+
+    async def _feed_row_ready(self, scope_key, row, *, now_ms, runtime_commit=None, clock_ms=None):
         if not self._row_ready(row, now_ms=now_ms, runtime_commit=runtime_commit):
             return False
         receipt = await self.received_epoch(scope_key, row["epoch_id"])
@@ -729,17 +739,24 @@ class PostgresManagementFeed:
         pending = await self.next_received_epoch(
             scope_key, exclude_epoch=row["epoch_id"]
         )
-        return pending is None
+        return pending is None and self._row_ready(
+            row, now_ms=now_ms if clock_ms is None else clock_ms(), runtime_commit=runtime_commit
+        )
 
-    async def read_readiness(self, scope_key, *, required, now_ms, runtime_commit=None):
+    async def read_readiness(self, scope_key, *, required, now_ms, runtime_commit=None, clock_ms=None):
         from src.trading_kernel.application.management_health import (
             ManagementFeedReadiness,
         )
 
         feed = await self.get_feed(scope_key)
-        ready = await self.feed_ready(
-            scope_key, now_ms=now_ms, runtime_commit=runtime_commit
+        if clock_ms is not None:
+            now_ms = clock_ms()
+        ready = await self._feed_row_ready(
+            scope_key, feed, now_ms=now_ms, runtime_commit=runtime_commit, clock_ms=clock_ms
         )
+        if clock_ms is not None:
+            now_ms = clock_ms()
+            ready = ready and self._row_ready(feed, now_ms=now_ms, runtime_commit=runtime_commit)
         reason = None
         if required and not ready:
             reason = (
@@ -754,12 +771,16 @@ class PostgresManagementFeed:
                         runtime_commit is not None
                         and feed["runtime_commit"] != runtime_commit
                     )
+                    else "management_receiver_clock_invalid"
+                    if (feed["last_successful_at_ms"] is not None and feed["last_successful_at_ms"] > now_ms)
+                    or (feed["connected_at_ms"] is not None and feed["connected_at_ms"] > now_ms)
                     else feed["health_reason"] or "management_receiver_not_ready"
                 )
             )
         since = None
         if reason and feed:
-            since = await self.current_gap_started_at(scope_key, feed["epoch_id"])
+            if feed["connection_state"] != "ready":
+                since = await self.current_gap_started_at(scope_key, feed["epoch_id"])
             if reason == "management_receiver_lease_expired":
                 since = feed["lease_until_ms"]
         return ManagementFeedReadiness(

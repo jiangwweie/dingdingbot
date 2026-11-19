@@ -203,7 +203,7 @@ async def run_entry_worker_once(
             )
             checked_at_ms = clock_ms()
             feed = await read_management_feed_readiness(uow.management, required=True, venue_id=profile.venue_id, account_id=profile.account_id,
-                runtime_commit=request.runtime_commit, now_ms=checked_at_ms)
+                runtime_commit=request.runtime_commit, now_ms=checked_at_ms, clock_ms=clock_ms)
             if not feed.ready:
                 await uow.signals.save_readiness(runtime_scope_id=signal.runtime_scope_id,
                     readiness_state="blocked", first_blocker=feed.blocker_code or "management_receiver_not_ready",

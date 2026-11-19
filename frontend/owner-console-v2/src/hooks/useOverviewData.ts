@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { mapManagementHealth } from '../mapping/managementHealthMapping';
+import { effectiveOverviewFreshness, overviewLiveOptions } from '../mapping/overviewSnapshot';
 import { useQuery } from '@tanstack/react-query';
 import { fetchOverview, overviewQueryKey } from '../api/overviewApi';
 import { fetchControls, controlsQueryKey } from '../api/controlsApi';
@@ -33,10 +34,18 @@ import { cleanSymbol } from '../utils/symbol';
 export { cleanSymbol };
 
 export function useOverviewData() {
+  const [displayNow, setDisplayNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setDisplayNow(Date.now()), 5_000);
+    const update = () => setDisplayNow(Date.now());
+    document.addEventListener('visibilitychange', update);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', update); };
+  }, []);
 
   const overviewQuery = useQuery({
     queryKey: overviewQueryKey,
     queryFn: fetchOverview,
+    ...overviewLiveOptions,
     staleTime: 15_000,
     retry: false,
   });
@@ -44,6 +53,7 @@ export function useOverviewData() {
   const controlsQuery = useQuery({
     queryKey: controlsQueryKey,
     queryFn: fetchControls,
+    ...overviewLiveOptions,
     staleTime: 15_000,
     retry: false,
   });
@@ -52,6 +62,7 @@ export function useOverviewData() {
   const ticketsQuery = useQuery({
     queryKey: ticketsQueryKey(ticketsParams),
     queryFn: () => fetchTickets(ticketsParams),
+    ...overviewLiveOptions,
     staleTime: 15_000,
     retry: false,
   });
@@ -113,7 +124,12 @@ export function useOverviewData() {
   }
 
   // 1. System Pulse
-  const freshness = overviewQuery.data?.freshness ?? 'unavailable';
+  const freshness = effectiveOverviewFreshness(
+    overviewQuery.data?.freshness ?? 'unavailable',
+    overviewQuery.data?.generated_at,
+    Math.max(displayNow, overviewQuery.dataUpdatedAt),
+    overviewQuery.dataUpdatedAt || undefined,
+  );
   const conclusionLevel = rawOverview?.conclusion?.level ?? 'no_action';
   const incidentCount = rawOverview?.execution_incident_count ?? 0;
   const totalStrategies = rawControls?.strategies?.length ?? 0;

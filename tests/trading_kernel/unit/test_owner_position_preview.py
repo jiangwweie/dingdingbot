@@ -28,3 +28,16 @@ def test_stop_preview_refuses_widening_or_crossed_stop(price):
     with pytest.raises(ValueError):
         preview_position_operation(aggregate=aggregate(), facts=facts(), kind='protection_tighten', price=price,
             quantity_step=D('.0001'), price_tick=D('.1'), minimum_quantity=D('.0001'), minimum_notional=D(1), now_ms=3000)
+
+
+@pytest.mark.parametrize('kind,values', [
+    ('protection_tighten', {'price': D(59500)}),
+    ('manual_tp_set', {'price': D(63000), 'quantity': D('.0002')}),
+    ('position_close', {}),
+])
+@pytest.mark.parametrize('change', [{'tp_order_id': 'different'}, {'tp_filled_quantity': D('.0001')}])
+def test_adjustment_preview_rejects_changed_tp_source(kind, values, change):
+    with pytest.raises(ValueError, match='position_operation_source_unavailable'):
+        preview_position_operation(aggregate=aggregate(), facts=facts(**change), kind=kind,
+            quantity_step=D('.0001'), price_tick=D('.1'), minimum_quantity=D('.0001'),
+            minimum_notional=D(1), now_ms=3000, **values)
