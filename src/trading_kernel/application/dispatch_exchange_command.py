@@ -1204,7 +1204,7 @@ def _command_is_applicable(
     aggregate_status: AggregateStatus,
 ) -> bool:
     applicable_statuses = {
-        ExchangeCommandKind.OWNER_REDUCE: {AggregateStatus.POSITION_PROTECTED,AggregateStatus.RUNNER_PROTECTED},
+        ExchangeCommandKind.OWNER_REDUCE: {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED, AggregateStatus.TP1_PENDING},
         ExchangeCommandKind.SET_LEVERAGE: {AggregateStatus.LEVERAGE_PENDING},
         ExchangeCommandKind.ENTRY: {
             AggregateStatus.ENTRY_PENDING,

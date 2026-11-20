@@ -905,6 +905,20 @@ class PostgresExchangeCommandRepository:
         conditions.append(~sa.exists(sa.select(trade_aggregates.c.ticket_id).where(
             trade_aggregates.c.ticket_id==exchange_commands.c.ticket_id,
             trade_aggregates.c.management_mode=='REVIEW_REQUIRED')))
+        from src.trading_kernel.infrastructure.pg_models import (
+            owner_position_operations,
+        )
+
+        # These exact unsent TP commands remain available if the Owner action
+        # ends without reducing exposure. Until then they must not win every
+        # dispatch poll ahead of the command that actually reduces risk.
+        deferred_tp = owner_position_operations.c.payload["deferred_tp_ids"]
+        conditions.append(~sa.exists(sa.select(owner_position_operations.c.operation_id).where(
+            exchange_commands.c.command_kind == ExchangeCommandKind.TAKE_PROFIT.value,
+            owner_position_operations.c.ticket_id == exchange_commands.c.ticket_id,
+            owner_position_operations.c.completed_at_ms.is_(None),
+            deferred_tp.op("?")(exchange_commands.c.command_id),
+        )))
         if ticket_id is not None:
             conditions.append(exchange_commands.c.ticket_id == ticket_id)
         if command_kinds:

@@ -14,8 +14,8 @@ function number(value){
 let operationItems=[],formIntent=null;
 let session=null, deviceKey=null, positions=[], orders=[], ordersStatus='unavailable',controls=null,page='positions',connected=navigator.onLine,busy=false,confirmAction=null,refreshTimer=null;
 function notice(text){$('#toast').textContent=text;$('#toast').hidden=false;setTimeout(()=>$('#toast').hidden=true,4500)}
-function show(html){sheet.innerHTML='<div class="handle"></div>'+html;overlay.hidden=false;sheet.querySelector('button,input')?.focus()}
-function close(){overlay.hidden=true;confirmAction=null}
+function show(html){visibleOperation=null;sheet.innerHTML='<div class="handle"></div>'+html;overlay.hidden=false;sheet.querySelector('button,input')?.focus()}
+function close(){overlay.hidden=true;confirmAction=null;visibleOperation=null}
 const heading=t=>`<div class="row"><h2>${esc(t)}</h2><button class="close" data-action="dismiss" aria-label="关闭">×</button></div>`;
 const operationGuides={
  reduce:{title:'想降低仓位',button:'减仓',cap:'reduce',lead:'退出一部分，余仓继续自动管理。',effects:[['数量','减少'],['后续盈亏金额','随余仓缩小'],['自动管理','保留']],note:'TP1前减仓不立即保本。原自动TP1数量单撤销，保留原目标价条件；已有人工止盈时需先处理该计划。',example:'100 XRP减仓50%，剩余50 XRP。减仓可能兑现盈利，也可能兑现亏损；余仓保本不会追回已兑现亏损。'},
@@ -31,7 +31,7 @@ function operationGuide(topic=null,id=null){
  const g=operationGuides[topic];
  if(!g){show(heading('操作帮助')+`<div class="guide-list">${Object.entries(operationGuides).map(([key,v])=>`<button class="guide-card" data-action="guide" data-topic="${key}"${id?` data-id="${esc(id)}"`:''}><span>${v.title}</span><small>${v.button} ›</small></button>`).join('')}</div>`);return}
  const p=positions.find(x=>x.ticket_id===id),runner=p?.status==='runner_protected';
- const available=topic==='pause'||(!id||!!p?.capabilities?.[g.cap]);
+ const available=topic==='pause'||(!id||!!p?.capabilities?.[g.cap]&&(topic!=='cancel'||p.manual_tp_active));
  show(heading('操作帮助')+`<div class="guide-hero"><span class="tag">${g.button}</span><h3>${g.title}</h3><p>${g.lead}</p></div>`+g.effects.map(([k,v])=>`<div class="kv"><span>${k}</span><span>${v}</span></div>`).join('')+`<p class="guide-note">${topic==='reduce'&&runner?'这笔已进入Runner，减仓后继续原Runner追踪，不重新等待TP1。':g.note}</p><details class="guide-example"><summary>用一个例子理解</summary><p>${g.example}</p></details><button class="primary" data-action="guide-enter" data-topic="${topic}"${id?` data-id="${esc(id)}"`:''} ${!connected||busy||!available?'disabled':''}>${available?'进入'+g.button:'当前暂不可操作'}</button><button class="outline" data-action="guide"${id?` data-id="${esc(id)}"`:''}>查看其他操作</button>`);
 }
 function guideEnter(topic,id){
@@ -39,8 +39,8 @@ function guideEnter(topic,id){
  if(topic==='pause'){close();page='control';render();return}
  const g=operationGuides[topic];if(!g)return;
  if(!id){show(heading('选择持仓')+(positions.length?positions.map(p=>`<button class="guide-card" data-action="guide-enter" data-topic="${topic}" data-id="${esc(p.ticket_id)}" ${!p.capabilities?.[g.cap]?'disabled':''}>${esc(p.exchange_instrument_id.split(':')[1])} · ${p.position_side==='short'?'空':'多'}</button>`).join(''):'<div class="empty">暂无可操作持仓</div>'));return}
- const p=positions.find(x=>x.ticket_id===id);if(!p?.capabilities?.[g.cap])return;
- if(topic==='cancel'){show(heading('取消人工止盈')+'<div class="kv"><span>必要止损</span><span>保留</span></div><div class="kv"><span>旧自动TP1</span><span>不恢复</span></div>'+`<button class="primary" data-action="cancel-tp" data-id="${esc(id)}">核实并预览</button>`+contextualGuide('cancel',id));return}
+ const p=positions.find(x=>x.ticket_id===id);if(!p?.capabilities?.[g.cap]||(topic==='cancel'&&!p.manual_tp_active))return;
+ if(topic==='cancel'){show(heading('取消人工止盈')+'<div class="kv"><span>必要止损</span><span>保留</span></div><div class="kv"><span>旧自动TP1</span><span>不恢复</span></div>'+`<button class="primary" data-action="cancel-tp" data-id="${esc(id)}">继续</button>`+contextualGuide('cancel',id));return}
  positionForm(topic,id);
 }
 function contextualGuide(topic,id){return `<button type="button" class="context-help" data-action="guide" data-topic="${topic}" data-id="${esc(id)}">这项操作会改变什么 ›</button>`}
@@ -61,6 +61,7 @@ const b64=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replace
 function canonical(value){if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value)}
 async function digest(body){return 'sha256:'+Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(body))))).map(x=>x.toString(16).padStart(2,'0')).join('')}
 function validWriteResult(path,payload,result){
+ if(path==='/operations/intent')return !!result&&typeof result.operation_id==='string'&&result.operation_id.length>0&&result.ticket_id===payload.ticket_id&&result.kind===payload.kind&&['accepted','closed'].includes(result.state)&&Number.isSafeInteger(result.version)&&result.version>0;
  if(path==='/operations/submit')return !!result&&result.operation_id===payload.operation_id&&result.ticket_id===payload.ticket_id&&result.state==='accepted'&&Number.isSafeInteger(result.version)&&result.version===payload.expected_version+1;
  if(!result||typeof result!=='object'||Array.isArray(result)||!payload||typeof payload.enabled!=='boolean'||!Number.isSafeInteger(payload.expected_version)||payload.expected_version<=0)return false;
  const versionOK=v=>Number.isSafeInteger(v)&&v>0&&(v===payload.expected_version||v===payload.expected_version+1);
@@ -136,10 +137,10 @@ function render(){if(!session)return;nav();const banner=operationBanner()+(!conn
  else screen.innerHTML=banner+`<div class="titlebar"><h2>当前委托</h2><button class="refresh" data-action="refresh">刷新</button></div>`+(ordersStatus!=='ready'?'<div class="banner">委托状态待核实</div>':'')+(orders.length?orders.map(o=>`<div class="order"><div class="row"><span class="symbol">${esc(o.symbol)}</span><span class="tag">${esc(o.kind)}</span></div><div class="kv"><span>价格</span><span>${number(o.price)}</span></div><div class="kv"><span>数量</span><span>${esc(o.quantity)}</span></div></div>`).join(''):ordersStatus==='ready'?'<div class="empty">暂无委托</div>':'<div class="empty">暂时无法核实委托</div>');
 }
 function switchButton(key,on){return `<button class="toggle ${on?'on':''}" role="switch" aria-label="${esc(key)}允许新开仓" aria-checked="${!!on}" data-action="toggle" data-key="${esc(key)}" ${!connected||busy?'disabled':''}><span></span></button>`}
-async function refresh(){if(!session)return;try{const [p,c]=await Promise.all([request('/positions'),request('/controls')]);positions=p.items;controls=c;try{operationItems=(await request('/operations')).items}catch{operationItems=[]}busy=!await resolvePendingWrite();try{const o=await request('/orders');orders=o.items;ordersStatus=o.status}catch{ordersStatus='unavailable'}connected=true;render()}catch(e){connected=false;render();if(session)notice(e.message)}clearTimeout(refreshTimer);if(session&&!document.hidden)refreshTimer=setTimeout(refresh,10000)}
+async function refresh(){if(!session)return;try{const [p,c]=await Promise.all([request('/positions'),request('/controls')]);positions=p.items;controls=c;try{operationItems=(await request('/operations')).items}catch{operationItems=[]}busy=!await resolvePendingWrite()||submittingPosition;try{const o=await request('/orders');orders=o.items;ordersStatus=o.status}catch{ordersStatus='unavailable'}connected=true;render();if(visibleOperation)await showOperation(visibleOperation,true)}catch(e){connected=false;render();if(session)notice(e.message)}clearTimeout(refreshTimer);if(session&&!document.hidden)refreshTimer=setTimeout(refresh,10000)}
 function confirmControl(key){const isGlobal=key==='global',s=isGlobal?controls.global:controls.strategies.find(s=>s.strategy_group_id===key),enabled=isGlobal?s.new_entry_submit_enabled:s.entry_state==='enabled';confirmAction=async()=>{busy=true;close();render();try{await signed(isGlobal?'/controls/global':'/controls/strategy',isGlobal?{owner_policy_id:s.owner_policy_id,enabled:!enabled,expected_version:s.policy_version}:{strategy_group_id:key,enabled:!enabled,expected_version:s.control_version});notice('状态已更新')}catch(e){notice(e.message)}finally{busy=false;await refresh()}};show(heading(enabled?'暂停新开仓':'恢复新开仓')+`<div class="subtitle">${isGlobal?'全局':esc(key)}</div><div class="kv"><span>已有仓位</span><span>继续管理</span></div><button class="primary" data-action="confirm">确认${enabled?'暂停':'恢复'}</button>`)}
 function settings(){show(heading('设备与通知')+`<div class="kv"><span>登录</span><span>可信设备 · 长期会话</span></div><div class="kv"><span>设备</span><span>${esc(session.device_id.slice(0,8))}</span></div><div class="bottomnote">手机丢失或换机，通过独立管理渠道撤销并重新绑定。</div><button class="outline" data-action="install">添加到主屏幕</button>`)}
-document.addEventListener('click',event=>{const b=event.target.closest('[data-action]');if(!b||b.disabled)return;const a=b.dataset.action;if(a==='guide')operationGuide(b.dataset.topic,b.dataset.id);if(a==='guide-enter')guideEnter(b.dataset.topic,b.dataset.id);if(a==='nav'){page=b.dataset.page;render();screen.scrollTop=0}if(a==='dismiss')close();if(a==='refresh')refresh();if(a==='toggle')confirmControl(b.dataset.key);if(a==='confirm')confirmAction?.();if(a==='settings'&&session)settings();if(['reduce','close','protection'].includes(a))positionForm(a,b.dataset.id);if(a==='tp-form')positionForm('tp',b.dataset.id);if(a==='cancel-tp')preparePosition('manual_tp_cancel',b.dataset.id,{});if(a==='percent')setPercent(b.dataset.percent);if(a==='operation')showOperation(b.dataset.id);if(a==='install')show(heading('添加到主屏幕')+'<p style="line-height:1.8">在Safari中点击分享，再选择「添加到主屏幕」。</p>')});
+document.addEventListener('click',event=>{const b=event.target.closest('[data-action]');if(!b||b.disabled)return;const a=b.dataset.action;if(a==='guide')operationGuide(b.dataset.topic,b.dataset.id);if(a==='guide-enter')guideEnter(b.dataset.topic,b.dataset.id);if(a==='nav'){page=b.dataset.page;render();screen.scrollTop=0}if(a==='dismiss')close();if(a==='refresh')refresh();if(a==='toggle')confirmControl(b.dataset.key);if(a==='confirm')confirmAction?.();if(a==='settings'&&session)settings();if(['reduce','close','protection'].includes(a))positionForm(a,b.dataset.id);if(a==='tp-form')positionForm('tp',b.dataset.id);if(a==='cancel-tp')confirmPosition('manual_tp_cancel',positions.find(p=>p.ticket_id===b.dataset.id),{});if(a==='percent')setPercent(b.dataset.percent);if(a==='operation')showOperation(b.dataset.id);if(a==='install')show(heading('添加到主屏幕')+'<p style="line-height:1.8">在Safari中点击分享，再选择「添加到主屏幕」。</p>')});
 document.addEventListener('submit',async event=>{if(event.target.id==='positionForm'){event.preventDefault();submitPositionForm();return}if(event.target.id!=='bindForm')return;event.preventDefault();const button=event.target.querySelector('button');button.disabled=true;try{await bind($('#binding').value.trim())}catch(e){const error=$('#bindError');if(error)error.textContent=e.message}finally{button.disabled=false}});
 overlay.addEventListener('click',e=>{if(e.target===overlay)close()});document.addEventListener('keydown',e=>{if(e.key==='Escape')close()});window.addEventListener('online',()=>{connected=true;refresh()});window.addEventListener('offline',()=>{connected=false;render()});document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(refreshTimer);else refresh()});
 async function boot(){
@@ -159,25 +160,95 @@ async function boot(){
 }
 boot();
 
-const operationReason=reason=>({natural_tp_won_owner_operation:'原止盈已成交，人工操作已结束，继续自动管理',natural_tp_recorded_owner_results_pending:'原止盈成交已记账，正在核实在途指令',owner_tp_target_crossed_repreview_required:'原止盈已停止替换，请重新预览并确认止盈',stop_not_sent_or_rejected_original_protection_kept:'收紧未执行，原止损仍有效',manual_tp_not_sent_or_rejected_protection_retained:'新止盈未执行，保护仍保留',protection_conversion_not_executed:'保护转换未执行，原计划保留',original_tp_restore_in_progress:'正在恢复原止盈',preview_expired:'预览已过期',preview_changed:'交易状态已变化，请重新预览',device_revoked:'设备授权已撤销',position_or_tp_changed:'数量或止盈成交已变化',stop_or_flat_requires_reconciliation:'止损或平仓结果正在核实',stop_or_flat_requires_readonly_closure:'退出结果正在核实',original_strategy_exit_priority:'原策略退出条件已满足',original_lifecycle_pending:'交易正在收尾',stop_price_crossed:'当前价格已越过申请止损',manual_tp_rejected_protection_retained:'止盈未能设置，原保护仍保留',exit_rejected_protection_retained:'平仓未执行，原保护仍保留',protection_truth_pending:'正在核实新保护',actual_reduction_verified:'减仓已核实',waiting_original_tp_price:'等待原目标价后续管'}[reason]||'当前操作需要核实，请刷新查看进度');
-const operationLabels={repreview_required:'需重新预览 · 旧操作已结束',handed_to_lifecycle:'人工操作已结束 · 自动续管',natural_tp_reconciling:'原止盈已记账 · 核实在途指令',restoring_original_tp:'恢复原止盈',accepted:'已受理',preview_requested:'核实中',previewed:'待确认',protection_converting:'确认余仓保护',protection_pending:'止损处理中',tp_cancelling:'撤销原止盈',tp_pending:'止盈处理中',reduction_pending:'减仓处理中',closure_pending:'平仓收尾中',wait_price:'减仓已完成 · 自动续管',runner_continuing:'减仓已完成 · Runner续管',completed:'已完成',closed:'已平仓',facts_unavailable:'等待核实',review_required:'需要核实',restore_required:'计划恢复中',failed:'执行失败',rejected:'未执行',revoked:'授权已撤销',expired:'已过期'};
-function operationBanner(){return operationItems.filter(o=>!['preview_requested','previewed','expired'].includes(o.state)).slice(0,3).map(o=>`<button class="banner" data-action="operation" data-id="${esc(o.operation_id)}">${esc(operationLabels[o.state]||'处理中')} ›</button>`).join('')}
+const operationReason=reason=>({request_key_already_used:'该请求已处理，请查看操作记录',exit_rejected:'交易所拒绝平仓',position_facts_unavailable:'暂时无法核实持仓，后台处理中',position_not_ready:'持仓尚未准备好',tp_active_or_price_reached:'原止盈正在变化，本次减仓未执行',full_close_requires_separate_intent:'当前余仓不足以执行该减仓数量',auto_required:'该笔目前无法继续自动管理',already_flat:'该笔已平仓',reduction_basis_invalid:'持仓快照已失效，请刷新',owner_start_window_expired:'超过执行期限，未发送',position_rules_unavailable:'无法核实交易数量规则',exit_fill_verified:'已成交 · 正在清理残单',profit_plan_changed:'止盈计划已改变，请刷新后操作',independent_profit_plan_active:'请先处理当前人工止盈',stop_already_tight_enough:'当前止损已满足要求',mobile_refresh_required:'请刷新手机应用后操作',natural_tp_won_owner_operation:'原止盈已成交，人工操作已结束，继续自动管理',natural_tp_recorded_owner_results_pending:'原止盈成交已记账，正在核实在途指令',owner_tp_target_crossed_repreview_required:'原止盈已停止替换，请重新设置止盈',stop_not_sent_or_rejected_original_protection_kept:'收紧未执行，原止损仍有效',manual_tp_not_sent_or_rejected_protection_retained:'新止盈未执行，保护仍保留',protection_conversion_not_executed:'保护转换未执行，原计划保留',original_tp_restore_in_progress:'正在恢复原止盈',preview_expired:'预览已过期',preview_changed:'交易状态已变化，请重新操作',device_revoked:'设备授权已撤销',position_or_tp_changed:'数量或止盈成交已变化',stop_or_flat_requires_reconciliation:'止损或平仓结果正在核实',stop_or_flat_requires_readonly_closure:'退出结果正在核实',original_strategy_exit_priority:'原策略退出条件已满足',original_lifecycle_pending:'交易正在收尾',stop_price_crossed:'当前价格已越过申请止损',manual_tp_rejected_protection_retained:'止盈未能设置，原保护仍保留',exit_rejected_protection_retained:'平仓未执行，原保护仍保留',protection_truth_pending:'正在核实新保护',actual_reduction_verified:'减仓已核实',waiting_original_tp_price:'等待原目标价后续管'}[reason]||(reason?.startsWith('ticket_adjustment_in_progress:')?'该笔已有操作处理中':reason||'当前操作需要核实，请刷新查看进度'));
+const operationLabels={repreview_required:'原申请已结束',handed_to_lifecycle:'人工操作已结束 · 自动续管',natural_tp_reconciling:'原止盈已记账 · 核实在途指令',restoring_original_tp:'恢复原止盈',accepted:'已受理',preview_requested:'核实中',previewed:'待确认',protection_converting:'确认余仓保护',protection_pending:'止损处理中',tp_cancelling:'撤销原止盈',tp_pending:'止盈处理中',reduction_pending:'减仓处理中',closure_pending:'平仓处理中',wait_price:'减仓已完成 · 自动续管',runner_continuing:'减仓已完成 · Runner续管',completed:'已完成',closed:'已平仓',facts_unavailable:'等待核实',review_required:'需要核实',restore_required:'计划恢复中',failed:'执行失败',rejected:'未执行',revoked:'授权已撤销',expired:'已过期'};
+function operationLabel(op){
+ if(op.result?.execution_state==='filled'&&op.result.cleanup_state==='pending')return '已成交 · 正在清理残单';
+ if(op.result?.executed_quantity!=null&&op.result.management_state==='pending')return '已减仓 · 正在核实余仓';
+ return operationLabels[op.state]||'处理中';
+}
+function operationBanner(){return operationItems.filter(o=>!['preview_requested','previewed','expired'].includes(o.state)).slice(0,3).map(o=>`<button class="banner" data-action="operation" data-id="${esc(o.operation_id)}">${esc(operationLabel(o))} ›</button>`).join('')}
 function exactFraction(value,percent){const [a,b='']=String(value).split('.'),digits=b.length+2,scale=10n**BigInt(digits),n=BigInt(a+b)*BigInt(percent),fraction=(n%scale).toString().padStart(digits,'0').replace(/0+$/,'');return (n/scale).toString()+(fraction?'.'+fraction:'')}
 
-function setPercent(percent){if(!formIntent)return;const p=positions.find(x=>x.ticket_id===formIntent.ticket_id),input=$('#operationQty');if(input&&p)input.value=exactFraction(p.position_qty,percent)}
-function positionForm(action,id){const p=positions.find(x=>x.ticket_id===id);if(!p||busy||!connected)return;formIntent={ticket_id:id,kind:action==='reduce'?'position_reduce':action==='close'?'position_close':action==='tp'?'manual_tp_set':'protection_tighten'};
+function setPercent(percent){const input=$('#operationQty');if(input&&formIntent)input.value=exactFraction(formIntent.position.position_qty,percent)}
+function positionForm(action,id){const p=positions.find(x=>x.ticket_id===id);if(!p||busy||!connected)return;if(action==='close'){if(p.capabilities?.close)confirmPosition('position_close',p,{});return}formIntent={ticket_id:id,position:p,kind:action==='reduce'?'position_reduce':action==='close'?'position_close':action==='tp'?'manual_tp_set':'protection_tighten'};
  const qty=['reduce','tp'].includes(action),price=['protection','tp'].includes(action),title={reduce:'市价减仓',close:'市价全平',protection:'收紧止损',tp:'限价止盈'}[action];
- show(heading(title)+`<div class="subtitle">${esc(p.exchange_instrument_id.split(':')[1])} · ${p.position_side==='short'?'空':'多'}</div><form id="positionForm">${qty?`<div class="field"><label for="operationQty">数量</label><div class="inputwrap"><input id="operationQty" inputmode="decimal" autocomplete="off" required></div></div><div class="actions">${[25,50,75].map(v=>`<button type="button" data-action="percent" data-percent="${v}">${v}%</button>`).join('')}</div>`:''}${price?`<div class="field"><label for="operationPrice">${action==='tp'?'止盈价格':'止损价格'}</label><div class="inputwrap"><input id="operationPrice" inputmode="decimal" autocomplete="off" required></div></div>`:''}<div class="kv"><span>当前数量</span><span>${esc(p.position_qty)}</span></div><div class="error" id="operationError"></div><button type="submit" class="primary">核实并预览</button></form>${contextualGuide(action,id)}${action==='protection'?`<div class="actions"><button data-action="tp-form" data-id="${esc(id)}" ${!p.capabilities?.tp?'disabled':''}>设置 / 修改止盈</button><button data-action="cancel-tp" data-id="${esc(id)}" ${!p.capabilities?.tp?'disabled':''}>取消人工止盈</button></div>`:''}`)}
-async function submitPositionForm(){if(!formIntent)return;const params={};if($('#operationQty'))params.quantity=$('#operationQty').value.trim();if($('#operationPrice'))params.price=$('#operationPrice').value.trim();try{await preparePosition(formIntent.kind,formIntent.ticket_id,params)}catch(e){if($('#operationError'))$('#operationError').textContent=e.message;else notice(e.message)}}
-async function preparePosition(kind,ticket_id,params){if(busy||!connected)return;busy=true;let op;
- try{op=await request('/operations/preview',{method:'POST',body:JSON.stringify({ticket_id,kind,...params,idempotency_key:crypto.randomUUID()})});show(heading('核实交易状态')+'<div class="empty">正在生成预览…</div>');
-  for(let i=0;i<20&&op.state==='preview_requested';i++){await new Promise(r=>setTimeout(r,1000));op=await request('/operations/'+encodeURIComponent(op.operation_id))}
-  if(op.state!=='previewed'||!op.preview)throw Error(op.first_blocker?operationReason(op.first_blocker):'预览暂不可用，请刷新后重试');
-  const p=op.preview,rows=[['操作',{position_reduce:'市价减仓',position_close:'市价全平',protection_tighten:'收紧止损',manual_tp_set:'限价止盈',manual_tp_cancel:'取消人工止盈'}[kind]],['当前数量',p.source_quantity]];
-  if(p.reduction_quantity)rows.push(['减仓数量',p.reduction_quantity],['剩余数量',p.remaining_quantity],['余仓管理','继续自动管理']);
-  if(p.price)rows.push(['申请价格',number(p.price)]);if(kind==='manual_tp_set'&&p.quantity)rows.push(['退出数量',p.quantity]);if(kind==='position_reduce')rows.push(['原止盈数量单',p.cancel_tp_order_id?'撤销':'无待撤止盈单'],['余仓转换目标',p.tp_trigger_price==null?'继续Runner':number(p.tp_trigger_price)]);
-  if(kind==='manual_tp_set')rows.push(['原止盈','替换'],['成交方式','普通限价 · GTC']);if(kind==='manual_tp_cancel')rows.push(['原自动止盈','不恢复']);
-  show(heading('确认操作')+rows.map(([k,v])=>`<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')+'<button class="primary" data-action="confirm">确认提交</button>');
-  confirmAction=async()=>{if(busy)return;busy=true;close();render();try{const r=await signed('/operations/submit',{operation_id:op.operation_id,ticket_id,expected_version:op.version});notice('已受理 · 服务器继续执行');await showOperation(r.operation_id)}catch(e){notice(e.message)}finally{busy=false;await refresh()}};
- }catch(e){notice(e.message);close()}finally{busy=false}}
-async function showOperation(id){try{const o=await request('/operations/'+encodeURIComponent(id));show(heading(operationLabels[o.state]||'处理中')+`<div class="kv"><span>操作编号</span><span>${esc(id.slice(-8))}</span></div><div class="kv"><span>状态</span><span>${esc(operationLabels[o.state]||o.state)}</span></div>${o.result?.actual_effects?`<div class="kv"><span>旧止盈</span><span>${o.result.actual_effects.retired_tp_order_id?'已撤销':o.result.actual_effects.old_tp_still_active?'保留':'无'}</span></div><div class="kv"><span>当前止损</span><span>${number(o.result.actual_effects.protection_price)}</span></div>`:''}${o.first_blocker?`<div class="banner">${esc(operationReason(o.first_blocker))}</div>`:''}<button class="outline" data-action="operation" data-id="${esc(id)}">刷新进度</button>`)}catch(e){notice(e.message)}}
+ show(heading(title)+`<div class="subtitle">${esc(p.exchange_instrument_id.split(':')[1])} · ${p.position_side==='short'?'空':'多'}</div><form id="positionForm">${qty?`<div class="field"><label for="operationQty">数量</label><div class="inputwrap"><input id="operationQty" inputmode="decimal" autocomplete="off" required></div></div><div class="actions">${(action==='reduce'?[25,50]:[25,50,75]).map(v=>`<button type="button" data-action="percent" data-percent="${v}">${v}%</button>`).join('')}</div>`:''}${price?`<div class="field"><label for="operationPrice">${action==='tp'?'止盈价格':'止损价格'}</label><div class="inputwrap"><input id="operationPrice" inputmode="decimal" autocomplete="off" required></div></div>`:''}<div class="kv"><span>当前数量</span><span>${esc(p.position_qty)}</span></div><div class="error" id="operationError"></div><button type="submit" class="primary">继续</button></form>${contextualGuide(action,id)}${action==='protection'?`<div class="actions"><button data-action="tp-form" data-id="${esc(id)}" ${!p.capabilities?.tp?'disabled':''}>设置 / 修改止盈</button><button data-action="cancel-tp" data-id="${esc(id)}" ${!p.capabilities?.tp||!p.manual_tp_active?'disabled':''}>取消人工止盈</button></div>`:''}`)}
+const positionActionNames={
+ position_reduce:'市价减仓',position_close:'市价全平',protection_tighten:'收紧止损',
+ manual_tp_set:'限价止盈',manual_tp_cancel:'取消人工止盈'
+};
+
+function positiveDecimal(value){
+ return typeof value==='string'&&/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value)&&/[1-9]/.test(value);
+}
+function decimalLessOrEqual(left,right){
+ const [a,b='']=left.split('.'),[c,d='']=right.split('.');
+ const scale=Math.max(b.length,d.length);
+ return BigInt((a||'0')+b.padEnd(scale,'0'))<=BigInt((c||'0')+d.padEnd(scale,'0'));
+}
+function submitPositionForm(){
+ if(!formIntent)return;
+ const params={};
+ if($('#operationQty'))params.quantity=$('#operationQty').value.trim();
+ if($('#operationPrice'))params.price=$('#operationPrice').value.trim();
+ try{
+  confirmPosition(formIntent.kind,formIntent.position,params);
+ }catch(error){
+  const field=$('#operationError');
+  if(field)field.textContent=error.message;
+  else notice(error.message);
+ }
+}
+function confirmPosition(kind,position,params){
+ if(!position||busy||!connected)return;
+ const payload={kind,ticket_id:position.ticket_id,...params};
+ const rows=[['持仓',position.exchange_instrument_id.split(':')[1]+' · '+(position.position_side==='short'?'空':'多')]];
+ if(kind==='position_close')rows.push(['退出范围','本笔全部余仓']);
+ else rows.push(['当前数量',position.position_qty]);
+ if('quantity' in params){
+  if(!positiveDecimal(params.quantity))throw Error('请输入有效数量');
+  rows.push(['退出数量',params.quantity]);
+ }
+ if('price' in params){
+  if(!positiveDecimal(params.price))throw Error('请输入有效价格');
+  rows.push(['申请价格',number(params.price)]);
+ }
+ if(kind==='position_reduce'){
+  if(!position.reduction_basis_token)throw Error('请刷新持仓后操作');
+  if(!decimalLessOrEqual(params.quantity,exactFraction(position.position_qty,50)))throw Error('单次减仓最多50%');
+  Object.assign(payload,{basis_version:position.version,basis_quantity:position.position_qty,
+   basis_token:position.reduction_basis_token});
+  rows.push(['余仓','继续自动管理']);
+  if(position.status!=='runner_protected'&&position.tp1_exchange_order_id)rows.push(['原止盈','撤销数量单，保留目标价']);
+ }
+ if(kind==='manual_tp_set'||kind==='manual_tp_cancel'){
+  if(kind==='manual_tp_cancel'&&!position.manual_tp_active)return;
+  payload.tp_order_id=position.tp1_exchange_order_id??null;
+ }
+ show(heading('确认'+positionActionNames[kind])+rows.map(([k,v])=>
+  `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')+
+  '<button class="primary'+(kind==='position_close'?' danger':'')+'" data-action="confirm">确认提交</button>');
+ confirmAction=async()=>{
+  if(busy||!connected||submittingPosition)return;
+  submittingPosition=true;
+  busy=true;
+  close();
+  render();
+  try{
+   const result=await signed('/operations/intent',payload);
+   notice(result.state==='closed'?'该笔已平仓':'已受理 · 可关闭页面');
+   await showOperation(result.operation_id);
+  }catch(error){
+   const current=error.message.match(/^ticket_adjustment_in_progress:(owner-op:[a-f0-9]+)$/);
+   if(current)await showOperation(current[1]);
+   else notice(operationReason(error.message));
+  }finally{
+   submittingPosition=false;
+   busy=false;
+   await refresh();
+  }
+ };
+}
+let visibleOperation=null, submittingPosition=false;
+async function showOperation(id,refreshing=false){try{const o=await request('/operations/'+encodeURIComponent(id));if(refreshing&&visibleOperation!==id)return;show(heading(operationLabel(o))+`<div class="kv"><span>操作编号</span><span>${esc(id.slice(-8))}</span></div><div class="kv"><span>状态</span><span>${esc(operationLabel(o))}</span></div>${o.result?.executed_quantity!=null?`<div class="kv"><span>实际成交</span><span>${number(o.result.executed_quantity)}</span></div><div class="kv"><span>余仓</span><span>${number(o.result.remaining_quantity)}</span></div>`:''}${o.result?.actual_effects?`<div class="kv"><span>旧止盈</span><span>${o.result.actual_effects.retired_tp_order_id?'已撤销':o.result.actual_effects.old_tp_still_active?'保留':'无'}</span></div><div class="kv"><span>当前止损</span><span>${number(o.result.actual_effects.protection_price)}</span></div>`:''}${o.first_blocker?`<div class="banner">${esc(operationReason(o.first_blocker))}</div>`:''}<button class="outline" data-action="operation" data-id="${esc(id)}">刷新进度</button>`);visibleOperation=id}catch(e){if(!refreshing)notice(e.message)}}

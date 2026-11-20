@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from decimal import Decimal
 from typing import Any
 
@@ -19,6 +20,7 @@ from src.trading_kernel.domain.owner_device_authority import (
     DEVICE_IDLE_MS,
     DeviceWriteProof,
 )
+from src.trading_kernel.domain.owner_position_intent import OwnerPositionIntent
 from src.trading_kernel.infrastructure.owner_device_credentials import (
     public_key_thumbprint,
 )
@@ -227,7 +229,9 @@ async def authorize(
             allow_idempotent_replay=True,
             clock_ms=lambda: get_clock_ms(request),
         )
-    except ValueError:
+    except ValueError as exc:
+        if str(exc) == "request_key_already_used":
+            raise HTTPException(409, "request_key_already_used") from None
         raise HTTPException(403, "device_write_unavailable") from None
 
 
@@ -394,6 +398,17 @@ async def strategy_control(request: Request, body: SignedBody) -> dict:
     return response
 
 
+def _reduction_basis(settings, *, ticket_id: str, version: int, quantity: str) -> str:
+    import json
+
+    message = json.dumps(
+        ["mobile-reduce-v1", settings.venue_id, settings.account_id,
+         ticket_id, version, quantity],
+        separators=(",", ":"),
+    ).encode()
+    return hmac.digest(settings.auth.session_signing_key.encode(), message, "sha256").hex()
+
+
 @router.get("/positions")
 async def positions(request: Request) -> dict:
     settings = get_settings(request)
@@ -409,6 +424,8 @@ async def positions(request: Request) -> dict:
                         trade_tickets.c.selected_leverage,
                         trade_aggregates.c.version,
                         trade_aggregates.c.position_qty,
+                        trade_aggregates.c.tp1_exchange_order_id,
+                        trade_aggregates.c.manual_profit_plan,
                         trade_aggregates.c.average_fill_price,
                         trade_aggregates.c.active_stop_price,
                         trade_aggregates.c.protected_qty,
@@ -449,7 +466,15 @@ async def positions(request: Request) -> dict:
         {
             "items": [
                 {
-                    **dict(x),
+                    **{k: v for k, v in x.items() if k != "manual_profit_plan"},
+                    "manual_tp_active": bool(
+                        x["tp1_exchange_order_id"] and x["manual_profit_plan"]
+                        and not x["manual_profit_plan"]["cancelled"]
+                    ),
+                    "reduction_basis_token": _reduction_basis(
+                        settings, ticket_id=x["ticket_id"], version=x["version"],
+                        quantity=str(x["position_qty"]),
+                    ) if x["position_qty"] > 0 else None,
                     "capabilities": {
                         "reduce": capable
                         and x["ticket_id"] not in busy_ids
@@ -676,21 +701,6 @@ async def request_receipt(
     return {"state": "completed", "result": row["result_payload"]}
 
 
-class PositionPreviewBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    ticket_id: str = Field(min_length=1, max_length=160)
-    kind: str = Field(
-        pattern=r"^(position_reduce|position_close|protection_tighten|manual_tp_set|manual_tp_cancel)$"
-    )
-    quantity: str | None = Field(
-        default=None, pattern=r"^(?:\d+(?:\.\d+)?|\.\d+)$", max_length=40
-    )
-    price: str | None = Field(
-        default=None, pattern=r"^(?:\d+(?:\.\d+)?|\.\d+)$", max_length=40
-    )
-    idempotency_key: str = Field(min_length=1, max_length=160)
-
-
 def operation_view(row):
     return {
         **{
@@ -706,7 +716,6 @@ def operation_view(row):
                 "completed_at_ms",
             )
         },
-        "preview": row["payload"].get("preview"),
         "result": row["payload"].get("result"),
     }
 
@@ -733,93 +742,51 @@ async def require_position_capability(c, request):
         raise HTTPException(409, "position_operations_unavailable")
 
 
-@router.post("/operations/preview")
-async def preview_position(request: Request, body: PositionPreviewBody) -> dict:
+@router.post("/operations/preview", include_in_schema=False)
+@router.post("/operations/submit", include_in_schema=False)
+async def retired_position_preview() -> None:
+    raise HTTPException(410, "mobile_refresh_required")
+
+
+@router.post("/operations/intent")
+async def submit_position_intent(request: Request, body: SignedBody) -> dict:
+    try:
+        intent = OwnerPositionIntent.model_validate(body.payload)
+    except ValidationError as exc:
+        reason = exc.errors(include_url=False, include_input=False)[0]["msg"]
+        raise HTTPException(422, reason) from None
+
     settings = get_settings(request)
+    if intent.kind == "position_reduce":
+        assert intent.basis_version is not None
+        assert intent.basis_quantity is not None and intent.basis_token is not None
+        expected = _reduction_basis(
+            settings, ticket_id=intent.ticket_id, version=intent.basis_version,
+            quantity=intent.basis_quantity,
+        )
+        if not hmac.compare_digest(expected, intent.basis_token):
+            raise HTTPException(409, "reduction_basis_invalid")
     async with get_control_engine(request).begin() as c:
+        devices = PostgresOwnerDeviceRepository(c)
+        owner = await authorize(c, request, body, intent.kind, get_clock_ms(request))
+        receipt = await devices.write_receipt(body.proof)
+        if receipt is not None:
+            return receipt
         await require_position_capability(c, request)
-        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
-            request.cookies[COOKIE], now_ms=get_clock_ms(request)
-        )
-        ticket = (
-            (
-                await c.execute(
-                    sa.select(trade_tickets).where(
-                        trade_tickets.c.ticket_id == body.ticket_id,
-                        trade_tickets.c.venue_id == settings.venue_id,
-                        trade_tickets.c.account_id == settings.account_id,
-                        trade_tickets.c.terminal_at_ms.is_(None),
-                    )
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
+        ticket = await c.scalar(sa.select(trade_tickets.c.ticket_id).where(
+            trade_tickets.c.ticket_id == intent.ticket_id,
+            trade_tickets.c.venue_id == settings.venue_id,
+            trade_tickets.c.account_id == settings.account_id,
+        ))
         if ticket is None:
             raise HTTPException(404, "ticket_not_found")
         try:
-            row = await PostgresOwnerPositionOperations(c).request_preview(
-                ticket_id=body.ticket_id,
-                kind=body.kind,
-                parameters={"quantity": body.quantity, "price": body.price},
-                owner_identity=d.owner_identity,
-                device_id=d.device_id,
-                device_epoch=d.epoch,
-                idempotency_key=body.idempotency_key,
-                now_ms=get_clock_ms(request),
+            return await PostgresOwnerPositionOperations(c).submit_intent(
+                intent=intent, signed_payload=body.payload, owner_identity=owner,
+                proof=body.proof, now_ms=await devices.write_authorized_at(body.proof),
             )
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
-        return serial(operation_view(row))
-
-
-@router.post("/operations/submit")
-async def submit_position(request: Request, body: SignedBody) -> dict:
-    if (
-        set(body.payload) != {"operation_id", "ticket_id", "expected_version"}
-        or type(body.payload["expected_version"]) is not int
-        or body.payload["expected_version"] <= 0
-        or not all(
-            isinstance(body.payload[k], str) and 0 < len(body.payload[k]) <= 160
-            for k in ["operation_id", "ticket_id"]
-        )
-    ):
-        raise HTTPException(422, "invalid_position_operation")
-    async with get_control_engine(request).begin() as c:
-        await require_position_capability(c, request)
-        repo = PostgresOwnerPositionOperations(c)
-        row = await repo.get(body.payload["operation_id"])
-        if row is None or row["ticket_id"] != body.payload["ticket_id"]:
-            raise HTTPException(404, "operation_not_found")
-        owner = await authorize(c, request, body, row["kind"], get_clock_ms(request))
-        receipt = await PostgresOwnerDeviceRepository(c).write_receipt(body.proof)
-        if receipt is not None:
-            return receipt
-        d, _ = await PostgresOwnerDeviceRepository(c).authenticate(
-            request.cookies[COOKIE], now_ms=get_clock_ms(request)
-        )
-        if body.payload["expected_version"] != row["payload"].get("preview_version", 1):
-            raise HTTPException(409, "preview_version_changed")
-        try:
-            accepted = await repo.accept(
-                operation_id=row["operation_id"],
-                owner_identity=owner,
-                device_id=d.device_id,
-                device_epoch=d.epoch,
-                idempotency_key=body.proof.idempotency_key,
-                proof=body.proof,
-                now_ms=await PostgresOwnerDeviceRepository(c).write_authorized_at(
-                    body.proof
-                ),
-            )
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from None
-        return {
-            "operation_id": accepted["operation_id"],
-            "ticket_id": accepted["ticket_id"],
-            "state": "accepted",
-            "version": accepted["version"],
-        }
 
 
 @router.get("/operations")

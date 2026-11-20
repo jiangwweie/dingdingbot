@@ -96,6 +96,19 @@ async def refresh_owner_read_grants(engine) -> None:
             await connection.execute(text(statement))
 
 
+async def refresh_owner_position_lock_grant(engine) -> None:
+    from sqlalchemy import text
+
+    grant = "GRANT UPDATE (ticket_id) ON TABLE public.brc_trade_aggregates TO brc_owner_control;"
+    declared = (REPO_ROOT / "deploy/owner-console/postgresql/owner-console-control-role.sql").read_text()
+    if grant not in declared.splitlines():
+        raise ValueError("declared Owner position lock grant differs")
+    async with engine.begin() as connection:
+        await connection.execute(text(grant))
+        await connection.execute(text("SET LOCAL ROLE brc_owner_control"))
+        await connection.execute(text("SELECT ticket_id FROM public.brc_trade_aggregates WHERE false FOR UPDATE"))
+
+
 async def activate(
     receipt: dict, source: dict, dsn: str, *, filesystem_root: Path = Path("/")
 ) -> dict:
@@ -356,6 +369,7 @@ async def activate(
                     for key in controls
                 ):
                     raise ValueError("Owner controls changed after preserved upgrade")
+        await refresh_owner_position_lock_grant(engine)
     finally:
         await engine.dispose()
     journal.complete_step("preservation")

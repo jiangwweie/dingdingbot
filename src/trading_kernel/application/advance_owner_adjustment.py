@@ -1,6 +1,7 @@
 """Tighten, one manual limit plan and full close using the sole Kernel Command ledger."""
 
 import asyncio
+from decimal import Decimal
 
 from src.trading_kernel.application.owner_operation_facts import (
     OwnerOperationFactsSource,
@@ -20,7 +21,9 @@ from src.trading_kernel.domain.events import (
     OwnerPositionExitRequested,
     OwnerProfitPlanCancelled,
     OwnerProfitPlanInstalled,
+    OwnerProfitPlanRetired,
     OwnerProtectionRequested,
+    VerifiedExitClosed,
 )
 from src.trading_kernel.domain.owner_position_operation import OwnerPositionPreview
 from src.trading_kernel.domain.reducer import reduce_event
@@ -60,25 +63,77 @@ async def advance_owner_adjustment(
             commands=commands,
             operation_id=row["operation_id"],
             now_ms=now_ms,
+            start_deadline_ms=row["payload"].get("start_deadline_ms"),
         ):
             return "unstarted_commands_expired"
 
+        deferred_tp_ids = set(row["payload"].get("deferred_tp_ids", ()))
+        if p.kind == "position_close" and any(
+            c.kind is K.EXIT and c.status in {S.ACCEPTED, S.RECONCILED_ACCEPTED}
+            and getattr(c.payload, "owner_operation_id", None) == row["operation_id"]
+            for c in commands
+        ):
+            for c in commands:
+                if c.command_id in deferred_tp_ids and c.status is S.PREPARED:
+                    await u.exchange_commands.mark_prepared_superseded(
+                        command_id=c.command_id, observed_at_ms=now_ms,
+                        reason="owner_full_close_accepted",
+                    )
         refs = {
             r.command_id: r.submitted_exchange_order_id
             for r in await u.exchange_commands.list_order_references(row["ticket_id"])
         }
     if a.status is A.TERMINAL:
+        payload = row["payload"]
         async with factory() as u:
+            result = payload.get("result") or {}
+            if p.kind == "position_close" and result.get("execution_state") != "filled":
+                exit_order_ids = {
+                    refs[c.command_id] for c in commands
+                    if c.kind is K.EXIT and c.command_id in refs
+                    and getattr(c.payload, "owner_operation_id", None) == row["operation_id"]
+                }
+                events = await u.events.list_for_ticket(row["ticket_id"])
+                closing = next((event for event in events if isinstance(event, VerifiedExitClosed)), None)
+                if closing is not None:
+                    executed = sum(
+                        (fill.quantity for fill in closing.proof.exit_fills if fill.order_id in exit_order_ids),
+                        Decimal(0),
+                    )
+                    if executed > 0:
+                        result = {
+                            "execution_state": "filled",
+                            "executed_quantity": str(executed),
+                            "remaining_quantity": "0",
+                        }
+            if result.get("execution_state") == "filled":
+                payload = {**payload, "result": {**result, "cleanup_state": "completed"}}
             await u.owner_position_operations.transition(
                 operation_id=row["operation_id"],
                 expected_version=row["version"],
                 state="closed",
-                payload=row["payload"],
+                payload=payload,
                 reason="ticket_terminal",
                 now_ms=now_ms,
                 completed=True,
             )
         return "closed"
+    if p.kind == "position_close" and a.status is A.EXIT_REJECTED and any(
+        c.kind is K.EXIT and c.status in {S.REJECTED, S.RECONCILED_ABSENT}
+        and getattr(c.payload, "owner_operation_id", None) == row["operation_id"]
+        for c in commands
+    ):
+        async with factory() as u:
+            await u.owner_position_operations.transition(
+                operation_id=row["operation_id"], expected_version=row["version"],
+                state="failed", reason="exit_rejected",
+                payload={**row["payload"], "result": {
+                    "execution_state": "not_executed",
+                    "actual_effects": row["payload"].get("actual_effects"),
+                }},
+                now_ms=now_ms, completed=True,
+            )
+        return "failed"
     pending_protection = a.protection_operation_id == row[
         "operation_id"
     ] and a.status.value.startswith("runner_")
@@ -92,10 +147,18 @@ async def advance_owner_adjustment(
             for c in commands
         )
     )
+    stages = {A.POSITION_PROTECTED, A.RUNNER_PROTECTED}
+    if p.kind == "position_close":
+        stages.add(A.TP1_PENDING)
+    closing_at_venue = p.kind == "position_close" and a.status in {
+        A.EXIT_ACCEPTED, A.EXIT_OUTCOME_UNKNOWN, A.RECONCILIATION_PENDING,
+        A.SETTLEMENT_PENDING, A.REVIEW_PENDING,
+    }
     if (
-        a.status not in {A.POSITION_PROTECTED, A.RUNNER_PROTECTED}
+        a.status not in stages
         and not pending_protection
         and not pending_exit
+        and not closing_at_venue
     ):
         async with factory() as u:
             await u.owner_position_operations.transition(
@@ -115,7 +178,8 @@ async def advance_owner_adjustment(
         o = await asyncio.wait_for(
             source.read_owner_position(
                 aggregate=a,
-                commands=commands,
+                commands=tuple(c for c in commands
+                               if c.command_id not in deferred_tp_ids or c.status is not S.PREPARED),
                 accepted_order_ids=refs,
                 operation_id=row["operation_id"],
             ),
@@ -170,6 +234,31 @@ async def advance_owner_adjustment(
                 completed=completed,
             )
             return state
+
+        if closing_at_venue:
+            filled = next((
+                order for order in o.orders
+                if order.status == "FILLED"
+                and order.evidence.terms.exchange_order_id == a.exit_exchange_order_id
+                and order.evidence.terms.order_namespace == "regular"
+                and order.evidence.executed_quantity > 0
+                and o.facts.position_quantity == 0
+                and any(
+                    c.command_id == order.command_id and c.kind is K.EXIT
+                    and getattr(c.payload, "owner_operation_id", None) == row["operation_id"]
+                    for c in commands
+                )
+            ), None)
+            if filled is not None:
+                payload["result"] = {
+                    "execution_state": "filled",
+                    "executed_quantity": str(filled.evidence.executed_quantity),
+                    "remaining_quantity": str(o.facts.position_quantity),
+                    "cleanup_state": "pending",
+                }
+                await u.aggregates.expedite_reconciliation(row["ticket_id"], due_at_ms=now_ms)
+                return await save("closure_pending", "exit_fill_verified")
+            return await save("closure_pending", "exit_fill_unverified")
 
         from src.trading_kernel.application.handoff_owner_operation import (
             handoff_natural_tp,
@@ -445,12 +534,39 @@ async def advance_owner_adjustment(
             )
             return await save("completed", completed=True)
         if p.kind == "position_close":
+            if o.facts.unresolved_other_command:
+                return await save("facts_unavailable", "owner_close_other_command_pending")
             exit_attempts = [c for c in own if c.kind is K.EXIT]
             if exit_attempts:
                 return await save(
                     "review_required", "full_close_not_executed_protection_retained"
                 )
 
+            if now_ms >= p.expires_at_ms:
+                return await finish("expired", "owner_start_window_expired")
+            if tp is not None and p.source_tp_order_id == a.tp1_exchange_order_id:
+                tp_source = next(c for c in commands if c.command_id == tp.command_id)
+                await commit(OwnerProfitPlanRetired(
+                    **fields(),
+                    operation_id=row["operation_id"],
+                    command_id=tp.command_id,
+                    exchange_order_id=tp.evidence.terms.exchange_order_id,
+                    source_kind="manual"
+                    if getattr(tp_source.payload, "owner_operation_id", None)
+                    else "retired_automatic",
+                    evidence=tp.evidence,
+                ))
+                updated = await u.aggregates.get_for_update(row["ticket_id"])
+                assert updated is not None
+                a = updated
+                payload["actual_effects"] = {
+                    "retired_tp_order_id": p.source_tp_order_id,
+                    "old_tp_still_active": False,
+                    "protection_price": str(o.facts.stop_price),
+                }
+                payload["facts"] = o.facts.model_copy(update={
+                    "tp_order_id": None, "tp_state": "absent",
+                }).model_dump(mode="json")
             # Existing lifecycle owns market exit, residual cleanup, settlement and review.
             await commit(
                 OwnerPositionExitRequested(**fields(), operation_id=row["operation_id"])

@@ -11,13 +11,13 @@ from src.trading_kernel.domain.reducer import reduce_event
 
 
 async def expire_unstarted_owner_commands(
-    uow, *, aggregate, commands, operation_id, now_ms
+    uow, *, aggregate, commands, operation_id, now_ms, start_deadline_ms=None
 ):
     expired = [
         c
         for c in commands
         if c.status is S.PREPARED
-        and c.deadline_at_ms <= now_ms
+        and min(c.deadline_at_ms, start_deadline_ms or c.deadline_at_ms) <= now_ms
         and getattr(c.payload, "owner_operation_id", None) == operation_id
     ]
     if not expired:

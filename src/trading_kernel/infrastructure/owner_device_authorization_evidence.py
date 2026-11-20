@@ -129,6 +129,38 @@ async def _source_matches(c, row, proof: DeviceWriteProof) -> bool:
     )
 
     payload, scope = row["payload"], row["target_scope"]
+    from src.trading_kernel.domain.owner_position_intent import (
+        INTENT_PATH,
+        OwnerPositionIntent,
+    )
+
+    if proof.path == INTENT_PATH:
+        intent = OwnerPositionIntent.model_validate(payload)
+        op = (await c.execute(sa.select(operations).where(
+            operations.c.operation_id == scope["operation_id"]
+        ))).mappings().one_or_none()
+        return bool(
+            op is not None
+            and proof.method == "POST"
+            and op["authorization_id"] == row["authorization_id"]
+            and op["owner_identity"] == row["owner_identity"]
+            and op["ticket_id"] == intent.ticket_id
+            and op["kind"] == intent.kind == row["purpose"]
+            and op["payload"].get("intent") == payload
+            and op["device_id"] == proof.device_id
+            and op["device_epoch"] == proof.device_epoch
+            and op["idempotency_key"] == proof.idempotency_key
+            and op["payload"].get("submit_key") == proof.idempotency_key
+            and row["auth_key"] == "owner-position:" + op["operation_id"]
+            and op["request_digest"] == row["request_digest"] == proof.body_digest
+            and scope == {
+                "operation_id": op["operation_id"],
+                "ticket_id": op["ticket_id"],
+                "management_revision": op["payload"]["management_revision"],
+                "device_id": proof.device_id,
+                "device_epoch": proof.device_epoch,
+            }
+        )
     if (
         proof.method != "POST"
         or proof.path != "/api/owner/v1/mobile/operations/submit"

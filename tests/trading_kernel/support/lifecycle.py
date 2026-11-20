@@ -59,7 +59,7 @@ def registered_sor_long_ticket():
     )
 
 
-async def reach_position_protected(engine, ticket) -> None:
+async def reach_position_protected(engine, ticket, *, install_tp: bool = True) -> None:
     async with PostgresKernelUnitOfWork(engine) as uow:
         await seed_strategy_registry(uow, seeded_at_ms=1_000)
     await seed_policy(engine)
@@ -96,7 +96,8 @@ async def reach_position_protected(engine, ticket) -> None:
             ),
         )
     await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=2_201), ticket.identity.ticket_id, now_ms=2_200)
-    await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=2_301), ticket.identity.ticket_id, now_ms=2_300)
+    if install_tp:
+        await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=2_301), ticket.identity.ticket_id, now_ms=2_300)
 
 
 async def reach_runner_protected(engine, ticket) -> None:

@@ -105,6 +105,7 @@ class OwnerReductionState(_Frozen):
     preview: OwnerReductionPreview
     phase: OwnerReductionPhase
     started_at_ms: int | None = Field(default=None, gt=0)
+    start_deadline_ms: int | None = Field(default=None, gt=0)
     confirmed_protection_order_id: str | None = Field(default=None, min_length=1)
     actual_reduction_quantity: Decimal = Field(
         default=Decimal(0), ge=0, allow_inf_nan=False
@@ -168,6 +169,7 @@ def preview_owner_reduction(
     if a.status not in {
         AggregateStatus.POSITION_PROTECTED,
         AggregateStatus.RUNNER_PROTECTED,
+        AggregateStatus.TP1_PENDING,
     }:
         raise ValueError("lifecycle_busy")
     if (
@@ -197,10 +199,15 @@ def preview_owner_reduction(
         or f.protected_quantity != a.position_qty
     ):
         raise ValueError("protection_unproven")
-    if a.manual_profit_plan is not None and not a.manual_profit_plan.cancelled:
+    if (
+        a.tp1_exchange_order_id is not None
+        and a.manual_profit_plan is not None
+        and not a.manual_profit_plan.cancelled
+    ):
         raise ValueError("independent_profit_plan_active")
     runner = a.status is AggregateStatus.RUNNER_PROTECTED
     waiting = not runner and a.owner_reduction_context is not None
+    unplaced_tp = a.status is AggregateStatus.TP1_PENDING and a.tp1_exchange_order_id is None
     target = (
         None
         if runner
@@ -213,7 +220,7 @@ def preview_owner_reduction(
     if waiting and (f.tp_order_id is not None or f.tp_state not in {"absent","cancelled"}):
         raise ValueError("retired_tp_reappeared")
     if not runner and (
-        (f.tp_state != "open" if not waiting else False)
+        (f.tp_state != "absent" if unplaced_tp else f.tp_state != "open" and not waiting)
         or f.tp_order_id != a.tp1_exchange_order_id
         or f.tp_filled_quantity != 0
         or target is None
@@ -345,7 +352,10 @@ def advance_owner_reduction(
             )
         if f.reduction_state != "not_sent" or f.reduction_filled_quantity != 0:
             return result("reconcile", "reduction_already_started")
-        if now_ms >= (p.expires_at_ms if state.started_at_ms is None else state.started_at_ms + 120000):
+        deadline = state.start_deadline_ms
+        if deadline is None:
+            deadline = p.expires_at_ms if state.started_at_ms is None else state.started_at_ms + 120_000
+        if now_ms >= deadline:
             return result(
                 "rejected"
                 if state.phase is OwnerReductionPhase.PREVIEWED

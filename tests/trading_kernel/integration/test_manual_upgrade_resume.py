@@ -129,6 +129,7 @@ async def test_real_stopped_upgrade_resumes_after_each_side_effect(
         pass
 
     monkeypatch.setattr(upgrade, "refresh_owner_read_grants", read_grants)
+    monkeypatch.setattr(upgrade, "refresh_owner_position_lock_grant", read_grants)
     actual_complete = UpgradeJournal.complete_step
 
     def complete(self, step):

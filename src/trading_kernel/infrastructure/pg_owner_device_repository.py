@@ -347,6 +347,14 @@ class PostgresOwnerDeviceRepository:
             ):
                 return d.owner_identity
             raise ValueError("nonce_consumed")
+        # The Owner lock already serializes this key across nonces. Reject a
+        # reused key through the API contract instead of a database error.
+        prior = await self.c.scalar(sa.select(writes.c.evidence_id).where(
+            writes.c.owner_identity == d.owner_identity,
+            writes.c.idempotency_key == proof.idempotency_key,
+        ))
+        if prior is not None:
+            raise ValueError("request_key_already_used")
         await self.c.execute(
             sa.update(nonces)
             .where(nonces.c.nonce_id == proof.nonce_id)

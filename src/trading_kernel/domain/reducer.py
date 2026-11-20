@@ -1626,7 +1626,8 @@ def reduce_event(
     if isinstance(event, OwnerPositionExitRequested):
         _require_status_in(
             current,
-            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED,
+             AggregateStatus.TP1_PENDING},
         )
         return _transition(
             current,
@@ -1800,7 +1801,8 @@ def reduce_event(
     if isinstance(event, OwnerReductionRecorded):
         _require_status_in(
             current,
-            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED,
+             AggregateStatus.TP1_PENDING},
         )
         if (
             event.filled_quantity <= 0
@@ -1832,7 +1834,7 @@ def reduce_event(
         )
         old = current.owner_reduction_context
         if (
-            current.status is AggregateStatus.POSITION_PROTECTED
+            current.status is not AggregateStatus.RUNNER_PROTECTED
             and old is None
             and (
                 event.original_tp_order_id != current.tp1_exchange_order_id
@@ -1864,7 +1866,7 @@ def reduce_event(
         return _transition(
             current,
             event,
-            status=current.status,
+            status=AggregateStatus.POSITION_PROTECTED if current.status is AggregateStatus.TP1_PENDING else current.status,
             updates={
                 "position_qty": event.remaining_quantity,
                 "protected_qty": event.remaining_quantity,
@@ -1990,7 +1992,8 @@ def reduce_event(
     if isinstance(event, OwnerProtectionRequested):
         _require_status_in(
             current,
-            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED},
+            {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED,
+             AggregateStatus.TP1_PENDING},
         )
         if (
             not event.operation_id.strip()

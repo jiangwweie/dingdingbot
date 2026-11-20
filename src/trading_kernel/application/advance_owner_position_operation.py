@@ -58,24 +58,13 @@ async def advance_owner_position_operation(
             return None
         row = rows[0]
         a = await u.aggregates.get(row["ticket_id"])
-        preview_requested = row["state"] == "preview_requested"
-        if preview_requested:
-            pass
-        elif a is None:
-            return "ticket_missing"
-        elif row["kind"] != "position_reduce":
-            pass
-    if preview_requested:
-        from src.trading_kernel.application.prepare_owner_position_preview import (
-            prepare_owner_position_preview,
+    if "intent" in row["payload"] and row["payload"].get("preview") is None:
+        from src.trading_kernel.application.prepare_owner_position_intent import (
+            prepare_owner_position_intent,
         )
 
-        return await prepare_owner_position_preview(
-            uow_factory,
-            facts_source,
-            row,
-            now_ms=now_ms,
-            timeout_seconds=timeout_seconds,
+        return await prepare_owner_position_intent(
+            uow_factory, facts_source, row, now_ms=now_ms, timeout_seconds=timeout_seconds
         )
     if row["authorization_id"] is None:
         async with uow_factory() as u:
@@ -130,6 +119,7 @@ async def advance_owner_position_operation(
             commands=commands,
             operation_id=row["operation_id"],
             now_ms=now_ms,
+            start_deadline_ms=row["payload"].get("start_deadline_ms"),
         ):
             return "unstarted_commands_expired"
 
@@ -176,7 +166,7 @@ async def advance_owner_position_operation(
             "operation_id"
         ] and a.status.value.startswith("runner_")
         if (
-            a.status not in {A.POSITION_PROTECTED, A.RUNNER_PROTECTED}
+            a.status not in {A.POSITION_PROTECTED, A.RUNNER_PROTECTED, A.TP1_PENDING}
             and not pending_protection
             and not restoring_tp
         ):
@@ -233,12 +223,14 @@ async def advance_owner_position_operation(
             read_original_operation_exit,
         )
 
+        deferred_tp_ids = set(row["payload"].get("deferred_tp_ids", ()))
         observation = await asyncio.wait_for(
             facts_source.read_owner_reduction(
                 aggregate=a,
                 state=s,
                 authorization_id=row["authorization_id"],
-                commands=commands,
+                commands=tuple(c for c in commands if c.command_id not in deferred_tp_ids
+                               or c.status is not S.PREPARED),
                 accepted_order_ids=accepted_order_ids,
             ),
             timeout=timeout_seconds,
@@ -302,6 +294,19 @@ async def advance_owner_position_operation(
             "facts": observation.facts.model_dump(mode="json"),
             "protection_close_position": observation.protection_close_position,
         }
+        f = observation.facts
+        if (
+            f.reduction_operation_id == row["operation_id"]
+            and f.reduction_state == "terminal"
+            and 0 < f.reduction_filled_quantity <= s.preview.reduction_quantity
+        ):
+            payload["result"] = {
+                "execution_state": "filled" if f.reduction_filled_quantity == s.preview.reduction_quantity else "partial",
+                "requested_quantity": str(s.preview.reduction_quantity),
+                "executed_quantity": str(f.reduction_filled_quantity),
+                "remaining_quantity": str(f.position_quantity),
+                "management_state": "pending",
+            }
         ids = list(payload.get("prepared_command_ids", []))
         ids.extend(
             c.command_id
@@ -472,6 +477,12 @@ async def advance_owner_position_operation(
                 completed=True,
             )
             return "failed"
+        if (
+            "intent" in payload and now_ms >= payload["start_deadline_ms"]
+            and s.phase is P.PREVIEWED and not ids
+        ):
+            await save("expired", "owner_start_window_expired", completed=True)
+            return "expired"
         if not observation.protection_close_position and s.phase is P.PREVIEWED:
             if (
                 not authority
@@ -578,7 +589,8 @@ async def advance_owner_position_operation(
                 payload=terms,
                 status=S.PREPARED,
                 created_at_ms=now_ms,
-                deadline_at_ms=now_ms + 30000,
+                deadline_at_ms=min(now_ms + 30_000, payload.get("start_deadline_ms", now_ms + 30_000))
+                if kind is K.OWNER_REDUCE else now_ms + 30_000,
             )
             await u.exchange_commands.add(c)
             ids.append(cid)
@@ -617,7 +629,20 @@ async def advance_owner_position_operation(
             if observation.proof is None:
                 await save("review_required", "actual_reduction_proof_missing")
                 return "review_required"
+            for c in commands:
+                if c.command_id in deferred_tp_ids and c.status is S.PREPARED:
+                    await u.exchange_commands.mark_prepared_superseded(
+                        command_id=c.command_id, observed_at_ms=now_ms,
+                        reason="owner_reduction_replaces_unplaced_tp",
+                    )
             await record_owner_reduction(u, proof=observation.proof, now_ms=now_ms)
+            payload["result"] = {
+                "execution_state": "filled" if s.actual_reduction_quantity == s.preview.reduction_quantity else "partial",
+                "requested_quantity": str(s.preview.reduction_quantity),
+                "executed_quantity": str(s.actual_reduction_quantity),
+                "remaining_quantity": str(observation.proof.remaining_quantity),
+                "management_state": s.phase.value,
+            }
             await save(s.phase.value, decision.reason, completed=True)
             return "completed"
         elif decision.action == "restore_or_reconcile":

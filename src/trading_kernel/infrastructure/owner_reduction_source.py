@@ -350,6 +350,8 @@ async def collect_owner_reduction(
             if a.status is AggregateStatus.RUNNER_PROTECTED
             else "wait_price"
             if a.owner_reduction_context
+            else "pre_tp_unplaced"
+            if a.status is AggregateStatus.TP1_PENDING
             else "pre_tp",
             source_tp_filled_quantity=p.source_tp_filled_quantity,
             authorization_id=authorization_id,

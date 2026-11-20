@@ -22,8 +22,13 @@ async def handoff_natural_tp(
     a = aggregate
     if a.management_mode.value != "AUTO":
         return False
+    plan = row["payload"].get("preview")
+    if plan is None:
+        # The worker has not frozen an execution plan. The lifecycle still
+        # accounts natural fills and the intent is subsequently planned against them.
+        return False
     if a.tp1_exchange_order_id is None or filled_quantity <= Decimal(
-        str(row["payload"]["preview"].get("source_tp_filled_quantity", 0))
+        str(plan.get("source_tp_filled_quantity", 0))
     ):
         return False
     delta = filled_quantity - a.tp1_filled_qty

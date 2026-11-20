@@ -74,6 +74,46 @@ async def test_full_close_refreshes_facts_after_restart_before_dispatch(
         )
     await dispatch_for_ticket(e, venue, t.identity.ticket_id, now_ms=15100)
 
+    from decimal import Decimal
+
+    from src.trading_kernel.application.reconcile_ticket import (
+        ReconcileTicketRequest,
+        reconcile_ticket,
+    )
+    from src.trading_kernel.domain.position import PositionSnapshot, VenueOrderSnapshot
+
+    async with factory() as u:
+        a = await u.aggregates.get(t.identity.ticket_id)
+        assert a.tp1_exchange_order_id is None
+        stop = a.active_stop_exchange_order_id
+        flat = PositionSnapshot(
+            netting_domain=t.identity.netting_domain, quantity=Decimal(0),
+            average_entry_price=None, observed_at_ms=15200,
+            open_orders=(VenueOrderSnapshot(
+                exchange_order_id=stop, venue_client_order_id="brc-stop",
+                position_side=t.identity.netting_domain.position_side,
+                reduce_only=True, order_namespace="conditional",
+            ),),
+        )
+        result = await reconcile_ticket(u, ReconcileTicketRequest(
+            ticket_id=t.identity.ticket_id, snapshot=flat
+        ))
+        assert result.status.value == "position_flat_recorded"
+        cancellations = [
+            c for c in await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
+            if c.kind is K.CANCEL_ORDER
+        ]
+        assert [(c.payload.purpose, c.payload.order_namespace) for c in cancellations] == [
+            ("owner_tp", "regular"), ("reconciliation_cleanup", "conditional")
+        ]
+    await dispatch_for_ticket(e, venue, t.identity.ticket_id, now_ms=15300)
+    async with factory() as u:
+        result = await reconcile_ticket(u, ReconcileTicketRequest(
+            ticket_id=t.identity.ticket_id,
+            snapshot=flat.model_copy(update={"open_orders": (), "observed_at_ms": 15400})
+        ))
+        assert result.status.value == "matched"
+
 
 @pytest.mark.asyncio
 async def test_original_tp_restoration_keeps_its_phase_until_delayed_dispatch(
@@ -397,7 +437,7 @@ async def test_manual_tp_is_not_prepared_after_protection_conversion_crosses_tar
 
 
 @pytest.mark.asyncio
-async def test_late_original_tp_fill_aborts_unstarted_full_close_and_hands_back(
+async def test_tp_fill_before_cancel_hands_full_close_back(
     head_template_engine,
 ):
 
@@ -405,7 +445,6 @@ async def test_late_original_tp_fill_aborts_unstarted_full_close_and_hands_back(
     t, op = await accepted_operation(e, "position_close")
     factory = lambda: PostgresKernelUnitOfWork(e)
     source = DelayedSource()
-    venue = OwnerOperationVenue()
 
     async def tick(at):
         source.at = at
@@ -416,8 +455,6 @@ async def test_late_original_tp_fill_aborts_unstarted_full_close_and_hands_back(
         )
 
     await tick(7000)
-    await dispatch_for_ticket(e, venue, t.identity.ticket_id, now_ms=7100)
-    assert await tick(8000) == "closure_pending"
     original = source.read_owner_position
 
     async def late_fill(**kwargs):
@@ -446,7 +483,10 @@ async def test_late_original_tp_fill_aborts_unstarted_full_close_and_hands_back(
             for c in await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
             if c.kind is K.EXIT
         ]
-        assert len(exits) == 1 and exits[0].status is S.SUPERSEDED
+        assert not exits
+        cancel = next(c for c in await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
+                      if c.kind is K.CANCEL_ORDER)
+        assert cancel.status is S.SUPERSEDED
         assert (
             await u.owner_position_operations.active_for_ticket(t.identity.ticket_id)
             is None

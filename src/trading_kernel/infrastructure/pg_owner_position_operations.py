@@ -12,6 +12,10 @@ from src.trading_kernel.domain.aggregate import TradeAggregate
 from src.trading_kernel.domain.commands import ExchangeCommand
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.owner_device_authority import DeviceWriteProof
+from src.trading_kernel.domain.owner_position_intent import (
+    START_WINDOW_MS,
+    OwnerPositionIntent,
+)
 from src.trading_kernel.domain.owner_position_operation import OwnerPositionPreview
 from src.trading_kernel.domain.owner_reduction import (
     OwnerReductionPhase,
@@ -322,6 +326,147 @@ class PostgresOwnerPositionOperations:
         )
         return row
 
+    async def submit_intent(
+        self,
+        *,
+        intent: OwnerPositionIntent,
+        signed_payload: dict,
+        owner_identity: str,
+        proof: DeviceWriteProof,
+        now_ms: int,
+    ) -> dict:
+        from src.trading_kernel.infrastructure.pg_owner_device_repository import (
+            PostgresOwnerDeviceRepository,
+        )
+
+        device_repo = PostgresOwnerDeviceRepository(self.c)
+        a = (
+            (await self.c.execute(
+                sa.select(aggregates)
+                .where(aggregates.c.ticket_id == intent.ticket_id)
+                .with_for_update()
+            )).mappings().one_or_none()
+        )
+        if a is None:
+            raise ValueError("ticket_not_found")
+        active = await self.active_for_ticket(intent.ticket_id)
+        if active is not None:
+            if intent.kind == active["kind"] == "position_close":
+                receipt = self._intent_receipt(active)
+                await device_repo.finish_control(
+                    proof=proof, owner_identity=owner_identity, authorization_id=None,
+                    result=receipt,
+                )
+                return receipt
+            raise ValueError("ticket_adjustment_in_progress:" + active["operation_id"])
+        operation_id = "owner-op:" + secrets.token_hex(16)
+        digest = canonical_digest(signed_payload)
+        flat = a["status"] == "terminal"
+        if not flat and a["position_qty"] == 0:
+            raise ValueError("position_not_ready")
+        if not flat and a["management_mode"] != "AUTO":
+            raise ValueError("auto_required")
+        if (
+            not flat
+            and intent.basis_version is not None
+            and intent.basis_version > a["version"]
+        ):
+            raise ValueError("reduction_basis_invalid")
+        auth = None if flat else "owner-auth:" + secrets.token_hex(16)
+        if auth is not None:
+            await self.c.execute(sa.insert(authorizations).values(
+                authorization_id=auth, purpose=intent.kind,
+                owner_identity=owner_identity,
+                authentication_strength="trusted_device_session",
+                request_digest=digest,
+                target_scope={
+                    "ticket_id": intent.ticket_id,
+                    "operation_id": operation_id,
+                    "management_revision": a["management_revision"],
+                    "device_id": proof.device_id,
+                    "device_epoch": proof.device_epoch,
+                },
+                idempotency_key="owner-position:" + operation_id,
+                authorized_at_ms=now_ms,
+            ))
+        row = {
+            "operation_id": operation_id,
+            "ticket_id": intent.ticket_id,
+            "kind": intent.kind,
+            "owner_identity": owner_identity,
+            "device_id": proof.device_id,
+            "device_epoch": proof.device_epoch,
+            "authorization_id": auth,
+            "idempotency_key": proof.idempotency_key,
+            "request_digest": digest,
+            "version": 1,
+            "state": "closed" if flat else "accepted",
+            "payload": {
+                "intent": signed_payload,
+                "preview": None,
+                "management_revision": a["management_revision"],
+                "submit_key": proof.idempotency_key,
+                "started_at_ms": now_ms,
+                "start_deadline_ms": now_ms + START_WINDOW_MS,
+                "result": {"execution_state": "not_needed"} if flat else None,
+            },
+            "first_blocker": "already_flat" if flat else None,
+            "created_at_ms": now_ms,
+            "updated_at_ms": now_ms,
+            "due_at_ms": now_ms,
+            "completed_at_ms": now_ms if flat else None,
+        }
+        await self.c.execute(sa.insert(operations).values(**row))
+        await self._event(row, now_ms)
+        receipt = self._intent_receipt(row)
+        await device_repo.finish_control(
+            proof=proof, owner_identity=owner_identity, authorization_id=auth, result=receipt,
+        )
+        return receipt
+
+    @staticmethod
+    def _intent_receipt(row: dict) -> dict:
+        return {
+            "operation_id": row["operation_id"],
+            "ticket_id": row["ticket_id"],
+            "kind": row["kind"],
+            "state": "closed" if row["state"] == "closed" else "accepted",
+            "version": row["version"],
+        }
+
+    async def install_intent_plan(
+        self, row: dict, plan: OwnerReductionPreview | OwnerPositionPreview, *,
+        now_ms: int, command_id: str | None = None, facts: dict | None = None,
+        deferred_tp_ids: tuple[str, ...] = (),
+    ) -> None:
+        payload = {**row["payload"], "preview": plan.model_dump(mode="json"),
+                   "deferred_tp_ids": list(deferred_tp_ids)}
+        state = row["state"]
+        if command_id is not None:
+            state = "reduction_pending"
+            payload.update(prepared_command_ids=[command_id], facts=facts,
+                           protection_close_position=True)
+        if isinstance(plan, OwnerReductionPreview):
+            payload["reduction_state"] = OwnerReductionState(
+                operation_id=row["operation_id"],
+                preview=plan,
+                phase=OwnerReductionPhase.REDUCTION_PENDING if command_id
+                else OwnerReductionPhase.PREVIEWED,
+                started_at_ms=row["created_at_ms"],
+                start_deadline_ms=row["payload"]["start_deadline_ms"],
+                confirmed_protection_order_id=plan.protection_order_id if command_id else None,
+            ).model_dump(mode="json")
+        updated = {**row, "version": row["version"] + 1, "payload": payload,
+                   "state": state, "due_at_ms": now_ms, "updated_at_ms": now_ms}
+        await self.c.execute(
+            sa.update(operations)
+            .where(operations.c.operation_id == row["operation_id"],
+                   operations.c.version == row["version"])
+            .values(**{k: updated[k] for k in
+                       ("version", "state", "payload", "due_at_ms", "updated_at_ms")})
+        )
+        await self._event(updated, now_ms)
+
     async def save_state(
         self,
         *,
@@ -442,7 +587,9 @@ class PostgresOwnerPositionOperations:
             or row["completed_at_ms"] is not None
         ):
             raise ValueError("operation_version_conflict")
-        if payload.get("preview") != row["payload"]["preview"] or payload.get(
+        if any(payload.get(key) != row["payload"].get(key) for key in (
+            "preview", "intent", "management_revision", "start_deadline_ms",
+        )) or payload.get(
             "submit_key"
         ) != row["payload"].get("submit_key"):
             raise ValueError("operation_authority_changed")
@@ -520,7 +667,11 @@ class PostgresOwnerPositionOperations:
             and device is not None
             and device["epoch"] == row["device_epoch"]
             and device["revoked_at_ms"] is None
-            and row["payload"]["preview"]["management_revision"] == management_revision
+            and (
+                row["payload"]["management_revision"]
+                if "intent" in row["payload"]
+                else row["payload"]["preview"]["management_revision"]
+            ) == management_revision
             and await trusted_owner_authorization_matches(
                 self.c, row["authorization_id"]
             )
@@ -574,11 +725,30 @@ class PostgresOwnerPositionOperations:
                 row, management_revision=aggregate.management_revision
             ):
                 return "owner_operation_authority_revoked"
+            if (
+                "intent" in row["payload"]
+                and command.kind in {
+                    K.OWNER_REDUCE, K.EXIT, K.REPLACE_PROTECTION, K.TAKE_PROFIT, K.CANCEL_ORDER
+                }
+                and now_ms >= row["payload"]["start_deadline_ms"]
+            ):
+                return "owner_start_window_expired"
             facts = row["payload"].get("facts")
             if facts is None or not int(facts["observed_at_ms"]) <= now_ms < min(
                 int(facts["valid_until_ms"]), int(facts["observed_at_ms"]) + 5000
             ):
                 return "owner_operation_facts_stale"
+            if command.kind in {K.EXIT, K.OWNER_REDUCE, K.REPLACE_PROTECTION} and row["payload"].get("deferred_tp_ids"):
+                from src.trading_kernel.infrastructure.pg_models import (
+                    exchange_commands,
+                )
+
+                unsafe = await self.c.scalar(sa.select(exchange_commands.c.command_id)
+                    .where(exchange_commands.c.command_id.in_(row["payload"]["deferred_tp_ids"]),
+                           exchange_commands.c.status.notin_(("prepared", "superseded", "rejected")))
+                    .limit(1))
+                if unsafe:
+                    return "owner_close_tp_outcome_pending"
             preview = row["payload"]["preview"]
             price = Decimal(str(facts["current_price"]))
             stop = (
@@ -611,7 +781,15 @@ class PostgresOwnerPositionOperations:
                 if new_price_blocker is not None:
                     return new_price_blocker
             if command.kind in {K.OWNER_REDUCE, K.EXIT} and (
-                (
+                not isinstance(command.payload, OrderCommandPayload)
+                or command.payload.side != ("sell" if long else "buy")
+                or command.payload.order_type != "market"
+                or not command.payload.reduce_only
+                or command.payload.quantity != (
+                    Decimal(preview["reduction_quantity"])
+                    if command.kind is K.OWNER_REDUCE else aggregate.position_qty
+                )
+                or (
                     command.kind is K.OWNER_REDUCE
                     and not row["payload"].get("protection_close_position")
                 )
@@ -653,137 +831,3 @@ class PostgresOwnerPositionOperations:
                 if reason is not None:
                     return reason
         return None
-
-    async def request_preview(
-        self,
-        *,
-        ticket_id: str,
-        kind: str,
-        parameters: dict,
-        owner_identity: str,
-        device_id: str,
-        device_epoch: int,
-        idempotency_key: str,
-        now_ms: int,
-    ) -> dict:
-        await self.c.execute(
-            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:k,0))"),
-            {"k": "owner-preview:" + owner_identity + ":" + idempotency_key},
-        )
-        request = {"ticket_id": ticket_id, "kind": kind, **parameters}
-        digest = canonical_digest(request)
-        old = (
-            (
-                await self.c.execute(
-                    sa.select(operations).where(
-                        operations.c.owner_identity == owner_identity,
-                        operations.c.idempotency_key == idempotency_key,
-                    )
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        if old is not None:
-            if (
-                old["payload"].get("preview_request_digest") != digest
-                or old["device_id"] != device_id
-                or old["device_epoch"] != device_epoch
-            ):
-                raise ValueError("idempotency_conflict")
-            return dict(old)
-        if (
-            int(
-                await self.c.scalar(
-                    sa.select(sa.func.count())
-                    .select_from(operations)
-                    .where(
-                        operations.c.owner_identity == owner_identity,
-                        operations.c.authorization_id.is_(None),
-                        operations.c.completed_at_ms.is_(None),
-                        operations.c.updated_at_ms > now_ms - 60000,
-                    )
-                )
-                or 0
-            )
-            >= 10
-        ):
-            raise ValueError("preview_limit")
-        row = {
-            "operation_id": "owner-op:" + secrets.token_hex(16),
-            "ticket_id": ticket_id,
-            "kind": kind,
-            "owner_identity": owner_identity,
-            "device_id": device_id,
-            "device_epoch": device_epoch,
-            "authorization_id": None,
-            "idempotency_key": idempotency_key,
-            "request_digest": digest,
-            "version": 1,
-            "state": "preview_requested",
-            "payload": {
-                "preview": None,
-                "request": request,
-                "preview_request_digest": digest,
-            },
-            "first_blocker": None,
-            "created_at_ms": now_ms,
-            "updated_at_ms": now_ms,
-            "due_at_ms": now_ms,
-            "completed_at_ms": None,
-        }
-        await self.c.execute(sa.insert(operations).values(**row))
-        await self._event(row, now_ms)
-        from src.trading_kernel.infrastructure.pg_notice_outbox import (
-            enqueue_position_operation_notice,
-        )
-
-        await enqueue_position_operation_notice(self.c, row)
-        return row
-
-    async def ready_preview(
-        self,
-        row: dict,
-        preview: OwnerReductionPreview | OwnerPositionPreview,
-        *,
-        now_ms: int,
-    ) -> None:
-        current = await self.get(row["operation_id"], for_update=True)
-        if (
-            current is None
-            or current["version"] != row["version"]
-            or current["state"] != "preview_requested"
-        ):
-            raise ValueError("preview_version_conflict")
-        version = row["version"] + 1
-        payload = {
-            **row["payload"],
-            "preview": preview.model_dump(mode="json"),
-            "preview_version": version,
-        }
-        row.update(
-            version=version,
-            state="previewed",
-            payload=payload,
-            request_digest=canonical_digest(payload["preview"]),
-            due_at_ms=preview.expires_at_ms,
-            updated_at_ms=now_ms,
-        )
-        await self.c.execute(
-            sa.update(operations)
-            .where(operations.c.operation_id == row["operation_id"])
-            .values(
-                **{
-                    k: row[k]
-                    for k in (
-                        "version",
-                        "state",
-                        "payload",
-                        "request_digest",
-                        "due_at_ms",
-                        "updated_at_ms",
-                    )
-                }
-            )
-        )
-        await self._event(row, now_ms)

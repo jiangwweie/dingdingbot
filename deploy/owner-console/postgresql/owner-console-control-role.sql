@@ -83,3 +83,7 @@ GRANT UPDATE (consumed_at_ms) ON brc_owner_binding_grants TO brc_owner_control;
 GRANT INSERT ON brc_owner_position_operation_events TO brc_owner_control;
 
 GRANT DELETE ON brc_owner_binding_limits TO brc_owner_control;
+
+-- SELECT FOR UPDATE on the exact Ticket during mobile intent acceptance.
+-- Lifecycle projection fields remain writable exclusively by the Kernel.
+GRANT UPDATE (ticket_id) ON TABLE public.brc_trade_aggregates TO brc_owner_control;

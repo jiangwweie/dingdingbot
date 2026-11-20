@@ -15,10 +15,35 @@ for(const topic of ['reduce','protection','tp','cancel','close','pause']){
 vm.runInContext(`operationGuide('reduce','t')`,context);
 assert.match(element('#sheet').innerHTML,/继续原Runner/);
 vm.runInContext(`guideEnter('reduce','t')`,context);
-assert.match(element('#sheet').innerHTML,/核实并预览/);
+assert.match(element('#sheet').innerHTML,/继续/);
 assert.equal(calls,0);
 vm.runInContext(`positions[0].capabilities.reduce=false;operationGuide('reduce','t')`,context);
 assert.match(element('#sheet').innerHTML,/disabled/);
 vm.runInContext(`positions=[];guideEnter('reduce','t')`,context);
 assert.equal(calls,0);
-console.log('Read-only guide, current capabilities and preview-only entry passed');
+(async()=>{
+ let sends=0;
+ context.sendFixture=async(path,payload)=>{
+  sends++;
+  assert.equal(path,'/operations/intent');
+  assert.equal(payload.kind,'position_reduce');
+  assert.equal(payload.ticket_id,'t');
+  assert.equal(payload.quantity,'50');
+  assert.equal(payload.basis_quantity,'100');
+  return {operation_id:'op-1',state:'accepted'};
+ };
+ vm.runInContext(`signed=sendFixture;showOperation=async()=>{};refresh=async()=>{};
+  positions=[{ticket_id:'t',version:3,position_qty:'100',position_side:'long',
+    exchange_instrument_id:'binance-usdm:BTCUSDT:perpetual',reduction_basis_token:'a'.repeat(64)}];
+ `,context);
+ assert.throws(()=>vm.runInContext("confirmPosition('position_reduce',positions[0],{quantity:'50.01'})",context),/最多50%/);
+ vm.runInContext("confirmPosition('position_reduce',positions[0],{quantity:'50'})",context);
+ assert.equal(sends,0);
+ assert.equal(calls,0);
+ assert.match(element('#sheet').innerHTML,/确认市价减仓/);
+ assert.match(element('#sheet').innerHTML,/确认提交/);
+ vm.runInContext("positions[0].position_qty='90'",context);
+ await vm.runInContext('confirmAction()',context);
+ assert.equal(sends,1);
+ assert.equal(calls,0);
+})().catch(error=>{console.error(error);process.exitCode=1});

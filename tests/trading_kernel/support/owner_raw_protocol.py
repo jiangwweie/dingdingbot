@@ -126,7 +126,7 @@ class RawOwnerProtocol:
             self.cancelled.add(oid)
         else:
             oid = 'owner-venue:' + request.command_id
-            if request.kind is K.OWNER_REDUCE:
+            if request.kind in {K.OWNER_REDUCE, K.EXIT}:
                 self.quantity -= request.payload.quantity
                 self.executed[request.command_id] = request.payload.quantity
         return ExchangeCommandResult(status=S.ACCEPTED, exchange_order_id=oid,

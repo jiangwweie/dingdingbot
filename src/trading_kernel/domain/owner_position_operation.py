@@ -43,9 +43,11 @@ def preview_position_operation(
     quantity: Decimal | None = None,
 ) -> OwnerPositionPreview:
     a, f = aggregate, facts
+    stages = {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+    if kind == "position_close":
+        stages.add(AggregateStatus.TP1_PENDING)
     if (
-        a.status
-        not in {AggregateStatus.POSITION_PROTECTED, AggregateStatus.RUNNER_PROTECTED}
+        a.status not in stages
         or a.management_mode.value != "AUTO"
         or f.management_mode.value != "AUTO"
         or f.ticket_id != a.identity.ticket_id

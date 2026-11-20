@@ -16,7 +16,7 @@ from tests.trading_kernel.support.owner_device import keypair, sign
 
 
 @asynccontextmanager
-async def mobile_client(engine, *, at_ms):
+async def mobile_client(engine, *, at_ms, control_engine=None):
     key, jwk = keypair()
     async with engine.begin() as c:
         grant = await PostgresOwnerDeviceRepository(c).issue_binding(
@@ -30,7 +30,7 @@ async def mobile_client(engine, *, at_ms):
         account_id="generic-snapshot",
         venue_id="binance-usdm",
     )
-    app.state.owner_control_engine = engine
+    app.state.owner_control_engine = engine if control_engine is None else control_engine
     app.state.owner_clock_ms = lambda: at_ms
     app.include_router(router)
     async with AsyncClient(

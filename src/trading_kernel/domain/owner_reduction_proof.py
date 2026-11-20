@@ -26,7 +26,7 @@ class RetiredProtectionProof(BaseModel):
 
 class OwnerReductionProof(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    source_stage: Literal["pre_tp", "wait_price", "runner"]
+    source_stage: Literal["pre_tp", "pre_tp_unplaced", "wait_price", "runner"]
     source_tp_filled_quantity: Decimal = Field(ge=0, allow_inf_nan=False)
     retired_protections: tuple[RetiredProtectionProof, ...] = Field(
         default=(), max_length=2
@@ -85,7 +85,7 @@ class OwnerReductionProof(BaseModel):
                 raise ValueError("owner_reduction_proof_unretired_tp")
         elif self.original_tp_order_id is not None or self.original_tp_cancelled:
             raise ValueError("owner_reduction_proof_repeated_tp_cancel")
-        if self.source_stage == "wait_price" and self.source_tp_filled_quantity != 0:
+        if self.source_stage in {"wait_price", "pre_tp_unplaced"} and self.source_tp_filled_quantity != 0:
             raise ValueError("owner_reduction_proof_changed_tp_history")
         return self
 
@@ -98,6 +98,9 @@ class OwnerReductionProof(BaseModel):
             else "wait_price"
             if aggregate.status is AggregateStatus.POSITION_PROTECTED
             and aggregate.owner_reduction_context is not None
+            else "pre_tp_unplaced"
+            if aggregate.status is AggregateStatus.TP1_PENDING
+            and aggregate.tp1_exchange_order_id is None
             else "pre_tp"
             if aggregate.status is AggregateStatus.POSITION_PROTECTED
             else None

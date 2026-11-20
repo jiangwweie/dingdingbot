@@ -799,8 +799,7 @@ async def test_openapi_contains_health_read_and_approved_owner_control_routes(
         "/api/owner/v1/mobile/operations/{operation_id}",
         "/api/owner/v1/mobile/orders",
         "/api/owner/v1/mobile/requests/{idempotency_key}",
-        "/api/owner/v1/mobile/operations/preview",
-        "/api/owner/v1/mobile/operations/submit",
+        "/api/owner/v1/mobile/operations/intent",
         "/api/owner/v1/mobile/operations",
     }
     assert not any(

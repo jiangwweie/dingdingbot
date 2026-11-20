@@ -880,21 +880,22 @@ class PostgresKernelUnitOfWork:
                     prior_commands = await self.exchange_commands.list_for_ticket(
                         aggregate.identity.ticket_id
                     )
-                    prior = max(
+                    prior_cancel = max(
                         (
                             command
                             for command in prior_commands
                             if command.kind is ExchangeCommandKind.CANCEL_ORDER
+                            and isinstance(command.payload, CancelCommandPayload)
+                            and command.payload.exchange_order_id == effect.exchange_order_id
+                            and command.payload.order_namespace == effect.order_namespace
                         ),
                         key=lambda command: command.generation,
+                        default=None,
                     )
-                    if (
-                        isinstance(prior.payload, CancelCommandPayload)
-                        and prior.payload.exchange_order_id == effect.exchange_order_id
-                    ):
+                    if prior_cancel is not None:
                         require_next_generation_allowed(
                             kind=ExchangeCommandKind.CANCEL_ORDER,
-                            prior_status=prior.status,
+                            prior_status=prior_cancel.status,
                             next_generation=generation,
                         )
                 await self.exchange_commands.add(
