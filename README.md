@@ -1,5 +1,16 @@
 # BRC App 人工接管交易系统
 
+## Tokyo / Seoul instance boundary
+
+**The manual/cooperation product can run as independent Tokyo and Seoul instances.**
+Tokyo's former automatic runtime was explicitly replaced; each instance keeps
+its own account, credentials, public origin, notification channel and database.
+The Tokyo-specific conversion entry is a one-time bound clean installation, not
+a generic alias bypass or permission to repeat a reset. Exact installation,
+Owner state and remaining TOTP/natural acceptance belong only to
+[MAIN_CONTROL_ROADMAP](docs/current/MAIN_CONTROL_ROADMAP.md). This documentation
+change does not redeploy either runtime or enable ENTRY.
+
 ## 本分支的产品定位
 
 **首尔人工接管产品**帮助 Owner 发现机会并自动入场；Owner 可以通过**币安 App**接管单笔交易。

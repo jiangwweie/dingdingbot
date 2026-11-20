@@ -6,6 +6,49 @@ last_verified: 2026-11-18
 
 # Main Control Roadmap
 
+## Tokyo clean manual conversion — installed, Owner configuration pending2026-11-20
+
+Owner explicitly replaced the former Tokyo automatic product with the actual
+Seoul manual/cooperation code and Seoul parameter semantics, preserving Tokyo
+external configuration and credentials. This supersedes the inherited automatic
+Tokyo runtime records later in this document; Seoul was not deployed or changed.
+
+| Boundary | Direct evidence |
+| --- | --- |
+| Tokyo production commit | `9190add529b8c40701a2ed83ca3aff722fee11a3` |
+| Tokyo immutable tag | `manual-runtime-2026.11.20.1`, pushed at the exact candidate |
+| Schema / new storage | `0024_owner_cooperation`; newly initialized PG system7710109570187497514, new `brc-tokyo-manual-pg-data` volume / `brc-manual-runtime-pg` container. Existing localhost55433/database name and login passwords retained; old tables/history were not restored |
+| Code source | Actual installed Seoul0e10ea41 manual/cooperation release; unrelated dirty UI worktree excluded. Focused `codex/manual-tokyo-clean-install` pushed; no auto `dev` integration or Seoul deployment implied |
+| Exact certification | R4 PASS:2506 Unit/Architecture,2104 Integration,77 Full-chain; Ruff/Mypy296,961 Golden snapshots/23064 Core decisions. Same-SHA API/static PASS; superseded628d candidate was interrupted, never used as final certification |
+| Source and backups | Tokyo genuine Owner pause Policy42, internal/external flat, no Ticket/position/command/Incident/reservation. Five writers stopped. Complete31MB main dump copied locally, SHA matched and fully restored in a disposable local DB; recovery source/credential capsule and remaining legacy default-DB dump also local/root-only. Full old-code archive separately SHA-verified at `/var/backups/brc-tokyo-auto-20261120`, never runtime input |
+| Old runtime cleanup | Both `brc-trading-kernel-pg` and `dingdingbot-pg` and their old data volumes removed after backup/target verification; all old Kernel/API/static release directories, cutover/grants tools and inactive legacy default site removed. Only one new release remains per surface; other four owner_ai applications retained |
+| Original Tokyo configuration | API Key/Secret, account ID, DB login DSNs, Google client file/drop-in, password/TOTP/session files and original public-domain nginx site byte-preservation verified. Original Feishu token retained; notices marked Tokyo with original-domain links. No credential rotation, new account, funds transfer, test order or test Feishu message |
+| Source semantic configuration | Baseline2%, gross6%, direction4%/neutral, minimum materialization50%, source wallet-allocation contract and capacity3. CPM paused; MI/MPG/BRF2/SOR-1H enabled; SOR-001/TradFi paused. Static members match Seoul: six Events/seven members each, actual serialized warming reaches Active; Generic Spec proof and MI/MPG comparison binding installed via canonical paths |
+| Current engineering snapshot | 2026-11-20 12:59:35 Asia/Shanghai: Kernel/API/static match target, safety/Observation/API active/NRestarts0; integrity, flatness, management Feed and current-scope recovery ready PASS. New Ticket/Command/position/Incident0. HTTPS trading/mobile/providers200, including original-domain public request from Mac |
+| Remaining genuine Owner operation | Six-Event exit/MA50 configuration first publication requires real Console/TOTP. It is not yet activated; no old or Seoul TOTP authorization was copied/fabricated. Initial Console defaults match the source bundle; Owner prompt issued with exact path. Global ENTRY remains Policy1/false and Entry worker inactive behind maintenance fence until required configuration and official promoter gates pass |
+
+This is a new empty trading ledger, not a compatible migration or active-position
+handover. The old legacy container's configured application DB had already been
+removed; its actual catalog contained only `postgres`, which was archived before
+container/volume deletion. The full source-code archive remains solely offline;
+old runtime trees/data volumes do not participate in current operation.
+
+First publication target: CPM/MI/MPG/BRF2 TP1=1R,target5%,minimum executable lift
+capped50%; SOR-1H LONG/SHORT TP1=1.2R,original50% quantity,strict floor; MA50 on
+for the three LONG Events. Source risk/strategy/Selection values above are already
+initialized, but exit/MA50 publication is separately gated by actual Owner TOTP.
+Official promoter has not yet completed and operational maintenance is not
+claimed finished. Actual App takeover, natural new order/protection, device
+cooperation and real notification receipt remain independent acceptance evidence.
+
+Evidence: `.local/tokyo-clean-manual-20261120/` exact certificate logs/manifests,
+source inventories/config samples, source-backed-up, offline-backup-restore,
+backup-locations, activation, serial-universe-preparation, target-readonly,
+clean-runtime-audit and cleanup. Failed transport/controller attempts and
+superseded certificate logs remain preserved; no change to certified runtime
+source was made during those transport repairs. Procedure:
+[clean installation plan](../superpowers/plans/2026-11-20-tokyo-manual-clean-rebuild.md).
+
 ## App Product Workspace Status
 
 ### Manual product identity and evidence boundary
