@@ -3,6 +3,18 @@
 Last updated: 2026-11-09
 Scope: Seoul App manual-takeover product engineering; inherited Tokyo contracts are baseline references
 
+## Explicit Tokyo conversion task
+
+Owner authorized a clean Tokyo replacement with the actual deployed manual-product
+code and Seoul parameter semantics. Preserve Tokyo endpoint/account/API/Feishu/
+Google/password/TOTP configuration; remove old Tokyo runtime/database from active
+service after verified offline backup. No Seoul mutation, active-position handover,
+old-schema compatibility or synthetic Owner Resume is authorized. This focused
+worktree may implement the dedicated identity-bound replacement path; inherited
+Tokyo backend and generic fresh-Seoul installer guards remain in force. Isolated
+local tests use the manual loopback PG only. See the
+[clean replacement plan](docs/superpowers/plans/2026-11-20-tokyo-manual-clean-rebuild.md).
+
 ## Branch-local App Manual Takeover Scope
 
 This fixed worktree is `/Users/jiangwei/Documents/final-manual`; integration is

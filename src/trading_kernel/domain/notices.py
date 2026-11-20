@@ -36,6 +36,7 @@ class StopView(BaseModel):
 
 class NoticeSnapshot(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+    site_label: Literal["首尔", "东京"] = "首尔"
     ticket_id: str
     event_id: str
     state_version: int = Field(ge=1)
