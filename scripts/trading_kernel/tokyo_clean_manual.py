@@ -233,6 +233,7 @@ def backup_source() -> dict:
                 "/opt/brc",
                 "/etc/brc",
                 "/etc/nginx",
+                "/var/www/brc-owner-console",
                 "/etc/systemd/system/brc-owner-console-api.service.d",
                 "/etc/systemd/system/brc-trading-kernel-observation-worker.service",
                 "/etc/systemd/system/brc-trading-kernel-entry-worker.service",
@@ -770,7 +771,7 @@ def cleanup_retired() -> dict:
             else:
                 child.unlink()
             deleted.append(str(child))
-    for directory in ["/opt/brc/cutover", "/opt/brc/owner-control-grants"]:
+    for directory in ["/opt/brc/cutover", "/opt/brc/owner-control-grants", "/var/www/brc-owner-console"]:
         p = Path(directory)
         if p.exists():
             shutil.rmtree(p)

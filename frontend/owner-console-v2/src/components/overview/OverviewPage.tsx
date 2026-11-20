@@ -90,7 +90,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({ onNavigateToControls
       <div className="rounded-lg border border-border bg-surface px-3 sm:px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 sm:gap-3 shadow-2xs" aria-label="飞书通知投递状态">
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <Send className="h-3.5 w-3.5 text-brand flex-none" />
-          <strong className="font-semibold text-text-primary">首尔飞书通知</strong>
+          <strong className="font-semibold text-text-primary">飞书通知</strong>
           <span className="text-text-muted">·</span>
           <span className="text-text-secondary">
             {notificationDelivery?.channel_state === 'configured'
