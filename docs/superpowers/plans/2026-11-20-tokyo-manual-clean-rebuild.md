@@ -11,10 +11,10 @@ Owner明确授权东京使用首尔实际人工产品代码及参数，替代旧
 - 新数据库从人工产品完整迁移链空库安装；两产品0016分叉，禁止伪造兼容升级/旧表回退/双写。
 - Tokyo专用重建入口以精确host/machine/source commit/schema、ENTRY关闭、内外部flat、无unknown/debt、五写入者停止、备份校验为硬门。原人工安装工具继续拒绝误指向Tokyo，不通过改别名或删除守卫绕过。
 - 站点显示标签和通知链接从受保护启动配置绑定；新东京沿用原飞书token，首尔现有默认显示保持不变，不额外发测试消息。
-- 首尔当前配置只迁移语义，不迁移Owner历史授权：全局ENTRY始终false；退休SOR及暂停的产品继续相同状态。API/TOTP身份使用原Tokyo凭证。
+- 首尔当前配置只迁移语义，不迁移Owner历史授权：初始化全局ENTRY保持false，后续仅按真实Owner授权恢复；退休SOR及暂停的产品继续相同状态。API/TOTP身份使用原Tokyo凭证。
 - 新软件精确R4/API/static认证通过后才停服切换；首先本地空库重建、配置导入及故障边界演练。
 - 完成后清理旧BRC release、旧业务DB/容器/卷和BRC旧配置；不触碰同机owner_ai等其他应用。nginx/证书/Google认证字节保全验证。
-- 先启动安全服务与观察，官方promote_entry --prepare-owner-resume，保持真实Owner ENTRY关闭。自然订单/保护/手机合作/真实通知各自独立验收。
+- 先启动安全服务与观察；Owner仍暂停时官方promote_entry --prepare-owner-resume保留暂停，Owner已真实Resume时按当前授权执行官方promote_entry，不生成授权或重复改Policy。自然订单/保护/手机合作/真实通知各自独立验收。
 
 ## 交付证据
 
@@ -33,3 +33,8 @@ Owner明确授权东京使用首尔实际人工产品代码及参数，替代旧
 原Tokyo外部配置及凭证逐项保全；首尔未部署，其他同机应用保留。常规币池预热串行推进，六Event均Active；Generic与ORB Spec通过正式仓储安装，比较绑定使用当前真实Static成员，不伪造ARMED。
 
 软件与数据重建完成不等于交易就绪：六Event退出/MA50首次发布等待原Console真实TOTP；ENTRY仍关闭、运维围栏保留，官方promoter未提前放行。当前实测和正式身份只见路线图。
+
+
+## 最终恢复记录
+
+Owner已通过原Console真实TOTP分别完成ENTRY Resume和六Event退出/MA50首次发布，参数语义与首尔样本逐项一致。当前证书门槛通过后，正式promote_entry返回promoted，Entry服务启动、运维围栏解除。五服务真实进程和身份核验通过，原凭证和同机其他应用保留，旧自动环境清理已完成。此前“等待发布/ENTRY关闭”是安装阶段证据，不再代表当前状态；当前核验时间、身份和验收边界只见MAIN_CONTROL_ROADMAP。

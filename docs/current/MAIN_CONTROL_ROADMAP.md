@@ -1,12 +1,43 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-18
+last_verified: 2026-11-20
 ---
 
 # Main Control Roadmap
 
-## Tokyo clean manual conversion — installed, Owner configuration pending2026-11-20
+## Tokyo manual conversion — genuine publication and trading restoration verified2026-11-20
+
+**The Tokyo clean installation and operational restoration are complete.** Owner
+separately performed genuine ENTRY Resume and initial six-Event exit/MA50
+publication through the original Console/TOTP. These later actions supersede
+the installation-time paused/configuration-pending snapshot below. No additional
+Owner approval or repeated Resume is required for this completed cutover.
+
+| Boundary | Current direct evidence |
+| --- | --- |
+| Software identity | Exact Tokyo production commit/tag/schema recorded in the installation table below remain unchanged; later documentation commits do not redeploy software |
+| Genuine ENTRY | Policy2/new_entry_submit_enabled=true; exact entry_resume/totp_step_up authorization at1795151290531ms equals policy update time; current installed certificate owner_entry_resume_authorized=true |
+| Genuine parameter publication | Exit configuration revision1/`exit-config:90156b55a0db7433c2c0d61531822e68`; exit_profile_bind/totp_step_up authorization at1795151413928ms. Each of the six Event TP/quantity/MA50 parameter sets compares equal to the sampled Seoul source semantic values; no source authorization was copied |
+| Official operational gate | Installed official promote_entry returned `status=promoted` after current internal/external flatness, rules and Owner/configuration gates. Operational fence absent; no direct unfence or policy rewrite |
+| Final runtime | At2026-11-20 13:14:49 Asia/Shanghai all four actual Python Workers and independent Owner API active/running/NRestarts0; actual commit/schema/account/product match target. Entry10s/30s, Observation/Lifecycle5s/5s, Reconciliation15s/5s; final send-window contract unchanged |
+| Current certificate | status, database integrity, flatness, management Feed, current enabled-scope recovery and exit_configuration_activated all PASS. PG Ticket/Command/position/open-Incident0 at the sampled moment; five Static controls and six Active Universes retain source members |
+| Original Tokyo configuration | Credential/domain byte-preservation remains PASS after release and planned legacy-site cleanup; original account/API/Feishu/Google/password/TOTP retained. Trading/mobile/providers HTTPS200; old auto containers/data volumes/releases remain removed; unrelated owner_ai applications retained |
+| Evidence boundary | No synthetic Signal/Ticket, test trade, funds transfer, TOTP generation or Feishu test was performed. Natural accepted/protected orders, actual external-App takeover, mobile cooperation and phone receipt remain independently unverified until naturally observed |
+
+Risk baseline2%, gross6%, neutral direction and capacity3 remain the adopted
+Seoul semantics. CPM stays paused; MI/MPG/BRF2/SOR-1H enabled; retired SOR-001 and
+TradFi remain paused. Market qualification (including MA50), trigger/rearm,
+current balance, quantity/materialization, budget and lane gates still decide
+each new trade; restored capability does not promise immediate orders or profit.
+
+Evidence: `owner-restoration-proof.json`, `published-parameters-verified.json`,
+`owner-entry-promotion.json`, `final-promoted-current.log`/`target-readonly.json`
+and the existing clean-runtime/backup proofs under
+`.local/tokyo-clean-manual-20261120/`. Actual ENTRY and parameter-authority records
+are separate; the agent only completed the authorized official service promotion.
+
+## Tokyo clean manual conversion — installation-time pending snapshot2026-11-20
 
 Owner explicitly replaced the former Tokyo automatic product with the actual
 Seoul manual/cooperation code and Seoul parameter semantics, preserving Tokyo
