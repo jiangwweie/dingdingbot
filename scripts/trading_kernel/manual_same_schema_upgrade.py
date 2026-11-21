@@ -42,12 +42,17 @@ def preservation_projection_sql(
             + " t ORDER BY 1 LIMIT 100001"
         )
     selected = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
+    order_by = (
+        't."diagnostic_id"'
+        if table == "brc_failure_diagnostics" and "diagnostic_id" in columns
+        else "1"
+    )
     return (
         "SELECT to_jsonb(t)::text FROM (SELECT "
         + selected
         + " FROM "
         + quoted_table
-        + ") t ORDER BY 1 LIMIT 100001"
+        + f") t ORDER BY {order_by} LIMIT 100001"
     )
 
 

@@ -274,3 +274,36 @@ async def test_real_stopped_upgrade_resumes_after_each_side_effect(
     finally:
         await engine.dispose()
         await drop_disposable_database(name)
+
+
+@pytest.mark.asyncio
+async def test_preservation_orders_large_diagnostics_by_stable_identity(
+    head_template_engine,
+):
+    async with head_template_engine.begin() as connection:
+        await connection.execute(
+            sa.text("""
+            INSERT INTO brc_failure_diagnostics(diagnostic_id,stage,subject_id,reason_code,basis,occurred_at_ms)
+            VALUES ('diag:z','observation','a','reason','{"context":"first"}',1000),
+                   ('diag:a','observation','z','reason','{"context":"last"}',1001)
+        """)
+        )
+        columns = [
+            "diagnostic_id",
+            "stage",
+            "subject_id",
+            "reason_code",
+            "basis",
+            "occurred_at_ms",
+        ]
+        result = await connection.execute(
+            sa.text(
+                upgrade.preservation_projection_sql("brc_failure_diagnostics", columns)
+            )
+        )
+        rows = [json.loads(row) for row in result.scalars()]
+        assert [row["diagnostic_id"] for row in rows] == ["diag:a", "diag:z"]
+        assert [row["basis"] for row in rows] == [
+            {"context": "last"},
+            {"context": "first"},
+        ]
