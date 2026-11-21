@@ -4,7 +4,9 @@ import { Pause, Play } from 'lucide-react';
 
 export interface TopStatusBarProps {
   globalEntry: GlobalEntryState;
+  enabledStrategyCount?: number;
   pausedStrategyCount: number;
+  unknownStrategyCount?: number;
   totalActiveStrategies: number;
   onRequestAction?: (action: 'pause' | 'resume', version: number) => void;
   isActionDisabled?: boolean;
@@ -13,7 +15,9 @@ export interface TopStatusBarProps {
 
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   globalEntry,
+  enabledStrategyCount,
   pausedStrategyCount,
+  unknownStrategyCount = 0,
   totalActiveStrategies,
   onRequestAction,
   isActionDisabled = false,
@@ -22,6 +26,8 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   const isGlobalEnabled = globalEntry.configured_state === 'enabled';
   const targetAction = isGlobalEnabled ? 'pause' : 'resume';
   const isDisabled = isActionDisabled || !onRequestAction;
+  const resolvedEnabledCount =
+    enabledStrategyCount ?? Math.max(0, totalActiveStrategies - pausedStrategyCount - unknownStrategyCount);
 
   return (
     <section className="mb-4 rounded border border-border bg-surface p-4 shadow-xs">
@@ -44,7 +50,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
                   isGlobalEnabled ? 'bg-status-green' : 'bg-status-amber'
                 }`}
               />
-              {isGlobalEnabled ? '允许新开仓 (Enabled)' : '已暂停新开仓 (Paused)'}
+              {isGlobalEnabled ? '配置开关已开启' : '已暂停新开仓'}
             </span>
           </div>
 
@@ -52,30 +58,32 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
 
           <p className="text-xs text-text-secondary">
             {isGlobalEnabled ? (
-              <span>全局新开仓通道开启中 · 存量持仓保护不受限制</span>
+              <span>仅控制新增开仓；不改变已有交易管理权。</span>
             ) : (
               <span className="text-status-amber font-medium">
-                新信号已阻断生成 Ticket · 已有持仓与止损仍由 Lifecycle 正常保护中
+                仅控制新增开仓；不改变已有交易管理权。新信号已被全局开关阻断。
               </span>
             )}
           </p>
         </div>
 
         {/* Right: Quick toggle button & metrics */}
-        <div className="flex items-center gap-4">
-          <div className="hidden xl:flex items-center gap-4 text-xs text-text-muted">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="hidden xl:flex items-center gap-3 text-xs text-text-muted">
             <div>
-              <span>策略态势: </span>
+              <span>策略配置: </span>
               <strong className="font-mono text-text-primary ml-1">
-                {totalActiveStrategies - pausedStrategyCount} 运行 / {pausedStrategyCount} 暂停
+                {resolvedEnabledCount} 已启用 / {pausedStrategyCount} 已暂停
+                {unknownStrategyCount > 0 ? ` / ${unknownStrategyCount} 未知` : ''}
               </strong>
             </div>
             <span className="opacity-30">·</span>
             <div>
-              <span>在管持仓: </span>
-              <strong className="font-mono text-text-primary ml-1">
-                {globalEntry.active_ticket_count} 笔 (受保护)
+              <span>当前在管 </span>
+              <strong className="font-mono text-text-primary">
+                {globalEntry.active_ticket_count ?? 0} 笔
               </strong>
+              <span className="ml-1">· 管理权与保护状态见持仓详情</span>
             </div>
           </div>
 

@@ -118,6 +118,22 @@ export function formatExecutionClassification(
   }
 }
 
+export function formatReviewFreshness(
+  freshness: 'fresh' | 'stale' | 'unavailable' | 'contradictory' | (string & {}) | undefined
+): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
+  switch (freshness) {
+    case 'fresh':
+      return { label: '快照新鲜', tone: 'success' };
+    case 'stale':
+      return { label: '数据滞后', tone: 'attention' };
+    case 'contradictory':
+      return { label: '数据矛盾', tone: 'danger' };
+    case 'unavailable':
+    default:
+      return { label: '新鲜度不可确认', tone: 'neutral' };
+  }
+}
+
 export function formatReviewStatus(
   status: ReviewItemReviewStatus | ReviewStatusQuery | (string & {})
 ): { label: string; tone: 'success' | 'attention' | 'danger' | 'neutral' } {
@@ -136,6 +152,43 @@ export function formatReviewStatus(
     default:
       return { label: status, tone: 'neutral' };
   }
+}
+
+export function formatEconomicsStatus(review: {
+  review_status: ReviewItemReviewStatus | (string & {});
+  economic_gaps?: { code: string }[];
+  economic_summary: {
+    gross_pnl?: MoneyMetric | null;
+    fees?: MoneyMetric | null;
+    funding?: MoneyMetric | null;
+    net_pnl?: MoneyMetric | null;
+    net_r?: MoneyMetric | null;
+  };
+}): { label: string; tone: 'success' | 'attention' | 'neutral' } {
+  const status = review.review_status as string;
+  if (status === 'waiting_review' || status === 'waiting_for_review') {
+    return { label: '等待复盘', tone: 'neutral' };
+  }
+  if (status === 'waiting_for_settlement') {
+    return { label: '等待结算', tone: 'neutral' };
+  }
+  if (status === 'in_progress') {
+    return { label: '持仓进行中', tone: 'neutral' };
+  }
+  if ((review.economic_gaps?.length ?? 0) > 0) {
+    return { label: '有核算缺项', tone: 'attention' };
+  }
+  const coreMetrics = [
+    review.economic_summary.gross_pnl,
+    review.economic_summary.fees,
+    review.economic_summary.funding,
+    review.economic_summary.net_pnl,
+    review.economic_summary.net_r,
+  ];
+  if (coreMetrics.some((m) => m?.value == null)) {
+    return { label: '核算待核实', tone: 'attention' };
+  }
+  return { label: '核算完整', tone: 'success' };
 }
 
 export function formatReviewSentenceTemplate(

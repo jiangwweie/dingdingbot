@@ -85,15 +85,15 @@ export const SelectionSection: React.FC<SelectionSectionProps> = ({ onSuccess })
       <div className="flex flex-col gap-3 border-b border-border px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-            动态选币与轮动治理 (Selection)
+            动态选币与轮动治理
           </h2>
           <p className="mt-0.5 text-xs text-text-secondary">
-            各策略独立的 4h / 24h 动态打分授权与 Static 基线回退；修改均需 Owner TOTP 签名。
+            各策略独立的 4h / 24h 动态打分授权与静态基线回退；修改均需 TOTP 签名。
           </p>
         </div>
 
         {/* Strategy Switcher Tabs */}
-        <div className="flex items-center gap-1 rounded border border-border bg-surface-subtle p-1">
+        <div className="flex flex-wrap items-center gap-1 rounded border border-border bg-surface-subtle p-1">
           {TABS.map((tab) => (
             <button
               key={tab}

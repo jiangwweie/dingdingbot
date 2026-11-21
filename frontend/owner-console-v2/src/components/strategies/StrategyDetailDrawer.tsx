@@ -262,9 +262,9 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
       <div className="flex border-b border-border bg-surface px-6 text-xs overflow-x-auto">
         {(
           [
-            { id: 'performance', label: '表现评估 (Performance)', icon: TrendingUp },
-            { id: 'runtime', label: '控制与准入 (Controls)', icon: Sliders },
-            { id: 'selection', label: '动态选币 (Selection)', icon: Compass },
+            { id: 'performance', label: '表现评估', icon: TrendingUp },
+            { id: 'runtime', label: '控制与准入', icon: Sliders },
+            { id: 'selection', label: '动态选币', icon: Compass },
             { id: 'tickets', label: `交易证据 (${summary.ticket_count})`, icon: FileText },
             { id: 'observations', label: `观察证据 (${summary.observation_count})`, icon: Activity },
           ] as const
@@ -319,11 +319,22 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
       {/* 3. Tab Contents (Scrollable) */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* TAB 1: PERFORMANCE */}
-        {activeTab === 'performance' && (
+        {activeTab === 'performance' && (() => {
+          const covPnl = summary.metric_coverage?.net_pnl;
+          const pnlAvail = covPnl?.available_count ?? strategy.confirmedReviews;
+          const pnlTotal = covPnl?.total_count ?? strategy.naturalTerminals;
+          const isPnlPartial = pnlAvail < pnlTotal;
+
+          const covR = summary.metric_coverage?.net_r;
+          const rAvail = covR?.available_count ?? strategy.confirmedReviews;
+          const rTotal = covR?.total_count ?? strategy.naturalTerminals;
+          const isRPartial = rAvail < rTotal;
+
+          return (
           <div className="space-y-6 animate-in fade-in-50 duration-150">
             {/* Top Metrics Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Card 1: Natural Net PnL */}
+              {/* Card 1: Selected Scope Net PnL */}
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <div className="flex items-center justify-between text-[11px] text-text-muted">
                   <span>所选范围已核实净收益</span>
@@ -340,12 +351,27 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                 >
                   {strategy.netPnlFormatted}
                 </div>
-                <div className="text-[10px] text-text-muted mt-1 leading-normal">
-                  仅计入已确认评审的自然终态交易 (排除受控退出与待评项)
+                <div
+                  className={`text-[10px] font-mono mt-1 ${
+                    isPnlPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                  }`}
+                >
+                  {isPnlPartial ? '部分合计 · ' : ''}覆盖 {pnlAvail}/{pnlTotal} 笔
+                </div>
+                <div className="text-[10px] text-text-muted mt-0.5 leading-normal">
+                  {exit_scope === 'strategy'
+                    ? '仅统计策略自身退出且已核实净额的终态交易'
+                    : exit_scope === 'owner'
+                    ? '仅统计 Owner 平仓且已核实净额的终态交易'
+                    : exit_scope === 'safety'
+                    ? '仅统计安全恢复退出且已核实净额的终态交易'
+                    : exit_scope === 'unknown'
+                    ? '仅统计退出原因未知且已核实净额的终态交易'
+                    : '按全部实际交易统计 · 仅计入已核实净额的终态交易'}
                 </div>
               </div>
 
-              {/* Card 2: Natural Net R */}
+              {/* Card 2: Selected Scope Net R (Independent Coverage) */}
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <div className="flex items-center justify-between text-[11px] text-text-muted">
                   <span>累计单笔净 R</span>
@@ -362,15 +388,22 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                 >
                   {strategy.netRFormatted}
                 </div>
-                <div className="text-[10px] text-text-muted mt-1 leading-normal">
+                <div
+                  className={`text-[10px] font-mono mt-1 ${
+                    isRPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                  }`}
+                >
+                  {isRPartial ? '部分合计 · ' : ''}覆盖 {rAvail}/{rTotal} 笔
+                </div>
+                <div className="text-[10px] text-text-muted mt-0.5 leading-normal">
                   以初始止损距离 (1R) 为单位风险基准
                 </div>
               </div>
 
-              {/* Card 3: Win Rate */}
+              {/* Card 3: Selected Scope Win Rate */}
               <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
                 <div className="flex items-center justify-between text-[11px] text-text-muted">
-                  <span>自然胜率</span>
+                  <span>所选范围净胜率</span>
                   <CheckCircle2 className="h-3.5 w-3.5 text-brand" />
                 </div>
                 <div className="mt-1 font-mono text-xl font-bold text-text-primary">
@@ -384,15 +417,15 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
 
             {/* Exit Classification Breakdown */}
             <div className="rounded-lg border border-border bg-surface p-4 shadow-xs space-y-3">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary flex items-center justify-between">
-                <span>终态路径物理隔离分解 (Exit Scope)</span>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary flex items-center justify-between gap-2 flex-wrap">
+                <span>终态退出分类（当前时间窗口全量 · 不受退出范围筛选限制）</span>
                 <span className="font-mono text-[11px] text-text-muted font-normal">
                   总 Ticket: {strategy.totalTickets} 笔
                 </span>
               </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs font-mono">
                 <div className="rounded border border-border bg-surface-subtle p-3">
-                  <span className="text-[10px] text-text-muted uppercase font-sans">自然终态 (Natural)</span>
+                  <span className="text-[10px] text-text-muted uppercase font-sans">策略自身退出</span>
                   <div className="text-base font-bold text-text-primary mt-1">
                     {strategy.naturalTerminals} 笔
                   </div>
@@ -402,7 +435,7 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                 </div>
 
                 <div className="rounded border border-amber-500/20 bg-amber-500/5 p-3">
-                  <span className="text-[10px] text-amber-700 dark:text-amber-400 uppercase font-sans">受控退出 (Controlled)</span>
+                  <span className="text-[10px] text-amber-700 dark:text-amber-400 uppercase font-sans">Owner 平仓</span>
                   <div className="text-base font-bold text-amber-600 dark:text-amber-400 mt-1">
                     {strategy.controlledExits} 笔
                   </div>
@@ -411,8 +444,18 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
                   </div>
                 </div>
 
+                <div className="rounded border border-border bg-surface-subtle p-3">
+                  <span className="text-[10px] text-text-muted uppercase font-sans">安全恢复 / 未知</span>
+                  <div className="text-base font-bold text-text-primary mt-1">
+                    {(strategy.summary.safety_exit_count ?? 0) + (strategy.summary.unknown_exit_count ?? 0)} 笔
+                  </div>
+                  <div className="text-[10px] text-text-muted mt-0.5">
+                    安全 {strategy.summary.safety_exit_count ?? 0} · 未知 {strategy.summary.unknown_exit_count ?? 0}
+                  </div>
+                </div>
+
                 <div className="rounded border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-sans">达到 TP1 (Target)</span>
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-sans">达到 TP1</span>
                   <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-1">
                     {strategy.tp1Reached} 笔
                   </div>
@@ -436,21 +479,21 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
             {/* Review Completeness Breakdown */}
             <div className="rounded-lg border border-border bg-surface p-4 shadow-xs space-y-3">
               <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
-                事后复盘审查覆盖 (Review Completeness)
+                事后复盘审查覆盖
               </h3>
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 <div className="rounded border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-sans">已确认审查 (Confirmed Review)</span>
+                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase font-sans">已确认审查</span>
                   <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-1">
                     {strategy.confirmedReviews} 笔
                   </div>
                   <div className="text-[10px] text-text-muted mt-0.5">
-                    已入账自然终态经济数据
+                    已入账所选范围终态经济数据
                   </div>
                 </div>
 
                 <div className="rounded border border-amber-500/20 bg-amber-500/5 p-3">
-                  <span className="text-[10px] text-amber-700 dark:text-amber-400 uppercase font-sans">待确认审查 (Pending Review)</span>
+                  <span className="text-[10px] text-amber-700 dark:text-amber-400 uppercase font-sans">待确认审查</span>
                   <div className="text-base font-bold text-amber-600 dark:text-amber-400 mt-1">
                     {strategy.pendingReviews} 笔
                   </div>
@@ -468,7 +511,8 @@ export const StrategyDetailDrawer: React.FC<StrategyDetailDrawerProps> = ({
               严格排除历史已退役版本的样本污染，亦不把不同策略组的盈亏混合。
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* TAB 2: CONTROLS & RUNTIME */}
         {activeTab === 'runtime' && (

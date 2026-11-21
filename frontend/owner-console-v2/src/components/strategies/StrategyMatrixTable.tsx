@@ -23,9 +23,154 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
-      <div className="overflow-x-auto">
-        <table data-testid="strategies-matrix-table" className="w-full text-left text-xs font-sans">
+    <div className="space-y-2.5">
+      {/* Mobile Card List (< md) */}
+      <div className="space-y-2.5 md:hidden">
+        {strategies.map((st) => {
+          const { summary } = st;
+          const isPnlPositive = st.netPnlIsPositive === true;
+          const isPnlNegative = st.netPnlIsPositive === false;
+          const isRPositive = st.netRIsPositive === true;
+          const isRNegative = st.netRIsPositive === false;
+          const covPnl = st.summary.metric_coverage?.net_pnl;
+          const pnlAvail = covPnl?.available_count ?? st.confirmedReviews;
+          const pnlTotal = covPnl?.total_count ?? st.naturalTerminals;
+          const isPnlPartial = pnlAvail < pnlTotal;
+
+          const covR = st.summary.metric_coverage?.net_r;
+          const rAvail = covR?.available_count ?? st.confirmedReviews;
+          const rTotal = covR?.total_count ?? st.naturalTerminals;
+          const isRPartial = rAvail < rTotal;
+
+          const hasControl = st.control != null;
+
+          return (
+            <div
+              key={summary.strategy_version_id}
+              data-strategy-version-id={summary.strategy_version_id}
+              data-strategy-group-id={summary.strategy_group_id}
+              onClick={() => onSelectStrategy(st)}
+              className="rounded-lg border border-border bg-surface p-3.5 shadow-xs space-y-2.5 cursor-pointer hover:border-brand/40 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-bold text-text-primary text-xs">{st.displayNameZh}</span>
+                    <span className="rounded bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-brand">
+                      {summary.strategy_group_id}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1 font-mono text-[11px] text-text-muted flex-wrap">
+                    <span
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
+                        summary.is_current
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-surface-subtle text-text-muted border border-border'
+                      }`}
+                    >
+                      v{summary.version} · {summary.is_current ? '当前版本' : '历史版本'}
+                    </span>
+                    <span>{st.timeframe}</span>
+                  </div>
+                </div>
+
+                {/* Config / Control Status */}
+                <div className="flex items-center gap-1.5 text-[11px] flex-none">
+                  {hasControl ? (
+                    <>
+                      <span
+                        className={`h-2 w-2 rounded-full shrink-0 ${
+                          st.runtimeStatus === 'enabled'
+                            ? 'bg-emerald-500'
+                            : st.runtimeStatus === 'paused'
+                            ? 'bg-amber-500'
+                            : 'bg-rose-500'
+                        }`}
+                      />
+                      <span className="font-medium text-text-primary">{st.runtimeStatusLabel}</span>
+                    </>
+                  ) : (
+                    <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                      控制状态未知
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-2 font-mono text-xs">
+                <div>
+                  <span
+                    className={`font-bold ${
+                      isPnlPositive
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : isPnlNegative
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-text-muted font-normal'
+                    }`}
+                  >
+                    {st.netPnlFormatted}
+                  </span>
+                  <span
+                    className={`block text-[10px] font-normal mt-0.5 ${
+                      isPnlPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                    }`}
+                  >
+                    {isPnlPartial ? '部分合计 · ' : ''}净盈亏覆盖 {pnlAvail}/{pnlTotal}
+                  </span>
+                </div>
+
+                <div className="text-right">
+                  <span
+                    className={`font-bold ${
+                      isRPositive
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : isRNegative
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-text-muted font-normal'
+                    }`}
+                  >
+                    {st.netRFormatted}
+                  </span>
+                  <span
+                    className={`block text-[10px] font-normal mt-0.5 ${
+                      isRPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                    }`}
+                  >
+                    {isRPartial ? '部分合计 · ' : ''}净 R 覆盖 {rAvail}/{rTotal}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-border/60 text-[11px]">
+                <a
+                  className="text-brand underline"
+                  onClick={(event) => event.stopPropagation()}
+                  href={(() => {
+                    const q = new URLSearchParams(incomeNavigationSearch(window.location.search, 'review'));
+                    q.set('strategy_version_id', st.summary.strategy_version_id);
+                    q.set('strategy_group_id', st.summary.strategy_group_id);
+                    return `?${q}`;
+                  })()}
+                >
+                  复盘对账
+                </a>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface-subtle px-2.5 py-1 text-xs font-semibold text-text-primary"
+                >
+                  <span>详情</span>
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop Table (>= md) */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
+        <div className="overflow-x-auto">
+          <table data-testid="strategies-matrix-table" className="w-full text-left text-xs font-sans">
           <thead>
             <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
               <th scope="col" className="px-4 py-3 font-semibold">策略 / 版本</th>
@@ -34,7 +179,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
               <th scope="col" className="px-3 py-3 font-semibold text-right">累计单笔净 R</th>
               <th scope="col" className="px-3 py-3 font-semibold text-right">所选范围净胜率</th>
               <th scope="col" className="px-3 py-3 font-semibold">终态构成（策略 / Owner）</th>
-              <th scope="col" className="px-3 py-3 font-semibold">复盘审计 (Review)</th>
+              <th scope="col" className="px-3 py-3 font-semibold">复盘审计</th>
               <th scope="col" className="px-3 py-3 font-semibold">TP1 达成</th>
               <th scope="col" className="px-4 py-3 font-semibold text-right">操作</th>
             </tr>
@@ -71,7 +216,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                             : 'bg-surface-subtle text-text-muted border border-border'
                         }`}
                       >
-                        v{summary.version} · {summary.is_current ? '当前有效' : '历史版本'}
+                        v{summary.version} · {summary.is_current ? '当前版本' : '历史版本'}
                       </span>
                       <span>·</span>
                       <span>{st.timeframe}</span>
@@ -80,18 +225,24 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
 
                   {/* 2. Runtime Controls & Active Tickets */}
                   <td className="px-3 py-3 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={`h-2 w-2 rounded-full shrink-0 ${
-                          st.runtimeStatus === 'enabled'
-                            ? 'bg-emerald-500'
-                            : st.runtimeStatus === 'paused'
-                            ? 'bg-amber-500'
-                            : 'bg-rose-500'
-                        }`}
-                      />
-                      <span className="font-medium text-text-primary">{st.runtimeStatusLabel}</span>
-                    </div>
+                    {st.control != null ? (
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`h-2 w-2 rounded-full shrink-0 ${
+                            st.runtimeStatus === 'enabled'
+                              ? 'bg-emerald-500'
+                              : st.runtimeStatus === 'paused'
+                              ? 'bg-amber-500'
+                              : 'bg-rose-500'
+                          }`}
+                        />
+                        <span className="font-medium text-text-primary">{st.runtimeStatusLabel}</span>
+                      </div>
+                    ) : (
+                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                        控制状态未知
+                      </span>
+                    )}
                     <div className="font-mono text-[11px] text-text-muted mt-0.5">
                       {st.activeTicketCount > 0 ? (
                         <span className="text-brand font-semibold">{st.activeTicketCount} 笔在管持仓</span>
@@ -101,40 +252,73 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
                     </div>
                   </td>
 
-                  {/* 3. Natural Net PnL */}
+                  {/* 3. Selected Scope Net PnL */}
                   <td className="px-3 py-3 font-mono text-right font-bold tabular-nums whitespace-nowrap">
-                    <span
-                      className={
-                        isPnlPositive
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : isPnlNegative
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-text-muted font-normal'
-                      }
-                    >
-                      {st.netPnlFormatted}
-                    </span>
-                    <div className="text-[10px] font-normal text-text-muted">核算覆盖 {st.summary.metric_coverage?.net_pnl?.available_count??st.confirmedReviews}/{st.summary.metric_coverage?.net_pnl?.total_count??st.naturalTerminals} 笔</div>
-                    {!st.hasConfirmedReview && (
-                      <div className="text-[10px] text-text-muted font-sans font-normal mt-0.5">
-                        待结清评审
-                      </div>
-                    )}
+                    {(() => {
+                      const covPnl = st.summary.metric_coverage?.net_pnl;
+                      const pnlAvail = covPnl?.available_count ?? st.confirmedReviews;
+                      const pnlTotal = covPnl?.total_count ?? st.naturalTerminals;
+                      const isPnlPartial = pnlAvail < pnlTotal;
+                      return (
+                        <>
+                          <span
+                            className={
+                              isPnlPositive
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : isPnlNegative
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-text-muted font-normal'
+                            }
+                          >
+                            {st.netPnlFormatted}
+                          </span>
+                          <div
+                            className={`text-[10px] font-normal ${
+                              isPnlPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                            }`}
+                          >
+                            {isPnlPartial ? '部分合计 · ' : ''}覆盖 {pnlAvail}/{pnlTotal} 笔
+                          </div>
+                          {!st.hasConfirmedReview && (
+                            <div className="text-[10px] text-text-muted font-sans font-normal mt-0.5">
+                              待结清评审
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </td>
 
-                  {/* 4. Natural Net R */}
+                  {/* 4. Selected Scope Net R (independent coverage) */}
                   <td className="px-3 py-3 font-mono text-right font-bold tabular-nums whitespace-nowrap">
-                    <span
-                      className={
-                        isRPositive
-                          ? 'text-emerald-600 dark:text-emerald-400'
-                          : isRNegative
-                          ? 'text-rose-600 dark:text-rose-400'
-                          : 'text-text-muted font-normal'
-                      }
-                    >
-                      {st.netRFormatted}
-                    </span>
+                    {(() => {
+                      const covR = st.summary.metric_coverage?.net_r;
+                      const rAvail = covR?.available_count ?? st.confirmedReviews;
+                      const rTotal = covR?.total_count ?? st.naturalTerminals;
+                      const isRPartial = rAvail < rTotal;
+                      return (
+                        <>
+                          <span
+                            className={
+                              isRPositive
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : isRNegative
+                                ? 'text-rose-600 dark:text-rose-400'
+                                : 'text-text-muted font-normal'
+                            }
+                          >
+                            {st.netRFormatted}
+                          </span>
+                          <div
+                            className={`text-[10px] font-normal ${
+                              isRPartial ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-text-muted'
+                            }`}
+                          >
+                            {isRPartial ? '部分合计 · ' : ''}覆盖 {rAvail}/{rTotal} 笔
+                          </div>
+                        </>
+                      );
+                    })()}
                   </td>
 
                   {/* 5. Win Rate */}
@@ -205,6 +389,7 @@ export const StrategyMatrixTable: React.FC<StrategyMatrixTableProps> = ({
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   );
 };

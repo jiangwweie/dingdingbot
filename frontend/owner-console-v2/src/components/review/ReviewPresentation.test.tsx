@@ -4,11 +4,13 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewCenterItem, ReviewCenterSummary } from '../../types/review';
 import { computeReviewSummary } from '../../mapping/reviewSummary';
-import { formatPnlWithGrossFallback, formatReviewExitReason } from '../../mapping/reviewMapping';
+import { formatPnlWithGrossFallback, formatReviewExitReason, formatReviewFreshness } from '../../mapping/reviewMapping';
 import { mapTradeListItemToEpisode, computeTradesSummaryMetrics } from '../../mapping/tradeEpisodeMapping';
 import type { TradeListItem } from '../../types/trades';
 import { ReviewMetricsDeck } from './ReviewMetricsDeck';
 import { ReviewTable } from './ReviewTable';
+import { ReviewFilterBar } from './ReviewFilterBar';
+import { ReviewBreakdownSections } from './ReviewBreakdownSections';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const money = (value: string | null, unit: 'R' | 'USDT' = 'USDT') => ({ value, unit, unavailable_reason: value === null ? 'funding_unavailable' : null });
@@ -94,5 +96,83 @@ describe('Review explanations and metric coverage', () => {
     expect(formatReviewExitReason('pre_tp1_time_stop_hit').label).toBe('TP1 前持仓超时退出');
     expect(formatReviewExitReason('future_unknown').label).toBe('退出原因未识别');
     expect(formatReviewExitReason(null).label).toBe('退出原因未确认');
+  });
+
+  it('keeps execution evidence, economics status, and overall review status independent', () => {
+    const execIncompleteEconComplete = item('ticket:exec-gap', false);
+    execIncompleteEconComplete.review.execution_classification = 'evidence_incomplete';
+    execIncompleteEconComplete.review.review_status = 'incomplete_evidence';
+    execIncompleteEconComplete.review.execution_gaps = [{ code: 'stop_trace_missing', label: '止损轨迹待核实', impact: '执行链未完全闭合' }];
+
+    const waitingItem = item('ticket:waiting', false);
+    waitingItem.review.execution_classification = 'waiting_review';
+    waitingItem.review.review_status = 'waiting_review';
+
+    render(<ReviewTable items={[execIncompleteEconComplete, waitingItem]} onSelectTicket={vi.fn()} />);
+    const tableText = container.querySelector('[data-testid="review-table"]')?.textContent ?? '';
+    expect(tableText).toContain('存在待核实项');
+    expect(tableText).toContain('核算完整');
+    expect(tableText).toContain('等待复盘');
+    expect(container.querySelector('[data-testid="review-mobile-list"]')?.textContent).toContain('复盘: 存在待核实项');
+  });
+
+  it('shows all active URL filters in ReviewFilterBar and resets them completely', () => {
+    const onReset = vi.fn();
+    render(
+      <ReviewFilterBar
+        filters={{
+          range: '30d',
+          from_ms: 1699900000000,
+          to_ms: 1700100000000,
+          strategy_version_id: 'v2.1',
+          exchange_instrument_id: 'binance-usdm:ETHUSDT:perpetual',
+          position_side: 'short',
+          exit_scope: 'owner',
+          view: 'current',
+        }}
+        onChange={vi.fn()}
+        onReset={onReset}
+      />
+    );
+    expect(container.textContent).toContain('版本: v2.1');
+    expect(container.textContent).toContain('标的: ETHUSDT');
+    expect(container.textContent).toContain('方向: 空头');
+    expect(container.textContent).toContain('退出范围: Owner 平仓');
+    expect(container.textContent).toContain('仅当前版本');
+    const resetBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('清除筛选'));
+    expect(resetBtn).toBeTruthy();
+    act(() => resetBtn!.click());
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders ReviewBreakdownSections with Chinese sample count and applicability details', () => {
+    render(
+      <ReviewBreakdownSections
+        summary={{
+          ...base,
+          strategy_group_samples: [
+            {
+              strategy_group_id: 'MPG-001',
+              sample_count: 3,
+              evidence_state: 'observe_only',
+              evidence: [{ kind: 'ticket', identity: 'ticket:1', occurred_at_ms: 1700000000000 }],
+            },
+          ],
+          execution_quality_breakdown: [],
+          exit_reason_breakdown: [],
+        }}
+        onSelectTicket={vi.fn()}
+      />
+    );
+    expect(container.textContent).toContain('策略组样本分布');
+    expect(container.textContent).toContain('已加载 3 笔复盘样本');
+    expect(container.textContent).toContain('仅供观察');
+  });
+
+  it('distinguishes all four freshness states without collapsing non-fresh states', () => {
+    expect(formatReviewFreshness('fresh')).toEqual({ label: '快照新鲜', tone: 'success' });
+    expect(formatReviewFreshness('stale')).toEqual({ label: '数据滞后', tone: 'attention' });
+    expect(formatReviewFreshness('unavailable')).toEqual({ label: '新鲜度不可确认', tone: 'neutral' });
+    expect(formatReviewFreshness('contradictory')).toEqual({ label: '数据矛盾', tone: 'danger' });
   });
 });

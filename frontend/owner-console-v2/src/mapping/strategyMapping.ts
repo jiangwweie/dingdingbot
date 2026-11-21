@@ -126,10 +126,15 @@ export function enrichStrategyVersion(
       runtimeStatusLabel = `阻断 · ${runtimeExtra.firstBlocker}`;
     } else if (control.effective_state === 'paused' || control.effective_state === 'paused_by_global') {
       runtimeStatus = 'paused';
-      runtimeStatusLabel = control.effective_state === 'paused_by_global' ? '全局暂停' : '已暂停';
+      runtimeStatusLabel =
+        control.effective_state === 'paused_by_global'
+          ? control.configured_state === 'enabled'
+            ? '配置已启用 · 全局暂停'
+            : '全局暂停'
+          : '已暂停';
     } else if (control.effective_state === 'enabled') {
       runtimeStatus = 'enabled';
-      runtimeStatusLabel = '运行中';
+      runtimeStatusLabel = '已启用';
     }
   }
 

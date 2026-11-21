@@ -1,4 +1,4 @@
-import {manualProtectionLabel} from './tradeTruth';
+import {manualProtectionLabel} from './tradeTruth.ts';
 /**
  * Ticket Mapping and Active Ticket Accounting Truth
  * 

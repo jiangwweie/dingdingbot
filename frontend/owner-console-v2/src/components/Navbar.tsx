@@ -9,6 +9,7 @@ interface NavbarProps {
   activeTab: NavTabId;
   onSelectTab: (tab: NavTabId) => void;
   isRealData?: boolean;
+  isIsolatedMock?: boolean;
   onLogout?: () => void;
   isLoggingOut?: boolean;
 }
@@ -17,6 +18,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   onSelectTab,
   isRealData = true,
+  isIsolatedMock = false,
   onLogout,
   isLoggingOut = false,
 }) => {
@@ -105,8 +107,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               'REAL API · PROD'
             ) : (
               <>
-                <span className="hidden sm:inline">数据未就绪</span>
-                <span className="sm:hidden">数据待核实</span>
+                <span className="hidden sm:inline">{isIsolatedMock ? 'ISOLATED MOCK · 离线验证' : '数据未就绪'}</span>
+                <span className="sm:hidden">{isIsolatedMock ? 'MOCK 验证' : '数据待核实'}</span>
               </>
             )}
           </span>

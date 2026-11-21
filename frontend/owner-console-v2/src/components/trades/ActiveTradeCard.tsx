@@ -1,5 +1,6 @@
 import React from 'react';
 import type { TradeEpisode } from '../../types/trades';
+import { deduplicateEpisodeAttentionItems, translateManualRiskReason } from '../overview/ActiveEpisodesSection';
 import {
   Shield,
   ShieldAlert,
@@ -9,6 +10,7 @@ import {
   ChevronRight,
   AlertTriangle,
   Layers,
+  UserCheck,
 } from 'lucide-react';
 
 interface ActiveTradeCardProps {
@@ -22,12 +24,20 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
 }) => {
   const isLong = episode.side === 'long';
   const management = episode.raw_item.management_mode ?? 'AUTO';
+  const isManual = management === 'MANUAL';
+  const isReviewRequired = management === 'REVIEW_REQUIRED';
+  const deduplicatedAttention = deduplicateEpisodeAttentionItems(episode.attention_items, management);
+  const riskReasonInfo = episode.raw_item.manual_risk_reason
+    ? translateManualRiskReason(episode.raw_item.manual_risk_reason)
+    : null;
 
   return (
     <div
       data-testid="active-trade-card"
       data-ticket-id={episode.ticket_id}
-      className="group relative flex flex-col justify-between rounded-lg border border-border bg-surface p-4 shadow-xs transition-all hover:border-brand/50 hover:shadow-sm"
+      className={`group relative flex flex-col justify-between rounded-lg border bg-surface p-4 shadow-xs transition-all hover:border-brand/50 hover:shadow-sm ${
+        isManual || isReviewRequired ? 'border-border border-l-4 border-l-amber-500' : 'border-border'
+      }`}
     >
       <div>
         {/* Row 1: Strategy, Symbol, Direction & Protection */}
@@ -77,19 +87,54 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
         </div>
 
         {management !== 'AUTO' && (
-          <section className="mt-3 rounded border border-amber-500/30 p-3 text-sm" aria-label="交易管理方式">
-            <strong>{management === 'MANUAL' ? '整笔已转人工管理' : '接管待核实'}</strong>
-            <p>{management === 'MANUAL' ? '现有 TP1 和止损仍有效，请在交易所 App 管理；程序不再自动退出或修改保护。' : '订单事实待核实，程序已暂停该笔自动处置。'}</p>
-            {episode.raw_item.manual_risk_reason && <p>新增开仓受限：{episode.raw_item.manual_risk_reason}</p>}
-            <p>当前关联挂单：{episode.raw_item.management_orders?.length ?? 0} 笔；以交易所最新事实为准。</p>
-            <ul className="mt-2 space-y-1 font-mono text-xs">
-              {(episode.raw_item.management_orders ?? []).map((order, index) => {
-                const terms = (order.terms && typeof order.terms === 'object' ? order.terms : {}) as Record<string, unknown>;
-                return <li key={String(order.exchange_order_id ?? index)}>
-                  {String(terms.order_type ?? '订单')} · 数量 {String(order.remaining_quantity ?? terms.quantity ?? '按当前仓位')} · 价格 {String(terms.trigger_price ?? terms.price ?? '市价')} · {String(order.exchange_order_id ?? '')}
-                </li>;
-              })}
-            </ul>
+          <section className="mt-3 space-y-2 text-xs" aria-label="交易管理方式">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <UserCheck className="h-3 w-3" />
+                {isManual ? '人工管理 · 不再自动处置' : '接管待核实 · 自动处置已暂停'}
+              </span>
+
+              {riskReasonInfo && (
+                <span className="inline-flex items-center rounded bg-rose-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                  {riskReasonInfo.shortTag}
+                </span>
+              )}
+
+              <details className="inline-block text-[11px]">
+                <summary className="cursor-pointer select-none inline-flex items-center gap-1 rounded bg-surface-subtle px-2 py-0.5 font-mono text-text-secondary border border-border hover:text-text-primary focus-visible:outline-2 focus-visible:outline-brand">
+                  关联挂单 {episode.raw_item.management_orders?.length ?? 0} 笔 ›
+                </summary>
+                <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1.5 text-text-secondary">
+                  <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                    {isManual
+                      ? '既有挂单是否有效以交易所最新订单事实为准；程序不再自动退出或修改保护。'
+                      : '订单或持仓事实待核实，程序已暂停该笔自动处置；以交易所最新对账为准。'}
+                  </p>
+                  {riskReasonInfo && (
+                    <p className="font-mono text-[11px] text-rose-600 dark:text-rose-400 break-all">
+                      新增开仓受限：{riskReasonInfo.raw}
+                    </p>
+                  )}
+                  {(episode.raw_item.management_orders ?? []).length > 0 ? (
+                    <ul className="space-y-1 font-mono text-[11px] text-text-primary">
+                      {(episode.raw_item.management_orders ?? []).map((order, index) => {
+                        const terms = (order.terms && typeof order.terms === 'object' ? order.terms : {}) as Record<string, unknown>;
+                        return (
+                          <li key={String(order.exchange_order_id ?? index)}>
+                            {String(terms.order_type ?? '订单')} · 数量{' '}
+                            {String(order.remaining_quantity ?? terms.quantity ?? '按当前仓位')} · 价格{' '}
+                            {String(terms.trigger_price ?? terms.price ?? '市价')} ·{' '}
+                            {String(order.exchange_order_id ?? '')}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-[11px] text-text-muted">当前快照未记录关联活动挂单，请以交易所端为准。</p>
+                  )}
+                </div>
+              </details>
+            </div>
           </section>
         )}
         {management === 'AUTO' && (<>
@@ -164,12 +209,12 @@ export const ActiveTradeCard: React.FC<ActiveTradeCardProps> = ({
           </div>
         </div>
 
-        {/* Attention Items Alert if any */}
-        {episode.attention_items.length > 0 && (
+        {/* Non-duplicate Attention Items Alert if any */}
+        {deduplicatedAttention.length > 0 && (
           <div className="mt-2.5 flex items-center gap-1.5 rounded border border-amber-500/20 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-600 dark:text-amber-400">
             <AlertTriangle className="h-3.5 w-3.5 flex-none" />
             <span className="text-[11px] leading-tight">
-              {episode.attention_items.join(' · ')}
+              {deduplicatedAttention.join(' · ')}
             </span>
           </div>
         )}

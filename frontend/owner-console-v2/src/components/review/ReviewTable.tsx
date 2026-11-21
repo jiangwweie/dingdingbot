@@ -4,6 +4,8 @@ import {
   formatReviewMoneyMetric,
   formatPnlWithGrossFallback,
   formatExecutionClassification,
+  formatReviewStatus,
+  formatEconomicsStatus,
   formatReviewExitReason,
   formatReviewSentenceTemplate,
 } from '../../mapping/reviewMapping.ts';
@@ -24,6 +26,171 @@ interface ReviewTableProps {
   onSelectTicket: (ticketId: string) => void;
   isLoading?: boolean;
 }
+
+const toneBadgeClass = (tone: 'success' | 'attention' | 'danger' | 'neutral') =>
+  tone === 'success'
+    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+    : tone === 'attention'
+    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+    : tone === 'danger'
+    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+    : 'bg-surface-subtle text-text-secondary border-border';
+
+const ReviewExpandedDetails: React.FC<{
+  item: ReviewCenterItem;
+  onSelectTicket: (ticketId: string) => void;
+}> = ({ item, onSelectTicket }) => {
+  const overallStatus = formatReviewStatus(item.review.review_status);
+  const attentionCount = item.review.attention_items?.length || 0;
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-surface p-3.5 sm:p-4 shadow-2xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <FileText className="h-4 w-4 text-brand" />
+          <h4 className="text-xs font-bold text-text-primary">
+            复盘因果评估陈述与可追溯证据
+          </h4>
+          <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border ${toneBadgeClass(overallStatus.tone)}`}>
+            整体复盘: {overallStatus.label}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onSelectTicket(item.ticket_id)}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline cursor-pointer"
+        >
+          <span>在因果抽屉中查看完整链路</span>
+          <ExternalLink className="h-3 w-3" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="review-economic-facts">
+        {([
+          ['毛收益', item.review.economic_summary.gross_pnl],
+          ['手续费', item.review.economic_summary.fees],
+          ['资金费', item.review.economic_summary.funding],
+          ['净收益', item.review.economic_summary.net_pnl],
+          ['净 R', item.review.economic_summary.net_r],
+        ] as const).map(([label, metric]) => (
+          <div key={label} className="rounded border border-border p-2">
+            <div className="text-[11px] text-text-muted">{label}</div>
+            <div className="mt-1 font-mono text-xs">{formatReviewMoneyMetric(metric).formatted}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2" data-testid="review-gaps">
+        {[
+          { title: '执行证据缺项', gaps: item.review.execution_gaps },
+          { title: '收益核算缺项', gaps: item.review.economic_gaps },
+        ].map(({ title, gaps }) => (
+          <div key={title} className="rounded border border-border p-3 text-xs">
+            <strong>{title}</strong>
+            {gaps?.length ? (
+              gaps.map((gap) => (
+                <p key={gap.code} className="mt-1 text-amber-600 dark:text-amber-400">
+                  {gap.label}：{gap.impact}
+                </p>
+              ))
+            ) : (
+              <p className="mt-1 text-text-muted">无已声明缺项</p>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <details className="text-xs text-text-muted">
+        <summary className="cursor-pointer hover:text-text-secondary">退出归因与审计详情</summary>
+        <p className="mt-1">{item.review.exit_attribution?.detail}</p>
+        <p className="break-all">原始原因：{item.review.exit_reason ?? '未确认'}</p>
+        <p>
+          依据：
+          {item.review.exit_attribution?.source === 'review_fills'
+            ? '当前 Review 成交与精确订单命令关联'
+            : item.review.exit_attribution?.source === 'exit_event'
+            ? '退出触发事件'
+            : '尚无充分归因证据'}
+        </p>
+      </details>
+
+      {item.review.sentences.length > 0 && (
+        <div className="space-y-2">
+          {item.review.sentences.map((sent, sIdx) => {
+            const tmpl = formatReviewSentenceTemplate(sent.template_id);
+            return (
+              <div
+                key={sIdx}
+                className="rounded border border-border bg-surface-subtle/80 p-3 space-y-1.5"
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-semibold border ${toneBadgeClass(
+                      tmpl.tone
+                    )}`}
+                  >
+                    {tmpl.label}
+                  </span>
+                </div>
+                <p className="text-xs text-text-primary leading-relaxed">{sent.text}</p>
+                {sent.evidence.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-text-muted">证据项:</span>
+                    {sent.evidence.map((ref, rIdx) => (
+                      <button
+                        key={`${ref.kind}:${ref.identity}:${rIdx}`}
+                        type="button"
+                        onClick={() => onSelectTicket(item.ticket_id)}
+                        className="inline-flex items-center gap-1 rounded bg-surface px-1.5 py-0.5 font-mono text-[10px] text-text-secondary border border-border hover:border-brand/40 hover:text-brand transition-colors cursor-pointer"
+                        title={`查看证据 ${ref.identity} (${ref.kind})`}
+                      >
+                        <span className="text-text-muted uppercase text-[9px]">{ref.kind}:</span>
+                        <span className="font-semibold">{ref.identity}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {attentionCount > 0 && (
+        <div className="rounded border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 space-y-1">
+          <div className="flex items-center gap-1.5 font-bold">
+            <AlertTriangle className="h-4 w-4 text-rose-500" />
+            <span>关注项提示 ({attentionCount})</span>
+          </div>
+          <ul className="list-disc list-inside space-y-0.5 text-[11px] font-mono pl-1">
+            {item.review.attention_items.map((att, aIdx) => (
+              <li key={aIdx}>
+                {({
+                  funding_unavailable: '资金费无法精确归因',
+                  external_exit_unavailable: '退出成交明细不可得',
+                  actual_stop_risk_above_frozen_plan: '实际止损风险高于冻结计划',
+                  runner_net_contribution_non_positive: '追踪段净贡献未转正',
+                } as Record<string, string>)[att] ??
+                  (att.startsWith('open_incident:') ? '存在未解除异常，详见因果链' : '存在待核实关注项')}
+                <details>
+                  <summary className="cursor-pointer">原始标识</summary>
+                  {att}
+                </details>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {item.review.final_conclusion && (
+        <div className="rounded border border-border bg-surface-subtle p-2.5 text-xs text-text-secondary">
+          <strong className="text-text-primary">结论摘要: </strong>
+          <span>{item.review.final_conclusion}</span>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const ReviewTable: React.FC<ReviewTableProps> = ({
   items,
@@ -56,56 +223,172 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
-      <div className="overflow-x-auto">
-        <table data-testid="review-table" className="w-full text-left text-xs font-sans">
-          <thead>
-            <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
-              <th scope="col" className="px-3 py-3 font-semibold">
-                标的 / 方向
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold">
-                策略组
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold">
-                执行证据
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold">
-                退出原因
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">
-                净盈亏 (Net PnL)
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">
-                净回报 (Net R)
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold text-right">
-                费用 / 资金费
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold">
-                收益核算
-              </th>
-              <th scope="col" className="px-3 py-3 font-semibold text-center">
-                关注项
-              </th>
-              <th scope="col" className="px-4 py-3 font-semibold text-right">
-                因果追溯
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border font-sans">
-            {items.map((item) => {
-              const expanded = expandedTicketIds.has(item.ticket_id);
-              const isLong = item.position_side === 'long';
-              const symbol = cleanSymbol(item.exchange_instrument_id);
-              const execClass = formatExecutionClassification(item.review.execution_classification);
-              const reviewStatus = { label: item.review.economic_gaps?.length ? '有核算缺项' : item.review.review_status === 'waiting_review' ? '尚无核算' : '核算完整', tone: item.review.economic_gaps?.length ? 'attention' : 'success' };
-              const exitReason = formatReviewExitReason(item.review.exit_reason);
-              const pnl = formatPnlWithGrossFallback(item.review.economic_summary.net_pnl, item.review.economic_summary.gross_pnl);
-              const r = formatReviewMoneyMetric(item.review.economic_summary.net_r, { sign: true, fractionDigits: 4 });
-              const fees = formatReviewMoneyMetric(item.review.economic_summary.fees);
-              const funding = formatReviewMoneyMetric(item.review.economic_summary.funding);
-              const attentionCount = item.review.attention_items?.length || 0;
+    <div className="space-y-3">
+      {/* Mobile Card List (< 768px) */}
+      <div className="md:hidden space-y-2.5" data-testid="review-mobile-list">
+        {items.map((item) => {
+          const expanded = expandedTicketIds.has(item.ticket_id);
+          const isLong = item.position_side === 'long';
+          const symbol = cleanSymbol(item.exchange_instrument_id);
+          const overallStatus = formatReviewStatus(item.review.review_status);
+          const execClass = formatExecutionClassification(item.review.execution_classification);
+          const economicsStatus = formatEconomicsStatus(item.review);
+          const exitReason = formatReviewExitReason(item.review.exit_reason);
+          const pnl = formatPnlWithGrossFallback(item.review.economic_summary.net_pnl, item.review.economic_summary.gross_pnl);
+          const r = formatReviewMoneyMetric(item.review.economic_summary.net_r, { sign: true, fractionDigits: 4 });
+          const fees = formatReviewMoneyMetric(item.review.economic_summary.fees);
+          const funding = formatReviewMoneyMetric(item.review.economic_summary.funding);
+          const attentionCount = item.review.attention_items?.length || 0;
+
+          return (
+            <div
+              key={item.ticket_id}
+              data-ticket-id={item.ticket_id}
+              className="rounded-lg border border-border bg-surface p-3.5 shadow-xs space-y-2.5 text-xs"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-mono font-bold text-text-primary">{symbol}</span>
+                    <span
+                      className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 font-mono text-[10px] font-bold uppercase ${
+                        isLong
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                      }`}
+                    >
+                      {isLong ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                      <span>{item.position_side}</span>
+                    </span>
+                    <span className="rounded bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand border border-brand/20">
+                      {item.strategy_group_id}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-[10px] text-text-muted truncate" title={item.ticket_id}>
+                    {item.ticket_id}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div
+                    className={`font-mono font-bold tabular-number ${
+                      pnl.isUnavailable
+                        ? 'text-text-muted'
+                        : pnl.isPositive
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {pnl.formatted}
+                  </div>
+                  {pnl.isGrossFallback && (
+                    <div className="text-[10px] text-text-muted">毛收益 · 费用未完整核实</div>
+                  )}
+                  <div className="font-mono text-[11px] text-text-secondary tabular-number">{r.formatted}</div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border ${toneBadgeClass(overallStatus.tone)}`}>
+                  复盘: {overallStatus.label}
+                </span>
+                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${toneBadgeClass(execClass.tone)}`}>
+                  执行: {execClass.label}
+                </span>
+                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border ${toneBadgeClass(economicsStatus.tone)}`}>
+                  核算: {economicsStatus.label}
+                </span>
+                {attentionCount > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded bg-rose-500/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>{attentionCount} 关注项</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-secondary">
+                <span className="truncate">退出: {item.review.exit_attribution?.label ?? exitReason.label}</span>
+                <span className="font-mono text-text-muted">
+                  费用 {fees.formatted} / 资费 {funding.formatted}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/60">
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  onClick={(e) => toggleExpand(item.ticket_id, e)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-text-secondary hover:text-text-primary cursor-pointer"
+                >
+                  {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  <span>{expanded ? '收起复盘详情' : '展开复盘详情与缺项'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectTicket(item.ticket_id)}
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/10 hover:border-brand/30 transition-colors cursor-pointer"
+                >
+                  <span>因果与 K 线</span>
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              </div>
+
+              {expanded && <ReviewExpandedDetails item={item} onSelectTicket={onSelectTicket} />}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop Table (>= 768px) */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
+        <div className="overflow-x-auto">
+          <table data-testid="review-table" className="w-full text-left text-xs font-sans">
+            <thead>
+              <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
+                <th scope="col" className="px-3 py-3 font-semibold">
+                  标的 / 方向
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold">
+                  策略组
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold">
+                  执行证据
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold">
+                  退出原因
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold text-right">
+                  净盈亏
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold text-right">
+                  净回报
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold text-right">
+                  费用 / 资金费
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold">
+                  收益核算
+                </th>
+                <th scope="col" className="px-3 py-3 font-semibold text-center">
+                  关注项
+                </th>
+                <th scope="col" className="px-4 py-3 font-semibold text-right">
+                  因果追溯
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border font-sans">
+              {items.map((item) => {
+                const expanded = expandedTicketIds.has(item.ticket_id);
+                const isLong = item.position_side === 'long';
+                const symbol = cleanSymbol(item.exchange_instrument_id);
+                const execClass = formatExecutionClassification(item.review.execution_classification);
+                const economicsStatus = formatEconomicsStatus(item.review);
+                const exitReason = formatReviewExitReason(item.review.exit_reason);
+                const pnl = formatPnlWithGrossFallback(item.review.economic_summary.net_pnl, item.review.economic_summary.gross_pnl);
+                const r = formatReviewMoneyMetric(item.review.economic_summary.net_r, { sign: true, fractionDigits: 4 });
+                const fees = formatReviewMoneyMetric(item.review.economic_summary.fees);
+                const funding = formatReviewMoneyMetric(item.review.economic_summary.funding);
+                const attentionCount = item.review.attention_items?.length || 0;
 
               return (
                 <React.Fragment key={item.ticket_id}>
@@ -208,7 +491,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                       >
                         {pnl.formatted}
                       </span>
-                      {pnl.isGrossFallback && <div className="text-[10px] font-normal text-text-muted" title="毛收益未扣手续费和资金费；净收益仍不可确认">毛收益 · 未扣手续费与资金费</div>}
+                      {pnl.isGrossFallback && <div className="text-[10px] font-normal text-text-muted" title="毛收益未扣手续费和资金费；净收益仍不可确认">毛收益 · 费用未完整核实</div>}
                     </td>
 
                     {/* 6. Net R */}
@@ -233,19 +516,15 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                       <div className="text-[10px]">{funding.formatted}</div>
                     </td>
 
-                    {/* 8. Evidence Status */}
+                    {/* 8. Economics Status */}
                     <td className="px-3 py-3 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5">
                         <span
-                          className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-semibold border ${
-                            reviewStatus.tone === 'success'
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                              : reviewStatus.tone === 'attention'
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                              : 'bg-surface-subtle text-text-secondary border-border'
-                          }`}
+                          className={`inline-flex items-center rounded px-1.5 py-0.2 text-[10px] font-semibold border ${toneBadgeClass(
+                            economicsStatus.tone
+                          )}`}
                         >
-                          {reviewStatus.label}
+                          {economicsStatus.label}
                         </span>
                         <span className="text-[10px] text-text-muted">
                           {item.review.evidence.length} 项证据
@@ -285,124 +564,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
                   {expanded && (
                     <tr className="bg-surface-subtle/50">
                       <td colSpan={10} className="px-6 py-4">
-                        <div className="space-y-3 rounded-lg border border-border bg-surface p-4 shadow-2xs">
-                          {/* Title & Ticket Identity */}
-                          <div className="flex items-center justify-between border-b border-border pb-2.5">
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-brand" />
-                              <h4 className="text-xs font-bold text-text-primary">
-                                复盘因果评估陈述与可追溯证据
-                              </h4>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => onSelectTicket(item.ticket_id)}
-                              className="inline-flex items-center gap-1 text-[11px] font-medium text-brand hover:underline"
-                            >
-                              <span>在因果抽屉中查看完整链路</span>
-                              <ExternalLink className="h-3 w-3" />
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" data-testid="review-economic-facts">
-                            {([
-                              ['毛收益', item.review.economic_summary.gross_pnl],
-                              ['手续费', item.review.economic_summary.fees],
-                              ['资金费', item.review.economic_summary.funding],
-                              ['净收益', item.review.economic_summary.net_pnl],
-                              ['净 R', item.review.economic_summary.net_r],
-                            ] as const).map(([label, metric]) => <div key={label} className="rounded border border-border p-2"><div className="text-text-muted">{label}</div><div className="mt-1 font-mono">{formatReviewMoneyMetric(metric).formatted}</div></div>)}
-                          </div>
-                          <div className="grid gap-2 sm:grid-cols-2" data-testid="review-gaps">
-                            {[
-                              { title: '执行证据缺项', gaps: item.review.execution_gaps },
-                              { title: '收益核算缺项', gaps: item.review.economic_gaps },
-                            ].map(({ title, gaps }) => (
-                              <div key={title} className="rounded border border-border p-3 text-xs">
-                                <strong>{title}</strong>
-                                {gaps?.length ? gaps.map((gap) => <p key={gap.code} className="mt-1 text-amber-600">{gap.label}：{gap.impact}</p>) : <p className="mt-1 text-text-muted">无已声明缺项</p>}
-                              </div>
-                            ))}
-                          </div>
-                          <details className="text-xs text-text-muted"><summary>退出归因与审计详情</summary>
-                            <p>{item.review.exit_attribution?.detail}</p>
-                            <p className="break-all">原始原因：{item.review.exit_reason ?? '未确认'}</p>
-                            <p>依据：{item.review.exit_attribution?.source === 'review_fills' ? '当前 Review 成交与精确订单命令关联' : item.review.exit_attribution?.source === 'exit_event' ? '退出触发事件' : '尚无充分归因证据'}</p>
-                          </details>
-                          {/* Review Sentences */}
-                          <div className="space-y-2">
-                            {item.review.sentences.map((sent, sIdx) => {
-                              const tmpl = formatReviewSentenceTemplate(sent.template_id);
-                              return (
-                                <div
-                                  key={sIdx}
-                                  className="rounded border border-border bg-surface-subtle/80 p-3 space-y-1.5"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-semibold border ${
-                                        tmpl.tone === 'success'
-                                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                                          : tmpl.tone === 'danger'
-                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                                          : tmpl.tone === 'attention'
-                                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                                          : 'bg-surface text-text-secondary border-border'
-                                      }`}
-                                    >
-                                      {tmpl.label}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-text-primary leading-relaxed">
-                                    {sent.text}
-                                  </p>
-
-                                  {/* Sentence Evidence Refs */}
-                                  {sent.evidence.length > 0 && (
-                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                                      <span className="text-[10px] text-text-muted">证据项:</span>
-                                      {sent.evidence.map((ref, rIdx) => (
-                                        <button
-                                          key={`${ref.kind}:${ref.identity}:${rIdx}`}
-                                          type="button"
-                                          onClick={() => onSelectTicket(item.ticket_id)}
-                                          className="inline-flex items-center gap-1 rounded bg-surface px-1.5 py-0.5 font-mono text-[10px] text-text-secondary border border-border hover:border-brand/40 hover:text-brand transition-colors cursor-pointer"
-                                          title={`查看证据 ${ref.identity} (${ref.kind})`}
-                                        >
-                                          <span className="text-text-muted uppercase text-[9px]">{ref.kind}:</span>
-                                          <span className="font-semibold">{ref.identity}</span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Attention Banner if present */}
-                          {attentionCount > 0 && (
-                            <div className="rounded border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-700 dark:text-rose-300 space-y-1">
-                              <div className="flex items-center gap-1.5 font-bold">
-                                <AlertTriangle className="h-4 w-4 text-rose-500" />
-                                <span>关注项提示 ({attentionCount})</span>
-                              </div>
-                              <ul className="list-disc list-inside space-y-0.5 text-[11px] font-mono pl-1">
-                                {item.review.attention_items.map((att, aIdx) => (
-                                  <li key={aIdx}>{({ funding_unavailable: '资金费无法精确归因', external_exit_unavailable: '退出成交明细不可得', actual_stop_risk_above_frozen_plan: '实际止损风险高于冻结计划', runner_net_contribution_non_positive: '追踪段净贡献未转正' } as Record<string, string>)[att] ?? (att.startsWith('open_incident:') ? '存在未解除异常，详见因果链' : '存在待核实关注项')}<details><summary>原始标识</summary>{att}</details></li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Final Conclusion if present */}
-                          {item.review.final_conclusion && (
-                            <div className="rounded border border-border bg-surface-subtle p-2.5 text-xs text-text-secondary">
-                              <strong className="text-text-primary">结论摘要: </strong>
-                              <span>{item.review.final_conclusion}</span>
-                            </div>
-                          )}
-                        </div>
+                        <ReviewExpandedDetails item={item} onSelectTicket={onSelectTicket} />
                       </td>
                     </tr>
                   )}
@@ -411,6 +573,7 @@ export const ReviewTable: React.FC<ReviewTableProps> = ({
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

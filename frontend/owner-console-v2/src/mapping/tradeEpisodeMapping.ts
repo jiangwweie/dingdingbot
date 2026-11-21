@@ -1,4 +1,4 @@
-import {manualProtectionLabel} from './tradeTruth';
+import {manualProtectionLabel} from './tradeTruth.ts';
 import { formatPnlWithGrossFallback, formatReviewExitReason } from './reviewMapping.ts';
 import { MoneyDecimal, protectionFact, terminalFact } from './tradeTruth.ts';
 import type { TradeListItem, TradeEpisode, MoneyMetric, TradesSummaryMetrics } from '../types/trades.ts';

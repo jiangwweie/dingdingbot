@@ -35,13 +35,24 @@ API requests retain `/api/owner/v1/` at the origin root.
 
 ## Release and rollback
 
-The official entry points are
-`scripts/owner_console/certify_static_release_candidate.py` and
-`scripts/owner_console/deploy_release.py --kind static`. Both use an exact,
-clean commit. The deployer builds that commit in a disposable directory,
-installs the immutable static release and switches only the static symlink.
-A failed smoke restores the previous static release. Kernel workers, Owner
-API, PostgreSQL and exchange controls are not changed by a static release.
+For the Seoul manual product, certify the exact clean HEAD with
+`scripts/owner_console/certify_static_release_candidate.py --commit HEAD`, then
+use `scripts/owner_console/deploy_manual_static.py --commit <exact-sha>
+--expected-runtime-commit <fresh-kernel-api-sha> --target <seoul-ssh-target>
+--machine-id <bound-id> --public-ip <bound-ip>`.
+
+The R1 controller checks the independent host/product/account/database and
+installed runtime identity, builds only the exact certified static source and
+switches only `/opt/brc/owner-console/current`. Kernel, schema and API contract
+changes relative to the installed runtime are rejected. The existing mobile
+shell must remain in the new artifact. Prior content-hashed assets are retained
+for open browser tabs. Every new public asset is verified by SHA-256; a failed
+smoke or changed runtime authority rolls back only the static symlink. No API,
+worker or Nginx service restart, database migration, ENTRY pause/resume or exchange
+write occurs. No R4 certificate or flatness gate is needed for this static-only path.
+
+The inherited `deploy_release.py --kind static` Tokyo SSH backend remains
+blocked on this product. Local preview mocks and screenshots are not deployed.
 
 Current production identity is recorded only in
 `docs/current/MAIN_CONTROL_ROADMAP.md`.

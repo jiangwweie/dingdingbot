@@ -76,7 +76,9 @@ export function useOverviewData() {
   const rawOverview = overviewQuery.data?.data;
   const rawControls = controlsQuery.data;
   const rawTickets = ticketsQuery.data?.data?.items ?? [];
-  const todayStartMs=rawOverview?.performance?.from_ms ?? getBeijingDayStartMs();
+  const todayStartMs = rawOverview?.performance?.from_ms ?? getBeijingDayStartMs();
+  const rawObservedMs = rawOverview?.observed_at_ms ?? Date.now();
+  const todayEndMs = rawObservedMs > todayStartMs ? rawObservedMs : todayStartMs + 60_000;
 
   // Active tickets mapping (terminal_at_ms === null means actively in flight)
   const authoritativeActiveCount = rawOverview?.active_ticket_count ?? null;
@@ -138,12 +140,12 @@ export function useOverviewData() {
   const activeStrategies =
     rawControls?.strategies?.filter((s) => s.configured_state === 'enabled').length ?? 0;
   const globalEntryEnabled = rawControls?.global_entry?.configured_state === 'enabled';
-  const entryStatusLabel = globalEntryEnabled ? 'ENTRY 正常' : 'ENTRY 暂停';
+  const entryStatusLabel = globalEntryEnabled ? '新开仓开关：开启' : '新开仓开关：已暂停';
 
   let healthStatus: 'healthy' | 'attention' | 'danger' = 'healthy';
   let statusLabel = '正常运行';
-  let summary = `${totalStrategies} 个策略 · ${entryStatusLabel} · ${
-    incidentCount > 0 ? `${incidentCount} 项执行异常` : '无异常'
+  let summary = `策略已启用 ${activeStrategies}/${totalStrategies} · ${entryStatusLabel} · ${
+    incidentCount > 0 ? `${incidentCount} 项执行异常` : '无执行异常'
   }`;
 
   if (conclusionLevel === 'intervention' || freshness === 'contradictory') {
@@ -164,7 +166,7 @@ export function useOverviewData() {
         : freshness === 'unavailable'
         ? '数据不可用'
         : '需要关注';
-    summary = `${totalStrategies} 个策略 · ${entryStatusLabel} · ${
+    summary = `策略已启用 ${activeStrategies}/${totalStrategies} · ${entryStatusLabel} · ${
       incidentCount > 0 ? `${incidentCount} 项异常待核实` : '存在需关注事实'
     }`;
   }
@@ -198,6 +200,7 @@ export function useOverviewData() {
     total_strategy_count: totalStrategies,
     active_strategy_count: activeStrategies,
     entry_status_label: entryStatusLabel,
+    global_entry_enabled: globalEntryEnabled,
     incidents_count: incidentCount,
     active_ticket_count: activeTicketCount,
     ticket_capacity_total: maxCapacity,
@@ -205,12 +208,43 @@ export function useOverviewData() {
     generated_at: overviewQuery.data?.generated_at,
   };
 
-  // 2. Today Performance Metrics
+  // 2. Today Performance Metrics (with per-metric coverage support)
   const netPnlVal = rawOverview?.today_net_pnl?.value;
   const netRVal = rawOverview?.today_net_r?.value;
+  const perf = rawOverview?.performance;
+  const metricCov = (perf?.metric_coverage ?? {}) as Record<
+    string,
+    { available_count?: number; total_count?: number } | undefined
+  >;
+
+  const pnlAvail = metricCov.net_pnl?.available_count ?? perf?.confirmed_count;
+  const pnlTotal = metricCov.net_pnl?.total_count ?? perf?.sample_count;
+  const pnlIsPartial =
+    typeof pnlAvail === 'number' && typeof pnlTotal === 'number' && pnlAvail < pnlTotal;
+  const pnlCoverage =
+    typeof pnlAvail === 'number' && typeof pnlTotal === 'number'
+      ? `${pnlIsPartial ? '部分核实' : '已核实'} ${pnlAvail}/${pnlTotal} 笔${pnlIsPartial ? ' · 部分合计' : ''}`
+      : undefined;
+
+  const rAvail = metricCov.net_r?.available_count ?? perf?.confirmed_count;
+  const rTotal = metricCov.net_r?.total_count ?? perf?.sample_count;
+  const rIsPartial =
+    typeof rAvail === 'number' && typeof rTotal === 'number' && rAvail < rTotal;
+  const rCoverage =
+    typeof rAvail === 'number' && typeof rTotal === 'number'
+      ? `${rIsPartial ? '部分核实' : '已核实'} ${rAvail}/${rTotal} 笔${rIsPartial ? ' · 部分合计' : ''}`
+      : undefined;
 
   const todayMetrics: TodayPerformanceMetrics = {
-    income_coverage: rawOverview?.performance ? `上海今日终态交易 · 已核实 ${rawOverview.performance.confirmed_count}/${rawOverview.performance.sample_count} 笔${rawOverview.performance.confirmed_count<rawOverview.performance.sample_count ? ' · 部分合计' : ''}` : undefined,
+    income_coverage: perf
+      ? `上海今日终态交易 · ${pnlIsPartial ? '部分核实' : '已核实'} ${perf.confirmed_count}/${perf.sample_count} 笔${
+          perf.confirmed_count < perf.sample_count ? ' · 部分合计' : ''
+        }`
+      : undefined,
+    pnl_coverage: pnlCoverage,
+    pnl_is_partial: pnlIsPartial,
+    r_coverage: rCoverage,
+    r_is_partial: rIsPartial,
     net_pnl_formatted: formatMetric(rawOverview?.today_net_pnl),
     net_pnl_is_positive:
       netPnlVal !== null && netPnlVal !== undefined ? Number(netPnlVal) >= 0 : null,
@@ -237,23 +271,32 @@ export function useOverviewData() {
 
   // Per-group contributions and headline are from the same full-window snapshot.
   const strategyItems: StrategyPerformanceItem[] = Object.entries(rawOverview?.performance?.by_strategy_group ?? {}).map(([group,stats])=>{
-    const meta=STRATEGY_META[group] ?? {name_zh:group,timeframe:'全部版本'};
+    const meta=STRATEGY_META[group] ?? {name_zh:group,timeframe:'1h close'};
     const paused=rawControls?.strategies?.find(c=>c.strategy_group_id===group)?.configured_state==='paused';
-    return {strategy_id:group,strategy_version_id:null,name_zh:meta.name_zh,timeframe:'全部版本 · 上海今日终态',status:paused?'paused':'running',status_label:paused?'已暂停':'运行中',ticket_count:stats.sample_count,win_count:stats.win_count,loss_count:stats.loss_count,net_pnl_formatted:formatMetric(stats.verified_totals.net_pnl),net_r_formatted:formatMetric(stats.verified_totals.net_r),active_tickets_count:activeCountByStrategy.get(group)??0,is_metrics_available:stats.confirmed_count>0};
+    return {strategy_id:group,strategy_version_id:null,name_zh:meta.name_zh,timeframe:meta.timeframe,status:paused?'paused':'running',status_label:paused?'已暂停':'已启用',ticket_count:stats.sample_count,win_count:stats.win_count,loss_count:stats.loss_count,net_pnl_formatted:formatMetric(stats.verified_totals.net_pnl),net_r_formatted:formatMetric(stats.verified_totals.net_r),active_tickets_count:activeCountByStrategy.get(group)??0,is_metrics_available:stats.confirmed_count>0};
   });
 
-  // 5. Attention Items (derived strictly from authoritative facts, never deduce global protection completeness)
+  // 5. Attention Items (derived strictly from authoritative facts, never deduce global protection completeness or fabricate worker watermark details)
   const attentionList: AttentionItem[] = [];
 
+  const inferActionTarget = (text: string): AttentionItem['action_target'] => {
+    if (text.includes('人工管理') || text.includes('外部干预') || text.includes('仓位') || text.includes('持仓')) {
+      return 'active_episodes';
+    }
+    if (text.includes('ENTRY') || text.includes('准入') || text.includes('暂停')) {
+      return 'controls';
+    }
+    return undefined;
+  };
+
   if (rawOverview?.conclusion?.summary && conclusionLevel !== 'no_action') {
+    const summaryText = rawOverview.conclusion.summary;
     attentionList.push({
       id: 'conclusion-summary',
       type: conclusionLevel === 'intervention' ? 'alert' : 'warning',
-      title: rawOverview.conclusion.summary,
-      detail:
-        conclusionLevel === 'attention'
-          ? '请核实后台 Worker 水印与只读证据状态'
-          : '需立即介入核实',
+      title: summaryText,
+      detail: conclusionLevel === 'intervention' ? '需立即介入核实' : undefined,
+      action_target: inferActionTarget(summaryText),
     });
   }
 
@@ -279,16 +322,18 @@ export function useOverviewData() {
       type: 'warning',
       title: '全局 ENTRY 入场处于暂停状态',
       detail: '新入场被阻断，存量持仓继续受生命周期保护。',
+      action_target: 'controls',
     });
   }
 
   if (rawOverview?.attention_summary && rawOverview.attention_summary.length > 0) {
     rawOverview.attention_summary.forEach((att, idx) => {
-      if (att !== rawOverview?.conclusion?.summary) {
+      if (att !== rawOverview?.conclusion?.summary && !attentionList.some((item) => item.title === att)) {
         attentionList.push({
           id: `att-${idx}`,
           type: 'warning',
           title: att,
+          action_target: inferActionTarget(att),
         });
       }
     });
@@ -300,6 +345,7 @@ export function useOverviewData() {
       type: 'alert',
       title: `存在 ${incidentCount} 项未决执行异常 (Incident)`,
       detail: '请核实命令流水与对账状态',
+      action_target: 'trades',
     });
   }
 
@@ -328,6 +374,7 @@ export function useOverviewData() {
     strategiesLoading: overviewQuery.isLoading,
     strategiesError: overviewQuery.isError ? '收益统计读取失败' : null,
     todayStartMs,
+    todayEndMs,
     refetchTickets: () => ticketsQuery.refetch(),
     refetchStrategies: () => overviewQuery.refetch(),
     pulse,

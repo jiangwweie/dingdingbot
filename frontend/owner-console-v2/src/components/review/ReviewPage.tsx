@@ -6,6 +6,7 @@ import { IncomeSummary, IncomeScopeBar } from '../common/IncomeSummary';
 import { ReviewTable } from './ReviewTable.tsx';
 import { ReviewBreakdownSections } from './ReviewBreakdownSections.tsx';
 import { CausalityDrawer } from '../overview/CausalityDrawer.tsx';
+import { formatReviewFreshness } from '../../mapping/reviewMapping.ts';
 import {
   RefreshCw,
   AlertCircle,
@@ -35,6 +36,7 @@ export const ReviewPage: React.FC = () => {
   } = useReviewData(filters);
 
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
+  const freshnessMeta = formatReviewFreshness(freshness);
 
   const handleManualRefresh = async () => {
     await refetch();
@@ -48,20 +50,21 @@ export const ReviewPage: React.FC = () => {
           <div className="flex items-center gap-2.5">
             <h1 className="text-base font-bold tracking-tight text-text-primary flex items-center gap-2">
               <FileSearch className="h-5 w-5 text-brand" />
-              <span>复盘评估工作台 (Review)</span>
+              <span>复盘评估</span>
             </h1>
-            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              REAL API · PROD
-            </span>
             <span
-              className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase ${
-                freshness === 'fresh'
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+              data-testid="review-freshness-badge"
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold border ${
+                freshnessMeta.tone === 'success'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                  : freshnessMeta.tone === 'attention'
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                  : freshnessMeta.tone === 'danger'
+                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                  : 'bg-surface-subtle text-text-secondary border-border'
               }`}
             >
-              {freshness}
+              {freshnessMeta.label}
             </span>
           </div>
           <p className="mt-1 text-xs text-text-secondary leading-relaxed">
@@ -85,12 +88,11 @@ export const ReviewPage: React.FC = () => {
             <RefreshCw
               className={`h-3.5 w-3.5 text-text-muted ${isFetching ? 'animate-spin text-brand' : ''}`}
             />
-            <span>{isFetching ? '正在读取真实 facts...' : '刷新复盘'}</span>
+            <span>{isFetching ? '刷新中...' : '刷新复盘'}</span>
           </button>
         </div>
       </div>
 
-      <IncomeScopeBar view={filters.view} scope={filters.exit_scope} onChange={setFilters} />
       {performanceError && <IncomeSummary summary={null} error={performanceError} onRefresh={handleManualRefresh} />}
       {/* 2. Refresh Error Banner */}
       {refreshError && (
@@ -124,13 +126,15 @@ export const ReviewPage: React.FC = () => {
         onChange={setFilters}
         onReset={resetFilters}
         disabled={isLoading}
-      />
+      >
+        <IncomeScopeBar view={filters.view} scope={filters.exit_scope} onChange={setFilters} />
+      </ReviewFilterBar>
 
       {/* 4. Initial Loading State */}
       {isLoading && (
         <div className="py-20 text-center space-y-3">
           <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin" />
-          <p className="text-xs text-text-secondary">正在读取复盘中心事实快照 (GET /api/owner/v1/review)...</p>
+          <p className="text-xs text-text-secondary">正在加载复盘记录与收益统计...</p>
         </div>
       )}
 
@@ -140,7 +144,7 @@ export const ReviewPage: React.FC = () => {
           <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-rose-500/10 text-rose-500">
             <ShieldAlert className="h-6 w-6" />
           </div>
-          <h3 className="text-base font-bold text-text-primary">Review API 暂时不可用</h3>
+          <h3 className="text-base font-bold text-text-primary">复盘数据暂时不可用</h3>
           <p className="text-xs text-text-secondary leading-relaxed">
             {error instanceof Error ? error.message : '未能成功获取真实复盘事实。'}
           </p>
@@ -202,7 +206,7 @@ export const ReviewPage: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <span>加载更多复盘记录 (Cursor 分页)</span>
+                    <span>加载更多复盘记录</span>
                     <span className="font-mono text-[10px] text-text-muted">已载入 {items.length} 笔</span>
                   </>
                 )}

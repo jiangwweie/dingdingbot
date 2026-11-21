@@ -395,7 +395,7 @@ describe('ControlsFlattenIntegration', () => {
     const activeOpBtn = container.querySelector(
       '[data-testid="danger-zone-flatten-btn"]'
     ) as HTMLButtonElement;
-    expect(container.textContent).toContain('平仓进行中 (pending) · 查看进度');
+    expect(container.textContent).toContain('平仓进行中 (待执行) · 查看进度');
 
     // 3. Clicking "查看进度" opens progress view
     await act(async () => {

@@ -75,8 +75,8 @@ describe('DangerZoneCard', () => {
 
     const { container } = renderCard({ currentOperation: mockOperation });
 
-    expect(container.textContent).toContain('进行中: exits_requested');
+    expect(container.textContent).toContain('已发出平仓指令');
     const button = container.querySelector('[data-testid="danger-zone-flatten-btn"]') as HTMLButtonElement;
-    expect(button.textContent).toContain('平仓进行中 (exits_requested) · 查看进度');
+    expect(button.textContent).toContain('平仓进行中 (已发出平仓指令) · 查看进度');
   });
 });

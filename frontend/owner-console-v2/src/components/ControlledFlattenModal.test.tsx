@@ -111,7 +111,7 @@ describe('ControlledFlattenModal', () => {
 
     const modal = document.body.querySelector('[data-testid="controlled-flatten-modal"]');
     expect(modal?.textContent).toContain('受控平仓正在执行中');
-    expect(modal?.textContent).toContain('exits_requested');
+    expect(modal?.textContent).toContain('已发出平仓指令');
     expect(modal?.textContent).toContain('owner-auth:active-op');
 
     // Submit inputs and submit button are completely absent

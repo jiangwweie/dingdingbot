@@ -120,6 +120,10 @@ def activate_static(
     root = release_root.resolve()
     if previous.parent != root:
         raise ValueError("source static release outside independent root")
+    if (previous / "dist/mobile").exists() and not all(
+        "mobile/" + name in manifest for name in MOBILE_FILES
+    ):
+        raise ValueError("static candidate must preserve the installed mobile shell")
     before = snapshot()
     target = root / commit
     if target.exists():

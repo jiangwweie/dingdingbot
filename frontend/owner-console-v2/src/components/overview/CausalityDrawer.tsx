@@ -40,14 +40,14 @@ export interface CausalityDrawerProps {
 }
 
 const STAGE_LABELS_ZH: Record<string, string> = {
-  signal: '信号 (Signal)',
-  admission: '准入评估 (Admission)',
-  entry: '入场下单 (Entry)',
-  protection: '保护安装 (Protection)',
-  tp_runner: '止盈 / Runner (TP/Runner)',
-  exit: '退出执行 (Exit)',
-  reconciliation: '账本对账 (Reconciliation)',
-  review: '事后复盘 (Review)',
+  signal: '信号',
+  admission: '准入评估',
+  entry: '入场下单',
+  protection: '保护安装',
+  tp_runner: '止盈 / Runner',
+  exit: '退出执行',
+  reconciliation: '账本对账',
+  review: '事后复盘',
 };
 
 export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
@@ -278,7 +278,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
               </span>
             </div>
 
-            {/* Price Plan Quick Bar (if available from real causality) */}
+            {/* Price Plan Quick Bar (4 aligned columns: Actual+Reference Entry, Initial Stop, Active Stop, Ticket Quantity) */}
             {causality?.price_plan && (
               <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono">
                 <div data-testid="causality-entry-price" className="rounded border border-border bg-surface p-2">
@@ -286,10 +286,9 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
                   <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
                     {priceFacts(causality.price_plan).actual}
                   </div>
-                </div>
-                <div className="rounded border border-border bg-surface p-2">
-                  <div className="text-text-muted">计划参考入场价</div>
-                  <div data-testid="causality-reference-price">{priceFacts(causality.price_plan).reference}</div>
+                  <div className="mt-0.5 text-[10px] text-text-muted">
+                    计划参考价: <span data-testid="causality-reference-price">{priceFacts(causality.price_plan).reference}</span>
+                  </div>
                 </div>
                 <div data-testid="causality-initial-stop" className="rounded border border-border bg-surface p-2">
                   <div className="text-[10px] text-text-muted uppercase">初始止损价</div>
@@ -304,7 +303,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
                   </div>
                 </div>
                 <div data-testid="causality-quantity" className="rounded border border-border bg-surface p-2">
-                  <div className="text-[10px] text-text-muted uppercase">头寸数量</div>
+                  <div className="text-[10px] text-text-muted uppercase">Ticket 数量</div>
                   <div data-testid="plan-value" className="font-bold text-text-primary mt-0.5">
                     {causality.price_plan.ticket_quantity ?? '未取得'}
                   </div>
@@ -384,7 +383,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
               <div className="py-20 text-center">
                 <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-3" />
                 <p className="text-xs text-text-secondary font-medium">
-                  正在读取 /tickets/{effectiveTicketId}/causality 真实因果链...
+                  正在读取该笔交易的真实因果链...
                 </p>
               </div>
             ) : isError || !causality ? (
@@ -704,7 +703,7 @@ export const CausalityDrawer: React.FC<CausalityDrawerProps> = ({
           {/* 4. Footer */}
           <div className="border-t border-border bg-surface-subtle p-4 flex items-center justify-between text-xs">
             <span className="text-[11px] text-text-muted">
-              遵循 L1 → L2 → L3 → L4 渐进披露 · 真实不可变因果链
+              真实不可变因果链 · 完整审计证据可在上方标签页核验
             </span>
             <button
               type="button"
