@@ -13,6 +13,7 @@ import asyncpg
 import pytest
 import pytest_asyncio
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from scripts.trading_kernel import seed_runtime_authority as seed_cli
@@ -917,13 +918,16 @@ async def test_policy_transitions_require_terminal_reviewed_acceptance_ticket(
 
 async def _insert_ticket_universe(connection: AsyncConnection) -> None:
     await connection.execute(
-        sa.insert(instruments).values(
+        pg_insert(instruments).values(
             exchange_instrument_id=_TICKET_EXCHANGE_INSTRUMENT_ID,
             venue_id="binance-usdm",
             asset_class="crypto",
             venue_symbol="ETHUSDT",
             contract_kind="perpetual",
             status="active",
+        ).on_conflict_do_update(
+            index_elements=[instruments.c.exchange_instrument_id],
+            set_={"status": "active"},
         )
     )
     await connection.execute(

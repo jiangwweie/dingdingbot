@@ -35,9 +35,12 @@ from src.trading_kernel.domain.instrument_certification import (
 )
 from src.trading_kernel.domain.orb_session_selection import (
     ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_GROUPS,
     ORB_EVENT_SPEC_IDS,
+    ORB_SELECTION_SPEC_ID,
     ORB_STATIC_MEMBERS,
     ORB_STRATEGY_GROUP_ID,
+    directional_orb_spec,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
@@ -696,17 +699,19 @@ async def _certify(
                     )
                 ).scalar_one()
             )
-            hourly_control = (await connection.execute(text("""
-                SELECT o.entry_state,s.selection_mode,s.pending_selection_mode,s.selection_epoch_id,
-                       EXISTS(SELECT 1 FROM brc_instrument_selection_specs spec
-                         WHERE spec.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
-                           AND spec.strategy_group_id='SOR-1H-001'
-                           AND spec.selection_kind='orb_session_dynamic_v1' AND spec.status='active') AS installed
+            expected_hourly_controls = {
+                group_id: directional_orb_spec(group_id).selection_spec_id
+                for group_id in ORB_DIRECTIONAL_GROUPS
+            } if revision == "0025_directional_sor" else {ORB_STRATEGY_GROUP_ID: ORB_SELECTION_SPEC_ID}
+            hourly_controls = (await connection.execute(text("""
+                SELECT o.strategy_group_id,s.selection_spec_id,o.entry_state,s.selection_mode,
+                       s.pending_selection_mode,s.selection_epoch_id,
+                       instrument.selection_kind, instrument.status AS spec_status
                   FROM brc_strategy_entry_controls_current o
                   JOIN brc_strategy_selection_control_current s USING(strategy_group_id)
-                 WHERE o.strategy_group_id='SOR-1H-001'
-                   AND s.selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1'
-            """))).mappings().one_or_none()
+                  JOIN brc_instrument_selection_specs instrument ON instrument.selection_spec_id=s.selection_spec_id
+                 WHERE o.strategy_group_id=ANY(CAST(:groups AS text[]))
+            """), {"groups": list(expected_hourly_controls)})).mappings().all()
             preserved_runtime = await read_preserved_runtime_state(connection)
             entry_restoration = await read_entry_restoration_state(
                 connection, now_ms=effective_now_ms,
@@ -1524,22 +1529,27 @@ async def _certify(
             expected_event_specs=expected_groups,
             expected_member_ids=member_ids,
         )
+    hourly_controls_match = (
+        {row["strategy_group_id"]: row["selection_spec_id"] for row in hourly_controls} == expected_hourly_controls
+        and all(
+            row["spec_status"] == "active" and row["selection_kind"] == "orb_session_dynamic_v1"
+            and row["entry_state"] == "paused" and row["selection_mode"] == "static_baseline"
+            and row["pending_selection_mode"] is None and row["selection_epoch_id"] is None
+            for row in hourly_controls
+        )
+    )
     hourly_pair_preparation = {
         "status": "pass" if (
-            hourly_control is not None and hourly_control["installed"]
-            and hourly_control["entry_state"] == "paused"
-            and hourly_control["selection_mode"] == "static_baseline"
-            and hourly_control["pending_selection_mode"] is None
-            and hourly_control["selection_epoch_id"] is None
+            hourly_controls_match
             and owner_policy_row is not None and owner_policy_row["new_entry_submit_enabled"] is False
             and not warming_universe_rows
             and _universe_manifest_matches(active_universe_manifest,
-                expected_event_specs=tuple(item for item in expected_event_specs if item[1] not in ORB_EVENT_SPEC_IDS),
+                expected_event_specs=tuple(item for item in expected_event_specs if item[1] not in hourly_events),
                 expected_member_ids=None)
         ) else "fail",
-        "strategy_entry_state": None if hourly_control is None else hourly_control["entry_state"],
-        "selection_mode": None if hourly_control is None else hourly_control["selection_mode"],
-        "pending_selection_mode": None if hourly_control is None else hourly_control["pending_selection_mode"],
+        "strategy_entry_state": "paused" if hourly_controls_match else None,
+        "selection_mode": "static_baseline" if hourly_controls_match else None,
+        "pending_selection_mode": None,
     }
     universe_identity_pass = _universe_manifest_matches(
         active_universe_manifest,

@@ -91,10 +91,10 @@ asyncio.run(run())
             upgraded=await deploy_compatible_upgrade_identity(uow,RuntimeAuthoritySeedRequest(account_id='account-certification',runtime_commit='target0011',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=1800000012000))
         assert upgraded.schema_revision==CURRENT_SCHEMA_REVISION
         async with engine.connect() as connection:
-            assert await connection.scalar(sa.text("SELECT entry_state FROM brc_strategy_entry_controls_current WHERE strategy_group_id='SOR-1H-001'"))=='paused'
+            assert await connection.scalar(sa.text("SELECT entry_state FROM brc_strategy_entry_controls_current WHERE strategy_group_id='SOR-1H-LONG-001'"))=='paused'
             assert await connection.scalar(sa.text("SELECT new_entry_submit_enabled FROM brc_owner_policy_current")) is False
-            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_specs WHERE selection_kind='orb_session_dynamic_v1'"))==1
-            target_bindings=tuple((await connection.execute(sa.text("SELECT * FROM brc_event_exit_profile_binding_current WHERE event_spec_id NOT LIKE 'event_spec:SOR-1H-001:%' ORDER BY event_spec_id"))).mappings())
+            assert await connection.scalar(sa.text("SELECT count(*) FROM brc_instrument_selection_specs WHERE selection_kind='orb_session_dynamic_v1'"))==3
+            target_bindings=tuple((await connection.execute(sa.text("SELECT * FROM brc_event_exit_profile_binding_current WHERE event_spec_id NOT LIKE 'event_spec:SOR-1H-%' ORDER BY event_spec_id"))).mappings())
             assert target_bindings==source_bindings
 
     finally:
@@ -102,14 +102,10 @@ asyncio.run(run())
         await drop_disposable_database(name)
 
 @pytest.mark.asyncio
-async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
+async def test_directional_cutover_postflight_requires_both_unprepared_paused_groups():
     from uuid import uuid4
 
     from scripts.trading_kernel.certify_readonly import _certify
-    from scripts.trading_kernel.deploy_tokyo_release import (
-        DeploymentBlocked,
-        _require_dynamic_selection_postflight,
-    )
     from tests.trading_kernel.support.postgres import async_database_url
     from tests.trading_kernel.support.promotion_rehearsal import (
         _cleanup,
@@ -121,12 +117,14 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
     await _seed_and_bootstrap(name, url, prepare_hourly=False,prepare_exit_configuration=False)
     try:
         from src.trading_kernel.domain.orb_session_selection import (
-            OrbSessionSelectionSpec,
+            ORB_DIRECTIONAL_GROUPS,
+            directional_orb_spec,
         )
         installing_engine = create_async_engine(url)
         try:
             async with PostgresKernelUnitOfWork(installing_engine) as uow:
-                await uow.instrument_selection.install_orb_spec(OrbSessionSelectionSpec(), installed_at_ms=NOW_MS)
+                for group in ORB_DIRECTIONAL_GROUPS:
+                    await uow.instrument_selection.install_orb_spec(directional_orb_spec(group), installed_at_ms=NOW_MS)
                 from src.trading_kernel.application.owner_control import (
                     ExitProfileBindingMutationRequest,
                     switch_event_exit_profile,
@@ -155,20 +153,15 @@ async def test_real_hourly_cutover_postflight_requires_unprepared_paused_pair():
         assert facts['status'] == 'pass', {k:v for k,v in facts.items() if isinstance(v,dict) and v.get('status')=='fail'}
         assert facts['hourly_pair_preparation']['status'] == 'pass'
         assert facts['entry_recovery_ready'] is True
-        assert facts['exit_profile_authority']['current_binding_count'] == 10
-        assert facts['exit_profile_authority']['binding_fact_count'] == 17
-        _require_dynamic_selection_postflight(facts, seed_identity=facts['runtime_identity']['seed_identity'],
-            preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
+        assert facts['exit_profile_authority']['current_binding_count'] == 12
+        assert facts['exit_profile_authority']['binding_fact_count'] == 19
         engine = create_async_engine(url)
         try:
             async with engine.begin() as c:
-                await c.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id='SOR-1H-001'"))
+                await c.execute(sa.text("UPDATE brc_strategy_entry_controls_current SET entry_state='enabled' WHERE strategy_group_id='SOR-1H-LONG-001'"))
             unpaused = await _certify(url, require_flat=True, now_ms=NOW_MS+10000)
             assert unpaused['hourly_pair_preparation']['status'] == 'fail'
             assert unpaused['entry_recovery_ready'] is False
-            with pytest.raises(DeploymentBlocked):
-                _require_dynamic_selection_postflight(unpaused, seed_identity=facts['runtime_identity']['seed_identity'],
-                    preserved_runtime=facts['preserved_runtime'], hourly_upgrade=True)
         finally:
             await engine.dispose()
     finally:

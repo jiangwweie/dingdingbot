@@ -72,7 +72,7 @@ export function ExitConfigurationPanel(){
  return <section className="rounded-xl border border-border bg-surface p-4 space-y-3" aria-label="TP1 与 MA50 参数">
   <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">TP1 与 MA50 参数</h2>
    <button type="button" disabled={busy} onClick={()=>void query.refetch()} className="text-sm text-brand">刷新配置</button></div>
-  <p className="text-xs text-text-secondary">按策略 Event／方向配置。六个退出绑定与三个 MA50 开关一次激活，仅作用于新交易；旧交易保持冻结方案，人工接管永久有效。</p>
+  <p className="text-xs text-text-secondary">按策略 Event／方向配置。退出配置仅影响新交易。SOR-多固定检查 BTC MA50，CPM、MI 和 MPG 的 MA50 可单独配置。</p>
   {query.isLoading?<p>读取配置中</p>:query.isError?<p role="alert">退出配置读取失败，当前无法编辑</p>:draft&&<>
    <p className="text-xs">{query.data?.current?`当前版本 ${query.data.current.revision}`:'尚未激活新版；首次激活采用已确认参数'}</p>
    <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr>{['策略／方向','TP1 倍数 R','目标比例','最小量提升','实际比例上限','BTC 4h > SMA50'].map(h=><th key={h} className="p-2 text-left">{h}</th>)}</tr></thead>

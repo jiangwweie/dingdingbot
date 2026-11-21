@@ -157,7 +157,9 @@ async def test_flat_0004_upgrade_installs_unified_tradfi_live_authority() -> Non
                     )
                 ).mappings()
             }
-            assert len(controls) == 7
+            assert len(controls) == 9
+            for group_id in ("SOR-1H-LONG-001", "SOR-1H-SHORT-001"):
+                assert controls[group_id]["entry_state"] == "paused"
             assert controls["SOR-1H-001"]["entry_state"] == "paused"
             assert controls["SOR-001"]["entry_state"] == "paused"
             assert controls["SOR-001"]["control_version"] == 2

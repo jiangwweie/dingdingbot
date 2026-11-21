@@ -358,7 +358,7 @@ async def test_postflight_recomputes_registry_identity_from_live_rows(
     result = _run_migration(database_url, "upgrade", HEAD_REVISION)
     assert result.returncode == 0, result.stderr[-4000:]
     expected_registry_hash = build_registry_semantic_hash(
-        registered_strategy_contracts()
+        registered_strategy_contracts(include_sor_split=True)
     )
     async with engine.begin() as connection:
         await connection.execute(

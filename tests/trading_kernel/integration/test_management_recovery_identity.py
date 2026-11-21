@@ -35,7 +35,7 @@ async def test_recovery_identity_is_exact_single_ticket_and_disables_both_capabi
     async with e.begin() as c:
         await c.execute(insert(runtime_profiles).values(runtime_profile_id=t.identity.runtime.runtime_profile_id,venue_id="binance-usdm",account_id=t.identity.netting_domain.account_id,environment="live",status="active",position_mode="independent_sides",updated_at_ms=1000).on_conflict_do_nothing())
         for key,value in {'runtime_commit':'a'*40,'schema_revision':CURRENT_SCHEMA_REVISION,'seed_identity':build_runtime_seed_identity(seed),
-            'registry_semantic_hash':build_registry_semantic_hash(registered_strategy_contracts())}.items():
+            'registry_semantic_hash':build_registry_semantic_hash(registered_strategy_contracts(include_sor_split=True))}.items():
             await c.execute(insert(schema_metadata).values(metadata_key=key,metadata_value=value,updated_at_ms=1000).on_conflict_do_update(index_elements=['metadata_key'],set_={'metadata_value':value}))
         await c.execute(insert(runtime_capabilities_current).values(capability_key='strategy_signal_ingest',enabled=True,certified_commit='a'*40,
             schema_revision=CURRENT_SCHEMA_REVISION,certification={'product_id':'brc-app-manual-v1'},updated_at_ms=1000).on_conflict_do_nothing())

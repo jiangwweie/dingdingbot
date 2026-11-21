@@ -262,7 +262,10 @@ async def test_flat_0003_upgrade_seeds_controls_and_pauses_entry() -> None:
                 controls = await uow.owner_controls.list_strategy_controls()
                 assert policy is not None
                 assert not policy.new_entry_submit_enabled
-                assert len(controls) == 7
+                assert len(controls) == 9
+                assert {c.strategy_group_id for c in controls if c.entry_state is StrategyEntryState.PAUSED}.issuperset(
+                    {"SOR-1H-LONG-001", "SOR-1H-SHORT-001"}
+                )
                 assert next(
                     item
                     for item in controls
