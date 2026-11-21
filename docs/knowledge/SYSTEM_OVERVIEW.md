@@ -73,7 +73,7 @@ flowchart TB
 | **BRF2-001** | Short / 1h | 反弹失败且空头未禁用；rally high | [brf2](../../src/trading_kernel/domain/detectors/brf2.py) |
 | **SOR-1H-001** | Long、Short / 1h 入场 | 独立开盘区间突破；已有 Crypto 15m 退出规则 | [sor_1h](../../src/trading_kernel/domain/detectors/sor_1h.py) |
 | **SOR-US-EQ-PERP-001** | Long、Short / 15m | TradFi 产品及 session 条件下的区间策略 | [us_equity_sor](../../src/trading_kernel/domain/detectors/us_equity_sor.py) |
-| **SOR-001** | 保留旧语义 | 永久禁止新 ENTRY，不能由同名前缀恢复 | [策略准入硬边界](../../src/trading_kernel/application/owner_control.py#L1100) |
+| **SOR-001** | 保留旧语义 | 永久禁止新 ENTRY，不能由同名前缀恢复 | [策略准入硬边界](../../src/trading_kernel/application/owner_control.py#L1105) |
 
 策略盈利性、参数优劣及实际启用状态不能由上述结构推出。
 

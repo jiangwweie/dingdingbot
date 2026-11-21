@@ -630,7 +630,9 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
     expected={"resident"}
     for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001"):
         expected.update(f"resident:{plane}:{group}" for plane in ("selection","materialization","facts"))
-    expected.update(f"resident:{plane}:SOR-1H-001" for plane in ("selection", "materialization", "facts"))
+    hourly_groups = ("SOR-1H-LONG-001", "SOR-1H-SHORT-001")
+    expected.update(f"resident:{plane}:{group}" for group in hourly_groups
+                    for plane in ("selection", "materialization", "facts"))
     # Freeze only the subprocess wall clock; resident shutdown/polling retains
     # the real monotonic clock. Both sides of the UTC 01:00 boundary are exact.
     bootstrap = (
@@ -655,7 +657,7 @@ async def test_real_static_resident_process_restarts_without_network_or_dynamic_
                     assert line,"Resident process exited before all components ticked"
                     result=json.loads(line)
                     assert result["component_id"] not in {"resident:selection","resident:materialization"},result
-                    if result["component_id"] == "resident:selection:SOR-1H-001":
+                    if result["component_id"] in {f"resident:selection:{group}" for group in hourly_groups}:
                         assert (result["status"], result["reason_code"]) == (orb_status, orb_reason), result
                     else:
                         assert result["status"] in {"not_due","no_work"},result

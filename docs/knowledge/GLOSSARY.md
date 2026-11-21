@@ -42,7 +42,7 @@
 | **Aggregate / Reducer / Effect** | 当前生命周期投影；纯事件转移；待由持久化层实现的副作用描述 | [aggregate](../../src/trading_kernel/domain/aggregate.py)、[reducer](../../src/trading_kernel/domain/reducer.py)、[effects](../../src/trading_kernel/domain/effects.py) |
 | **Unit of Work（UoW）** | 一组本地数据库改动的提交或回滚边界，不包含网络请求 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146) |
 | **Initial Stop / TP1 / Runner** | 初始保护、第一段止盈、余仓管理；均由 Ticket 冻结的规则约束 | [exit_policy](../../src/trading_kernel/domain/exit_policy.py) |
-| **ExitProfile / EventExitBinding** | 不可变退出方案；版本化的 Event→方案绑定；切换只影响新签发 | [ExitProfile](../../src/trading_kernel/domain/exit_policy.py#L190)、[绑定切换](../../src/trading_kernel/application/owner_control.py#L545) |
+| **ExitProfile / EventExitBinding** | 不可变退出方案；版本化的 Event→方案绑定；切换只影响新签发 | [ExitProfile](../../src/trading_kernel/domain/exit_policy.py#L190)、[绑定切换](../../src/trading_kernel/application/owner_control.py#L550) |
 | **OUTCOME_UNKNOWN** | 请求可能已到交易所而结果不明；不能当作拒绝或安全重发 | [未知恢复](../../src/trading_kernel/application/recover_unknown_command.py#L97) |
 | **Incident / Runtime Fence** | 安全异常与其阻断范围；版本或 schema 不匹配时隔离写者 | [incident_blocking](../../src/trading_kernel/domain/incident_blocking.py)、[runtime_fence](../../src/trading_kernel/application/runtime_fence.py) |
 | **Reconciliation** | 依据外部订单、成交和持仓核对内部状态并推进清理 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L141) |
