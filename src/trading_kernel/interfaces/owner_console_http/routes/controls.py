@@ -1214,7 +1214,6 @@ from src.trading_kernel.domain.exit_regime import BtcMa50Snapshot
 from src.trading_kernel.domain.orb_session_selection import (
     ORB_DIRECTIONAL_EVENTS,
     ORB_DIRECTIONAL_GROUPS,
-    ORB_DIRECTIONAL_LONG_EVENT,
     ORB_EVENT_SPEC_IDS,
     ORB_SELECTION_SPEC_ID,
     ORB_STRATEGY_GROUP_ID,
@@ -1314,8 +1313,10 @@ async def read_exit_configuration(request: Request) -> ExitConfigurationView:
                     else Decimal(1)
                     if sor
                     else Decimal(".5"),
-                    ma50_enabled=event == ORB_DIRECTIONAL_LONG_EVENT or (
-                        previous.ma50_enabled if previous else event in MA50_EVENTS
+                    ma50_enabled=(
+                        previous.ma50_enabled
+                        if previous is not None and previous.event_spec_id == event
+                        else event in MA50_EVENTS
                     ),
                 ).model_dump(mode="json")
             )

@@ -75,20 +75,12 @@ def test_directional_selection_specs_share_parameters_but_never_identity():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "configuration", ["missing", "unlisted", "explicitly_disabled"]
-)
-async def test_new_long_does_not_bypass_ma50_without_exact_enabled_configuration(
-    configuration,
-):
-    params = SimpleNamespace(event_spec_id=LONG, ma50_enabled=False)
-    record = {
-        "missing": None,
-        "unlisted": SimpleNamespace(intent=SimpleNamespace(events=())),
-        "explicitly_disabled": SimpleNamespace(
-            intent=SimpleNamespace(events=(params,))
-        ),
-    }[configuration]
+@pytest.mark.parametrize("configuration", ["missing", "unlisted"])
+async def test_new_long_requires_exact_exit_configuration(configuration):
+    record = (
+        None if configuration == "missing"
+        else SimpleNamespace(intent=SimpleNamespace(events=()))
+    )
     uow = SimpleNamespace(
         exit_profiles=SimpleNamespace(
             get_current_configuration=AsyncMock(return_value=record)
@@ -96,17 +88,32 @@ async def test_new_long_does_not_bypass_ma50_without_exact_enabled_configuration
         signals=SimpleNamespace(get_runtime_capability=AsyncMock(return_value=None)),
     )
     reason, proof = await check_exit_regime(
-        uow,
-        venue_id="binance-usdm",
-        account_id="seoul-test",
-        event_spec_id=LONG,
-        now_ms=1000,
+        uow, venue_id="binance-usdm", account_id="seoul-test",
+        event_spec_id=LONG, now_ms=1000,
     )
     assert reason == "exit_configuration_not_activated" and proof is None
 
 
-@pytest.mark.parametrize(("event", "enabled"), [(LONG, False), (SHORT, True)])
-def test_directional_sor_configuration_rejects_wrong_ma50_value(event, enabled):
+@pytest.mark.asyncio
+async def test_disabled_long_ma50_still_requires_matching_current_exit_binding():
+    uow = SimpleNamespace(exit_profiles=SimpleNamespace(
+        get_current_configuration=AsyncMock(return_value=SimpleNamespace(
+            intent=SimpleNamespace(events=(SimpleNamespace(event_spec_id=LONG, ma50_enabled=False),)),
+            profiles=(SimpleNamespace(event_spec_id=LONG),),
+        )),
+        get_current_binding=AsyncMock(return_value=None),
+        get_ma50_snapshot=AsyncMock(),
+    ))
+    reason, proof = await check_exit_regime(
+        uow, venue_id="binance-usdm", account_id="seoul-test",
+        event_spec_id=LONG, now_ms=1000,
+    )
+    assert reason == "exit_configuration_binding_drift" and proof is None
+    uow.exit_profiles.get_ma50_snapshot.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("event", "enabled"), [(LONG, True), (LONG, False), (SHORT, False), (SHORT, True)])
+def test_directional_sor_ma50_is_configurable_for_long_only(event, enabled):
     from src.trading_kernel.domain.exit_configuration import EventExitParameters
 
     payload = {
@@ -119,12 +126,11 @@ def test_directional_sor_configuration_rejects_wrong_ma50_value(event, enabled):
         "max_actual_fraction": Decimal(1),
         "ma50_enabled": enabled,
     }
-    with pytest.raises(ValueError, match="MA50"):
-        EventExitParameters.model_validate(payload)
-    accepted = EventExitParameters.model_validate(
-        dict(payload, ma50_enabled=not enabled)
-    )
-    assert accepted.ma50_enabled is (event == LONG)
+    if event == SHORT and enabled:
+        with pytest.raises(ValueError, match="MA50"):
+            EventExitParameters.model_validate(payload)
+    else:
+        assert EventExitParameters.model_validate(payload).ma50_enabled is enabled
 
 
 @pytest.mark.parametrize(

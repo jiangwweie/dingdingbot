@@ -20,16 +20,25 @@ function render(){node=document.createElement('div');document.body.append(node);
 async function click(text:string){const b=Array.from(node.querySelectorAll('button')).find(b=>b.textContent===text);expect(b).toBeDefined();await act(async()=>{b!.click();});}
 describe('Owner exit configuration boundary',()=>{
  it('first activation shows six independent bindings and retains original SOR quantity',async()=>{render();expect(node.querySelectorAll('tbody tr')).toHaveLength(6);expect(node.querySelector<HTMLInputElement>('[aria-label="SOR-1H-001 · LONG 目标比例"]')?.disabled).toBe(true);await click('生成服务端预览');expect(api.preview.mock.calls[0][0].events).toHaveLength(6);expect(api.activate).not.toHaveBeenCalled();});
- it('shows the split long MA50 as a fixed rule and leaves split short unfiltered',()=>{
+ it.each([true,false])('renders the saved SOR long MA50 choice (%s) and previews its opposite',async(enabled)=>{
   const split = events.map((e,i)=>i<4?e:{
    ...e,
    event_spec_id: i===4?'event_spec:SOR-1H-LONG-001:SOR-1H-LONG:v1':'event_spec:SOR-1H-SHORT-001:SOR-1H-SHORT:v1',
-   ma50_enabled:i===4,
+   ma50_enabled:i===4&&enabled,
   });
-  queryData={current:{revision:2},intent:{...intent,expected_revision:2,events:split},sources:[]};
+  const savedIntent={...intent,expected_revision:2,events:split};
+  queryData={current:{revision:2,intent:savedIntent},intent:savedIntent,sources:[]};
+  api.preview.mockImplementation(async submitted=>({...preview,intent:submitted}));
   render();
   const rows=Array.from(node.querySelectorAll('tbody tr'));
-  expect(rows.find(r=>r.textContent?.includes('SOR-多'))?.textContent).toContain('强制开启');
+  const gate=node.querySelector<HTMLInputElement>('[aria-label="SOR-多 MA50"]')!;
+  expect(gate.checked).toBe(enabled);
+  expect(gate.disabled).toBe(false);
+  act(()=>gate.click());
+  await click('生成服务端预览');
+  expect(api.preview.mock.calls[0][0].events[4].ma50_enabled).toBe(!enabled);
+  expect(api.preview.mock.calls[0][0].events[5].ma50_enabled).toBe(false);
+
   expect(rows.find(r=>r.textContent?.includes('SOR-空'))?.textContent).toContain('不适用');
   expect(rows.find(r=>r.textContent?.includes('SOR-多'))?.querySelector<HTMLInputElement>('input[aria-label$="目标比例"]')?.disabled).toBe(true);
  });

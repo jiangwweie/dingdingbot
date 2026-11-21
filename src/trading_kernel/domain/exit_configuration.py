@@ -26,7 +26,7 @@ EXIT_EVENTS = (
     "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
     "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
 )
-MA50_EVENTS = EXIT_EVENTS[:3]
+MA50_EVENTS = (*EXIT_EVENTS[:3], ORB_DIRECTIONAL_LONG_EVENT)
 DIRECTIONAL_EXIT_EVENTS = (*EXIT_EVENTS[:4], *ORB_DIRECTIONAL_EVENTS)
 EXIT_CONFIGURATION_EVENT_SETS = (frozenset(EXIT_EVENTS), frozenset(DIRECTIONAL_EXIT_EVENTS))
 
@@ -72,10 +72,7 @@ class EventExitParameters(BaseModel):
                 raise ValueError("four-strategy TP requires 0<f<=cap<=50%")
         elif self.minimum_lift or self.max_actual_fraction != 1:
             raise ValueError("SOR retains original floor quantity contract")
-        if self.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT:
-            if not self.ma50_enabled:
-                raise ValueError("MA50 is required for standalone hourly SOR LONG")
-        elif self.event_spec_id not in MA50_EVENTS and self.ma50_enabled:
+        if self.event_spec_id not in MA50_EVENTS and self.ma50_enabled:
             raise ValueError("MA50 is unsupported for this Event")
         return self
 

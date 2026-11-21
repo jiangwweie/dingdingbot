@@ -58,13 +58,13 @@ function formatPctHelper(decimalStr: string): string | null {
 }
 
 function getEventFlags(eventSpecId: string) {
-  const requiredMa50 = eventSpecId === standaloneLong;
-  const sor = eventSpecId.includes('SOR-1H-001') || requiredMa50 || eventSpecId === standaloneShort;
-  const ma =
+  const sorLong = eventSpecId === standaloneLong;
+  const sor = eventSpecId.includes('SOR-1H-001') || sorLong || eventSpecId === standaloneShort;
+  const ma = sorLong ||
     eventSpecId.includes('CPM-RO-001') ||
     eventSpecId.includes('MI-001') ||
     eventSpecId.includes('MPG-001');
-  return { sor, ma, requiredMa50 };
+  return { sor, ma, sorLong };
 }
 
 export function ExitConfigurationPanel() {
@@ -337,11 +337,11 @@ export function ExitConfigurationPanel() {
 
         {draft && (
           <>
-            {splitTransfer && <p className="text-xs text-text-secondary">首次切换继承当前退出参数。完成切换后可按原流程调整。</p>}
+            {splitTransfer && <p className="text-xs text-text-secondary">首次切换继承当前退出参数，可选择是否开启 SOR-多的 MA50。</p>}
             {/* Mobile Card List (< 768px) */}
             <div className="md:hidden space-y-2.5" data-testid="exit-config-mobile-list">
               {draft.events.map((e) => {
-                const { sor, ma, requiredMa50 } = getEventFlags(e.event_spec_id);
+                const { sor, ma, sorLong } = getEventFlags(e.event_spec_id);
                 const eventLabel = label(e.event_spec_id);
                 const targetPct = formatPctHelper(e.target_fraction);
                 const maxPct = formatPctHelper(e.max_actual_fraction);
@@ -424,13 +424,13 @@ export function ExitConfigurationPanel() {
                           <span>最小量提升{sor ? ' (原规则)' : ''}</span>
                         </label>
                         <div className="text-[11px] text-text-secondary">
-                          {requiredMa50 ? <span className="text-[11px] text-text-secondary">强制开启</span> : ma ? (
+                          {ma ? (
                             <label className="inline-flex items-center gap-1.5">
                               <input
                                 aria-label={`移动端 ${eventLabel} MA50`}
                                 type="checkbox"
                                 checked={e.ma50_enabled}
-                                disabled={isFieldLocked}
+                                disabled={sorLong ? isActionBlocked : isFieldLocked}
                                 onChange={(v) => update(e.event_spec_id, 'ma50_enabled', v.target.checked)}
                                 className="h-3.5 w-3.5 rounded border-border accent-brand"
                               />
@@ -462,7 +462,7 @@ export function ExitConfigurationPanel() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {draft.events.map((e) => {
-                    const { sor, ma, requiredMa50 } = getEventFlags(e.event_spec_id);
+                    const { sor, ma, sorLong } = getEventFlags(e.event_spec_id);
                     const eventLabel = label(e.event_spec_id);
                     const targetPct = formatPctHelper(e.target_fraction);
                     const maxPct = formatPctHelper(e.max_actual_fraction);
@@ -548,12 +548,12 @@ export function ExitConfigurationPanel() {
                           </div>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          {requiredMa50 ? <span className="text-[11px] text-text-secondary">强制开启</span> : ma ? (
+                          {ma ? (
                             <input
                               aria-label={`${eventLabel} MA50`}
                               type="checkbox"
                               checked={e.ma50_enabled}
-                              disabled={isFieldLocked}
+                              disabled={sorLong ? isActionBlocked : isFieldLocked}
                               onChange={(v) => update(e.event_spec_id, 'ma50_enabled', v.target.checked)}
                               className="h-3.5 w-3.5 rounded border-border accent-brand"
                             />
@@ -576,7 +576,7 @@ export function ExitConfigurationPanel() {
                 </summary>
                 <div className="mt-1.5 space-y-1 pl-2 border-l border-border max-w-2xl leading-relaxed">
                   <p>
-                    六个退出绑定一次激活，SOR-多固定检查 BTC MA50，CPM、MI 和 MPG 的 MA50 可单独配置，仅作用于新交易；旧交易保持冻结方案，人工接管永久有效。
+                    六个退出绑定一次激活，SOR-多、CPM、MI 和 MPG 的 BTC MA50 可单独配置，仅作用于新交易；旧交易保持冻结方案，人工接管永久有效。
                   </p>
                   <p>
                     比例以小数填写（如 0.05 表示 5%）。Runner、保本、保护与时间规则从原策略继承；激活不改变策略暂停状态或全局开仓开关。
@@ -833,7 +833,7 @@ export function ExitConfigurationPanel() {
         onOpenChange={setOpen}
         title="激活退出配置"
         description="仅影响新交易；不恢复暂停策略，不恢复人工票自动管理。"
-        confirmLabel="确认激活六退出及三门槛"
+        confirmLabel="确认激活退出配置"
         expectedVersion={preview?.source_configuration_revision}
         isSubmitting={busy}
         isUnknownResult={!!pending}

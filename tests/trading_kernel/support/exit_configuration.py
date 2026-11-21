@@ -116,7 +116,7 @@ async def install_approved_exit_configuration_in_uow(
                     else Decimal(".05"),
                     minimum_lift=not sor,
                     max_actual_fraction=Decimal(1) if sor else Decimal(".5"),
-                    ma50_enabled=event in (*MA50_EVENTS, ORB_DIRECTIONAL_LONG_EVENT),
+                    ma50_enabled=event in MA50_EVENTS,
                 )
             )
         intent = ExitConfigurationIntent(

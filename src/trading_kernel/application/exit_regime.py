@@ -7,7 +7,6 @@ from src.trading_kernel.domain.exit_configuration import EXIT_EVENTS
 from src.trading_kernel.domain.exit_regime import RegimeAdmissionProof
 from src.trading_kernel.domain.orb_session_selection import (
     ORB_DIRECTIONAL_EVENTS,
-    ORB_DIRECTIONAL_LONG_EVENT,
     ORB_EVENT_SPEC_IDS,
 )
 
@@ -24,7 +23,6 @@ async def check_exit_regime(
         venue_id=venue_id, account_id=account_id
     )
     requires_configuration = event_spec_id in ORB_DIRECTIONAL_EVENTS
-    requires_ma50 = event_spec_id == ORB_DIRECTIONAL_LONG_EVENT
     if current is None:
         if requires_configuration:
             return "exit_configuration_not_activated", None
@@ -39,7 +37,7 @@ async def check_exit_regime(
     parameters = next(
         (e for e in current.intent.events if e.event_spec_id == event_spec_id), None
     )
-    if parameters is None or (requires_ma50 and not parameters.ma50_enabled):
+    if parameters is None:
         retired_hourly_event = event_spec_id in ORB_EVENT_SPEC_IDS and any(
             item.event_spec_id in ORB_DIRECTIONAL_EVENTS for item in current.intent.events
         )
