@@ -91,7 +91,10 @@ async def preview_exit_configuration(
             sor = item.event_spec_id in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)
             if (
                 item.reward_multiple != (Decimal("1.2") if sor else Decimal(1))
-                or item.ma50_enabled != (item.event_spec_id in (*MA50_EVENTS, ORB_DIRECTIONAL_LONG_EVENT))
+                or (
+                    item.event_spec_id != ORB_DIRECTIONAL_LONG_EVENT
+                    and item.ma50_enabled != (item.event_spec_id in MA50_EVENTS)
+                )
                 or (
                     not sor
                     and (
@@ -160,7 +163,10 @@ async def preview_exit_configuration(
                 or parameters.target_fraction != old.target_fraction
                 or parameters.minimum_lift != old.minimum_lift
                 or parameters.max_actual_fraction != old.max_actual_fraction
-                or parameters.ma50_enabled != (parameters.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT or old.ma50_enabled)
+                or (
+                    parameters.event_spec_id != ORB_DIRECTIONAL_LONG_EVENT
+                    and parameters.ma50_enabled != old.ma50_enabled
+                )
             ):
                 raise OwnerControlBlocked("split_exit_configuration_must_preserve_effective_terms")
         configuration_id = (

@@ -2049,7 +2049,10 @@ def _validate_owner_exit_revisions(
                         or parameters.target_fraction != old.target_fraction
                         or parameters.minimum_lift != old.minimum_lift
                         or parameters.max_actual_fraction != old.max_actual_fraction
-                        or parameters.ma50_enabled != (lineage.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT or old.ma50_enabled)
+                        or (
+                            lineage.event_spec_id != ORB_DIRECTIONAL_LONG_EVENT
+                            and parameters.ma50_enabled != old.ma50_enabled
+                        )
                     ):
                         return False
                 if not (split_transfer and lineage.event_spec_id in ORB_DIRECTIONAL_EVENTS) and (

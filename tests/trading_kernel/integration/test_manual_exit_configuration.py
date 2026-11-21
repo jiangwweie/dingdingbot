@@ -639,8 +639,9 @@ async def test_exit_configuration_refuses_other_account_even_with_valid_binding_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_long_ma50", [True, False])
 async def test_split_configuration_preserves_effective_sor_exit_terms_instead_of_seed_defaults(
-    lifecycle_engine,
+    lifecycle_engine, initial_long_ma50,
 ):
     from src.trading_kernel.application.owner_control import OwnerControlBlocked
     from src.trading_kernel.domain.exit_configuration import EventExitParameters
@@ -693,7 +694,7 @@ async def test_split_configuration_preserves_effective_sor_exit_terms_instead_of
                 "event_spec_id": event_id,
                 "expected_binding_id": current.exit_binding_id,
                 "expected_binding_revision": current.projection_version,
-                "ma50_enabled": event_id == ORB_DIRECTIONAL_EVENTS[0] or parameters.ma50_enabled,
+                "ma50_enabled": initial_long_ma50 if event_id == ORB_DIRECTIONAL_EVENTS[0] else parameters.ma50_enabled,
             }))
         proposal = ExitConfigurationIntent(account_id="manual-account", expected_revision=original.revision, events=tuple(events))
         preview = await preview_exit_configuration(uow, intent=proposal, now_ms=4000)
@@ -722,11 +723,56 @@ async def test_split_configuration_preserves_effective_sor_exit_terms_instead_of
         assert (await check_exit_regime(
             uow, venue_id="binance-usdm", account_id="manual-account",
             event_spec_id=ORB_DIRECTIONAL_EVENTS[0], now_ms=4200,
-        ))[0] == "ma50_unavailable"
+        ))[0] == ("ma50_unavailable" if initial_long_ma50 else None)
         assert (await check_exit_regime(
             uow, venue_id="binance-usdm", account_id="manual-account",
             event_spec_id=ORB_DIRECTIONAL_EVENTS[1], now_ms=4200,
         ))[0] is None
+
+        # The activated revision, including a deliberate opt-out, remains authoritative.
+        async def set_long_ma50(record, enabled, now_ms):
+            items = []
+            for item in record.intent.events:
+                binding = await uow.exit_profiles.get_current_binding(item.event_spec_id)
+                items.append(EventExitParameters.model_validate({
+                    **item.model_dump(),
+                    "expected_binding_id": binding.exit_binding_id,
+                    "expected_binding_revision": binding.projection_version,
+                    "ma50_enabled": enabled if item.event_spec_id == ORB_DIRECTIONAL_EVENTS[0] else item.ma50_enabled,
+                }))
+            target = record.intent.model_copy(update={"expected_revision": record.revision, "events": tuple(items)})
+            proposed = await preview_exit_configuration(uow, intent=target, now_ms=now_ms)
+            return await activate_exit_configuration(
+                uow, request=ActivateExitConfigurationRequest(
+                    expected_version=record.revision, intent=target, preview_digest=proposed.preview_digest,
+                    preview_valid_until_ms=proposed.valid_until_ms, reason="test independent SOR long MA50",
+                    idempotency_key=f"test-sor-ma50-{enabled}", owner_identity="owner", now_ms=now_ms + 10,
+                ), authentication_strength="totp_step_up",
+            )
+
+        off = await set_long_ma50(split, False, 4300) if initial_long_ma50 else split
+        reason, proof = await check_exit_regime(
+            uow, venue_id="binance-usdm", account_id="manual-account",
+            event_spec_id=ORB_DIRECTIONAL_EVENTS[0], now_ms=4400,
+        )
+        assert reason is None and proof is not None
+        assert proof.configuration_revision == off.revision
+        assert not proof.enabled and proof.snapshot is None
+        assert await uow.exit_profiles.get_configuration(split.configuration_id) == split
+        # A subsequent revision can re-enable the gate before any new entry.
+        restored = await set_long_ma50(off, True, 4500)
+        reason, proof = await check_exit_regime(
+            uow, venue_id="binance-usdm", account_id="manual-account",
+            event_spec_id=ORB_DIRECTIONAL_EVENTS[0], now_ms=4600,
+        )
+        assert reason == "ma50_unavailable" and proof is not None and proof.enabled
+        assert proof.configuration_revision == restored.revision
+        for before, after in zip(split.intent.events, off.intent.events, strict=True):
+            assert before.model_dump(exclude={"expected_binding_id", "expected_binding_revision", "ma50_enabled"}) == after.model_dump(
+                exclude={"expected_binding_id", "expected_binding_revision", "ma50_enabled"}
+            )
+            if before.event_spec_id != ORB_DIRECTIONAL_EVENTS[0]:
+                assert before.ma50_enabled == after.ma50_enabled
 
     from scripts.trading_kernel.certify_readonly import _exit_profile_authority_manifest
     from src.trading_kernel.infrastructure.pg_models import (
