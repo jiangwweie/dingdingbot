@@ -708,8 +708,8 @@ function handleMockApiRequest(method: string, urlStr: string): Response | null {
       'MI-001:MI-LONG:v3',
       'MPG-001:MPG-LONG:v3',
       'BRF2-001:BRF2-SHORT:v3',
-      'SOR-1H-001:SOR-1H-LONG:v1',
-      'SOR-1H-001:SOR-1H-SHORT:v1',
+      'SOR-1H-LONG-001:SOR-1H-LONG:v1',
+      'SOR-1H-SHORT-001:SOR-1H-SHORT:v1',
     ].map((e, i) => ({
       event_spec_id: `event_spec:${e}`,
       expected_binding_id: `binding-${i}`,
@@ -718,7 +718,7 @@ function handleMockApiRequest(method: string, urlStr: string): Response | null {
       target_fraction: i < 4 ? '0.05' : '0.5',
       minimum_lift: i < 4,
       max_actual_fraction: i < 4 ? '0.5' : '1',
-      ma50_enabled: i < 3,
+      ma50_enabled: i < 3 || i === 4,
     }));
     return new Response(
       JSON.stringify({
@@ -749,8 +749,8 @@ function handleMockApiRequest(method: string, urlStr: string): Response | null {
       'MI-001:MI-LONG:v3',
       'MPG-001:MPG-LONG:v3',
       'BRF2-001:BRF2-SHORT:v3',
-      'SOR-1H-001:SOR-1H-LONG:v1',
-      'SOR-1H-001:SOR-1H-SHORT:v1',
+      'SOR-1H-LONG-001:SOR-1H-LONG:v1',
+      'SOR-1H-SHORT-001:SOR-1H-SHORT:v1',
     ].map((e, i) => ({
       event_spec_id: `event_spec:${e}`,
       expected_binding_id: `binding-${i}`,
@@ -759,7 +759,7 @@ function handleMockApiRequest(method: string, urlStr: string): Response | null {
       target_fraction: i < 4 ? '0.05' : '0.5',
       minimum_lift: i < 4,
       max_actual_fraction: i === 3 ? '0.4' : i < 4 ? '0.5' : '1',
-      ma50_enabled: i === 1 ? false : i < 3,
+      ma50_enabled: i === 1 || i === 4 ? false : i < 3,
     }));
     return new Response(
       JSON.stringify({

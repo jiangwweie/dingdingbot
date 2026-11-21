@@ -28,16 +28,21 @@ describe('Owner exit configuration boundary',()=>{
   });
   const savedIntent={...intent,expected_revision:2,events:split};
   queryData={current:{revision:2,intent:savedIntent},intent:savedIntent,sources:[]};
-  api.preview.mockImplementation(async submitted=>({...preview,intent:submitted}));
+  api.preview.mockImplementation(async submitted=>({...preview,intent:submitted,profiles:submitted.events.map((ev:typeof events[number])=>({event_spec_id:ev.event_spec_id,profile:{tp1:{reward_multiple:ev.reward_multiple,quantity_fraction:ev.target_fraction},execution:{quantity_policy:ev.minimum_lift?'target_floor_then_minimum':'floor_only'}}}))}));
   render();
   const rows=Array.from(node.querySelectorAll('tbody tr'));
   const gate=node.querySelector<HTMLInputElement>('[aria-label="SOR-多 MA50"]')!;
   expect(gate.checked).toBe(enabled);
   expect(gate.disabled).toBe(false);
+  const mobileGate=node.querySelector<HTMLInputElement>('[aria-label="移动端 SOR-多 MA50"]')!;
+  expect(mobileGate.checked).toBe(enabled);
+  expect(mobileGate.disabled).toBe(false);
   act(()=>gate.click());
   await click('生成服务端预览');
+  expect(mobileGate.checked).toBe(!enabled);
   expect(api.preview.mock.calls[0][0].events[4].ma50_enabled).toBe(!enabled);
   expect(api.preview.mock.calls[0][0].events[5].ma50_enabled).toBe(false);
+  expect(node.textContent).toContain(`MA50 门槛: ${enabled?'开启 → 关闭':'关闭 → 开启'}`);
 
   expect(rows.find(r=>r.textContent?.includes('SOR-空'))?.textContent).toContain('不适用');
   expect(rows.find(r=>r.textContent?.includes('SOR-多'))?.querySelector<HTMLInputElement>('input[aria-label$="目标比例"]')?.disabled).toBe(true);
