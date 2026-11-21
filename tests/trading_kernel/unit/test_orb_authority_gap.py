@@ -124,6 +124,44 @@ async def test_hourly_gap_replays_only_matching_pair_and_hourly_path(through, ex
     assert tuple(r.first_natural_trigger_at_ms for r in results) == expected
 
 
+
+@pytest.mark.asyncio
+async def test_standalone_hourly_audit_preserves_first_trigger_without_opposite_scope():
+    from src.trading_kernel.domain.orb_session_selection import directional_orb_spec
+
+    spec = directional_orb_spec("SOR-1H-LONG-001")
+    opposite = directional_orb_spec("SOR-1H-SHORT-001")
+    event, = spec.event_spec_ids
+    audit = AuthorityGapAudit.model_validate({
+        **pending_audit().model_dump(), "selection_spec_id": spec.selection_spec_id
+    })
+
+    class Market:
+        async def fetch_closed_candles(self, request):
+            assert request.timeframe == "1h"
+            return tuple(
+                ClosedCandle(
+                    open_time_ms=D + i * H, close_time_ms=D + (i + 1) * H,
+                    open=Decimal(100), high=Decimal(103 if i else 101), low=Decimal(99),
+                    close=Decimal(102 if i else 100), volume=Decimal(100),
+                )
+                for i in range(request.limit)
+            )
+
+    scope = AuthorityGapScope(event_spec_id=event, exchange_instrument_id="BTCUSDT")
+    source = PublicMarketAuthorityGapAuditSource(Market())
+    results = await source.evaluate_authority_gap(AuthorityGapAuditEvaluationRequest(
+        audit=audit, scopes=(scope,), audited_through_close_time_ms=D + 2 * H,
+    ))
+    assert len(results) == 1 and results[0].scope == scope
+    assert results[0].first_natural_trigger_at_ms == D + 2 * H
+    with pytest.raises(RuntimeError, match="exact Selection identity"):
+        await source.evaluate_authority_gap(AuthorityGapAuditEvaluationRequest(
+            audit=audit, scopes=(scope.model_copy(update={"event_spec_id": opposite.event_spec_ids[0]}),),
+            audited_through_close_time_ms=D + 2 * H,
+        ))
+
+
 def planning_facts(**updates):
     values = {
         "selection_spec_id": ORB_SELECTION_SPEC_ID,
@@ -263,7 +301,7 @@ async def test_static_intent_after_last_hour_does_not_create_generation_or_vacuu
     from src.trading_kernel.domain.selection_authority import (
         MaterializationGenerationState,
     )
-    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long'),))),
+    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',selection_spec_id=ORB_SELECTION_SPEC_ID,strategy_group_id='SOR-1H-001',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long',event_spec_id='event_spec:SOR-1H-001:SOR-1H-LONG:v1',position_side='long'),))),
         get_materialization_generation=AsyncMock(return_value=None if state=='absent' else SimpleNamespace(lifecycle_state=MaterializationGenerationState.DESIRED,projection_version=2)),
         get_current_entry_vacuum=AsyncMock(return_value=None),add_pending_materialization_generation=AsyncMock(),open_generation_entry_vacuum=AsyncMock(),get_current_authority_projection=AsyncMock(return_value=None))
     uow=SimpleNamespace(instrument_selection=repo,strategy_universes=SimpleNamespace(get_members=AsyncMock(return_value=tuple(sorted(f'binance-usdm:{m}USDT:perpetual' for m in ('BTC','ETH','BNB','SOL','XRP','DOGE','ADA')))),materialization_slot_available=AsyncMock(return_value=True)))
@@ -285,7 +323,7 @@ async def test_static_retry_does_not_abandon_targets_before_previous_fence_is_sa
     )
     from src.trading_kernel.domain.strategy_entry_vacuum import StrategyEntryVacuumState
     prior=SimpleNamespace(session_start_ms=D if fault=='not_older' else D-86400000,materialization_generation_id='old')
-    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long'),))),
+    repo=SimpleNamespace(get_orb_static_baseline=AsyncMock(return_value=SimpleNamespace(rollback_baseline_id='baseline',selection_spec_id=ORB_SELECTION_SPEC_ID,strategy_group_id='SOR-1H-001',strategy_version_id='sgv:SOR-1H-001:v1',semantic_digest='sha256:'+'a'*64,source_events=(SimpleNamespace(universe_version_id='baseline:long',event_spec_id='event_spec:SOR-1H-001:SOR-1H-LONG:v1',position_side='long'),))),
         get_materialization_generation=AsyncMock(side_effect=[None,prior]),get_current_authority_projection=AsyncMock(return_value=None),
         get_current_entry_vacuum=AsyncMock(return_value=SimpleNamespace(entry_vacuum_id='fence',source_generation_id='old',
             state=StrategyEntryVacuumState.RECONFIGURING,drained_at_ms=None if fault=='undrained' else D-H,resolved_at_ms=None)),

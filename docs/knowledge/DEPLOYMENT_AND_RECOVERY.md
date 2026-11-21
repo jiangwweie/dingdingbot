@@ -58,7 +58,7 @@ flowchart TB
     Local[本地人工产品发布控制] -->|SSH 与人工产品正式脚本| Seoul
 ```
 
-**这张图表达仓库声明的逻辑部署关系，没有声称本轮核对了机器上的进程、数据库安装方式或网络端点。**共同数据库的具体服务位置以机器配置为准。（来源：[systemd Observation](../../deploy/systemd/brc-trading-kernel-observation-worker.service)、[API service](../../deploy/owner-console/systemd/brc-owner-console-api.service)、[Nginx](../../deploy/owner-console/nginx/owner-console.locations.conf)、[启动装配](../../scripts/trading_kernel/run_observation_worker_once.py#L98)）
+**这张图表达仓库声明的逻辑部署关系，没有声称本轮核对了机器上的进程、数据库安装方式或网络端点。**共同数据库的具体服务位置以机器配置为准。（来源：[systemd Observation](../../deploy/systemd/brc-trading-kernel-observation-worker.service)、[API service](../../deploy/owner-console/systemd/brc-owner-console-api.service)、[Nginx](../../deploy/owner-console/nginx/owner-console.locations.conf)、[启动装配](../../scripts/trading_kernel/run_observation_worker_once.py#L102)）
 
 ## 服务、入口与配置责任
 

@@ -276,7 +276,11 @@ async def controls(request: Request) -> dict:
             .mappings()
             .all()
         )
-    active = {"CPM-RO-001", "MI-001", "MPG-001", "BRF2-001", "SOR-1H-001"}
+    active = {"CPM-RO-001", "MI-001", "MPG-001", "BRF2-001", "SOR-1H-001",
+              "SOR-1H-LONG-001", "SOR-1H-SHORT-001"}
+    groups = {x["strategy_group_id"] for x in strategies}
+    if groups.issuperset({"SOR-1H-LONG-001", "SOR-1H-SHORT-001"}):
+        active.remove("SOR-1H-001")
     return serial(
         {
             "global": dict(policy[0]),
@@ -351,6 +355,8 @@ async def strategy_control(request: Request, body: SignedBody) -> dict:
         "MPG-001",
         "BRF2-001",
         "SOR-1H-001",
+        "SOR-1H-LONG-001",
+        "SOR-1H-SHORT-001",
     }:
         raise HTTPException(422, "invalid_strategy_control")
     now = get_clock_ms(request)

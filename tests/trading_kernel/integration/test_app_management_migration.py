@@ -24,7 +24,7 @@ async def test_app_management_migration_preserves_source_rows():
             before={}
             for table,cols in tables.items():
                 before[table]=sorted((dict(r) for r in (await c.execute(sa.text('SELECT '+','.join(cols)+' FROM '+table))).mappings()),key=str)
-        await asyncio.to_thread(run_alembic,url,'upgrade','head')
+        await asyncio.to_thread(run_alembic,url,'upgrade','0024_owner_cooperation')
         async with engine.connect() as c:
             for table,cols in tables.items():
                 after=sorted((dict(r) for r in (await c.execute(sa.text('SELECT '+','.join(cols)+' FROM '+table))).mappings()),key=str)

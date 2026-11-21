@@ -80,6 +80,10 @@ from src.trading_kernel.domain.instrument_certification import (
 from src.trading_kernel.domain.instrument_identity import (
     parse_binance_usdm_instrument_id,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    daily_event_spec_ids,
+    is_hourly_orb_spec,
+)
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
@@ -94,6 +98,7 @@ from src.trading_kernel.domain.selection_authority import (
     selected_member_set_digest,
     static_recovery_is_first_activation_source,
 )
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.strategy_universe import (
     MAX_UNIVERSE_MEMBERS,
     StrategyUniverseVersion,
@@ -658,12 +663,12 @@ class PostgresStrategyUniverseRepository:
         if request.operation is UniverseActivationOperation.ACTIVATE_DYNAMIC_PAIR:
             return await self._activate_dynamic_pair(
                 request=request,
-                long_target=target,
+                primary_target=target,
             )
         if request.operation is UniverseActivationOperation.FALLBACK_PREVIOUS:
             return await self._fallback_previous_pair(
                 request=request,
-                previous_long=target,
+                primary_previous=target,
             )
         if request.operation in {UniverseActivationOperation.STAGE_DYNAMIC, UniverseActivationOperation.CERTIFY_STAGED}:
             return await self._try_stage_dynamic(
@@ -1305,7 +1310,10 @@ class PostgresStrategyUniverseRepository:
             ).order_by(instrument_selection_spec_events.c.event_spec_id).limit(3))).scalars())
         if spec is None or spec["status"] != "active" or target["event_spec_id"] not in expected_events or (
             (spec["selection_kind"] == "generic_dynamic_v1" and len(expected_events) != 1)
-            or (spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"} and len(expected_events) != 2)
+            or (
+                spec["selection_kind"] in {"sor_dynamic_v0", "orb_session_dynamic_v1"}
+                and expected_events != tuple(sorted(daily_event_spec_ids(generation["selection_spec_id"])))
+            )
         ):
             return _not_ready_activation(target=target,current=None,reason_code="DYNAMIC_GENERATION_IDENTITY_CONFLICT")
         if target["source_kind"]=="static_baseline" and spec["selection_kind"] not in {"generic_dynamic_v1","orb_session_dynamic_v1"}:
@@ -1481,19 +1489,19 @@ class PostgresStrategyUniverseRepository:
         self,
         *,
         request: UniverseActivationRequest,
-        long_target: RowMapping,
+        primary_target: RowMapping,
     ) -> UniverseActivationResult:
         generation_id = request.materialization_generation_id
-        short_target_id = request.paired_universe_version_id
+        secondary_target_id = request.paired_universe_version_id
         authority = request.selection_authority
-        if generation_id is None or short_target_id is None or authority is None:
+        if generation_id is None or authority is None or authority.authorized_pair is None:
             raise UniverseInstallConflict("DYNAMIC_PAIR_REQUEST_INCOMPLETE")
-        short_target = (
+        secondary_target = None if secondary_target_id is None else (
             await self._connection.execute(
                 sa.select(strategy_universe_versions)
                 .where(
                     strategy_universe_versions.c.universe_version_id
-                    == short_target_id
+                    == secondary_target_id
                 )
                 .with_for_update(of=strategy_universe_versions)
                 .limit(1)
@@ -1557,8 +1565,8 @@ class PostgresStrategyUniverseRepository:
             )
         ).mappings().one_or_none()
         if (
-            short_target is None
-            or generation is None
+            (secondary_target_id is not None and secondary_target is None)
+            or generation["selection_spec_id"] != authority.selection_spec_id
             or vacuum is None
             or audit is None
             or owner_control is None
@@ -1577,20 +1585,14 @@ class PostgresStrategyUniverseRepository:
             != authority.first_eligible_close_time_ms
             or authority.authority_outcome.value != "ACTIVE_NEW"
             or authority.materialization_generation_id != generation_id
-            or authority.authorized_pair is None
-            or authority.authorized_pair.long_universe_version_id
-            != request.universe_version_id
-            or authority.authorized_pair.short_universe_version_id
-            != short_target_id
         ):
             raise UniverseInstallConflict("DYNAMIC_PAIR_AUTHORITY_CONFLICT")
-        if (
-            long_target["source_kind"] != authority.selection_mode.value
-            or short_target["source_kind"] != authority.selection_mode.value
-            or long_target["materialization_generation_id"] != generation_id
-            or short_target["materialization_generation_id"] != generation_id
-            or long_target["lifecycle_state"] != "staged"
-            or short_target["lifecycle_state"] != "staged"
+        targets = (primary_target,) if secondary_target is None else (primary_target, secondary_target)
+        if any(
+            target["source_kind"] != authority.selection_mode.value
+            or target["materialization_generation_id"] != generation_id
+            or target["lifecycle_state"] != "staged"
+            for target in targets
         ):
             raise UniverseInstallConflict("DYNAMIC_PAIR_TARGET_CONFLICT")
         target_rows = (
@@ -1606,51 +1608,39 @@ class PostgresStrategyUniverseRepository:
                 .with_for_update(of=strategy_universe_materialization_targets)
             )
         ).mappings().all()
+        events = daily_event_spec_ids(authority.selection_spec_id)
         if (
-            len(target_rows) != 2
-            or target_rows[0]["event_spec_id"] != long_target["event_spec_id"]
-            or target_rows[1]["event_spec_id"] != short_target["event_spec_id"]
-            or target_rows[0]["expected_member_set_digest"]
-            != target_rows[1]["expected_member_set_digest"]
+            tuple(row["event_spec_id"] for row in target_rows) != events
+            or tuple(target["event_spec_id"] for target in targets) != events
+            or len({row["expected_member_set_digest"] for row in target_rows}) != 1
         ):
             raise UniverseInstallConflict("DYNAMIC_PAIR_TARGET_CONTRACT_CONFLICT")
-        long_members = await self.get_members(request.universe_version_id)
-        short_members = await self.get_members(short_target_id)
-        if (
-            long_members != short_members
-            or selected_member_set_digest(long_members)
-            != target_rows[0]["expected_member_set_digest"]
-        ):
-            raise UniverseInstallConflict("DYNAMIC_PAIR_MEMBER_DIGEST_CONFLICT")
-        previous_pair = (
-            str(generation["previous_long_universe_version_id"]),
-            str(generation["previous_short_universe_version_id"]),
-        )
+        target_ids = authority.authorized_pair.universe_ids
+        for target_id in target_ids:
+            members = await self.get_members(target_id)
+            if selected_member_set_digest(members) != target_rows[0]["expected_member_set_digest"]:
+                raise UniverseInstallConflict("DYNAMIC_PAIR_MEMBER_DIGEST_CONFLICT")
         current_rows = (
             await self._connection.execute(
                 sa.select(strategy_universe_current)
-                .where(
-                    strategy_universe_current.c.event_spec_id.in_(
-                        (long_target["event_spec_id"], short_target["event_spec_id"])
-                    )
-                )
+                .where(strategy_universe_current.c.event_spec_id.in_(events))
                 .order_by(strategy_universe_current.c.event_spec_id)
                 .with_for_update(of=strategy_universe_current)
             )
         ).mappings().all()
         current_by_event = {str(row["event_spec_id"]): row for row in current_rows}
-        previous_long = current_by_event.get(str(long_target["event_spec_id"]))
-        previous_short = current_by_event.get(str(short_target["event_spec_id"]))
-        if (
-            previous_long is None
-            or previous_short is None
-            or previous_long["universe_version_id"] != previous_pair[0]
-            or previous_short["universe_version_id"] != previous_pair[1]
-            or not await self._current_universe_identity_is_complete(previous_long)
-            or not await self._current_universe_identity_is_complete(previous_short)
-        ):
-            raise UniverseInstallConflict("DYNAMIC_PREVIOUS_PAIR_CONFLICT")
-        for target in (long_target, short_target):
+        previous: list[RowMapping] = []
+        for event_id in events:
+            current = current_by_event.get(event_id)
+            side = strategy_contract_for(event_id).position_side
+            if (
+                current is None
+                or current["universe_version_id"] != generation[f"previous_{side}_universe_version_id"]
+                or not await self._current_universe_identity_is_complete(current)
+            ):
+                raise UniverseInstallConflict("DYNAMIC_PREVIOUS_PAIR_CONFLICT")
+            previous.append(current)
+        for target in targets:
             readiness = await self._activation_readiness(
                 target=target,
                 attempted_at_ms=request.attempted_at_ms,
@@ -1664,7 +1654,7 @@ class PostgresStrategyUniverseRepository:
             if blocker is not None:
                 raise UniverseInstallConflict(blocker)
 
-        previous_ids = previous_pair
+        previous_ids = tuple(row["universe_version_id"] for row in previous)
         await self._connection.execute(
             sa.update(runtime_scopes_current)
             .where(runtime_scopes_current.c.universe_version_id.in_(previous_ids))
@@ -1682,7 +1672,6 @@ class PostgresStrategyUniverseRepository:
                 updated_at_ms=request.attempted_at_ms,
             )
         )
-        target_ids = (request.universe_version_id, short_target_id)
         await self._connection.execute(
             sa.update(runtime_scopes_current)
             .where(runtime_scopes_current.c.universe_version_id.in_(target_ids))
@@ -1716,10 +1705,7 @@ class PostgresStrategyUniverseRepository:
                 activated_at_ms=request.attempted_at_ms,
             )
         )
-        for target, current in (
-            (long_target, previous_long),
-            (short_target, previous_short),
-        ):
+        for target, current in zip(targets, previous, strict=True):
             pointer = await self._connection.execute(
                 sa.update(strategy_universe_current)
                 .where(
@@ -1768,8 +1754,8 @@ class PostgresStrategyUniverseRepository:
                 event_sequence=6,
                 event_type="ACTIVE",
                 payload={
-                    "long_universe_version_id": request.universe_version_id,
-                    "short_universe_version_id": short_target_id,
+                    "long_universe_version_id": authority.authorized_pair.long_universe_version_id,
+                    "short_universe_version_id": authority.authorized_pair.short_universe_version_id,
                 },
                 occurred_at_ms=request.attempted_at_ms,
             )
@@ -1839,31 +1825,31 @@ class PostgresStrategyUniverseRepository:
         return UniverseActivationResult(
             status=UniverseActivationStatus.ACTIVATED,
             reason_code=None,
-            event_spec_id=str(long_target["event_spec_id"]),
+            event_spec_id=str(primary_target["event_spec_id"]),
             universe_version_id=request.universe_version_id,
-            previous_universe_version_id=previous_pair[0],
-            activation_generation=int(previous_long["activation_generation"]) + 1,
+            previous_universe_version_id=previous_ids[0],
+            activation_generation=int(previous[0]["activation_generation"]) + 1,
             activated_at_ms=request.attempted_at_ms,
-            paired_universe_version_id=short_target_id,
+            paired_universe_version_id=secondary_target_id,
         )
 
     async def _fallback_previous_pair(
         self,
         *,
         request: UniverseActivationRequest,
-        previous_long: RowMapping,
+        primary_previous: RowMapping,
     ) -> UniverseActivationResult:
         generation_id = request.materialization_generation_id
-        previous_short_id = request.paired_universe_version_id
+        secondary_previous_id = request.paired_universe_version_id
         authority = request.selection_authority
-        if generation_id is None or previous_short_id is None or authority is None:
+        if generation_id is None or authority is None or authority.authorized_pair is None:
             raise UniverseInstallConflict("FALLBACK_PREVIOUS_REQUEST_INCOMPLETE")
-        previous_short = (
+        secondary_previous = None if secondary_previous_id is None else (
             await self._connection.execute(
                 sa.select(strategy_universe_versions)
                 .where(
                     strategy_universe_versions.c.universe_version_id
-                    == previous_short_id
+                    == secondary_previous_id
                 )
                 .with_for_update(of=strategy_universe_versions)
                 .limit(1)
@@ -1926,15 +1912,21 @@ class PostgresStrategyUniverseRepository:
                 .limit(1)
             )
         ).mappings().one_or_none()
+        previous = (
+            (primary_previous,) if secondary_previous is None
+            else (primary_previous, secondary_previous)
+        )
+        events = daily_event_spec_ids(authority.selection_spec_id)
+        if (
+            tuple(row["event_spec_id"] for row in previous) != events
+            or generation["selection_spec_id"] != authority.selection_spec_id
+        ):
+            raise UniverseInstallConflict("FALLBACK_PREVIOUS_PAIR_CONFLICT")
         current_rows = (
             await self._connection.execute(
                 sa.select(strategy_universe_current)
                 .where(
-                    strategy_universe_current.c.event_spec_id.in_(
-                        (previous_long["event_spec_id"], previous_short["event_spec_id"])
-                        if previous_short is not None
-                        else (previous_long["event_spec_id"],)
-                    )
+                    strategy_universe_current.c.event_spec_id.in_(events)
                 )
                 .order_by(strategy_universe_current.c.event_spec_id)
                 .with_for_update(of=strategy_universe_current)
@@ -1955,37 +1947,30 @@ class PostgresStrategyUniverseRepository:
             return UniverseActivationResult(
                 status=UniverseActivationStatus.FALLBACK_PREVIOUS,
                 reason_code=None,
-                event_spec_id=str(previous_long["event_spec_id"]),
+                event_spec_id=str(primary_previous["event_spec_id"]),
                 universe_version_id=request.universe_version_id,
                 previous_universe_version_id=request.universe_version_id,
                 activation_generation=int(current_rows[0]["activation_generation"]),
                 activated_at_ms=int(vacuum["resolved_at_ms"]),
-                paired_universe_version_id=previous_short_id,
+                paired_universe_version_id=secondary_previous_id,
             )
         current_by_event = {str(row["event_spec_id"]): row for row in current_rows}
-        current_long = current_by_event.get(str(previous_long["event_spec_id"]))
-        current_short = (
-            None
-            if previous_short is None
-            else current_by_event.get(str(previous_short["event_spec_id"]))
-        )
         pending_static_transition = bool(
             selection_control is not None
             and selection_control["selection_mode"] == "static_baseline"
             and selection_control["pending_selection_mode"] == "dynamic_selection"
             and selection_control["pending_effective_period_anchor_ms"]
             is not None
-            and (selection_control["pending_effective_period_anchor_ms"] <= generation["period_anchor_ms"] if authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" else selection_control["pending_effective_period_anchor_ms"]==generation["period_anchor_ms"])
+            and (selection_control["pending_effective_period_anchor_ms"] <= generation["period_anchor_ms"] if is_hourly_orb_spec(authority.selection_spec_id) else selection_control["pending_effective_period_anchor_ms"]==generation["period_anchor_ms"])
             and selection_control["pending_authorization_id"] is not None
         )
         dynamic_previous_restore = bool(
             selection_control is not None
             and selection_control["selection_mode"] == "dynamic_selection"
-            and (selection_control["pending_selection_mode"] is None or (authority.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1" and generation["selection_mode"]=="static_baseline" and selection_control["pending_selection_mode"]=="static_baseline"))
+            and (selection_control["pending_selection_mode"] is None or (is_hourly_orb_spec(authority.selection_spec_id) and generation["selection_mode"]=="static_baseline" and selection_control["pending_selection_mode"]=="static_baseline"))
         )
         if (
-            previous_short is None
-            or vacuum is None
+            vacuum is None
             or audit is None
             or owner_control is None
             or selection_control is None
@@ -1993,10 +1978,6 @@ class PostgresStrategyUniverseRepository:
             or int(owner_control["control_version"])
             != authority.owner_control_version
             or generation["lifecycle_state"] not in {"MATERIALIZING", "STAGED"}
-            or generation["previous_long_universe_version_id"]
-            != request.universe_version_id
-            or generation["previous_short_universe_version_id"]
-            != previous_short_id
             or vacuum["state"] != "RECONFIGURING"
             or vacuum["drained_at_ms"] is None
             or vacuum["resolved_at_ms"] is not None
@@ -2008,11 +1989,6 @@ class PostgresStrategyUniverseRepository:
             != authority.first_eligible_close_time_ms
             or authority.authority_outcome.value != "FALLBACK_PREVIOUS"
             or authority.materialization_generation_id != generation_id
-            or authority.authorized_pair is None
-            or authority.authorized_pair.long_universe_version_id
-            != request.universe_version_id
-            or authority.authorized_pair.short_universe_version_id
-            != previous_short_id
             or not (pending_static_transition or dynamic_previous_restore)
         ):
             raise UniverseInstallConflict("FALLBACK_PREVIOUS_AUTHORITY_CONFLICT")
@@ -2020,17 +1996,17 @@ class PostgresStrategyUniverseRepository:
             authority.selection_mode is SelectionMode.STATIC_BASELINE
         ):
             raise UniverseInstallConflict("FALLBACK_PREVIOUS_MODE_CONFLICT")
-        if (
-            current_long is None
-            or current_short is None
-            or current_long["universe_version_id"] != request.universe_version_id
-            or current_short["universe_version_id"] != previous_short_id
-            or previous_long["lifecycle_state"] != "active"
-            or previous_short["lifecycle_state"] != "active"
-            or not await self._current_universe_identity_is_complete(current_long)
-            or not await self._current_universe_identity_is_complete(current_short)
-        ):
-            raise UniverseInstallConflict("FALLBACK_PREVIOUS_PAIR_CONFLICT")
+        for event_id, source in zip(events, previous, strict=True):
+            current = current_by_event.get(event_id)
+            side = strategy_contract_for(event_id).position_side
+            if (
+                current is None
+                or current["universe_version_id"] != source["universe_version_id"]
+                or generation[f"previous_{side}_universe_version_id"] != source["universe_version_id"]
+                or source["lifecycle_state"] != "active"
+                or not await self._current_universe_identity_is_complete(current)
+            ):
+                raise UniverseInstallConflict("FALLBACK_PREVIOUS_PAIR_CONFLICT")
         generation_targets = await self.get_generation_universe_targets(
             generation_id,
             for_update=True,
@@ -2129,7 +2105,7 @@ class PostgresStrategyUniverseRepository:
                 else int(current_selection_version)
             ),
         )
-        if pending_static_transition and authority.selection_spec_id != "SOR_1H_OR_ATR_DYNAMIC_V1":
+        if pending_static_transition and not is_hourly_orb_spec(authority.selection_spec_id):
             control_update = await self._connection.execute(
                 sa.update(strategy_selection_control_current)
                 .where(
@@ -2155,12 +2131,12 @@ class PostgresStrategyUniverseRepository:
         return UniverseActivationResult(
             status=UniverseActivationStatus.FALLBACK_PREVIOUS,
             reason_code=None,
-            event_spec_id=str(previous_long["event_spec_id"]),
+            event_spec_id=str(primary_previous["event_spec_id"]),
             universe_version_id=request.universe_version_id,
             previous_universe_version_id=request.universe_version_id,
-            activation_generation=int(current_long["activation_generation"]),
+            activation_generation=int(current_by_event[events[0]]["activation_generation"]),
             activated_at_ms=request.attempted_at_ms,
-            paired_universe_version_id=previous_short_id,
+            paired_universe_version_id=secondary_previous_id,
         )
 
     async def get_generation_universe_targets(

@@ -10,7 +10,8 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     RuntimeAuthoritySeedRequest,
     seed_runtime_authority,
 )
-from src.trading_kernel.infrastructure.runtime_identity import CURRENT_SCHEMA_REVISION
+
+PAIRED_ORB_SOURCE_REVISION = "0024_owner_cooperation"
 
 D = 1_800_000_000_000 // 86_400_000 * 86_400_000
 
@@ -70,7 +71,7 @@ async def test_global_pause_resume_of_completed_hourly_pair_requires_fresh_audit
             RuntimeAuthoritySeedRequest(
                 account_id="orb-test",
                 runtime_commit="orb-local-test",
-                schema_revision=CURRENT_SCHEMA_REVISION,
+                schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 seeded_at_ms=D,
             ),
         )
@@ -389,7 +390,7 @@ async def test_hourly_spec_installs_as_independent_paused_pair_with_frozen_candi
             RuntimeAuthoritySeedRequest(
                 account_id="orb-test",
                 runtime_commit="orb-local-test",
-                schema_revision=CURRENT_SCHEMA_REVISION,
+                schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 seeded_at_ms=D,
             ),
         )
@@ -470,7 +471,7 @@ async def test_hourly_snapshot_member_results_are_immutable_independent_and_epoc
             RuntimeAuthoritySeedRequest(
                 account_id="orb-test",
                 runtime_commit="orb-local-test",
-                schema_revision=CURRENT_SCHEMA_REVISION,
+                schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 seeded_at_ms=D,
             ),
         )
@@ -605,7 +606,7 @@ async def test_static_pair_and_owner_intent_drive_daily_job_on_later_session(
             RuntimeAuthoritySeedRequest(
                 account_id="orb-test",
                 runtime_commit="orb-local-test",
-                schema_revision=CURRENT_SCHEMA_REVISION,
+                schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 seeded_at_ms=D,
             ),
         )
@@ -718,7 +719,7 @@ async def test_hourly_first_no_change_commits_exact_pair_epoch_and_owner_proof(h
     from src.trading_kernel.domain.owner_control import StrategyEntryState
     h=3600000;day=86400000;session=D+day;spec=OrbSessionSelectionSpec()
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
-        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-test',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=D))
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-test',runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,seeded_at_ms=D))
         await uow.instrument_selection.install_orb_spec(spec,installed_at_ms=D+1)
     await install_static_pair(head_template_engine)
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
@@ -1040,7 +1041,7 @@ async def test_orb_readonly_view_loads_current_epoch_job(head_template_engine):
     )
     spec=OrbSessionSelectionSpec();day=D+86400000
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
-        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-test',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=D))
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-test',runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,seeded_at_ms=D))
         await uow.instrument_selection.install_orb_spec(spec,installed_at_ms=D+1)
     await install_static_pair(head_template_engine)
     async with PostgresKernelUnitOfWork(head_template_engine) as uow:
@@ -1073,7 +1074,7 @@ async def assert_staged_facts_refresh(engine,spec,session,monkeypatch):
             return (ClosedCandle(open_time_ms=session,close_time_ms=session+3600000,open=Decimal(100),high=Decimal(101),low=Decimal(99),close=Decimal(100),volume=Decimal(100)),)
     for sid in ids:
         refreshed=await observe_strategy_scope(lambda:PostgresKernelUnitOfWork(engine),Market(),ObservationRequest(runtime_scope_id=sid,
-            runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,trigger_candle_close_time_ms=session+3600000,attempted_at_ms=session+3600014,
+            runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,trigger_candle_close_time_ms=session+3600000,attempted_at_ms=session+3600014,
             operation='refresh_staged_facts'))
         assert refreshed.status=='facts_refreshed' and refreshed.signal_event_id is None
     async with engine.connect() as connection:
@@ -1296,7 +1297,7 @@ async def test_bootstrap_only_hourly_static_pair_uses_formal_workers_and_does_no
     from tests.trading_kernel.support.dispatch_venues import AcceptingVenue
     engine=head_template_engine
     async with PostgresKernelUnitOfWork(engine) as uow:
-        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-bootstrap',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=D))
+        await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='orb-bootstrap',runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,seeded_at_ms=D))
         await uow.instrument_selection.install_orb_spec(OrbSessionSelectionSpec(),installed_at_ms=D+1)
     class Market:
         async def fetch_closed_candles(self,request):
@@ -1309,12 +1310,12 @@ async def test_bootstrap_only_hourly_static_pair_uses_formal_workers_and_does_no
     async def workers(delay):
         nonlocal now
         for _ in range(7):
-            certified=await run_reconciliation_worker_once(factory,AcceptingVenue(engine),Positions(),ReconciliationWorkerRequest(worker_id='orb:bootstrap:cert',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,
+            certified=await run_reconciliation_worker_once(factory,AcceptingVenue(engine),Positions(),ReconciliationWorkerRequest(worker_id='orb:bootstrap:cert',runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 now_ms=now,timeout_seconds=1,unknown_visibility_grace_ms=30000,idle_poll_interval_ms=1000,certification_lease_ms=60000,certification_valid_for_ms=600000,
                 certification_eligible_check_interval_ms=300000,certification_owner_action_check_interval_ms=300000,certification_transient_retry_interval_ms=30000),instrument_certification_source=RecordingReadonlyCertificationSource(engine))
             if certified.status is not ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED:break
         for _ in range(7):
-            await run_observation_worker_once(factory,Market(),ObservationWorkerRequest(worker_id='orb:bootstrap:observe',runtime_commit='orb-local-test',schema_revision=CURRENT_SCHEMA_REVISION,
+            await run_observation_worker_once(factory,Market(),ObservationWorkerRequest(worker_id='orb:bootstrap:observe',runtime_commit='orb-local-test',schema_revision=PAIRED_ORB_SOURCE_REVISION,
                 now_ms=now,lease_until_ms=now+30000,timeout_seconds=1,retry_interval_ms=1000))
         now+=10
     results=await bootstrap_strategy_universes(engine.url.render_as_string(hide_password=False),runtime_profile_id='tiny-live-v1',strategy_group_id='SOR-1H-001',

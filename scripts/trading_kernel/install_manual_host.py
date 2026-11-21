@@ -183,7 +183,8 @@ os.execv(p,[p,str(k/'scripts/trading_kernel'/script),*sys.argv[1:]])
             shlex.join(args),
         )
         result = subprocess.run(
-            cmd, input=data, capture_output=True, timeout=1000, check=False
+            cmd, input=data, capture_output=True,
+            timeout=1450 if phase == "activate-upgrade" else 1000, check=False
         )
         if result.returncode:
             raise RuntimeError(

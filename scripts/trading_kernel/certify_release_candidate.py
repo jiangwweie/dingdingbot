@@ -34,7 +34,6 @@ from src.trading_kernel.application.runtime import (
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.strategy_registry import (
     build_registry_semantic_hash,
-    registered_strategy_contracts,
 )
 from src.trading_kernel.infrastructure.entry_runtime_contract import (
     ENTRY_ACTION_FACT_VALIDITY_MS,
@@ -46,6 +45,7 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     POSITION_MODE,
     RUNTIME_PROFILE_ID,
     VENUE_ID,
+    _contracts_for_schema,
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
     CURRENT_SCHEMA_REVISION,
@@ -153,7 +153,7 @@ def build_certification_identity(
 ) -> dict[str, str]:
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError("release commit must be an exact lowercase 40-hex SHA")
-    registry_hash = build_registry_semantic_hash(registered_strategy_contracts())
+    registry_hash = build_registry_semantic_hash(_contracts_for_schema(CURRENT_SCHEMA_REVISION))
     policy_digest = _digest(DYNAMIC_POLICY)
     authority_digest = _digest(
         {

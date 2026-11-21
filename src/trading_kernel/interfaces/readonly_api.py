@@ -28,6 +28,7 @@ from src.trading_kernel.domain.generic_materialization import (
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS
+from src.trading_kernel.domain.orb_session_selection import is_hourly_orb_spec
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapAudit,
     CurrentSelectionAuthority,
@@ -396,7 +397,7 @@ async def get_selection_runtime_view(
 
     repository = uow.instrument_selection
     control = await repository.get_selection_control(request.strategy_group_id)
-    if request.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1" and control is not None:
+    if is_hourly_orb_spec(request.selection_spec_id) and control is not None:
         job = None if control.selection_epoch_id is None else await repository.get_selection_job(
             selection_spec_id=request.selection_spec_id,period_anchor_ms=request.session_start_ms,
             selection_epoch_id=control.selection_epoch_id)

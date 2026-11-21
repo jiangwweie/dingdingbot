@@ -13,6 +13,10 @@ from pydantic import (
 
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import DAY_MS
+from src.trading_kernel.domain.orb_session_selection import (
+    hourly_orb_strategy_identity,
+    is_hourly_orb_spec,
+)
 
 
 class StrategyEntryVacuumState(StrEnum):
@@ -84,9 +88,10 @@ class StrategyEntryVacuum(BaseModel):
 
     @model_validator(mode="after")
     def _validate_vacuum(self) -> StrategyEntryVacuum:
-        if self.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1":
-            if self.strategy_group_id!="SOR-1H-001":raise ValueError("hourly ORB Vacuum identity differs")
-            interval=DAY_MS
+        if is_hourly_orb_spec(self.selection_spec_id):
+            if self.strategy_group_id != hourly_orb_strategy_identity(self.selection_spec_id)[0]:
+                raise ValueError("hourly ORB Vacuum identity differs")
+            interval = DAY_MS
         elif self.selection_spec_id == "sor-dynamic-selection-v0":
             if self.strategy_group_id != "SOR-001":
                 raise ValueError("Vacuum StrategyGroup/Selection Spec identity differs")

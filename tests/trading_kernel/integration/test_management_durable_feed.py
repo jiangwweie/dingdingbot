@@ -811,3 +811,92 @@ async def test_old_epoch_replay_never_fills_real_disconnect_interval(head_templa
         )
         ended=(await u._require_connection().execute(sa.select(management_coverage_events.c.to_ms).where(management_coverage_events.c.epoch_id=='before-disconnect',management_coverage_events.c.kind=='epoch_closed'))).scalar_one()
         assert ended==1100
+
+
+@pytest.mark.asyncio
+async def test_restart_replays_close_all_echo_without_healing_old_epoch(head_template_engine):
+    import sqlalchemy as sa
+
+    from src.trading_kernel.infrastructure.pg_models import management_stream_events
+    from src.trading_kernel.interfaces.management_feed_worker import (
+        management_scope,
+        persist_management_feed_once,
+    )
+    from tests.trading_kernel.support.lifecycle import (
+        reach_position_protected,
+        registered_sor_long_ticket,
+    )
+
+    engine = head_template_engine
+    await reach_position_protected(engine, registered_sor_long_ticket())
+    account = "close-all-replay"
+    scope = management_scope("binance-usdm", account)
+    old_epoch = "close-all-old"
+    new_epoch = "close-all-new"
+    events = [
+        {
+            "sequence": sequence,
+            "received_at_ms": time_ms + 1,
+            "payload": {
+                "e": "ALGO_UPDATE", "E": time_ms, "T": time_ms,
+                "o": {
+                    "R": True, "S": "BUY", "V": "EXPIRE_MAKER", "X": status,
+                    "f": "GTE_GTC", "o": "STOP_MARKET", "p": "0", "q": "0",
+                    "s": "XRPUSDT", "cp": True, "ia": False, "pP": False,
+                    "pm": "NONE", "ps": "SHORT", "tp": "0.9229",
+                    "wt": "CONTRACT_PRICE", "aid": 201, "gtd": 0, "caid": "app-exact",
+                },
+            },
+        }
+        for sequence, (status, time_ms) in enumerate(
+            (("NEW", 1100), ("CANCELED", 1150)), start=1
+        )
+    ]
+    async with PostgresKernelUnitOfWork(engine) as u:
+        await u.management.start_feed(
+            scope_key=scope, epoch_id=old_epoch, worker_id="receiver",
+            runtime_commit="kernel-test-head", now_ms=1000,
+        )
+        await u.management.persist_received_batch(
+            scope_key=scope, epoch_id=old_epoch, events=events,
+            connected_at_ms=1000, now_ms=1200, worker_id="receiver",
+            gap_reason="management_stream_protocol_invalid",
+        )
+        assert (await u.management.get_feed(scope))["applied_watermark"] == 0
+
+    class Source:
+        def __init__(self, epoch, observed_at_ms):
+            self.epoch = epoch
+            self.observed_at_ms = observed_at_ms
+
+        def management_feed_batches(self):
+            return [{
+                "venue_id": "binance-usdm", "account_id": account, "epoch_id": self.epoch,
+                "events": [], "connected_at_ms": 1000 if self.epoch == old_epoch else 3000,
+                "connection_observed_at_ms": self.observed_at_ms,
+                "gap_reason": None, "backlog_pending": False,
+            }]
+
+        def acknowledge_management_events(self, epoch, watermark):
+            assert (epoch, watermark) == (self.epoch, 2 if epoch == old_epoch else 0)
+
+    for epoch, now in ((old_epoch, 2000), (new_epoch, 3000)):
+        result = await persist_management_feed_once(
+            lambda: PostgresKernelUnitOfWork(engine),
+            Source(epoch, now), worker_id="receiver", runtime_commit="kernel-test-head",
+            now_ms=now, clock_ms=lambda now=now: now,
+        )
+        async with PostgresKernelUnitOfWork(engine) as u:
+            feed = await u.management.get_feed(scope)
+            assert feed["epoch_id"] == epoch, result
+            assert feed["applied_watermark"] == feed["persisted_watermark"] == (
+                2 if epoch == old_epoch else 0
+            ), (result, feed)
+            assert await u.management.feed_ready(scope, now_ms=now) is (epoch == new_epoch)
+            assert not await u.management.continuity_covers(scope, 1100, now)
+            raw = (await u._require_connection().execute(
+                sa.select(management_stream_events.c.safe_payload)
+                .where(management_stream_events.c.epoch_id == old_epoch)
+                .order_by(management_stream_events.c.receive_sequence)
+            )).scalars().all()
+            assert raw == [event["payload"] for event in events]

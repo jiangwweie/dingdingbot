@@ -15,6 +15,10 @@ from src.trading_kernel.domain.exit_policy import (
     registered_event_exit_bindings,
     registered_exit_profiles,
 )
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
+    ORB_STRATEGY_GROUP_ID,
+)
 from src.trading_kernel.domain.product import product_compatibility_for
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -110,6 +114,7 @@ class PostgresStrategyRegistryRepository:
                 contract
             )
 
+        directional_cutover = set(ORB_DIRECTIONAL_GROUPS).issubset(contracts_by_group)
         for strategy_group_id, group_contracts in sorted(contracts_by_group.items()):
             group_contracts = sorted(
                 group_contracts,
@@ -136,7 +141,9 @@ class PostgresStrategyRegistryRepository:
             ] += await self._activate_strategy_group_version(
                 strategy_group_id=strategy_group_id,
                 active_version_id=active_version_id,
-                status=status,
+                status="disabled"
+                if directional_cutover and strategy_group_id == ORB_STRATEGY_GROUP_ID
+                else status,
                 seeded_at_ms=seeded_at_ms,
             )
             counters[
@@ -281,7 +288,7 @@ class PostgresStrategyRegistryRepository:
                     ),
                 )
             selected_event_ids={c.event_spec_id for c in contracts}
-            for binding in registered_event_exit_bindings():
+            for binding in registered_event_exit_bindings(include_sor_split=True):
                 if binding.event_spec_id not in selected_event_ids:
                     continue
                 counters["inserted_exit_binding_count"] += await self._insert_exact(
@@ -408,7 +415,15 @@ class PostgresStrategyRegistryRepository:
                 )
             await self._connection.execute(sa.insert(strategy_groups).values(expected))
             return 1
-        if not _matches(existing, expected, ("display_name", "status")):
+        retiring_combined_hourly = (
+            strategy_group_id == ORB_STRATEGY_GROUP_ID
+            and status == "disabled"
+            and existing["status"] == "active"
+            and existing["active_version_id"] == active_version_id
+        )
+        if existing["display_name"] != expected["display_name"] or (
+            existing["status"] != status and not retiring_combined_hourly
+        ):
             raise RegistrySeedConflict(
                 f"strategy Registry conflict for {strategy_group_id}"
             )
@@ -422,6 +437,12 @@ class PostgresStrategyRegistryRepository:
                 f"strategy Registry active version conflicts: {strategy_group_id}"
             )
         if current_version_id == active_version_id:
+            if retiring_combined_hourly:
+                await self._connection.execute(
+                    sa.update(strategy_groups)
+                    .where(strategy_groups.c.strategy_group_id == strategy_group_id)
+                    .values(status=status, updated_at_ms=seeded_at_ms)
+                )
             return 0
         if status != "active":
             raise RegistrySeedConflict(
@@ -709,6 +730,8 @@ def _display_name(strategy_group_id: str) -> str:
         "MI-001": "MI relative strength impulse",
         "SOR-001": "SOR opening range breakout and breakdown",
         "SOR-1H-001": "SOR-1H hourly entry with 15m exits",
+        "SOR-1H-LONG-001": "SOR-多",
+        "SOR-1H-SHORT-001": "SOR-空",
         "SOR-US-EQ-PERP-001": "SOR U.S. equity regular-session opening range",
         "BRF2-001": "BRF2 bear rally failure",
     }[strategy_group_id]

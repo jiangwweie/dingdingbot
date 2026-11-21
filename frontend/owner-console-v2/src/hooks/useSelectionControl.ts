@@ -14,6 +14,10 @@ import { ApiError } from '../api/errors';
 import { formatControlError } from '../utils/controlErrors';
 import type { SelectionActionModalProps } from '../components/SelectionActionModal';
 
+function isHourlySor(groupId: string): boolean {
+  return ['SOR-1H-001', 'SOR-1H-LONG-001', 'SOR-1H-SHORT-001'].includes(groupId);
+}
+
 export type InFlightSelectionStatus =
   | 'initialized'
   | 'submitting'
@@ -198,7 +202,7 @@ export function useSelectionControl(options?: UseSelectionControlOptions) {
       // Fetch fresh authoritative preview before opening
       try {
         const preview = await fetchSelectionPreview(groupId);
-        const isOrb = groupId === 'SOR-1H-001' || 'strategy_label' in preview;
+        const isOrb = isHourlySor(groupId) || 'strategy_label' in preview;
         const control = preview.control;
 
         if (!control) {
@@ -362,7 +366,7 @@ export function useSelectionControl(options?: UseSelectionControlOptions) {
       try {
         let resultControl: SelectionControl;
         if (act === 'dynamic') {
-          if (groupId === 'SOR-1H-001') {
+          if (isHourlySor(groupId)) {
             resultControl = await activateDynamicSelection(groupId, {
               expected_version: currentOp.expected_version,
               reason: currentOp.reason,

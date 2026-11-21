@@ -11,7 +11,10 @@ from src.trading_kernel.domain.detector import (
     invalid_result,
 )
 from src.trading_kernel.domain.market import MarketSnapshot
-from src.trading_kernel.domain.orb_session_selection import ORB_EVENT_SPEC_IDS
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_EVENT_SPEC_IDS,
+)
 from src.trading_kernel.domain.strategy_registry import RegisteredStrategyContract
 
 H = 3_600_000
@@ -21,8 +24,7 @@ DAY = 24 * H
 class SorHourlyDetector:
     def __init__(self, contract: RegisteredStrategyContract) -> None:
         if (
-            contract.event_spec_id not in ORB_EVENT_SPEC_IDS
-            or contract.strategy_group_id != "SOR-1H-001"
+            contract.event_spec_id not in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)
             or contract.timeframe != "1h"
         ):
             raise ValueError("hourly ORB Detector rejects another strategy or clock")
@@ -57,6 +59,13 @@ class SorHourlyDetector:
             if long
             else (bars[-2].close >= low and bars[-1].close < low)
         )
+        if crossed and c.event_spec_id in ORB_DIRECTIONAL_EVENTS:
+            # The complete session path carries the consumed opportunity across
+            # a change in Event identity, membership, or Owner authority.
+            crossed = (
+                all(bar.close <= high for bar in bars[1:-1])
+                if long else all(bar.close >= low for bar in bars[1:-1])
+            )
         values: tuple[tuple[str, JsonValue, bool], ...] = (
             ("opening_range_defined_1h_v1", True, True),
             ("entry_hour_eligible_1h_v1", eligible, eligible),

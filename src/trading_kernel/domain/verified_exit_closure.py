@@ -192,6 +192,22 @@ class VerifiedExitClosureProof(BaseModel):
                 raise ValueError("closure order and trade quantity disagree")
         return self
 
+    def proves_full_initial_stop(self, *, entry_id: str | None, stop_id: str | None) -> bool:
+        """Only the confirmed entry and its original system stop may explain this exit."""
+        if not entry_id or not stop_id or len(self.orders) != 2:
+            return False
+        orders = {
+            (o.reference.command_kind.value, o.reference.namespace.value,
+             o.reference.submitted_exchange_order_id, o.status)
+            for o in self.orders
+            if isinstance(o.reference, TicketOrderReference)
+            and o.executed_quantity == self.entry_quantity
+        }
+        return orders == {
+            ("entry", "regular", entry_id, "FILLED"),
+            ("initial_stop", "conditional", stop_id, "FINISHED"),
+        }
+
     @property
     def exit_quantity(self) -> Decimal:
         return sum((f.quantity for f in self.exit_fills), Decimal(0))

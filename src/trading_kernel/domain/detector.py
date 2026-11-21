@@ -86,7 +86,7 @@ class StrategyDetector(Protocol):
 
 def detector_for(event_spec_id: str) -> StrategyDetector:
     contracts = {
-        item.event_spec_id: item for item in registered_strategy_contracts()
+        item.event_spec_id: item for item in registered_strategy_contracts(include_sor_split=True)
     }
     try:
         contract = contracts[event_spec_id]

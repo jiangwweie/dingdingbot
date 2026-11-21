@@ -518,3 +518,35 @@ async def _insert_source_sor_v3_registry(
                 created_at_ms=900,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_standalone_sor_registry_preparation_adds_exact_bindings_without_entry_grants(
+    registry_engine: AsyncEngine,
+) -> None:
+    from src.trading_kernel.domain.orb_session_selection import (
+        ORB_DIRECTIONAL_EVENTS,
+        ORB_DIRECTIONAL_GROUPS,
+    )
+
+    contracts = tuple(
+        contract for contract in registered_strategy_contracts(include_sor_split=True)
+        if contract.event_spec_id in ORB_DIRECTIONAL_EVENTS
+    )
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        result = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_000, contracts=contracts)
+        assert result.inserted_strategy_group_count == result.inserted_exit_binding_current_count == 2
+
+    async with PostgresKernelUnitOfWork(registry_engine) as uow:
+        result = await seed_strategy_registry(uow, seeded_at_ms=1_800_000_000_001, contracts=contracts)
+        assert result.total_inserted_count == 0
+        for event, side in zip(ORB_DIRECTIONAL_EVENTS, ("long", "short"), strict=True):
+            record = await uow.signals.get_event_spec(event)
+            binding = await uow.exit_profiles.get_current_binding(event)
+            assert record is not None and record.position_side == side
+            assert binding is not None and binding.event_spec_id == event
+        for group in ORB_DIRECTIONAL_GROUPS:
+            assert await uow.owner_controls.get_strategy_control(group) is None
+
+    async with registry_engine.connect() as connection:
+        assert await connection.scalar(sa.select(sa.func.count()).select_from(runtime_scopes_current)) == 0

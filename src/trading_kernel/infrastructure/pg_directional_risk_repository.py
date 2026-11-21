@@ -9,8 +9,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.domain.directional_risk import (
+    DIRECTIONAL_RULES,
+    DIRECTIONAL_SOR_RULE_ID,
     ENTRY_SEND_WINDOW_MS,
-    RULE_DIGEST,
     RULE_ID,
     RULE_LIMITS,
     SCOPED_EVENTS,
@@ -34,6 +35,7 @@ from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
     owner_policy_current,
     owner_policy_events,
+    schema_metadata,
     trade_tickets,
 )
 
@@ -49,7 +51,15 @@ class PostgresDirectionalRiskRepository:
             {"key": key},
         )
 
+    async def _current_rule_id(self) -> str:
+        revision = await self._connection.scalar(
+            sa.select(schema_metadata.c.metadata_value)
+            .where(schema_metadata.c.metadata_key == "schema_revision")
+        )
+        return DIRECTIONAL_SOR_RULE_ID if revision == "0025_directional_sor" else RULE_ID
+
     async def initialize(self, *, venue_id: str, account_id: str, now_ms: int) -> None:
+        rule_id = await self._current_rule_id()
         await self._connection.execute(
             pg_insert(directional_risk_controls)
             .values(
@@ -57,8 +67,8 @@ class PostgresDirectionalRiskRepository:
                 account_id=account_id,
                 version=1,
                 view="unset",
-                rule_id=RULE_ID,
-                rule_digest=RULE_DIGEST,
+                rule_id=rule_id,
+                rule_digest=DIRECTIONAL_RULES[rule_id][0],
                 effective_at_ms=now_ms,
             )
             .on_conflict_do_nothing()
@@ -70,38 +80,35 @@ class PostgresDirectionalRiskRepository:
     ) -> DirectionalControl | None:
         if for_update:
             await self.lock(venue_id, account_id)
+        rule_id = await self._current_rule_id()
+        digest, scoped_events = DIRECTIONAL_RULES[rule_id]
         rule = (
-            (
-                await self._connection.execute(
-                    sa.select(directional_risk_rules).where(
-                        directional_risk_rules.c.rule_id == RULE_ID
-                    )
+            await self._connection.execute(
+                sa.select(directional_risk_rules, directional_risk_controls)
+                .outerjoin(
+                    directional_risk_controls,
+                    sa.and_(
+                        directional_risk_controls.c.rule_id == directional_risk_rules.c.rule_id,
+                        directional_risk_controls.c.venue_id == venue_id,
+                        directional_risk_controls.c.account_id == account_id,
+                    ),
                 )
+                .where(directional_risk_rules.c.rule_id == rule_id)
             )
-            .mappings()
-            .one_or_none()
-        )
+        ).mappings().one_or_none()
         if (
             rule is None
-            or rule["rule_digest"] != RULE_DIGEST
+            or rule[directional_risk_rules.c.rule_digest] != digest
             or rule["limits"] != {k: list(v) for k, v in RULE_LIMITS.items()}
-            or rule["event_spec_ids"] != sorted(SCOPED_EVENTS)
+            or rule["event_spec_ids"] != sorted(scoped_events)
             or rule["budget_contract"] != BUDGET_CONTRACT
         ):
             raise ValueError("directional_rule_mismatch")
-        row = (
-            (
-                await self._connection.execute(
-                    sa.select(directional_risk_controls).where(
-                        directional_risk_controls.c.venue_id == venue_id,
-                        directional_risk_controls.c.account_id == account_id,
-                    )
-                )
-            )
-            .mappings()
-            .one_or_none()
-        )
-        return None if row is None else DirectionalControl.model_validate(dict(row))
+        if rule[directional_risk_controls.c.account_id] is None:
+            return None
+        return DirectionalControl.model_validate({
+            column.name: rule[column] for column in directional_risk_controls.c
+        })
 
     async def request_change(
         self, request: DirectionalChangeRequest
@@ -129,7 +136,7 @@ class PostgresDirectionalRiskRepository:
             if previous["fingerprint"] != fingerprint:
                 raise ValueError("directional_idempotency_conflict")
             # A completed request from an earlier rule cannot restore that rule.
-            if previous["result"].get("rule_id") != RULE_ID:
+            if previous["result"].get("rule_id") != current.rule_id:
                 raise ValueError("directional_request_from_previous_rule")
             return DirectionalControl.model_validate(previous["result"])
         if current.version != request.expected_version:
@@ -143,6 +150,8 @@ class PostgresDirectionalRiskRepository:
             venue_id=current.venue_id,
             account_id=current.account_id,
             version=current.version + 1,
+            rule_id=current.rule_id,
+            rule_digest=current.rule_digest,
             view=current.view if in_flight else DirectionalView(request.view),
             effective_at_ms=current.effective_at_ms
             if in_flight
@@ -376,8 +385,8 @@ class PostgresDirectionalRiskRepository:
                     "baseline": str(budget.baseline),
                     "owner_identity": request.owner_identity,
                     "reason": request.reason,
-                    "rule_id": RULE_ID,
-                    "rule_digest": RULE_DIGEST,
+                    "rule_id": current.rule_id,
+                    "rule_digest": current.rule_digest,
                 },
                 created_at_ms=effective_at,
             )
@@ -426,7 +435,7 @@ class PostgresDirectionalRiskRepository:
         )
         return (
             None
-            if payload is None or payload["result"].get("rule_id") != RULE_ID
+            if payload is None or payload["result"].get("rule_id") != await self._current_rule_id()
             else DirectionalControl.model_validate(payload["result"])
         )
 
@@ -458,6 +467,8 @@ class PostgresDirectionalRiskRepository:
             venue_id=venue_id,
             account_id=account_id,
             version=current.version + 1,
+            rule_id=current.rule_id,
+            rule_digest=current.rule_digest,
             view=current.pending_view,
             effective_at_ms=max(
                 now_ms, current.requested_at_ms or current.effective_at_ms

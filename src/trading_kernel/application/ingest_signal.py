@@ -24,8 +24,9 @@ from src.trading_kernel.domain.instrument_selection import (
     HOUR_MS,
 )
 from src.trading_kernel.domain.orb_session_selection import (
-    ORB_SELECTION_SPEC_ID,
+    ORB_DIRECTIONAL_GROUPS,
     daily_event_spec_ids,
+    is_hourly_orb_spec,
 )
 from src.trading_kernel.domain.selection_authority import (
     AuthorityOutcome,
@@ -41,6 +42,7 @@ from src.trading_kernel.domain.selection_authority import (
     selection_authority_allows_new_entry,
 )
 from src.trading_kernel.domain.signal import StrategySignal, build_signal_fact_digest
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 
 class IngestSignalStatus(StrEnum):
@@ -163,7 +165,7 @@ def evaluate_selection_entry_authority(
         if (
             current.selection_mode is not SelectionMode.STATIC_BASELINE
             or (current.authority_outcome is not AuthorityOutcome.FALLBACK_PREVIOUS
-                and not (control.selection_spec_id==ORB_SELECTION_SPEC_ID and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
+                and not (is_hourly_orb_spec(control.selection_spec_id) and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
                     and current.activation_authorization_id is not None))
         ):
             return _selection_refused(
@@ -179,14 +181,14 @@ def evaluate_selection_entry_authority(
         )
 
     assert current is not None
-    orb_static_grant=bool(control.selection_spec_id==ORB_SELECTION_SPEC_ID and control.selection_mode is SelectionMode.STATIC_BASELINE
+    orb_static_grant=bool(is_hourly_orb_spec(control.selection_spec_id) and control.selection_mode is SelectionMode.STATIC_BASELINE
         and current.selection_mode is SelectionMode.STATIC_BASELINE and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
         and current.activation_authorization_id is not None)
     orb_static_pending=bool(orb_static_grant and control.pending_selection_mode is SelectionMode.DYNAMIC_SELECTION
         and control.pending_authorization_id is not None and control.pending_effective_period_anchor_ms is not None
         and current.selection_control_version is not None and current.selection_control_version+1==control.control_version
         and current.created_at_ms<=control.updated_at_ms)
-    if control.selection_spec_id == ORB_SELECTION_SPEC_ID and (
+    if is_hourly_orb_spec(control.selection_spec_id) and (
         current.selection_spec_id != control.selection_spec_id
         or (current.selection_epoch_id != control.selection_epoch_id and not (control.selection_mode is SelectionMode.STATIC_BASELINE
             and current.selection_mode is SelectionMode.STATIC_BASELINE and current.authority_outcome is AuthorityOutcome.ACTIVE_NEW
@@ -373,6 +375,12 @@ async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: 
         runtime_scope.strategy_group_id,
         for_update=lock_current,
     )
+    if control is None and runtime_scope.strategy_group_id in ORB_DIRECTIONAL_GROUPS:
+        return _selection_refused(
+            SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
+            "selection_control_missing",
+            None,
+        )
     if control is None:
         return evaluate_selection_entry_authority(
             SelectionEntryAuthorityFacts(
@@ -394,7 +402,9 @@ async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: 
             allow_current_as_birth=allow_current_as_birth,
         )
 
-    if control.strategy_group_id not in {"SOR-001", "SOR-1H-001"}:
+    if control.strategy_group_id != "SOR-001" and not is_hourly_orb_spec(
+        control.selection_spec_id
+    ):
         return await _resolve_generic_selection_authority(uow,control=control,runtime_scope=runtime_scope,
             birth_selection_authority_id=birth_selection_authority_id,now_ms=now_ms,lock_current=lock_current,
             observed_close_time_ms=observed_close_time_ms,allow_current_as_birth=allow_current_as_birth,recovery_observation=recovery_observation)
@@ -413,19 +423,27 @@ async def _resolve_selection_authority(uow: KernelUnitOfWork, *, runtime_scope: 
     policy = await uow.entry_admission.get_owner_policy(
         runtime_scope.owner_policy_id
     )
-    long_current = await uow.strategy_universes.get_current(
-        daily_event_spec_ids(control.selection_spec_id)[0]
-    )
-    short_current = await uow.strategy_universes.get_current(
-        daily_event_spec_ids(control.selection_spec_id)[1]
-    )
-    current_pair = (
-        None
-        if long_current is None or short_current is None
-        else UniverseAuthorityPair(
-            long_universe_version_id=long_current.universe_version_id,
-            short_universe_version_id=short_current.universe_version_id,
+    events = daily_event_spec_ids(control.selection_spec_id)
+    if runtime_scope.event_spec_id not in events:
+        return _selection_refused(
+            SelectionEntryAuthorityStatus.AUTHORITY_INVALID,
+            "selection_scope_event_mismatch",
+            current,
         )
+    current_ids = {}
+    for event_spec_id in events:
+        universe = await uow.strategy_universes.get_current(event_spec_id)
+        if universe is None or universe.event_spec_id != event_spec_id:
+            break
+        side = strategy_contract_for(event_spec_id).position_side
+        current_ids[side] = universe.universe_version_id
+    current_pair = (
+        UniverseAuthorityPair(
+            long_universe_version_id=current_ids.get("long"),
+            short_universe_version_id=current_ids.get("short"),
+        )
+        if len(current_ids) == len(events)
+        else None
     )
     resolved_birth_id = birth_selection_authority_id
     if resolved_birth_id is None and allow_current_as_birth and current is not None:

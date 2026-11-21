@@ -16,15 +16,20 @@ from src.trading_kernel.domain.generic_selection_jobs import (
 from src.trading_kernel.domain.instrument_selection import (
     SelectionKline,
 )
-from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
+from src.trading_kernel.domain.orb_session_selection import (
+    OrbSessionSelectionSpec,
+    directional_orb_spec,
+)
 
 D=1704067200000
 H=3600000
 
 
 @pytest.mark.asyncio
-async def test_hourly_selector_claims_exact_day_epoch_then_reads_outside_transaction_and_commits_once():
-    spec=OrbSessionSelectionSpec();epoch='epoch:orb:runner'
+@pytest.mark.parametrize("group", [None, "SOR-1H-LONG-001", "SOR-1H-SHORT-001"])
+async def test_hourly_selector_claims_exact_day_epoch_then_reads_outside_transaction_and_commits_once(group):
+    spec = OrbSessionSelectionSpec() if group is None else directional_orb_spec(group)
+    epoch='epoch:orb:runner'
     claim=GenericSelectionJobClaim(selection_job_id=selection_job_identity(spec.selection_spec_id,D,epoch),
         selection_spec_id=spec.selection_spec_id,selection_epoch_id=epoch,selection_control_version=2,period_anchor_ms=D,
         worker_id='orb-runner',attempt_number=1,projection_version=2,started_at_ms=D+H,lease_expires_at_ms=D+H+120000)
@@ -52,6 +57,8 @@ async def test_hourly_selector_claims_exact_day_epoch_then_reads_outside_transac
     assert repo.claim_orb_selection_job.call_args.kwargs["lease_duration_ms"]>=120000
     c=repo.complete_orb_selection_snapshot.call_args.kwargs['computation']
     assert c.snapshot.selection_epoch_id==epoch and c.snapshot.eligibility_not_before_ms==D+2*H
+    assert c.snapshot.selection_spec_id == spec.selection_spec_id
+    assert c.snapshot.strategy_group_id == spec.strategy_group_id
 
 
 @pytest.mark.asyncio

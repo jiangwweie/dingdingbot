@@ -23,6 +23,7 @@ from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.orb_session_selection import ORB_DIRECTIONAL_GROUPS
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.infrastructure.pg_models import (
     owner_policy_current,
@@ -272,13 +273,14 @@ async def _seed_and_bootstrap(database_name: str, database_url: str, *, prepare_
             ),
         )
         if prepare_hourly:
-            await bootstrap_strategy_universes(
-                database_url, runtime_profile_id=RUNTIME_PROFILE_ID,
-                strategy_group_id="SOR-1H-001", now_ms=clock.read,
-                wait_timeout_ms=60_000, poll_interval_ms=1,
-                sleep=_worker_driving_sleep_for_profile(engine=engine, clock=clock,
-                    market=market, certification=certification, runtime_profile_id=RUNTIME_PROFILE_ID),
-            )
+            for group in ORB_DIRECTIONAL_GROUPS:
+                await bootstrap_strategy_universes(
+                    database_url, runtime_profile_id=RUNTIME_PROFILE_ID,
+                    strategy_group_id=group, now_ms=clock.read,
+                    wait_timeout_ms=60_000, poll_interval_ms=1,
+                    sleep=_worker_driving_sleep_for_profile(engine=engine, clock=clock,
+                        market=market, certification=certification, runtime_profile_id=RUNTIME_PROFILE_ID),
+                )
         async with engine.begin() as connection:
             await connection.execute(
                 sa.text(

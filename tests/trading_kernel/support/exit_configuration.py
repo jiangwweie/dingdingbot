@@ -8,6 +8,7 @@ from src.trading_kernel.application.exit_configuration import (
     preview_exit_configuration,
 )
 from src.trading_kernel.domain.exit_configuration import (
+    DIRECTIONAL_EXIT_EVENTS,
     EXIT_EVENTS,
     MA50_EVENTS,
     EventExitParameters,
@@ -16,6 +17,10 @@ from src.trading_kernel.domain.exit_configuration import (
 from src.trading_kernel.domain.exit_execution import ExitOrderRules
 from src.trading_kernel.domain.exit_regime import FOUR_HOURS_MS, BtcMa50Snapshot
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_LONG_EVENT,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 
 
@@ -88,7 +93,9 @@ async def install_approved_exit_configuration_in_uow(
     )
     if current is None:
         parameters = []
-        for event in EXIT_EVENTS:
+        split = await uow.exit_profiles.get_current_binding(ORB_DIRECTIONAL_LONG_EVENT) is not None
+        events = DIRECTIONAL_EXIT_EVENTS if split else EXIT_EVENTS
+        for event in events:
             binding_current = await uow.exit_profiles.get_current_binding(event)
             binding = await uow.exit_profiles.get_binding(
                 binding_current.exit_binding_id
@@ -97,7 +104,7 @@ async def install_approved_exit_configuration_in_uow(
                 exit_profile_id=binding.exit_profile_id,
                 semantic_hash=binding.exit_profile_semantic_hash,
             )
-            sor = event in EXIT_EVENTS[4:]
+            sor = event in (*EXIT_EVENTS[4:], *ORB_DIRECTIONAL_EVENTS)
             parameters.append(
                 EventExitParameters(
                     event_spec_id=event,
@@ -109,7 +116,7 @@ async def install_approved_exit_configuration_in_uow(
                     else Decimal(".05"),
                     minimum_lift=not sor,
                     max_actual_fraction=Decimal(1) if sor else Decimal(".5"),
-                    ma50_enabled=event in MA50_EVENTS,
+                    ma50_enabled=event in (*MA50_EVENTS, ORB_DIRECTIONAL_LONG_EVENT),
                 )
             )
         intent = ExitConfigurationIntent(

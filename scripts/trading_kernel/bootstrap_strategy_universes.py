@@ -45,12 +45,16 @@ from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
     ORB_EVENT_SPEC_IDS,
     ORB_STATIC_MEMBERS,
+    ORB_STRATEGY_GROUP_ID,
+    directional_orb_spec,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.strategy_registry import (
     registered_strategy_contracts,
+    strategy_contract_for,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
@@ -104,8 +108,17 @@ def _manifest_for_profile(
     runtime_profile_id: str,*,strategy_group_id: str | None=None,
 ) -> tuple[tuple[tuple[str, str], ...], tuple[str, ...]]:
     if strategy_group_id is not None:
-        if strategy_group_id!='SOR-1H-001' or runtime_profile_id!='tiny-live-v1':raise BootstrapBlocked('strategy_batch_manifest_missing')
-        return (('SOR-1H-LONG',ORB_EVENT_SPEC_IDS[0]),('SOR-1H-SHORT',ORB_EVENT_SPEC_IDS[1])),ORB_STATIC_MEMBERS
+        if runtime_profile_id != "tiny-live-v1" or strategy_group_id not in (
+            ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS
+        ):
+            raise BootstrapBlocked("strategy_batch_manifest_missing")
+        event_spec_ids = (
+            ORB_EVENT_SPEC_IDS if strategy_group_id == ORB_STRATEGY_GROUP_ID
+            else directional_orb_spec(strategy_group_id).event_spec_ids
+        )
+        return tuple(
+            (strategy_contract_for(event).event_id, event) for event in event_spec_ids
+        ), ORB_STATIC_MEMBERS
     manifest = APPROVED_UNIVERSE_BATCHES.get(runtime_profile_id)
     if manifest is None:
         raise BootstrapBlocked("runtime_profile_manifest_missing")
@@ -118,7 +131,16 @@ def _validate_static_manifest(
     event_specs, members = _manifest_for_profile(runtime_profile_id,strategy_group_id=strategy_group_id)
     event_order = tuple(event_id for event_id, _event_spec_id in event_specs)
     event_spec_by_event_id = dict(event_specs)
-    contracts = {contract.event_id: contract for contract in registered_strategy_contracts()}
+    registry = (
+        registered_strategy_contracts(include_sor_split=True)
+        if strategy_group_id in ORB_DIRECTIONAL_GROUPS
+        else registered_strategy_contracts()
+    )
+    contracts = {
+        contract.event_id: contract
+        for contract in registry
+        if strategy_group_id is None or contract.strategy_group_id == strategy_group_id
+    }
     if tuple(event_spec_by_event_id) != event_order or {
         event_id: contracts[event_id].event_spec_id
         for event_id in event_order
@@ -151,11 +173,15 @@ async def _validate_database_authority(
         event_rows = (
             await connection.execute(
                 text(
-                    "SELECT event_id, event_spec_id FROM brc_event_specs "
-                    "WHERE event_id = ANY(:event_ids) AND status = 'active' "
-                    "ORDER BY event_id"
+                    "SELECT e.event_id, e.event_spec_id FROM brc_event_specs e "
+                    "JOIN brc_strategy_versions v ON v.strategy_version_id=e.strategy_version_id "
+                    "JOIN brc_strategy_groups g ON g.strategy_group_id=v.strategy_group_id "
+                    "AND g.active_version_id=v.strategy_version_id "
+                    "WHERE e.event_id=ANY(:event_ids) AND e.status='active' AND v.status='active' "
+                    "AND g.status='active' AND (CAST(:group_id AS text) IS NULL OR g.strategy_group_id=CAST(:group_id AS text)) "
+                    "ORDER BY e.event_id, e.event_spec_id"
                 ),
-                {"event_ids": list(event_order)},
+                {"event_ids": list(event_order), "group_id": strategy_group_id},
             )
         ).mappings().all()
         policy_rows = (
@@ -180,7 +206,7 @@ async def _validate_database_authority(
     actual_event_specs = {
         str(row["event_id"]): str(row["event_spec_id"]) for row in event_rows
     }
-    if actual_event_specs != {
+    if len(event_rows) != len(event_order) or actual_event_specs != {
         event_id: event_spec_by_event_id[event_id] for event_id in event_order
     }:
         raise BootstrapBlocked("registry_event_authority_mismatch")
@@ -601,7 +627,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", default=os.getenv("TRADING_KERNEL_DATABASE_URL", ""))
     parser.add_argument("--runtime-profile-id", required=True)
-    parser.add_argument("--strategy-group-id",choices=("SOR-1H-001",))
+    parser.add_argument("--strategy-group-id",choices=(ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS))
     parser.add_argument("--wait-timeout-ms", type=int, default=300_000)
     parser.add_argument("--poll-interval-ms", type=int, default=5_000)
     certification_batch_mode = parser.add_mutually_exclusive_group()

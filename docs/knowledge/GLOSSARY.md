@@ -23,10 +23,10 @@
 | --- | --- | --- |
 | **StrategyGroup / Version / EventSpec** | 策略族、语义版本、某个方向和周期的可执行事件定义；注册不是启用 | [Registry](../../src/trading_kernel/domain/strategy_registry.py#L106) |
 | **RuntimeProfile / RuntimeScope** | 账户与环境配置；具体 Event、币种、Universe 和 Policy 的运行范围 | [ports](../../src/trading_kernel/application/ports.py)、[pg_models](../../src/trading_kernel/infrastructure/pg_models.py) |
-| **Observation / Fact** | 收盘行情观察与条件/保护参考事实；事实不直接占用资金 | [观察](../../src/trading_kernel/application/observe_strategy_scope.py#L246) |
+| **Observation / Fact** | 收盘行情观察与条件/保护参考事实；事实不直接占用资金 | [观察](../../src/trading_kernel/application/observe_strategy_scope.py#L249) |
 | **Exposure Episode** | 一次连续合格机会的身份；上升沿或 session 决定重置与去重 | [exposure_episode](../../src/trading_kernel/domain/exposure_episode.py) |
 | **StrategySignal** | 冻结 Event、币种、方向、时间、Episode、事实与出生权限的机会记录 | [StrategySignal](../../src/trading_kernel/domain/signal.py#L80) |
-| **Readiness / first_blocker** | 当前 scope 的可准入判断及第一个阻断解释，随当前事实变化 | [ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L806) |
+| **Readiness / first_blocker** | 当前 scope 的可准入判断及第一个阻断解释，随当前事实变化 | [ingest_signal](../../src/trading_kernel/application/ingest_signal.py#L824) |
 | **AdmissionDecision** | 某个 Signal 的最终准入或拒绝事实，记录当时组合占用与原因 | [admission_decision](../../src/trading_kernel/domain/admission_decision.py) |
 | **CapacityClaim** | 在当时账户快照、规则、风险和权限下冻结的一次容量声明 | [CapacityClaim](../../src/trading_kernel/domain/capacity.py#L249) |
 | **Ticket** | 不可变执行合同，冻结资金、入场与退出规则及来源身份；不是订单回执 | [TradeTicket](../../src/trading_kernel/domain/ticket.py#L39) |
@@ -42,7 +42,7 @@
 | **Aggregate / Reducer / Effect** | 当前生命周期投影；纯事件转移；待由持久化层实现的副作用描述 | [aggregate](../../src/trading_kernel/domain/aggregate.py)、[reducer](../../src/trading_kernel/domain/reducer.py)、[effects](../../src/trading_kernel/domain/effects.py) |
 | **Unit of Work（UoW）** | 一组本地数据库改动的提交或回滚边界，不包含网络请求 | [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146) |
 | **Initial Stop / TP1 / Runner** | 初始保护、第一段止盈、余仓管理；均由 Ticket 冻结的规则约束 | [exit_policy](../../src/trading_kernel/domain/exit_policy.py) |
-| **ExitProfile / EventExitBinding** | 不可变退出方案；版本化的 Event→方案绑定；切换只影响新签发 | [ExitProfile](../../src/trading_kernel/domain/exit_policy.py#L190)、[绑定切换](../../src/trading_kernel/application/owner_control.py#L540) |
+| **ExitProfile / EventExitBinding** | 不可变退出方案；版本化的 Event→方案绑定；切换只影响新签发 | [ExitProfile](../../src/trading_kernel/domain/exit_policy.py#L190)、[绑定切换](../../src/trading_kernel/application/owner_control.py#L545) |
 | **OUTCOME_UNKNOWN** | 请求可能已到交易所而结果不明；不能当作拒绝或安全重发 | [未知恢复](../../src/trading_kernel/application/recover_unknown_command.py#L97) |
 | **Incident / Runtime Fence** | 安全异常与其阻断范围；版本或 schema 不匹配时隔离写者 | [incident_blocking](../../src/trading_kernel/domain/incident_blocking.py)、[runtime_fence](../../src/trading_kernel/application/runtime_fence.py) |
 | **Reconciliation** | 依据外部订单、成交和持仓核对内部状态并推进清理 | [reconcile_ticket](../../src/trading_kernel/application/reconcile_ticket.py#L141) |

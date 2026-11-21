@@ -329,7 +329,11 @@ def require_product_compatibility(
         raise ProductCompatibilityError("PRODUCT_COMPATIBILITY_MISMATCH")
 
 
-def registered_product_compatibilities() -> tuple[ProductCompatibility, ...]:
+def registered_product_compatibilities(
+    *, include_sor_split: bool = False
+) -> tuple[ProductCompatibility, ...]:
+    from src.trading_kernel.domain.orb_session_selection import ORB_DIRECTIONAL_EVENTS
+
     crypto_events = (
         "event_spec:CPM-RO-001:CPM-LONG:v3",
         "event_spec:MPG-001:MPG-LONG:v3",
@@ -339,6 +343,7 @@ def registered_product_compatibilities() -> tuple[ProductCompatibility, ...]:
         "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
         "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
         "event_spec:BRF2-001:BRF2-SHORT:v3",
+        *(ORB_DIRECTIONAL_EVENTS if include_sor_split else ()),
     )
     tradfi_events = (
         "event_spec:SOR-US-EQ-PERP-001:SOR-US-LONG-15M:v1",
@@ -371,7 +376,7 @@ def registered_product_compatibilities() -> tuple[ProductCompatibility, ...]:
 def product_compatibility_for(event_spec_id: str) -> ProductCompatibility:
     matches = tuple(
         item
-        for item in registered_product_compatibilities()
+        for item in registered_product_compatibilities(include_sor_split=True)
         if item.event_spec_id == event_spec_id
     )
     if len(matches) != 1:

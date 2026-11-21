@@ -32,6 +32,10 @@ async def protected_proof(engine, *, review=True):
         a = await u.aggregates.get(t.identity.ticket_id)
         refs = await u.exchange_commands.list_order_references(t.identity.ticket_id)
         rows = await u.management.command_rows(t.identity.ticket_id)
+    return t, make_stop_proof(t, a, refs, rows)
+
+
+def make_stop_proof(t, a, refs, rows):
     from src.trading_kernel.domain.trade_management import OrderTerms
 
     orders = []
@@ -118,5 +122,5 @@ async def protected_proof(engine, *, review=True):
         observed_at_ms=7000,
         valid_until_ms=37000,
     )
-    return t, proof
+    return proof
 

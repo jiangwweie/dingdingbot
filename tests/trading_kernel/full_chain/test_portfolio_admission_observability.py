@@ -554,7 +554,7 @@ async def test_overnight_portfolio_replay_uses_observation_producer_for_decision
     assert sor[:2] == (
         ObservationStatus.SIGNAL_CREATED,
         EntryWorkerStatus.DISPATCHED,
-    )
+    ), sor
     assert source.calls
 
     async with PostgresKernelUnitOfWork(replay_engine) as uow:
@@ -1243,8 +1243,15 @@ async def _seed_replay_runtime(
             members=members,
         )
 
+    from tests.trading_kernel.support.exit_configuration import (
+        install_approved_exit_configuration,
+    )
+
+    await install_approved_exit_configuration(
+        engine, account_id="subaccount-source-test", now_ms=NOW_MS-3,
+    )
     async with PostgresKernelUnitOfWork(engine) as uow:
-        await set_strategy_entry_state(uow,strategy_group_id="SOR-1H-001",target_state=StrategyEntryState.ENABLED,
+        await set_strategy_entry_state(uow,strategy_group_id="SOR-1H-SHORT-001",target_state=StrategyEntryState.ENABLED,
             request=ControlMutationRequest(expected_version=1,reason="hourly replay",idempotency_key="replay:hourly:resume",owner_identity="owner",now_ms=NOW_MS-2),authentication_strength="totp_step_up")
         await arm_acceptance_policy(
             uow,
@@ -1260,7 +1267,8 @@ async def _install_and_activate(
     members: tuple[str, ...],
 ) -> None:
     contract = next(
-        item for item in registered_strategy_contracts() if item.event_id == event_id
+        item for item in registered_strategy_contracts(include_sor_split=True)
+        if item.event_id == event_id and item.strategy_group_id != "SOR-1H-001"
     )
     warm_interval_ms = 900_000 if contract.timeframe == "15m" else 3_600_000
     warm_at_ms = NOW_MS - warm_interval_ms

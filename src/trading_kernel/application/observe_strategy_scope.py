@@ -55,8 +55,11 @@ from src.trading_kernel.domain.market import (
     Timeframe,
 )
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_GROUPS,
     ORB_EVENT_SPEC_IDS,
-    ORB_SELECTION_SPEC_ID,
+    daily_event_spec_ids,
+    is_hourly_orb_spec,
 )
 from src.trading_kernel.domain.product import ProductSessionSnapshot
 from src.trading_kernel.domain.selection_authority import (
@@ -189,7 +192,7 @@ def build_warm_readiness(
     if (
         scope.lifecycle_state != source_lifecycle
         or (source_lifecycle != "staged" and not scope.observation_enabled)
-        or (source_lifecycle == "staged" and (scope.event_spec_id not in ORB_EVENT_SPEC_IDS or scope.observation_enabled or scope.entry_enabled))
+        or (source_lifecycle == "staged" and (scope.event_spec_id not in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS) or scope.observation_enabled or scope.entry_enabled))
         or (source_lifecycle=="warming" and scope.entry_enabled)
     ):
         raise ValueError("warm readiness requires a warming-only scope")
@@ -305,7 +308,7 @@ async def _observe_strategy_scope(
             else request.trigger_candle_close_time_ms
         )
         if not (_scope_observation_permissions_are_valid(scope) or (request.operation == "refresh_staged_facts"
-            and scope.lifecycle_state == "staged" and scope.event_spec_id in ORB_EVENT_SPEC_IDS
+            and scope.lifecycle_state == "staged" and scope.event_spec_id in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)
             and not scope.observation_enabled and not scope.entry_enabled)):
             if scope.lifecycle_state == "warming":
                 await _save_observation_blocker(
@@ -809,7 +812,7 @@ async def _observe_strategy_scope(
             ),
         )
         if (ingest_result.status is IngestSignalStatus.CANDIDATE_READY
-            and contract.strategy_group_id in {"CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"}):
+            and contract.strategy_group_id in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001", "SOR-1H-001", *ORB_DIRECTIONAL_GROUPS)):
             async with uow.shadow_outcomes.isolate_collection(
                 signal_event_id=signal.signal_event_id, stage="observation",
             ):
@@ -864,14 +867,14 @@ async def _capture_orb_fact_refresh_source(uow: KernelUnitOfWork,scope: RuntimeS
     request: ObservationRequest,now_ms: int,*,for_update: bool=False) -> CurrentFactsRefreshSource | None:
     authoritative_now=await uow.instrument_selection.read_authority_clock_ms()
     staged=request.operation=="refresh_staged_facts"
-    if (scope.event_spec_id not in ORB_EVENT_SPEC_IDS or scope.lifecycle_state!=("staged" if staged else "active")
-        or scope.observation_enabled==staged or scope.entry_enabled==staged or scope.strategy_group_id!="SOR-1H-001"
+    if (scope.event_spec_id not in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS) or scope.lifecycle_state!=("staged" if staged else "active")
+        or scope.observation_enabled==staged or scope.entry_enabled==staged or scope.strategy_group_id not in ("SOR-1H-001", *ORB_DIRECTIONAL_GROUPS)
         or now_ms<request.trigger_candle_close_time_ms or authoritative_now<now_ms
         or request.trigger_candle_close_time_ms!=authoritative_now//3600000*3600000):
         return None
     owner=await uow.owner_controls.get_strategy_control(scope.strategy_group_id,for_update=for_update)
     control=await uow.instrument_selection.get_selection_control(scope.strategy_group_id,for_update=for_update)
-    if owner is None or owner.entry_state!="enabled" or control is None or control.selection_spec_id!=ORB_SELECTION_SPEC_ID:
+    if owner is None or owner.entry_state!="enabled" or control is None or not is_hourly_orb_spec(control.selection_spec_id) or scope.event_spec_id not in daily_event_spec_ids(control.selection_spec_id):
         return None
     vacuum=await uow.instrument_selection.get_current_entry_vacuum(strategy_group_id=scope.strategy_group_id,
         selection_spec_id=control.selection_spec_id,for_update=for_update)
@@ -1002,7 +1005,7 @@ async def _save_observation_blocker(
 def _contract_for_scope(
     scope: RuntimeScopeSnapshot,
 ) -> RegisteredStrategyContract | None:
-    for contract in registered_strategy_contracts():
+    for contract in registered_strategy_contracts(include_sor_split=True):
         if (
             contract.event_spec_id == scope.event_spec_id
             and contract.strategy_group_id == scope.strategy_group_id

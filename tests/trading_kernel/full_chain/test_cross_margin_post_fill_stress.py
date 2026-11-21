@@ -876,3 +876,122 @@ async def test_concurrent_rule_change_is_not_overwritten_by_post_fill_refresh(
         )
     assert cached is not None
     assert cached.maintenance_margin_brackets_digest == "sha256:" + "7" * 64
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("contradictory_incident", "risk_source_timeout"), [(False, False), (True, False), (False, True)])
+async def test_pending_stress_full_initial_stop_requires_proof_before_releasing_lane(
+    stress_engine, contradictory_incident, risk_source_timeout,
+):
+    from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
+    from tests.trading_kernel.support.event_chain import _valued_usdt_fee
+    from tests.trading_kernel.support.verified_exit import make_stop_proof
+
+    ticket = _ticket()
+    await _reach_post_fill_pending(stress_engine, ticket)
+    factory = lambda: PostgresKernelUnitOfWork(stress_engine)
+
+    class FlatRisk(StressFactsSource):
+        async def read_account_risk_snapshot(self, request):
+            account = await super().read_account_risk_snapshot(request)
+            values = account.model_dump(exclude={"snapshot_digest"})
+            values["account_positions"] = ()
+            return AccountRiskSnapshot.create(**values)
+
+    class Venue:
+        available = False
+
+        async def read_position_snapshot(self, request):
+            return PositionSnapshot(
+                netting_domain=request.netting_domain, quantity=Decimal(0),
+                average_entry_price=None, open_orders=(), observed_at_ms=request.observed_at_ms,
+            )
+
+        async def read_verified_exit(self, *, aggregate, references, incident_ids):
+            if not self.available:
+                raise ValueError("initial stop child fills not yet visible")
+            async with factory() as uow:
+                rows = await uow.management.command_rows(ticket.identity.ticket_id)
+            self.proof = make_stop_proof(ticket, aggregate, references, rows).model_copy(
+                update={"incident_ids": incident_ids}
+            )
+
+            return self.proof
+
+        async def read_review_economics(self, request):
+            def fills(events, role):
+                return tuple(
+                    ReviewFill(
+                        exchange_trade_id=f.trade_id, exchange_order_id=f.order_id,
+                        role=role, command_id=next(
+                            o.reference.command_id for o in self.proof.orders if o.executable_id == f.order_id
+                        ), quantity=f.quantity, price=f.price,
+                        fee=_valued_usdt_fee("0.01", f.occurred_at_ms),
+                        realized_pnl_quote=Decimal(0) if role == "entry" else
+                            f.quantity * (f.price - ticket.entry_reference_price),
+                        occurred_at_ms=f.occurred_at_ms,
+                    ) for f in events
+                )
+            return ReviewEconomicsFacts(
+                ticket_id=request.ticket_id, entry_fills=fills(self.proof.entry_fills, "entry"),
+                exit_fills=fills(self.proof.exit_fills, "exit"), funding_quote=Decimal(0),
+                funding_unavailable_reason=None, observed_at_ms=request.observed_at_ms,
+            )
+
+    venue = Venue()
+    risk = FlatRisk(ticket, margin_balance=Decimal(100), unavailable=risk_source_timeout)
+    async def tick(now):
+        return await run_reconciliation_worker_once(
+            factory, NoTicketVenueTruth(), venue,
+            ReconciliationWorkerRequest(worker_id="reconciliation", runtime_commit="kernel-test-head",
+                schema_revision=CURRENT_SCHEMA_REVISION, now_ms=now, timeout_seconds=1,
+                unknown_visibility_grace_ms=30_000, idle_poll_interval_ms=1000),
+            account_risk_source=risk, instrument_rules_source=risk, review_economics_source=venue,
+        )
+
+    assert (await tick(5000)).status is ReconciliationWorkerStatus.FACTS_UNAVAILABLE
+    async with factory() as uow:
+        agg = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert agg.entry_lane_held and agg.status is AggregateStatus.POST_FILL_RISK_PENDING
+        assert (await uow.budgets.get_for_ticket(ticket.identity.ticket_id)).status == "active"
+        assert await uow.incidents.get_open_for_ticket_kind(ticket.identity.ticket_id, "post_fill_risk_facts_unavailable")
+    if contradictory_incident:
+        from src.trading_kernel.application.reconcile_ticket import (
+            PostFillStressReconcileStatus,
+            record_post_fill_stress_retry,
+        )
+        async with factory() as uow:
+            await record_post_fill_stress_retry(
+                uow, ticket_id=ticket.identity.ticket_id,
+                status=PostFillStressReconcileStatus.FACTS_CONTRADICTORY,
+                now_ms=6000, due_at_ms=7000,
+            )
+    venue.available = True
+    await tick(7000)
+    if contradictory_incident:
+        # Retrying a known flat account must not downgrade an independent contradiction.
+        await tick(9000)
+        async with factory() as uow:
+            lane = await uow.entry_admission.get_global_lane()
+            assert lane.status == "claimed" and lane.ticket_id == ticket.identity.ticket_id
+            assert await uow.incidents.get_open_for_ticket_kind(
+                ticket.identity.ticket_id, "post_fill_risk_facts_contradictory"
+            )
+            assert (await uow.budgets.get_for_ticket(ticket.identity.ticket_id)).status == "active"
+        return
+    async with factory() as uow:
+        agg = await uow.aggregates.get(ticket.identity.ticket_id)
+        assert agg.status is AggregateStatus.REVIEW_PENDING
+        assert agg.position_qty == 0 and agg.post_fill_stress_status is None
+        assert not agg.entry_lane_held
+        assert not await uow.incidents.list_open_for_ticket(ticket.identity.ticket_id)
+        assert (await uow.budgets.get_for_ticket(ticket.identity.ticket_id)).status == "released"
+        assert len(await uow.exchange_commands.list_for_ticket(ticket.identity.ticket_id)) == 2
+    async with stress_engine.connect() as c:
+        assert await c.scalar(sa.text("SELECT status FROM brc_entry_lane_current")) == "idle"
+    await tick(9000)
+    async with factory() as uow:
+        assert (await uow.aggregates.get(ticket.identity.ticket_id)).status is AggregateStatus.TERMINAL
+        review = await uow.reviews.get_for_ticket(ticket.identity.ticket_id)
+        assert review.metrics["economics_completeness"] == "complete"
+        assert Decimal(review.metrics["net_pnl_quote"]) < 0

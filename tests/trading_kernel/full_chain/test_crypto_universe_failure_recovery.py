@@ -65,12 +65,12 @@ from tests.trading_kernel.integration.universe_activation_support import (
     NOW_MS as ACTIVATION_NOW_MS,
 )
 from tests.trading_kernel.integration.universe_activation_support import (
-    activation_engine as _activation_engine,  # noqa: F401
-)
-from tests.trading_kernel.integration.universe_activation_support import (
     activation_snapshot,
     make_warming_ready,
     prepare_active_and_warming,
+)
+from tests.trading_kernel.integration.universe_activation_support import (
+    legacy_hourly_activation_engine as _activation_engine,  # noqa: F401
 )
 from tests.trading_kernel.integration.universe_certification_support import (
     NOW_MS,

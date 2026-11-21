@@ -140,6 +140,14 @@ async def activate(
 
     require_upgrade_schema(source["schema"], receipt["schema_revision"])
     forward = source["schema"] != receipt["schema_revision"]
+    directional_cutover = (source["schema"], receipt["schema_revision"]) == (
+        "0024_owner_cooperation", "0025_directional_sor"
+    )
+    from scripts.trading_kernel.manual_directional_sor_preservation import (
+        DIRECTIONAL_DELTA_TABLES,
+        verify_directional_sor_controls,
+        verify_directional_sor_preservation,
+    )
     from scripts.trading_kernel.manual_upgrade_journal import UpgradeJournal
 
     journal = UpgradeJournal(ROOT, receipt, source)
@@ -207,6 +215,7 @@ async def activate(
             await c.execute(text("SET LOCAL statement_timeout='5s'"))
             result = await read_preserved_runtime_state(c)
             history = {}
+            directional_delta = {}
             all_columns = {}
             available = {
                 r[0]
@@ -254,12 +263,16 @@ async def activate(
                     raise ValueError(
                         "fresh-account preservation exceeds bounded upgrade scope"
                     )
+                if directional_cutover and table.name in DIRECTIONAL_DELTA_TABLES:
+                    directional_delta[table.name] = [json.loads(row) for row in rows]
                 history[table.name] = {
                     "rows": len(rows),
                     "sha256": sha256(
                         json.dumps(rows, separators=(",", ":")).encode()
                     ).hexdigest(),
                 }
+            if directional_cutover:
+                result["directional_delta"] = directional_delta
             result["preserved_table_rows"] = history
             result["preserved_columns"] = all_columns
             result.update(await read_preserved_controls(c, all_columns))
@@ -345,7 +358,12 @@ async def activate(
                             )
             await refresh_owner_read_grants(engine)
             after = await snapshot(before["preserved_columns"])
-            if before != json.loads(json.dumps(after, default=str)):
+            normalized_after = json.loads(json.dumps(after, default=str))
+            if directional_cutover:
+                verify_directional_sor_preservation(
+                    before, normalized_after, account_id=account, commit=receipt["commit"],
+                )
+            elif before != normalized_after:
                 raise ValueError(
                     "current Universe/history or Owner controls changed during upgrade"
                 )
@@ -364,10 +382,10 @@ async def activate(
                         "installed identity differs from resumed candidate"
                     )
                 controls = await read_preserved_controls(c, before["preserved_columns"])
-                if any(
-                    json.loads(json.dumps(controls[key], default=str)) != before[key]
-                    for key in controls
-                ):
+                normalized_controls = json.loads(json.dumps(controls, default=str))
+                if directional_cutover:
+                    verify_directional_sor_controls(before, normalized_controls)
+                elif any(normalized_controls[key] != before[key] for key in controls):
                     raise ValueError("Owner controls changed after preserved upgrade")
         await refresh_owner_position_lock_grant(engine)
     finally:
@@ -394,6 +412,7 @@ async def activate(
         "0022_wallet_margin_allocation",
         "0023_management_recovery",
         "0024_owner_cooperation",
+        "0025_directional_sor",
     }:
         credential = filesystem_root / "etc/brc/notification-credentials/feishu_webhook"
         private_env = filesystem_root / "etc/brc/notification-credentials/feishu.env"
@@ -442,6 +461,25 @@ async def activate(
                 "brc-trading-kernel-reconciliation-worker.service",
             ]
         )
+    if directional_cutover and not journal.done("directional_universes"):
+        from src.trading_kernel.domain.orb_session_selection import (
+            ORB_DIRECTIONAL_GROUPS,
+        )
+
+        bootstrap_env = {**os.environ, "TRADING_KERNEL_DATABASE_URL": dsn}
+        for group in ORB_DIRECTIONAL_GROUPS:
+            run(
+                [
+                    str(REPO_ROOT / ".venv/bin/python"),
+                    str(REPO_ROOT / "scripts/trading_kernel/bootstrap_strategy_universes.py"),
+                    "--runtime-profile-id", "tiny-live-v1",
+                    "--strategy-group-id", group,
+                    "--wait-timeout-ms", "600000",
+                ],
+                env=bootstrap_env,
+                timeout=630,
+            )
+        journal.complete_step("directional_universes")
     run(["systemctl", "reload", "nginx"])
     result = {
         "status": "forward_schema_upgraded_entry_fenced"
@@ -451,7 +489,7 @@ async def activate(
         "source_commit": source["commit"],
         "commit": receipt["commit"],
         "preservation_pass": True,
-        "owner_policy_changed": False,
+        "owner_policy_changed": directional_cutover,
         "entry_worker_started": False,
     }
     journal.complete_step("services")

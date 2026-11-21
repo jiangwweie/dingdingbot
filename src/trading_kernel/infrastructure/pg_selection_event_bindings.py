@@ -8,6 +8,7 @@ from src.trading_kernel.domain.selection_authority import (
     UniverseAuthorityPair,
     build_event_universe_set,
 )
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 
 
 def sor_authority_pair_from_bindings(
@@ -15,21 +16,22 @@ def sor_authority_pair_from_bindings(
 ) -> UniverseAuthorityPair | None:
     from src.trading_kernel.domain.orb_session_selection import daily_event_spec_ids
 
-    long_event, short_event = daily_event_spec_ids(selection_spec_id)
+    events = tuple(strategy_contract_for(event) for event in daily_event_spec_ids(selection_spec_id))
     bindings = TypeAdapter(tuple[AuthorityEventBinding, ...]).validate_python(payload)
     shape = build_event_universe_set(
-        requirements=(
-            AuthorityEventRequirement(event_spec_id=long_event, position_side="long"),
-            AuthorityEventRequirement(event_spec_id=short_event, position_side="short"),
+        requirements=tuple(
+            AuthorityEventRequirement(event_spec_id=event.event_spec_id, position_side=event.position_side)
+            for event in events
         ),
         bindings=bindings,
     )
     if not shape.is_trading:
         return None
-    long_id = shape.binding_for(long_event).universe_version_id
-    short_id = shape.binding_for(short_event).universe_version_id
-    if long_id is None or short_id is None:
-        raise ValueError("SOR trading Event set lacks a Universe")
+    universes = {
+        event.position_side: shape.binding_for(event.event_spec_id).universe_version_id
+        for event in events
+    }
     return UniverseAuthorityPair(
-        long_universe_version_id=long_id, short_universe_version_id=short_id
+        long_universe_version_id=universes.get("long"),
+        short_universe_version_id=universes.get("short"),
     )

@@ -35,6 +35,12 @@ from src.trading_kernel.domain.generic_materialization import (
     GenericStaticMaterializationGeneration,
 )
 from src.trading_kernel.domain.instrument_selection import DAY_MS, HOUR_MS, INTERVAL_MS
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
+    ORB_SELECTION_SPEC_ID,
+    ORB_STRATEGY_GROUP_ID,
+    directional_orb_spec,
+)
 from src.trading_kernel.domain.owner_control import (
     ControlOperationState,
     OwnerAuthorization,
@@ -219,7 +225,11 @@ async def set_strategy_entry_state(
             strategy_group_id,
             for_update=True,
         )
-        if selection_control is not None:
+        if selection_control is not None and not (
+            strategy_group_id in ORB_DIRECTIONAL_GROUPS
+            and selection_control.selection_mode is SelectionMode.STATIC_BASELINE
+            and selection_control.pending_selection_mode is None
+        ):
             session_start_ms = (request.now_ms // DAY_MS) * DAY_MS
             await uow.instrument_selection.open_owner_paused_entry_vacuum(
                 StrategyEntryVacuum(
@@ -1226,17 +1236,21 @@ async def stage_orb_dynamic_selection_mode(
     effective_session_start_ms: int,
     request: ControlMutationRequest,
     authentication_strength: Literal["totp_step_up"],
+    strategy_group_id: str = ORB_STRATEGY_GROUP_ID,
 ) -> SelectionControl:
-    from src.trading_kernel.domain.orb_session_selection import (
-        ORB_SELECTION_SPEC_ID,
-        ORB_STRATEGY_GROUP_ID,
+    if strategy_group_id == ORB_STRATEGY_GROUP_ID:
+        group = await uow.signals.get_strategy_group(strategy_group_id)
+        if group is None or group.status != "active":
+            raise OwnerControlBlocked("strategy_retired")
+    selection_spec_id = (
+        ORB_SELECTION_SPEC_ID if strategy_group_id == ORB_STRATEGY_GROUP_ID
+        else directional_orb_spec(strategy_group_id).selection_spec_id
     )
-
     if authentication_strength != "totp_step_up":
         raise OwnerControlBlocked("selection_mode_change_requires_step_up")
-    spec = await uow.instrument_selection.get_orb_spec(ORB_SELECTION_SPEC_ID)
+    spec = await uow.instrument_selection.get_orb_spec(selection_spec_id)
     current = await uow.instrument_selection.get_selection_control(
-        ORB_STRATEGY_GROUP_ID, for_update=True
+        strategy_group_id, for_update=True
     )
     if current is None:
         raise OwnerControlBlocked("selection_control_missing")
@@ -1245,7 +1259,7 @@ async def stage_orb_dynamic_selection_mode(
         + sha256(
             json.dumps(
                 {
-                    "strategy_group_id": ORB_STRATEGY_GROUP_ID,
+                    "strategy_group_id": strategy_group_id,
                     "selection_spec_id": spec.selection_spec_id,
                     "idempotency_key": request.idempotency_key,
                 },
@@ -1255,7 +1269,7 @@ async def stage_orb_dynamic_selection_mode(
         ).hexdigest()
     )
     target_scope: dict[str, JsonValue] = {
-        "strategy_group_id": ORB_STRATEGY_GROUP_ID,
+        "strategy_group_id": strategy_group_id,
         "selection_spec_id": spec.selection_spec_id,
         "target_selection_mode": "dynamic_selection",
         "effective_period_anchor_ms": effective_session_start_ms,
@@ -1289,7 +1303,7 @@ async def stage_orb_dynamic_selection_mode(
     ):
         raise OwnerControlBlocked("selection_effective_session_not_next")
     baseline = await uow.instrument_selection.capture_orb_static_baseline(
-        captured_at_ms=request.now_ms
+        captured_at_ms=request.now_ms, selection_spec_id=spec.selection_spec_id,
     )
     authorization = _authorization(
         purpose="selection_mode_change",
@@ -1299,7 +1313,7 @@ async def stage_orb_dynamic_selection_mode(
     )
     await uow.owner_controls.add_authorization(authorization)
     staged = await uow.instrument_selection.stage_pending_generic_selection_mode(
-        strategy_group_id=ORB_STRATEGY_GROUP_ID,
+        strategy_group_id=strategy_group_id,
         selection_spec_id=spec.selection_spec_id,
         expected_control_version=current.control_version,
         selection_epoch_id=epoch,
@@ -1315,15 +1329,19 @@ async def stage_orb_dynamic_selection_mode(
 
 async def stage_orb_static_selection_mode(uow: KernelUnitOfWork, *, rollback_baseline_id: str,
     selection_epoch_id: str,effective_session_start_ms: int,request: ControlMutationRequest,
-    authentication_strength: Literal['totp_step_up']) -> SelectionControl:
-    from src.trading_kernel.domain.orb_session_selection import (
-        ORB_SELECTION_SPEC_ID,
-        ORB_STRATEGY_GROUP_ID,
+    authentication_strength: Literal['totp_step_up'],strategy_group_id: str = ORB_STRATEGY_GROUP_ID) -> SelectionControl:
+    if strategy_group_id == ORB_STRATEGY_GROUP_ID:
+        group = await uow.signals.get_strategy_group(strategy_group_id)
+        if group is None or group.status != "active":
+            raise OwnerControlBlocked("strategy_retired")
+    selection_spec_id = (
+        ORB_SELECTION_SPEC_ID if strategy_group_id == ORB_STRATEGY_GROUP_ID
+        else directional_orb_spec(strategy_group_id).selection_spec_id
     )
     if authentication_strength!='totp_step_up':raise OwnerControlBlocked('selection_mode_change_requires_step_up')
-    current=await uow.instrument_selection.get_selection_control(ORB_STRATEGY_GROUP_ID,for_update=True)
+    current=await uow.instrument_selection.get_selection_control(strategy_group_id,for_update=True)
     if current is None:raise OwnerControlBlocked('selection_control_missing')
-    scope: dict[str,JsonValue]={'strategy_group_id':ORB_STRATEGY_GROUP_ID,'selection_spec_id':ORB_SELECTION_SPEC_ID,
+    scope: dict[str,JsonValue]={'strategy_group_id':strategy_group_id,'selection_spec_id':selection_spec_id,
         'target_selection_mode':'static_baseline','rollback_baseline_id':rollback_baseline_id,
         'selection_epoch_id':selection_epoch_id,'effective_period_anchor_ms':effective_session_start_ms}
     existing=await uow.owner_controls.get_authorization_by_idempotency_key(request.idempotency_key)
@@ -1337,11 +1355,13 @@ async def stage_orb_static_selection_mode(uow: KernelUnitOfWork, *, rollback_bas
         raise OwnerControlBlocked('selection_static_source_changed')
     if effective_session_start_ms != _next_dynamic_selection_session_start_ms(request.now_ms):
         raise OwnerControlBlocked('selection_effective_session_not_next')
-    await uow.instrument_selection.get_orb_static_baseline(rollback_baseline_id)
+    baseline = await uow.instrument_selection.get_orb_static_baseline(rollback_baseline_id)
+    if baseline.selection_spec_id != selection_spec_id:
+        raise OwnerControlBlocked("selection_static_source_changed")
     authorization=_authorization(purpose='selection_mode_change',request=request,authentication_strength='totp_step_up',target_scope=scope)
     await uow.owner_controls.add_authorization(authorization)
-    staged=await uow.instrument_selection.stage_pending_generic_static_mode(strategy_group_id=ORB_STRATEGY_GROUP_ID,
-        selection_spec_id=ORB_SELECTION_SPEC_ID,selection_epoch_id=selection_epoch_id,rollback_baseline_id=rollback_baseline_id,
+    staged=await uow.instrument_selection.stage_pending_generic_static_mode(strategy_group_id=strategy_group_id,
+        selection_spec_id=selection_spec_id,selection_epoch_id=selection_epoch_id,rollback_baseline_id=rollback_baseline_id,
         expected_control_version=current.control_version,effective_period_anchor_ms=effective_session_start_ms,
         authorization_id=authorization.authorization_id,updated_at_ms=request.now_ms)
     if staged is None:raise OwnerControlConflict('selection_control_version_conflict')

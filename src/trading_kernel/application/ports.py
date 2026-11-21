@@ -131,6 +131,7 @@ from src.trading_kernel.domain.instrument_selection import (
     SorDynamicSelectionSpecV0,
 )
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_SELECTION_SPEC_ID,
     InstalledOrbSessionSelectionSpec,
     OrbSessionSelectionComputation,
     OrbSessionSelectionSnapshot,
@@ -1510,8 +1511,8 @@ class SignalRepository(Protocol):
         self,
         *,
         materialization_generation_id: str,
-        long_universe_version_id: str,
-        short_universe_version_id: str,
+        long_universe_version_id: str | None,
+        short_universe_version_id: str | None,
     ) -> bool: ...
 
 
@@ -1856,7 +1857,7 @@ class InstrumentSelectionRepository(Protocol):
         computation: OrbSessionSelectionComputation, completed_at_ms: int) -> None: ...
 
     async def capture_orb_static_baseline(
-        self, *, captured_at_ms: int
+        self, *, captured_at_ms: int, selection_spec_id: str = ORB_SELECTION_SPEC_ID
     ) -> OrbStaticRollbackBaseline: ...
     async def get_orb_static_baseline(
         self, baseline_id: str

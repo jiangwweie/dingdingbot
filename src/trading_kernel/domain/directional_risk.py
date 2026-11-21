@@ -9,6 +9,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_EVENT_SPEC_IDS,
+)
 from src.trading_kernel.domain.risk_budget import BUDGET_CONTRACT
 
 
@@ -27,7 +31,7 @@ RULE_LIMITS = {
     "neutral": ("1", "1"),
     "bearish": ("0.5", "1"),
 }
-SCOPED_EVENTS = frozenset(
+_LEGACY_SCOPED_EVENTS = frozenset(
     {
         "event_spec:CPM-RO-001:CPM-LONG:v3",
         "event_spec:MPG-001:MPG-LONG:v3",
@@ -41,10 +45,27 @@ RULE_DIGEST = canonical_digest(
     {
         "rule_id": RULE_ID,
         "limits": RULE_LIMITS,
-        "event_spec_ids": sorted(SCOPED_EVENTS),
+        "event_spec_ids": sorted(_LEGACY_SCOPED_EVENTS),
         "budget_contract": BUDGET_CONTRACT,
     }
 )
+
+
+DIRECTIONAL_SOR_RULE_ID = "owner-directional-risk:v3"
+_DIRECTIONAL_SOR_SCOPE = (_LEGACY_SCOPED_EVENTS - set(ORB_EVENT_SPEC_IDS)) | frozenset(ORB_DIRECTIONAL_EVENTS)
+DIRECTIONAL_SOR_RULE_DIGEST = canonical_digest(
+    {
+        "rule_id": DIRECTIONAL_SOR_RULE_ID,
+        "limits": RULE_LIMITS,
+        "event_spec_ids": sorted(_DIRECTIONAL_SOR_SCOPE),
+        "budget_contract": BUDGET_CONTRACT,
+    }
+)
+DIRECTIONAL_RULES = {
+    RULE_ID: (RULE_DIGEST, _LEGACY_SCOPED_EVENTS),
+    DIRECTIONAL_SOR_RULE_ID: (DIRECTIONAL_SOR_RULE_DIGEST, _DIRECTIONAL_SOR_SCOPE),
+}
+SCOPED_EVENTS = _LEGACY_SCOPED_EVENTS | _DIRECTIONAL_SOR_SCOPE
 
 
 class DirectionalControl(BaseModel):
@@ -68,7 +89,8 @@ class DirectionalControl(BaseModel):
     def valid(self):
         if not self.venue_id.strip() or not self.account_id.strip():
             raise ValueError("directional_identity_blank")
-        if self.rule_id != RULE_ID or self.rule_digest != RULE_DIGEST:
+        rule = DIRECTIONAL_RULES.get(self.rule_id)
+        if rule is None or self.rule_digest != rule[0]:
             raise ValueError("directional_rule_mismatch")
         if (self.pending_view is None) != (self.pending_request_id is None):
             raise ValueError("directional_pending_shape")

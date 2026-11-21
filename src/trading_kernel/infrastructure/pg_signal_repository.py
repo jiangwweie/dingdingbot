@@ -48,7 +48,11 @@ from src.trading_kernel.domain.exposure_episode import (
     build_episode_domain_key,
 )
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
-from src.trading_kernel.domain.orb_session_selection import ORB_EVENT_SPEC_IDS
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_EVENT_SPEC_IDS,
+    is_hourly_orb_spec,
+)
 from src.trading_kernel.domain.product import (
     InstrumentProductProfile,
     ProductSessionSnapshot,
@@ -1116,7 +1120,7 @@ class PostgresSignalRepository:
             runtime_scopes_current.c.universe_version_id==readiness.universe_version_id,
             runtime_scopes_current.c.universe_semantic_digest==readiness.universe_semantic_digest,
             sa.or_(sa.and_(runtime_scopes_current.c.lifecycle_state=="active",runtime_scopes_current.c.observation_enabled.is_(True)),
-                sa.and_(runtime_scopes_current.c.lifecycle_state=="staged",runtime_scopes_current.c.event_spec_id.in_(ORB_EVENT_SPEC_IDS),runtime_scopes_current.c.observation_enabled.is_(False),runtime_scopes_current.c.entry_enabled.is_(False))),
+                sa.and_(runtime_scopes_current.c.lifecycle_state=="staged",runtime_scopes_current.c.event_spec_id.in_((*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)),runtime_scopes_current.c.observation_enabled.is_(False),runtime_scopes_current.c.entry_enabled.is_(False))),
             sa.or_(runtime_scopes_current.c.warm_closed_bar_time_ms.is_(None),
                 runtime_scopes_current.c.warm_closed_bar_time_ms<=readiness.warm_closed_bar_time_ms),
         ).values(warm_closed_bar_time_ms=readiness.warm_closed_bar_time_ms,
@@ -1201,7 +1205,7 @@ class PostgresSignalRepository:
         limit: int, staged: bool=False) -> tuple[RuntimeScopeSnapshot,...]:
         if not 1<=limit<=16:
             raise ValueError("Current fact refresh bound invalid")
-        if staged and event_spec_id not in ORB_EVENT_SPEC_IDS:
+        if staged and event_spec_id not in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS):
             raise ValueError('staged fact refresh requires exact hourly ORB Event')
         rows=(await self._connection.execute(sa.select(runtime_scopes_current).where(
             runtime_scopes_current.c.event_spec_id==event_spec_id,runtime_scopes_current.c.universe_version_id==universe_version_id,
@@ -1358,7 +1362,7 @@ class PostgresSignalRepository:
                 ),
                 sa.or_(
                     strategy_universe_versions.c.lifecycle_state == "warming",
-                    sa.and_(strategy_universe_versions.c.lifecycle_state=="staged",strategy_universe_versions.c.event_spec_id.in_(ORB_EVENT_SPEC_IDS)),
+                    sa.and_(strategy_universe_versions.c.lifecycle_state=="staged",strategy_universe_versions.c.event_spec_id.in_((*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS))),
                     strategy_universe_current.c.universe_version_id.is_not(None),
                 ),
             )
@@ -1810,9 +1814,15 @@ class PostgresSignalRepository:
         self,
         *,
         materialization_generation_id: str,
-        long_universe_version_id: str,
-        short_universe_version_id: str,
+        long_universe_version_id: str | None,
+        short_universe_version_id: str | None,
     ) -> bool:
+        if long_universe_version_id == short_universe_version_id:
+            return False
+        ids = {value for value in (long_universe_version_id, short_universe_version_id)
+               if value is not None}
+        if not ids:
+            return False
         rows = (
             await self._connection.execute(
                 sa.select(
@@ -1821,15 +1831,13 @@ class PostgresSignalRepository:
                     strategy_universe_versions.c.lifecycle_state,
                 ).where(
                     strategy_universe_versions.c.universe_version_id.in_(
-                        (long_universe_version_id, short_universe_version_id)
+                        ids
                     )
                 )
             )
         ).mappings().all()
         return bool(
-            len(rows) == 2
-            and {str(row["universe_version_id"]) for row in rows}
-            == {long_universe_version_id, short_universe_version_id}
+            {str(row["universe_version_id"]) for row in rows} == ids
             and all(
                 row["materialization_generation_id"]
                 == materialization_generation_id
@@ -1875,9 +1883,9 @@ def _selection_authority_from_row(row: RowMapping) -> SelectionSessionAuthority:
     return SelectionSessionAuthority(
         selection_authority_id=str(row["selection_authority_id"]),
         selection_spec_id=str(row["selection_spec_id"]),
-        selection_epoch_id=str(row["selection_epoch_id"]) if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
-        selection_control_version=row["selection_control_version"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
-        activation_authorization_id=row["activation_authorization_id"] if row["selection_spec_id"] == "SOR_1H_OR_ATR_DYNAMIC_V1" else None,
+        selection_epoch_id=str(row["selection_epoch_id"]) if is_hourly_orb_spec(str(row["selection_spec_id"])) else None,
+        selection_control_version=row["selection_control_version"] if is_hourly_orb_spec(str(row["selection_spec_id"])) else None,
+        activation_authorization_id=row["activation_authorization_id"] if is_hourly_orb_spec(str(row["selection_spec_id"])) else None,
         session_start_ms=int(row["period_anchor_ms"]),
         decision_boundary_ms=int(row["decision_boundary_ms"]),
         authority_sequence=int(row["authority_sequence"]),

@@ -81,7 +81,7 @@ erDiagram
 | **brc_monitor_current / events** | monitor_key / monitor_event_id | Owner 可读状态和事件；终态使用 `owner:ticket:<ticket_id>` | project_owner_state、健康监控 |
 | **brc_shadow_outcomes_current** | shadow_outcome_id；signal_event_id 唯一 | source_kind、evaluation_kind、冻结输入、结果和不可用原因 | 研究 admission 与 projector |
 
-以上字段均可在 [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)找到；对象到持久化的入口为 [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146)、[PostgresSignalRepository](../../src/trading_kernel/infrastructure/pg_signal_repository.py#L117) 和 [pg_repositories](../../src/trading_kernel/infrastructure/pg_repositories.py)。
+以上字段均可在 [pg_models](../../src/trading_kernel/infrastructure/pg_models.py)找到；对象到持久化的入口为 [PostgresKernelUnitOfWork](../../src/trading_kernel/infrastructure/pg_unit_of_work.py#L146)、[PostgresSignalRepository](../../src/trading_kernel/infrastructure/pg_signal_repository.py#L125) 和 [pg_repositories](../../src/trading_kernel/infrastructure/pg_repositories.py)。
 
 ## 选币与 Owner 的状态族
 

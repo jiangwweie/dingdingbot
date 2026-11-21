@@ -20,6 +20,41 @@ ORB_SHORT_EVENT_SPEC_ID = "event_spec:SOR-1H-001:SOR-1H-SHORT:v1"
 ORB_EVENT_SPEC_IDS = (ORB_LONG_EVENT_SPEC_ID, ORB_SHORT_EVENT_SPEC_ID)
 ORB_SELECTION_SPEC_ID: Final = "SOR_1H_OR_ATR_DYNAMIC_V1"
 ORB_SELECTION_KIND: Final = "orb_session_dynamic_v1"
+ORB_LONG_GROUP_ID: Final = "SOR-1H-LONG-001"
+ORB_SHORT_GROUP_ID: Final = "SOR-1H-SHORT-001"
+ORB_LONG_SPEC_ID: Final = "SOR_1H_LONG_OR_ATR_DYNAMIC_V1"
+ORB_SHORT_SPEC_ID: Final = "SOR_1H_SHORT_OR_ATR_DYNAMIC_V1"
+ORB_DIRECTIONAL_LONG_EVENT: Final = "event_spec:SOR-1H-LONG-001:SOR-1H-LONG:v1"
+ORB_DIRECTIONAL_SHORT_EVENT: Final = "event_spec:SOR-1H-SHORT-001:SOR-1H-SHORT:v1"
+ORB_DIRECTIONAL_EVENTS = (ORB_DIRECTIONAL_LONG_EVENT, ORB_DIRECTIONAL_SHORT_EVENT)
+ORB_DIRECTIONAL_GROUPS = (ORB_LONG_GROUP_ID, ORB_SHORT_GROUP_ID)
+_ORB_IDENTITIES = {
+    ORB_SELECTION_SPEC_ID: (ORB_STRATEGY_GROUP_ID, ORB_STRATEGY_VERSION_ID, ORB_EVENT_SPEC_IDS),
+    ORB_LONG_SPEC_ID: (ORB_LONG_GROUP_ID, "sgv:SOR-1H-LONG-001:v1", (ORB_DIRECTIONAL_LONG_EVENT,)),
+    ORB_SHORT_SPEC_ID: (ORB_SHORT_GROUP_ID, "sgv:SOR-1H-SHORT-001:v1", (ORB_DIRECTIONAL_SHORT_EVENT,)),
+}
+
+
+def is_hourly_orb_spec(selection_spec_id: str) -> bool:
+    return selection_spec_id in _ORB_IDENTITIES
+
+
+def hourly_orb_strategy_identity(selection_spec_id: str) -> tuple[str, str]:
+    group_id, version_id, _ = _ORB_IDENTITIES[selection_spec_id]
+    return group_id, version_id
+
+
+def directional_orb_spec(strategy_group_id: str) -> OrbSessionSelectionSpec:
+    for spec_id in (ORB_LONG_SPEC_ID, ORB_SHORT_SPEC_ID):
+        group, version, events = _ORB_IDENTITIES[spec_id]
+        if strategy_group_id == group:
+            return OrbSessionSelectionSpec(
+                selection_spec_id=spec_id, strategy_group_id=group,
+                strategy_version_id=version, event_spec_ids=events,
+            )
+    raise ValueError("no standalone hourly ORB identity for strategy group")
+
+
 ORB_STATIC_MEMBERS = tuple(
     sorted(
         f"binance-usdm:{s}USDT:perpetual"
@@ -30,9 +65,9 @@ ORB_STATIC_MEMBERS = tuple(
 
 class OrbSessionSelectionSpec(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    selection_spec_id: Literal["SOR_1H_OR_ATR_DYNAMIC_V1"] = ORB_SELECTION_SPEC_ID
-    strategy_group_id: Literal["SOR-1H-001"] = ORB_STRATEGY_GROUP_ID
-    strategy_version_id: Literal["sgv:SOR-1H-001:v1"] = ORB_STRATEGY_VERSION_ID
+    selection_spec_id: str = ORB_SELECTION_SPEC_ID
+    strategy_group_id: str = ORB_STRATEGY_GROUP_ID
+    strategy_version_id: str = ORB_STRATEGY_VERSION_ID
     selection_kind: Literal["orb_session_dynamic_v1"] = ORB_SELECTION_KIND
     event_spec_ids: tuple[str, ...] = ORB_EVENT_SPEC_IDS
     candidate_ids: tuple[str, ...] = CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
@@ -50,11 +85,12 @@ class OrbSessionSelectionSpec(BaseModel):
     @model_validator(mode="after")
     def _exact_inputs(self) -> OrbSessionSelectionSpec:
         if (
-            self.event_spec_ids != ORB_EVENT_SPEC_IDS
+            _ORB_IDENTITIES.get(self.selection_spec_id)
+            != (self.strategy_group_id, self.strategy_version_id, self.event_spec_ids)
             or self.candidate_ids != CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS
         ):
             raise ValueError(
-                "hourly ORB requires exact independent Events and canonical Candidate24"
+                "hourly ORB requires exact strategy and Event identity and canonical Candidate24"
             )
         return self
 
@@ -136,9 +172,9 @@ def next_orb_eligible_close(*, session_start_ms: int, now_ms: int) -> int | None
 class OrbSessionSelectionSnapshot(SelectionSnapshot):
     model_config = ConfigDict(frozen=True, extra="forbid")
     selection_snapshot_id: str
-    selection_spec_id: Literal["SOR_1H_OR_ATR_DYNAMIC_V1"] = ORB_SELECTION_SPEC_ID
-    strategy_group_id: Literal["SOR-1H-001"] = ORB_STRATEGY_GROUP_ID
-    strategy_version_id: Literal["sgv:SOR-1H-001:v1"] = ORB_STRATEGY_VERSION_ID
+    selection_spec_id: str = ORB_SELECTION_SPEC_ID
+    strategy_group_id: str = ORB_STRATEGY_GROUP_ID
+    strategy_version_id: str = ORB_STRATEGY_VERSION_ID
     selection_epoch_id: str
     session_start_ms: int
     feature_cutoff_at_ms: int
@@ -157,8 +193,11 @@ class OrbSessionSelectionSnapshot(SelectionSnapshot):
     def _validate_snapshot(self) -> OrbSessionSelectionSnapshot:
         period = build_orb_session_period(self.session_start_ms)
         require_orb_epoch(self.selection_epoch_id)
+        identity = _ORB_IDENTITIES.get(self.selection_spec_id)
+        if identity is None or identity[:2] != (self.strategy_group_id, self.strategy_version_id):
+            raise ValueError("hourly ORB Snapshot strategy identity differs from its Spec")
         if self.selection_snapshot_id != orb_snapshot_identity(
-            self.selection_epoch_id, self.session_start_ms
+            self.selection_epoch_id, self.session_start_ms, selection_spec_id=self.selection_spec_id
         ):
             raise ValueError(
                 "hourly ORB Snapshot identity differs from its exact epoch and Session"
@@ -206,15 +245,19 @@ def require_orb_epoch(epoch: str) -> None:
         raise ValueError("hourly ORB requires independent bounded epoch")
 
 
-def orb_snapshot_identity(epoch: str, session_start_ms: int) -> str:
+def orb_snapshot_identity(
+    epoch: str, session_start_ms: int, *, selection_spec_id: str = ORB_SELECTION_SPEC_ID
+) -> str:
     from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 
     require_orb_epoch(epoch)
+    if selection_spec_id not in _ORB_IDENTITIES:
+        raise ValueError("hourly ORB Snapshot requires exact Spec identity")
     return (
         "selection:orb:"
         + canonical_digest(
             {
-                "selection_spec_id": ORB_SELECTION_SPEC_ID,
+                "selection_spec_id": selection_spec_id,
                 "selection_epoch_id": epoch,
                 "session_start_ms": session_start_ms,
             }
@@ -241,7 +284,7 @@ class OrbSessionSelectionComputation(BaseModel):
             m.exchange_instrument_id for m in self.member_decisions
         ) != CANONICAL_CANDIDATE_EXCHANGE_INSTRUMENT_IDS or any(
             m.selection_snapshot_id != self.snapshot.selection_snapshot_id
-            or m.selection_spec_id != ORB_SELECTION_SPEC_ID
+            or m.selection_spec_id != self.snapshot.selection_spec_id
             or m.session_start_ms != self.snapshot.session_start_ms
             for m in self.member_decisions
         ):
@@ -274,7 +317,9 @@ def compute_orb_selection(
         raise SelectionSourceIntegrityError(
             "hourly ORB requires exact Candidate24 windows at 01:00 cutoff"
         )
-    sid = orb_snapshot_identity(selection_epoch_id, period.session_start_ms)
+    sid = orb_snapshot_identity(
+        selection_epoch_id, period.session_start_ms, selection_spec_id=spec.selection_spec_id
+    )
     decisions, ready = compute_opening_range_member_decisions(
         source_windows=source_windows,
         selection_snapshot_id=sid,
@@ -296,6 +341,9 @@ def compute_orb_selection(
     )
     snapshot = OrbSessionSelectionSnapshot(
         selection_snapshot_id=sid,
+        selection_spec_id=spec.selection_spec_id,
+        strategy_group_id=spec.strategy_group_id,
+        strategy_version_id=spec.strategy_version_id,
         selection_epoch_id=selection_epoch_id,
         session_start_ms=period.session_start_ms,
         feature_cutoff_at_ms=period.feature_cutoff_at_ms,
@@ -318,9 +366,9 @@ def orb_spec_semantic_digest(spec: OrbSessionSelectionSpec) -> str:
     return canonical_digest(spec.model_dump(mode="json"))
 
 
-def daily_event_spec_ids(selection_spec_id: str) -> tuple[str, str]:
-    if selection_spec_id == ORB_SELECTION_SPEC_ID:
-        return ORB_LONG_EVENT_SPEC_ID, ORB_SHORT_EVENT_SPEC_ID
+def daily_event_spec_ids(selection_spec_id: str) -> tuple[str, ...]:
+    if selection_spec_id in _ORB_IDENTITIES:
+        return _ORB_IDENTITIES[selection_spec_id][2]
     if selection_spec_id == "sor-dynamic-selection-v0":
         return "event_spec:SOR-001:SOR-LONG:v4", "event_spec:SOR-001:SOR-SHORT:v4"
     raise ValueError("daily ORB requires an exact installed Selection identity")
@@ -328,7 +376,7 @@ def daily_event_spec_ids(selection_spec_id: str) -> tuple[str, str]:
 
 def daily_entry_interval_ms(selection_spec_id: str) -> int:
     daily_event_spec_ids(selection_spec_id)
-    return HOUR_MS if selection_spec_id == ORB_SELECTION_SPEC_ID else 900000
+    return HOUR_MS if selection_spec_id in _ORB_IDENTITIES else 900000
 
 
 def daily_first_offset_ms(selection_spec_id: str) -> int:
@@ -344,7 +392,7 @@ def daily_authority_expires_at(selection_spec_id: str, session_start_ms: int) ->
     return (
         session_start_ms
         + DAY_MS
-        + (0 if selection_spec_id == ORB_SELECTION_SPEC_ID else HOUR_MS)
+        + (0 if selection_spec_id in _ORB_IDENTITIES else HOUR_MS)
     )
 
 
@@ -357,7 +405,7 @@ def next_daily_eligible_close(
         (now_ms // interval + 1) * interval,
     )
     if (
-        selection_spec_id == ORB_SELECTION_SPEC_ID
+        selection_spec_id in _ORB_IDENTITIES
         and first >= session_start_ms + DAY_MS
     ):
         raise ValueError("NO_ELIGIBLE_CLOSE_BEFORE_SESSION_END")
@@ -375,8 +423,11 @@ class OrbStaticSourceEvent(BaseModel):
     @model_validator(mode="after")
     def _exact_side(self) -> OrbStaticSourceEvent:
         if (
-            self.event_spec_id
-            != ORB_EVENT_SPEC_IDS[0 if self.position_side == "long" else 1]
+            self.event_spec_id not in (
+                (ORB_LONG_EVENT_SPEC_ID, ORB_DIRECTIONAL_LONG_EVENT)
+                if self.position_side == "long"
+                else (ORB_SHORT_EVENT_SPEC_ID, ORB_DIRECTIONAL_SHORT_EVENT)
+            )
             or not self.universe_version_id.strip()
         ):
             raise ValueError(
@@ -388,35 +439,40 @@ class OrbStaticSourceEvent(BaseModel):
 class OrbStaticRollbackBaseline(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     rollback_baseline_id: str
-    strategy_group_id: Literal["SOR-1H-001"] = ORB_STRATEGY_GROUP_ID
-    strategy_version_id: Literal["sgv:SOR-1H-001:v1"] = ORB_STRATEGY_VERSION_ID
-    selection_spec_id: Literal["SOR_1H_OR_ATR_DYNAMIC_V1"] = ORB_SELECTION_SPEC_ID
+    strategy_group_id: str = ORB_STRATEGY_GROUP_ID
+    strategy_version_id: str = ORB_STRATEGY_VERSION_ID
+    selection_spec_id: str = ORB_SELECTION_SPEC_ID
     source_events: tuple[OrbStaticSourceEvent, ...]
     captured_at_ms: int
     semantic_digest: str
 
     @classmethod
     def build(
-        cls, *, source_events: tuple[OrbStaticSourceEvent, ...], captured_at_ms: int
+        cls, *, source_events: tuple[OrbStaticSourceEvent, ...], captured_at_ms: int,
+        selection_spec_id: str = ORB_SELECTION_SPEC_ID,
     ) -> OrbStaticRollbackBaseline:
         from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 
+        group_id, version_id = hourly_orb_strategy_identity(selection_spec_id)
         if (
-            tuple(e.event_spec_id for e in source_events) != ORB_EVENT_SPEC_IDS
+            tuple(e.event_spec_id for e in source_events) != daily_event_spec_ids(selection_spec_id)
             or captured_at_ms <= 0
         ):
-            raise ValueError("ORB Static baseline requires exact LONG/SHORT references")
+            raise ValueError("ORB Static baseline requires exact Spec Event references")
         digest = canonical_digest(
             {
-                "selection_spec_id": ORB_SELECTION_SPEC_ID,
-                "strategy_group_id": ORB_STRATEGY_GROUP_ID,
-                "strategy_version_id": ORB_STRATEGY_VERSION_ID,
+                "selection_spec_id": selection_spec_id,
+                "strategy_group_id": group_id,
+                "strategy_version_id": version_id,
                 "source_events": [e.model_dump() for e in source_events],
                 "captured_at_ms": captured_at_ms,
             }
         )
         return cls(
             rollback_baseline_id="rollback:orb:" + digest[7:],
+            selection_spec_id=selection_spec_id,
+            strategy_group_id=group_id,
+            strategy_version_id=version_id,
             source_events=source_events,
             captured_at_ms=captured_at_ms,
             semantic_digest=digest,
@@ -426,16 +482,20 @@ class OrbStaticRollbackBaseline(BaseModel):
 class OrbStaticMaterializationSource(BaseModel):
     """Frozen Static baseline source for the shared pair materializer, never a Snapshot."""
     model_config=ConfigDict(frozen=True,extra='forbid')
-    selection_spec_id: Literal['SOR_1H_OR_ATR_DYNAMIC_V1']=ORB_SELECTION_SPEC_ID
-    strategy_group_id: Literal['SOR-1H-001']=ORB_STRATEGY_GROUP_ID
-    strategy_version_id: Literal['sgv:SOR-1H-001:v1']=ORB_STRATEGY_VERSION_ID
+    selection_spec_id: str=ORB_SELECTION_SPEC_ID
+    strategy_group_id: str=ORB_STRATEGY_GROUP_ID
+    strategy_version_id: str=ORB_STRATEGY_VERSION_ID
     selection_snapshot_id: None = None
     session_start_ms: int
     selection_epoch_id: str
     rollback_baseline_id: str
     selected_count: Literal[7]=7
     @model_validator(mode='after')
-    def _validate_static_source(self):
+    def _validate_static_source(self) -> OrbStaticMaterializationSource:
+        if (self.strategy_group_id, self.strategy_version_id) != hourly_orb_strategy_identity(
+            self.selection_spec_id
+        ):
+            raise ValueError("ORB Static source requires exact Spec strategy identity")
         build_orb_session_period(self.session_start_ms)
         require_orb_epoch(self.selection_epoch_id)
         if not self.rollback_baseline_id.strip():raise ValueError('ORB Static source requires frozen baseline')

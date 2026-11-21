@@ -4,12 +4,12 @@
 
 ## 核心结论与对象边界
 
-**选币计算只产生不可变 Snapshot；物化另行建立 Universe 与 Authority。**拥有排名结果不能直接发 Signal，更不能占用资金。（代码已验证：[run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106)、[coordinate_selection_materialization_once](../../src/trading_kernel/application/coordinate_selection_materialization.py#L577)）
+**选币计算只产生不可变 Snapshot；物化另行建立 Universe 与 Authority。**拥有排名结果不能直接发 Signal，更不能占用资金。（代码已验证：[run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L107)、[coordinate_selection_materialization_once](../../src/trading_kernel/application/coordinate_selection_materialization.py#L612)）
 
 | 对象 | 负责什么 | 不负责什么 | 实现 |
 | --- | --- | --- | --- |
 | **Spec** | 固定候选集、特征、资格、排名、时间契约 | 当前启用权限 | [generic_selection_spec](../../src/trading_kernel/domain/generic_selection_spec.py) |
-| **Control / Epoch** | Owner 当前模式和待生效意图、版本与代际 | Snapshot 的市场真相 | [SelectionControl](../../src/trading_kernel/domain/selection_authority.py#L297) |
+| **Control / Epoch** | Owner 当前模式和待生效意图、版本与代际 | Snapshot 的市场真相 | [SelectionControl](../../src/trading_kernel/domain/selection_authority.py#L304) |
 | **Job / Attempt** | 某一期计算的租约、重试与失败记录 | 物化币池 | [runner](../../src/trading_kernel/application/run_instrument_selection.py) |
 | **Snapshot** | 当期全部候选资格、特征、排名与选中结果 | 直接更改 current Universe | [GenericSelectionSnapshotV1](../../src/trading_kernel/domain/generic_selection_core.py#L77) |
 | **Generation / Vacuum** | 排空未完 ENTRY、安装并预热新币池 | 重写已发行 Ticket | [coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[Vacuum](../../src/trading_kernel/domain/strategy_entry_vacuum.py) |
@@ -26,8 +26,8 @@
 | MI | `MI_POSITIVE_IMPULSE_RECENCY_V0` | 16 / 16 | 1h | 13 bars |
 | BRF2 | `BRF2_RESIDUAL_EXTENSION_V0` | 16 / 16 | 4h | 73 bars |
 
-1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L277) 先检查安装、策略控制、模式、epoch 和当期是否到时。
-2. [run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L106) 领取 Job，事务外读取来源，使用同一 cutoff 的完整窗口和资格事实。
+1. [run_selection_runtime_once](../../src/trading_kernel/interfaces/selection_runtime_worker.py#L284) 先检查安装、策略控制、模式、epoch 和当期是否到时。
+2. [run_instrument_selection_once](../../src/trading_kernel/application/run_instrument_selection.py#L107) 领取 Job，事务外读取来源，使用同一 cutoff 的完整窗口和资格事实。
 3. [generic_selection_core](../../src/trading_kernel/domain/generic_selection_core.py) 校验无缺口、无未来 candle、来源身份一致，按 Decimal 数学计算特征并排序。
 4. 合格且排名在 entry_rank 内可以新入；原成员在 retain_rank 内且仍合格可保留。完整成员决策和输入摘要随 Snapshot 持久化。
 5. cutoff 为 **t** 时，正常目标生效边界是 **t+1h**，到期为 **t+(cadence+1)h**；最终交易收盘权限仍由 Authority proof 约束。
@@ -63,7 +63,7 @@ flowchart TD
     Atomic --> Signal[后续 Signal 冻结出生权限]
 ```
 
-图是 Generic 主路径；空集合、Owner 暂停、来源失败和恢复缺口有专门分支，不能为经过期 generation 续期来绕过门槛。（来源：[coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[advance_strategy_universe](../../src/trading_kernel/application/advance_strategy_universe.py#L290)、[generic_materialization](../../src/trading_kernel/domain/generic_materialization.py)）
+图是 Generic 主路径；空集合、Owner 暂停、来源失败和恢复缺口有专门分支，不能为经过期 generation 续期来绕过门槛。（来源：[coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[advance_strategy_universe](../../src/trading_kernel/application/advance_strategy_universe.py#L293)、[generic_materialization](../../src/trading_kernel/domain/generic_materialization.py)）
 
 ## 切换时序与既有持仓
 
@@ -93,7 +93,7 @@ sequenceDiagram
 
 | 分支 | 判定依据 | 可以消费哪个收盘 | 核查入口 |
 | --- | --- | --- | --- |
-| **NORMAL_TRANSITION** | 预提交 Snapshot、连续 epoch/比较集合及最新未消费收盘证明 | 满足 proof 的最新收盘；慢几秒不自动构成缺口 | [prepare_generic_current_close_proof](../../src/trading_kernel/application/coordinate_selection_materialization.py#L1869) |
+| **NORMAL_TRANSITION** | 预提交 Snapshot、连续 epoch/比较集合及最新未消费收盘证明 | 满足 proof 的最新收盘；慢几秒不自动构成缺口 | [prepare_generic_current_close_proof](../../src/trading_kernel/application/coordinate_selection_materialization.py#L1891) |
 | **RECOVERY_TRANSITION** | 实际失败/权限缺口、恢复 proof 和 Episode/Comparison rebase | 严格未来收盘，不能补吃缺口内信号 | [authority_recovery_rebase](../../src/trading_kernel/domain/authority_recovery_rebase.py)、[timing](../../src/trading_kernel/domain/dynamic_selection_timing.py) |
 | **VALID_EMPTY** | 合法计算结果没有可授予成员 | 不授予新 ENTRY 成员 | [coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
 | **Owner paused** | 策略控制暂停 | 不允许通过 fallback 恢复新 ENTRY | [owner_control](../../src/trading_kernel/application/owner_control.py)、[coordinator](../../src/trading_kernel/application/coordinate_selection_materialization.py) |
@@ -112,7 +112,7 @@ sequenceDiagram
 
 **全局暂停后 Resume 会重新核验当前授权沿革。**相同 Snapshot 和 LONG/SHORT 币池不能单独证明已恢复；检测到中断后，协调器基于当前 Policy 版本、Owner/Selection 控制、前序 Authority、配对 Universe 和运行身份建立新的 Gap Audit。每次恢复有独立身份，正常重入幂等；审计期间状态漂移、缺失行情或跨过拟授予收盘时拒绝提交。恢复只授予审计完成后的合法小时收盘，旧出生信号不跨越暂停沿革。（来源：[协调器](../../src/trading_kernel/application/coordinate_selection_materialization.py)、[真实 PostgreSQL 回归](../../tests/trading_kernel/integration/test_orb_session_selection_repository.py)）
 
-数值及边界来源：[OrbSessionSelectionSpec](../../src/trading_kernel/domain/orb_session_selection.py#L31)、[SOR-1H detector](../../src/trading_kernel/domain/detectors/sor_1h.py)、[hourly 测试](../../tests/trading_kernel/unit/test_hourly_recovery_clock.py)。
+数值及边界来源：[OrbSessionSelectionSpec](../../src/trading_kernel/domain/orb_session_selection.py#L102)、[SOR-1H detector](../../src/trading_kernel/domain/detectors/sor_1h.py)、[hourly 测试](../../tests/trading_kernel/unit/test_hourly_recovery_clock.py)。
 
 ## “已经选币，为什么不能交易”的定位步骤
 

@@ -15,7 +15,18 @@ from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from src.trading_kernel.domain.capacity import FamilyTicketLimits
+from src.trading_kernel.domain.directional_risk import (
+    DIRECTIONAL_SOR_RULE_DIGEST,
+    DIRECTIONAL_SOR_RULE_ID,
+)
 from src.trading_kernel.domain.exit_policy import build_exit_profile_catalog_digest
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
+    ORB_EVENT_SPEC_IDS,
+    ORB_STATIC_MEMBERS,
+    ORB_STRATEGY_GROUP_ID,
+    directional_orb_spec,
+)
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
@@ -25,6 +36,8 @@ from src.trading_kernel.domain.strategy_registry import (
 from src.trading_kernel.infrastructure.pg_models import (
     account_exposure_current,
     budget_reservations,
+    directional_risk_controls,
+    directional_risk_events,
     entry_lane_current,
     exchange_commands,
     owner_authorizations,
@@ -34,9 +47,12 @@ from src.trading_kernel.infrastructure.pg_models import (
     runtime_capabilities_current,
     runtime_incidents,
     runtime_profiles,
+    runtime_scopes_current,
     schema_metadata,
     strategy_entry_control_events,
     strategy_entry_controls_current,
+    strategy_universe_current,
+    strategy_universe_versions,
     trade_aggregates,
     trade_reviews,
     trade_tickets,
@@ -276,7 +292,7 @@ def build_runtime_seed_identity(request: RuntimeAuthoritySeedRequest) -> str:
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
             else None
         ),
@@ -315,7 +331,7 @@ async def seed_runtime_authority(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
         ),
     )
@@ -341,7 +357,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }:
         control_inserted_count = await _seed_strategy_entry_controls(
             connection,
@@ -377,7 +393,7 @@ async def seed_runtime_authority(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
             else None
         ),
@@ -390,18 +406,18 @@ async def seed_runtime_authority(
         updated_at_ms=request.seeded_at_ms,
     )
 
-    if request.schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
+    if request.schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}:
         policy["margin_allocation_contract"] = "wallet_allocation_v1"
     certification = {
         **(
             {"exit_configuration_required": True}
-            if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
+            if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}
             else {}
         ),
         **(
             {"management_feed_required": True}
             if request.schema_revision
-            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
+            in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}
             else {}
         ),
         "stage": "entry_paused" if include_tradfi else "observation_only",
@@ -416,7 +432,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }:
         certification["product_id"] = PRODUCT_ID
     rows = [
@@ -579,7 +595,7 @@ async def seed_runtime_authority(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }:
         await uow.directional_risk.initialize(venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms)
     return RuntimeAuthoritySeedResult(
@@ -631,6 +647,13 @@ async def deploy_compatible_upgrade_identity(
             await _install_capacity_release_revision(connection, request, source_identity=metadata_rows)
         return result
     source_schema_revision = metadata_rows.get("schema_revision")
+    if (source_schema_revision, request.schema_revision) == (
+        "0024_owner_cooperation", "0025_directional_sor"
+    ):
+        await _prepare_directional_sor_cutover(uow, request, metadata_rows)
+        return await _deploy_runtime_identity(
+            uow, request, allow_compatible_runtime_fence=True
+        )
     if (source_schema_revision, request.schema_revision) in {
         ("0021_manual_operational_closure", "0022_wallet_margin_allocation"),
         ("0022_wallet_margin_allocation", "0023_management_recovery"),
@@ -676,7 +699,7 @@ async def deploy_compatible_upgrade_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             raise RuntimeAuthorityTransitionRefused(
                 "Generic Selection upgrade requires exact 0008 target"
@@ -720,7 +743,11 @@ async def deploy_compatible_upgrade_identity(
         allow_compatible_runtime_fence=True,
     )
     current_policy = dict(await _lock_policy(connection))
-    target_event_spec_ids = _allowed_event_spec_ids(registered_strategy_contracts())
+    target_contracts = (
+        _contracts_for_schema(request.schema_revision)
+        if request.schema_revision == "0025_directional_sor" else registered_strategy_contracts()
+    )
+    target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
     source_event_spec_ids = _allowed_event_spec_ids(_contracts_for_schema(str(source_schema_revision)))
     current_policy_version = int(str(current_policy["policy_version"]))
     expected_policy_version = (
@@ -764,6 +791,7 @@ async def deploy_compatible_upgrade_identity(
     registry = await seed_strategy_registry(
         uow,
         seeded_at_ms=request.seeded_at_ms,
+        contracts=target_contracts,
         compatible_source_registry_semantic_hash=(
             compatible_registry_hash
             if source_schema_revision
@@ -782,12 +810,14 @@ async def deploy_compatible_upgrade_identity(
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
+            strategy_group_ids=tuple({contract.strategy_group_id for contract in target_contracts}),
         )
     else:
         await _seed_strategy_entry_controls(
             connection,
             seeded_at_ms=request.seeded_at_ms,
-            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001")
+            strategy_group_ids=("SOR-US-EQ-PERP-001", "SOR-1H-001", *ORB_DIRECTIONAL_GROUPS)
+            if request.schema_revision == "0025_directional_sor" else ("SOR-US-EQ-PERP-001", "SOR-1H-001")
             if request.schema_revision
             in {
                 "0011_orb_session_1h_v1",
@@ -802,7 +832,7 @@ async def deploy_compatible_upgrade_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
             else ("SOR-US-EQ-PERP-001",),
             assert_exact_identity_set=False,
@@ -855,7 +885,7 @@ async def deploy_compatible_upgrade_identity(
         connection,
         strategy_entry_controls_current,
         "strategy_group_id",
-        {contract.strategy_group_id for contract in registered_strategy_contracts()},
+        {contract.strategy_group_id for contract in target_contracts},
     )
     seed_identity = _seed_identity(
         account_id=request.account_id,
@@ -883,7 +913,7 @@ async def deploy_compatible_upgrade_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
             else None
         ),
@@ -951,7 +981,7 @@ async def deploy_compatible_upgrade_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -979,6 +1009,12 @@ async def deploy_compatible_upgrade_identity(
                 "compatible runtime capability update was lost"
             )
 
+    if request.schema_revision == "0025_directional_sor":
+        await _rotate_sor_risk_scope(uow, request, require_existing=False)
+        for group in ORB_DIRECTIONAL_GROUPS:
+            await uow.instrument_selection.install_orb_spec(
+                directional_orb_spec(group), installed_at_ms=request.seeded_at_ms,
+            )
     metadata_targets = {
         "registry_semantic_hash": registry.registry_semantic_hash,
         "runtime_commit": request.runtime_commit,
@@ -1010,6 +1046,10 @@ async def deploy_compatible_upgrade_identity(
         resolved_at_ms=request.seeded_at_ms,
     )
 
+    if request.schema_revision == "0025_directional_sor":
+        await uow.directional_risk.initialize(
+            venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms,
+        )
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
@@ -1018,15 +1058,153 @@ async def deploy_compatible_upgrade_identity(
     )
 
 
+async def _prepare_directional_sor_cutover(
+    uow: PostgresKernelUnitOfWork,
+    request: RuntimeAuthoritySeedRequest,
+    metadata_rows: Mapping[str, str],
+) -> None:
+    connection = uow._require_connection()
+    source_schema = "0024_owner_cooperation"
+    source_registry = build_registry_semantic_hash(_contracts_for_schema(source_schema))
+    source_seed = build_runtime_seed_identity(request.model_copy(update={"schema_revision": source_schema}))
+    if (
+        await connection.scalar(sa.text("SELECT version_num FROM alembic_version")) != request.schema_revision
+        or metadata_rows.get("registry_semantic_hash") != source_registry
+        or metadata_rows.get("seed_identity") != source_seed
+    ):
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover source identity differs")
+    await _require_flat_compatible_upgrade_activity(connection, allow_compatible_runtime_fence=True)
+    current_policy = dict(await _lock_policy(connection))
+    if not _policy_matches(
+        current_policy,
+        version=int(str(current_policy["policy_version"])),
+        new_entry_submit_enabled=False,
+        allowed_event_spec_ids=_allowed_event_spec_ids(_contracts_for_schema(source_schema)),
+    ) or request.seeded_at_ms <= int(str(current_policy["updated_at_ms"])):
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover requires the exact paused source policy")
+    capabilities = (await connection.execute(sa.select(runtime_capabilities_current).with_for_update())).mappings().all()
+    if {row["capability_key"] for row in capabilities} != {"exchange_commands", "strategy_signal_ingest"} or any(
+        row["certified_commit"] != metadata_rows.get("runtime_commit")
+        or row["schema_revision"] != source_schema
+        or row["certification"].get("product_id") != PRODUCT_ID for row in capabilities
+    ):
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover capability source differs")
+    await uow.strategy_universes.lock_mutation()
+    old_control = await uow.instrument_selection.get_selection_control(ORB_STRATEGY_GROUP_ID, for_update=True)
+    if (
+        old_control is None
+        or old_control.selection_mode.value != "static_baseline"
+        or old_control.pending_selection_mode is not None
+    ):
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover requires the installed Static source")
+    source_universes = []
+    for event_id in ORB_EVENT_SPEC_IDS:
+        previous = await uow.strategy_universes.get_current(event_id)
+        if previous is not None:
+            if await uow.strategy_universes.get_members(previous.universe_version_id) != ORB_STATIC_MEMBERS:
+                raise RuntimeAuthorityTransitionRefused("hourly Static source members differ")
+            source_universes.append(previous.universe_version_id)
+    source_writer_enabled = any(
+        row["capability_key"] == "exchange_commands" and row["enabled"] for row in capabilities
+    )
+    if len(source_universes) != len(ORB_EVENT_SPEC_IDS) and (source_universes or source_writer_enabled):
+        raise RuntimeAuthorityTransitionRefused("hourly Static source is incomplete")
+
+    contracts = _contracts_for_schema(request.schema_revision)
+    await seed_strategy_registry(
+        uow, seeded_at_ms=request.seeded_at_ms, contracts=contracts,
+        compatible_source_registry_semantic_hash=source_registry,
+        preserve_existing_exit_authority=True,
+    )
+    await _seed_strategy_entry_controls(
+        connection, seeded_at_ms=request.seeded_at_ms,
+        strategy_group_ids=ORB_DIRECTIONAL_GROUPS, assert_exact_identity_set=False,
+    )
+    for group in ORB_DIRECTIONAL_GROUPS:
+        await uow.instrument_selection.install_orb_spec(
+            directional_orb_spec(group), installed_at_ms=request.seeded_at_ms
+        )
+    if source_universes:
+        await connection.execute(
+            sa.update(runtime_scopes_current)
+            .where(runtime_scopes_current.c.universe_version_id.in_(source_universes))
+            .values(
+                lifecycle_state="retired", observation_enabled=False, entry_enabled=False,
+                scope_version=runtime_scopes_current.c.scope_version + 1,
+                observation_generation=runtime_scopes_current.c.observation_generation + 1,
+                next_observation_due_at_ms=None, lease_owner=None, lease_expires_at_ms=None,
+                updated_at_ms=request.seeded_at_ms,
+            )
+        )
+        await connection.execute(
+            sa.delete(strategy_universe_current)
+            .where(strategy_universe_current.c.universe_version_id.in_(source_universes))
+        )
+        await connection.execute(
+            sa.update(strategy_universe_versions)
+            .where(strategy_universe_versions.c.universe_version_id.in_(source_universes))
+            .values(lifecycle_state="retired", retired_at_ms=request.seeded_at_ms)
+        )
+    await _rotate_sor_risk_scope(uow, request, require_existing=True)
+    await _prepare_orb_policy_scope(
+        connection, current_policy=current_policy, allowed_event_spec_ids=_allowed_event_spec_ids(contracts),
+        occurred_at_ms=request.seeded_at_ms, operation="orb_directional_policy_scope_prepared",
+    )
+    for key, value in {
+        "schema_revision": request.schema_revision,
+        "registry_semantic_hash": build_registry_semantic_hash(contracts),
+        "seed_identity": build_runtime_seed_identity(request),
+    }.items():
+        updated = await connection.execute(
+            sa.update(schema_metadata).where(schema_metadata.c.metadata_key == key)
+            .values(metadata_value=value, updated_at_ms=request.seeded_at_ms)
+        )
+        if updated.rowcount != 1:
+            raise RuntimeAuthorityTransitionRefused("directional SOR cutover metadata is incomplete")
+
+
+async def _rotate_sor_risk_scope(
+    uow: PostgresKernelUnitOfWork, request: RuntimeAuthoritySeedRequest, *,
+    require_existing: bool,
+) -> None:
+    connection = uow._require_connection()
+    risk = await uow.directional_risk.get(VENUE_ID, request.account_id, for_update=True)
+    if risk is None and not require_existing:
+        return
+    if risk is None or risk.pending_view is not None or risk.pending_baseline is not None:
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover requires settled Owner risk preferences")
+    next_risk = risk.model_copy(update={
+        "rule_id": DIRECTIONAL_SOR_RULE_ID,
+        "rule_digest": DIRECTIONAL_SOR_RULE_DIGEST,
+        "version": risk.version + 1,
+    })
+    result = await connection.execute(
+        sa.update(directional_risk_controls).where(
+            directional_risk_controls.c.venue_id == VENUE_ID,
+            directional_risk_controls.c.account_id == request.account_id,
+            directional_risk_controls.c.version == risk.version,
+        ).values(rule_id=next_risk.rule_id, rule_digest=next_risk.rule_digest, version=next_risk.version)
+    )
+    if result.rowcount != 1:
+        raise RuntimeAuthorityTransitionRefused("directional SOR cutover risk version drift")
+    await connection.execute(sa.insert(directional_risk_events).values(
+        event_id=f"directional-rule:{request.account_id}:v3",
+        venue_id=VENUE_ID, account_id=request.account_id, event_kind="scope_migrated",
+        payload={"previous": risk.model_dump(mode="json"), "result": next_risk.model_dump(mode="json"),
+                 "runtime_commit": request.runtime_commit}, occurred_at_ms=request.seeded_at_ms,
+    ))
+
+
 async def _prepare_orb_policy_scope(connection: AsyncConnection,*,current_policy: Mapping[str,object],
-    allowed_event_spec_ids: tuple[str,...],occurred_at_ms: int) -> dict[str,object]:
-    """Install only the named hourly pair; the new control and global ENTRY remain paused."""
+    allowed_event_spec_ids: tuple[str,...],occurred_at_ms: int,
+    operation: str = "orb_hourly_policy_scope_prepared") -> dict[str,object]:
+    """Record an exact stopped release scope while global ENTRY is paused."""
     version=int(str(current_policy['policy_version']))
     target=dict(current_policy)
     target.update({'policy_version':version+1,'new_entry_submit_enabled':False,'updated_at_ms':occurred_at_ms,
         'scope':{'event_runtime_profiles':[{'event_spec_id':eid,'runtime_profile_id':TRADFI_RUNTIME_PROFILE_ID if eid in _tradfi_event_spec_ids() else RUNTIME_PROFILE_ID} for eid in allowed_event_spec_ids]}})
     await _insert_exact(connection,_ExactRow(owner_policy_events,'owner_policy_event_id',
-        _policy_event(version=version+1,operation='orb_hourly_policy_scope_prepared',policy=target,occurred_at_ms=occurred_at_ms),
+        _policy_event(version=version+1,operation=operation,policy=target,occurred_at_ms=occurred_at_ms),
         ('owner_policy_id','policy_version','operation','payload')))
     updated=await connection.execute(sa.update(owner_policy_current).where(owner_policy_current.c.owner_policy_id==OWNER_POLICY_ID,
         owner_policy_current.c.policy_version==version,owner_policy_current.c.new_entry_submit_enabled.is_(False)).values(
@@ -1071,7 +1249,7 @@ async def _deploy_capability_compatible_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     } and source_schema_revision not in {
         "0011_orb_session_1h_v1",
         "0012_generic_signal_path_v1",
@@ -1085,7 +1263,7 @@ async def _deploy_capability_compatible_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }
     target_contracts = _contracts_for_schema(request.schema_revision)
     target_event_spec_ids = _allowed_event_spec_ids(target_contracts)
@@ -1158,7 +1336,9 @@ async def _deploy_capability_compatible_identity(
     if orb_upgrade:
         current_policy=await _prepare_orb_policy_scope(connection,current_policy=current_policy,
             allowed_event_spec_ids=target_event_spec_ids,occurred_at_ms=request.seeded_at_ms)
-        await _seed_strategy_entry_controls(connection,seeded_at_ms=request.seeded_at_ms,strategy_group_ids=('SOR-1H-001',),assert_exact_identity_set=False)
+        await _seed_strategy_entry_controls(connection,seeded_at_ms=request.seeded_at_ms,strategy_group_ids=('SOR-1H-001', *ORB_DIRECTIONAL_GROUPS)
+            if request.schema_revision == "0025_directional_sor" else ('SOR-1H-001',),
+            assert_exact_identity_set=False)
         from src.trading_kernel.domain.orb_session_selection import (
             OrbSessionSelectionSpec,
         )
@@ -1225,7 +1405,7 @@ async def _deploy_capability_compatible_identity(
                 "0020_manual_exit_regime_v1",
                 "0021_manual_operational_closure",
                 "0022_wallet_margin_allocation",
-                "0023_management_recovery", "0024_owner_cooperation",
+                "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
             }
             else None
         ),
@@ -1240,7 +1420,7 @@ async def _deploy_capability_compatible_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             certification["product_id"] = PRODUCT_ID
         certification.update(
@@ -1264,7 +1444,7 @@ async def _deploy_capability_compatible_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}
                     else {}
                 ),
             )
@@ -1272,6 +1452,12 @@ async def _deploy_capability_compatible_identity(
         if updated.rowcount != 1:
             raise RuntimeAuthorityTransitionRefused(
                 "capability runtime capability update was lost"
+            )
+    if request.schema_revision == "0025_directional_sor":
+        await _rotate_sor_risk_scope(uow, request, require_existing=False)
+        for group in ORB_DIRECTIONAL_GROUPS:
+            await uow.instrument_selection.install_orb_spec(
+                directional_orb_spec(group), installed_at_ms=request.seeded_at_ms,
             )
     metadata_targets = {
         "registry_semantic_hash": registry.registry_semantic_hash,
@@ -1304,6 +1490,10 @@ async def _deploy_capability_compatible_identity(
     )
     if request.schema_revision == "0009_capacity_policy_v0":
         await _install_capacity_release_revision(connection, request, source_identity=metadata_rows)
+    if request.schema_revision == "0025_directional_sor":
+        await uow.directional_risk.initialize(
+            venue_id=VENUE_ID, account_id=request.account_id, now_ms=request.seeded_at_ms,
+        )
     return RuntimeDeploymentIdentityResult(
         runtime_commit=request.runtime_commit,
         schema_revision=request.schema_revision,
@@ -1385,6 +1575,11 @@ async def _deploy_runtime_identity(
                 "guarded identity requires an existing runtime authority"
             )
         seeded = await seed_runtime_authority(uow, request)
+        if request.schema_revision == "0025_directional_sor":
+            for group in ORB_DIRECTIONAL_GROUPS:
+                await uow.instrument_selection.install_orb_spec(
+                    directional_orb_spec(group), installed_at_ms=request.seeded_at_ms,
+                )
         return RuntimeDeploymentIdentityResult(
             runtime_commit=request.runtime_commit,
             schema_revision=request.schema_revision,
@@ -1494,7 +1689,7 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             certification["product_id"] = PRODUCT_ID
         if request.schema_revision in {
@@ -1502,7 +1697,7 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             certification["management_feed_required"]=True
         if request.schema_revision in {
@@ -1510,14 +1705,14 @@ async def _deploy_runtime_identity(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }:
             certification.pop('runtime_mode',None)
             certification.pop('management_recovery_ticket_ids',None)
             certification.pop('verified_exit_recovery_scope',None)
-        if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
+        if request.schema_revision in {"0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}:
             certification["exit_configuration_required"] = True
-        if request.schema_revision=="0024_owner_cooperation" and capability["capability_key"]=="exchange_commands":
+        if request.schema_revision in {"0024_owner_cooperation", "0025_directional_sor"} and capability["capability_key"]=="exchange_commands":
             certification["owner_cooperation"]="owner-cooperation-v1"
         certification["deployment_commit"] = request.runtime_commit
         updated = await connection.execute(
@@ -1534,7 +1729,7 @@ async def _deploy_runtime_identity(
                 **(
                     {"enabled": True}
                     if request.schema_revision
-                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}
+                    in {"0019_management_evidence_v2", "0020_manual_exit_regime_v1", "0021_manual_operational_closure", "0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}
                     else {}
                 ),
             )
@@ -1732,6 +1927,8 @@ def _allowed_event_spec_ids(
             {str(contract.event_spec_id) for contract in contracts}
         )
     )
+    if any(contract.strategy_group_id in ORB_DIRECTIONAL_GROUPS for contract in contracts):
+        event_spec_ids = tuple(event for event in event_spec_ids if event not in ORB_EVENT_SPEC_IDS)
     if not event_spec_ids:
         raise RuntimeAuthoritySeedConflict("runtime policy requires registered Events")
     return event_spec_ids
@@ -1748,6 +1945,8 @@ def _crypto_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
 def _contracts_for_schema(
     schema_revision: str,
 ) -> tuple[RegisteredStrategyContract, ...]:
+    if schema_revision == "0025_directional_sor":
+        return registered_strategy_contracts(include_sor_split=True)
     contracts = registered_strategy_contracts() if _schema_includes_tradfi(schema_revision) else _crypto_strategy_contracts()
     return (
         contracts
@@ -1765,7 +1964,7 @@ def _contracts_for_schema(
             "0020_manual_exit_regime_v1",
             "0021_manual_operational_closure",
             "0022_wallet_margin_allocation",
-            "0023_management_recovery", "0024_owner_cooperation",
+            "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
         }
         else tuple(c for c in contracts if c.strategy_group_id != "SOR-1H-001")
     )
@@ -1791,7 +1990,7 @@ def _schema_includes_tradfi(schema_revision: str) -> bool:
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }
 
 
@@ -1967,10 +2166,10 @@ def _seed_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }:
         payload["product_id"] = PRODUCT_ID
-    if schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation"}:
+    if schema_revision in {"0022_wallet_margin_allocation", "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor"}:
         payload["margin_allocation_contract"] = "wallet_allocation_v1"
     if exit_profile_catalog_digest is not None:
         payload["exit_profile_catalog_digest"] = exit_profile_catalog_digest
@@ -1989,7 +2188,7 @@ def _seed_identity(
         "0020_manual_exit_regime_v1",
         "0021_manual_operational_closure",
         "0022_wallet_margin_allocation",
-        "0023_management_recovery", "0024_owner_cooperation",
+        "0023_management_recovery", "0024_owner_cooperation", "0025_directional_sor",
     }:
         payload["capacity_release_contract"] = {
             "max_same_strategy_side": 2,
@@ -2756,7 +2955,7 @@ async def _seed_strategy_entry_controls(
     )
     inserted = 0
     for strategy_group_id in selected_group_ids:
-        paused = strategy_group_id in {"SOR-US-EQ-PERP-001", "SOR-1H-001"}
+        paused = strategy_group_id in {"SOR-US-EQ-PERP-001", ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS}
         authorization_id = f"owner-authorization:seed:{strategy_group_id}"
         event_id = f"strategy-control-event:seed:{strategy_group_id}"
         inserted += await _insert_exact(

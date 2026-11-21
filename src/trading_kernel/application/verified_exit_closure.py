@@ -94,8 +94,11 @@ async def record_verified_exit(
             if term != (None if p.get(key) is None else Decimal(p[key])):
                 raise ValueError("closure price differs from original command")
     incidents = await uow.incidents.list_open_for_ticket(proof.ticket_id)
+    allowed_incidents = CAUSAL_CLOSURE_INCIDENTS
+    if a.status is AggregateStatus.POST_FILL_RISK_PENDING:
+        allowed_incidents = frozenset({"post_fill_risk_facts_unavailable"})
     if set(proof.incident_ids) != {i.incident_id for i in incidents} or any(
-        i.incident_kind not in CAUSAL_CLOSURE_INCIDENTS for i in incidents
+        i.incident_kind not in allowed_incidents for i in incidents
     ):
         raise ValueError("closure causal incident set differs")
     event = VerifiedExitClosed(
@@ -124,6 +127,17 @@ async def record_verified_exit(
             updated_at_ms=now_ms,
         )
     )
+    if a.status is AggregateStatus.POST_FILL_RISK_PENDING:
+        await uow.monitors.save_if_changed(
+            MonitorStateRecord(
+                monitor_key=f"post-fill-stress:{proof.ticket_id}",
+                owner_status=MonitorOwnerStatus.RUNNING,
+                summary="完整初始止损成交已核实，交易进入结算",
+                intervention="none",
+                ticket_id=proof.ticket_id,
+                updated_at_ms=now_ms,
+            )
+        )
     return "settlement_pending"
 
 

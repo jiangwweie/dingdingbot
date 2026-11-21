@@ -261,11 +261,11 @@ async def test_seed_creates_exact_idempotent_acceptance_authority(
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {
-                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-LONG:v1",
+                    "event_spec_id": "event_spec:SOR-1H-LONG-001:SOR-1H-LONG:v1",
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {
-                    "event_spec_id": "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
+                    "event_spec_id": "event_spec:SOR-1H-SHORT-001:SOR-1H-SHORT:v1",
                     "runtime_profile_id": "tiny-live-v1",
                 },
                 {

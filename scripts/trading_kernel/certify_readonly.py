@@ -34,8 +34,10 @@ from src.trading_kernel.domain.instrument_certification import (
     build_certification_manifest_digest,
 )
 from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
     ORB_EVENT_SPEC_IDS,
     ORB_STATIC_MEMBERS,
+    ORB_STRATEGY_GROUP_ID,
 )
 from src.trading_kernel.domain.owner_policy import OwnerPolicyScope
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
@@ -43,7 +45,6 @@ from src.trading_kernel.domain.risk_budget import policy_budget_is_valid
 from src.trading_kernel.domain.strategy_registry import (
     RegisteredStrategyContract,
     build_registry_semantic_hash,
-    registered_strategy_contracts,
 )
 from src.trading_kernel.domain.strategy_universe import build_strategy_universe
 from src.trading_kernel.infrastructure.entry_restoration_certification import (
@@ -57,6 +58,8 @@ from src.trading_kernel.infrastructure.runtime_authority_seed import (
     DYNAMIC_POLICY,
     OWNER_POLICY_ID,
     RuntimeAuthoritySeedRequest,
+    _allowed_event_spec_ids,
+    _contracts_for_schema,
     build_runtime_seed_identity,
 )
 from src.trading_kernel.infrastructure.runtime_identity import (
@@ -257,8 +260,8 @@ def _batch_matches(
     )
 
 
-def _expected_registry_manifest() -> dict[str, object]:
-    contracts = registered_strategy_contracts()
+def _expected_registry_manifest(*, schema_revision: str = CURRENT_SCHEMA_REVISION) -> dict[str, object]:
+    contracts = _contracts_for_schema(schema_revision)
     registry_hash = build_registry_semantic_hash(contracts)
     contracts_by_group: dict[str, list[RegisteredStrategyContract]] = {}
     for contract in contracts:
@@ -276,7 +279,9 @@ def _expected_registry_manifest() -> dict[str, object]:
             {
                 "strategy_group_id": strategy_group_id,
                 "active_version_id": active_version_id,
-                "status": "active",
+                "status": "disabled"
+                if schema_revision == "0025_directional_sor" and strategy_group_id == ORB_STRATEGY_GROUP_ID
+                else "active",
             }
         )
         versions.append(
@@ -367,13 +372,17 @@ def _expected_registry_manifest() -> dict[str, object]:
 
 
 async def _live_registry_manifest(
-    connection: AsyncConnection,
+    connection: AsyncConnection, *, schema_revision: str = CURRENT_SCHEMA_REVISION,
 ) -> dict[str, object]:
+    group_predicate = (
+        "status = 'active' OR (strategy_group_id='SOR-1H-001' AND status='disabled')"
+        if schema_revision == "0025_directional_sor" else "status = 'active'"
+    )
     queries = {
-        "groups": """
+        "groups": f"""
             SELECT strategy_group_id, active_version_id, status
               FROM brc_strategy_groups
-             WHERE status = 'active'
+             WHERE {group_predicate}
           ORDER BY strategy_group_id
         """,
         "versions": """
@@ -503,12 +512,6 @@ async def _certify(
     effective_now_ms = int(time.time() * 1_000) if now_ms is None else now_ms
     if effective_now_ms <= 0:
         raise ValueError("certification time must be positive")
-    registered_contracts = registered_strategy_contracts()
-    expected_registry_hash = build_registry_semantic_hash(registered_contracts)
-    expected_registry_manifest = _expected_registry_manifest()
-    expected_live_registry_hash = _registry_manifest_hash(
-        expected_registry_manifest
-    )
     engine = create_async_engine(database_url)
     try:
         async with engine.connect() as connection:
@@ -519,6 +522,11 @@ async def _certify(
                         text("SELECT version_num FROM alembic_version")
                     )
                 ).scalar_one()
+            )
+            registered_contracts = _contracts_for_schema(revision)
+            expected_registry_hash = build_registry_semantic_hash(registered_contracts)
+            expected_live_registry_hash = _registry_manifest_hash(
+                _expected_registry_manifest(schema_revision=revision)
             )
             runtime_identity = {
                 str(row["metadata_key"]): str(row["metadata_value"])
@@ -549,7 +557,7 @@ async def _certify(
                 ).scalar_one_or_none()
                 or ""
             )
-            live_registry_manifest = await _live_registry_manifest(connection)
+            live_registry_manifest = await _live_registry_manifest(connection, schema_revision=revision)
             exit_profile_rows = (
                 (
                     await connection.execute(
@@ -1439,11 +1447,14 @@ async def _certify(
         and open_incidents == 0
         and exit_profile_authority["status"] == "pass"
     )
+    allowed_events = set(_allowed_event_spec_ids(registered_contracts))
+    hourly_events = ORB_DIRECTIONAL_EVENTS if revision == "0025_directional_sor" else ORB_EVENT_SPEC_IDS
     expected_event_specs = tuple(
         sorted(
             (
                 (contract.strategy_group_id, contract.event_spec_id)
                 for contract in registered_contracts
+                if contract.event_spec_id in allowed_events
             ),
             key=lambda identity: identity[1],
         )
@@ -1609,12 +1620,12 @@ async def _certify(
         }
     )
     orb_bootstrap_pass = _universe_manifest_matches(
-        [active_by_event[e] for e in ORB_EVENT_SPEC_IDS if e in active_by_event],
-        expected_event_specs=tuple(("SOR-1H-001", e) for e in ORB_EVENT_SPEC_IDS),
+        [active_by_event[e] for e in hourly_events if e in active_by_event],
+        expected_event_specs=tuple(item for item in expected_event_specs if item[1] in hourly_events),
         expected_member_ids=ORB_STATIC_MEMBERS,
     )
-    expected_active_universes += len(ORB_EVENT_SPEC_IDS)
-    expected_active_scopes += len(ORB_EVENT_SPEC_IDS) * len(ORB_STATIC_MEMBERS)
+    expected_active_universes += len(hourly_events)
+    expected_active_scopes += len(hourly_events) * len(ORB_STATIC_MEMBERS)
     universe_bootstrap_pass = (
         orb_bootstrap_pass
         and database_integrity_pass
@@ -1689,6 +1700,16 @@ async def _certify(
             and closure_ticket["netting_domain_released"] is True
         )
     )
+    exit_configuration_activated = bool(exit_configuration_current_rows)
+    if revision == "0025_directional_sor":
+        current_configurations = {row["configuration_id"] for row in exit_configuration_current_rows}
+        exit_configuration_activated = any(
+            row["record"]["configuration_id"] in current_configurations
+            and set(hourly_events).issubset(
+                item["event_spec_id"] for item in row["record"]["intent"]["events"]
+            )
+            for row in exit_configuration_rows
+        )
     passed = (
         database_integrity_pass
         and closure_is_valid
@@ -1732,7 +1753,7 @@ async def _certify(
             and management_feed_pass
         ),
         "exit_configuration_required": exit_configuration_required,
-        "exit_configuration_activated": bool(exit_configuration_current_rows),
+        "exit_configuration_activated": exit_configuration_activated,
         "management_feed_required": management_feed_required,
         "management_feed_pass": management_feed_pass,
         "management_feed": None if management_feed is None else management_feed.model_dump(mode="json"),
@@ -1826,9 +1847,12 @@ def _exit_profile_authority_manifest(
         account_id=account_id,
     )
     profiles_pass = profiles_pass and owner_profiles_pass
-    expected_bindings = {
-        item.exit_binding_id: item for item in registered_event_exit_bindings()
-    }
+    from src.trading_kernel.domain.orb_session_selection import ORB_DIRECTIONAL_EVENTS
+
+    installed_events = {str(row["event_spec_id"]) for row in current_rows}
+    has_split = bool(installed_events.intersection(ORB_DIRECTIONAL_EVENTS))
+    canonical_bindings = registered_event_exit_bindings(include_sor_split=has_split)
+    expected_bindings = {item.exit_binding_id: item for item in canonical_bindings}
     actual_bindings = {str(row["exit_binding_id"]): row for row in binding_rows}
     initial_bindings_pass = all(
         binding_id in actual_bindings
@@ -1846,7 +1870,8 @@ def _exit_profile_authority_manifest(
         for binding_id, binding in expected_bindings.items()
     )
     current_pass = bool(
-        len(current_rows) == len(registered_event_exit_bindings())
+        installed_events == {binding.event_spec_id for binding in canonical_bindings}
+        and len(current_rows) == len(canonical_bindings)
         and all(
             row["event_spec_id"] == row["binding_event_spec_id"]
             and row["binding_semantic_hash"] == row["fact_binding_hash"]
@@ -1894,10 +1919,17 @@ def _validate_owner_exit_revisions(
 ) -> bool:
     """Seed hashes stay exact; extra Profiles need supported derivation and Owner audit."""
     from src.trading_kernel.domain.exit_configuration import (
+        DIRECTIONAL_EXIT_EVENTS,
+        EXIT_EVENTS,
         ExitConfigurationRecord,
         derive_exit_profile,
     )
     from src.trading_kernel.domain.exit_policy import ExitProfile
+    from src.trading_kernel.domain.orb_session_selection import (
+        ORB_DIRECTIONAL_EVENTS,
+        ORB_DIRECTIONAL_LONG_EVENT,
+        ORB_EVENT_SPEC_IDS,
+    )
     from src.trading_kernel.domain.owner_control import OwnerAuthorization
 
     known = dict(seed_profiles)
@@ -1964,12 +1996,21 @@ def _validate_owner_exit_revisions(
                 )
             ):
                 return False
-            if record.revision > 1 and not any(
-                r.revision == record.revision - 1
-                and r.intent.account_id == intent.account_id
-                for r in records.values()
-            ):
+            predecessor = next(
+                (r for r in records.values() if r.revision == record.revision - 1
+                 and r.intent.account_id == intent.account_id), None
+            )
+            if record.revision > 1 and predecessor is None:
                 return False
+            previous_events = set() if predecessor is None else {
+                e.event_spec_id for e in predecessor.intent.events
+            }
+            event_set = {e.event_spec_id for e in intent.events}
+            if previous_events == set(DIRECTIONAL_EXIT_EVENTS) and event_set != previous_events:
+                return False
+            split_transfer = (
+                previous_events == set(EXIT_EVENTS) and event_set == set(DIRECTIONAL_EXIT_EVENTS)
+            )
             for lineage in record.profiles:
                 parameters = next(
                     e for e in intent.events if e.event_spec_id == lineage.event_spec_id
@@ -1982,12 +2023,28 @@ def _validate_owner_exit_revisions(
                     ),
                     None,
                 )
-                if (
-                    source_binding is None
-                    or source_binding["event_spec_id"] != lineage.event_spec_id
-                    or source_binding["exit_profile_id"] != lineage.source_profile_id
-                    or source_binding["exit_profile_semantic_hash"]
-                    != lineage.source_profile_hash
+                if source_binding is None or source_binding["event_spec_id"] != lineage.event_spec_id:
+                    return False
+                if split_transfer:
+                    assert predecessor is not None
+                    old_event_id = lineage.event_spec_id
+                    if old_event_id in ORB_DIRECTIONAL_EVENTS:
+                        old_event_id = ORB_EVENT_SPEC_IDS[ORB_DIRECTIONAL_EVENTS.index(old_event_id)]
+                        old_profile = next(p.profile for p in predecessor.profiles if p.event_spec_id == old_event_id)
+                        if old_profile.exit_profile_id != lineage.source_profile_id or old_profile.semantic_hash() != lineage.source_profile_hash:
+                            return False
+                    old = next(e for e in predecessor.intent.events if e.event_spec_id == old_event_id)
+                    if (
+                        parameters.reward_multiple != old.reward_multiple
+                        or parameters.target_fraction != old.target_fraction
+                        or parameters.minimum_lift != old.minimum_lift
+                        or parameters.max_actual_fraction != old.max_actual_fraction
+                        or parameters.ma50_enabled != (lineage.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT or old.ma50_enabled)
+                    ):
+                        return False
+                if not (split_transfer and lineage.event_spec_id in ORB_DIRECTIONAL_EVENTS) and (
+                    source_binding["exit_profile_id"] != lineage.source_profile_id
+                    or source_binding["exit_profile_semantic_hash"] != lineage.source_profile_hash
                 ):
                     return False
                 source = known.get(lineage.source_profile_id)

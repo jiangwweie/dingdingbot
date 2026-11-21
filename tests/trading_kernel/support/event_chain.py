@@ -56,6 +56,10 @@ from src.trading_kernel.domain.fee_valuation import (
     value_native_fee,
 )
 from src.trading_kernel.domain.market import ClosedCandle
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
+    directional_orb_spec,
+)
 from src.trading_kernel.domain.position import PositionSnapshot
 from src.trading_kernel.domain.review import ReviewEconomicsFacts, ReviewFill
 from src.trading_kernel.domain.strategy_registry import (
@@ -915,9 +919,7 @@ async def _seed_dynamic_hourly_runtime(engine: AsyncEngine,*,contract: Registere
     )
     from src.trading_kernel.domain.instrument_selection import SelectionKline
     from src.trading_kernel.domain.orb_session_selection import (
-        ORB_EVENT_SPEC_IDS,
         ORB_STATIC_MEMBERS,
-        OrbSessionSelectionSpec,
     )
     from src.trading_kernel.domain.owner_control import StrategyEntryState
     from src.trading_kernel.interfaces.authority_gap_audit_source import (
@@ -931,7 +933,7 @@ async def _seed_dynamic_hourly_runtime(engine: AsyncEngine,*,contract: Registere
     prep=NOW_MS-300000
     market=CertifiedMarketSource(contract.event_id)
     factory=lambda:PostgresKernelUnitOfWork(engine)
-    spec=OrbSessionSelectionSpec()
+    spec=directional_orb_spec(contract.strategy_group_id)
     async with factory() as uow:
         await seed_runtime_authority(uow,RuntimeAuthoritySeedRequest(account_id='account-certification',runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,seeded_at_ms=previous))
         await uow.instrument_selection.install_orb_spec(spec,installed_at_ms=previous+1)
@@ -952,7 +954,7 @@ async def _seed_dynamic_hourly_runtime(engine: AsyncEngine,*,contract: Registere
             result=await observe_strategy_scope(factory,market,ObservationRequest(runtime_scope_id=sid,runtime_commit='kernel-test-head',schema_revision=CURRENT_SCHEMA_REVISION,
                 trigger_candle_close_time_ms=close,attempted_at_ms=now))
             assert result.status is ObservationStatus.WARMED,result.detector_reason
-    for event in ORB_EVENT_SPEC_IDS:
+    for event in spec.event_spec_ids:
         async with factory() as uow:
             installed=await install_strategy_universe(uow,UniverseInstallRequest(event_spec_id=event,runtime_profile_id=RUNTIME_PROFILE_ID,owner_policy_id='policy-main',exchange_instrument_ids=ORB_STATIC_MEMBERS,installed_at_ms=previous+h-1000))
         await certify(previous+h)
@@ -961,7 +963,7 @@ async def _seed_dynamic_hourly_runtime(engine: AsyncEngine,*,contract: Registere
             active=await advance_strategy_universe(uow,UniverseActivationRequest(universe_version_id=installed.universe.universe_version_id,attempted_at_ms=previous+h+1))
         assert active.status.value=='activated'
     async with factory() as uow:
-        control=await stage_orb_dynamic_selection_mode(uow,effective_session_start_ms=day,request=ControlMutationRequest(expected_version=1,reason='current daily Dynamic',idempotency_key='orb:full:dynamic',owner_identity='owner',now_ms=day+100),authentication_strength='totp_step_up')
+        control=await stage_orb_dynamic_selection_mode(uow,strategy_group_id=spec.strategy_group_id,effective_session_start_ms=day,request=ControlMutationRequest(expected_version=1,reason='current daily Dynamic',idempotency_key='orb:full:dynamic',owner_identity='owner',now_ms=day+100),authentication_strength='totp_step_up')
     desired=tuple(sorted({'binance-usdm:ADAUSDT:perpetual','binance-usdm:AVAXUSDT:perpetual','binance-usdm:BNBUSDT:perpetual','binance-usdm:BTCUSDT:perpetual','binance-usdm:ETHUSDT:perpetual','binance-usdm:SOLUSDT:perpetual','binance-usdm:XRPUSDT:perpetual'}))
     class Selector:
         async def fetch_selection_klines(self,request):
@@ -971,7 +973,7 @@ async def _seed_dynamic_hourly_runtime(engine: AsyncEngine,*,contract: Registere
     for tick in range(1,15):
         await certify(prep+tick)
         async with engine.connect() as connection:
-            warming=tuple((await connection.execute(sa.text("SELECT universe_version_id FROM brc_strategy_universe_versions WHERE strategy_group_id='SOR-1H-001' AND lifecycle_state='warming'"))).scalars())
+            warming=tuple((await connection.execute(sa.text("SELECT universe_version_id FROM brc_strategy_universe_versions WHERE strategy_group_id=:group AND lifecycle_state='warming'"), {"group": spec.strategy_group_id})).scalars())
         for uid in warming:await warm(uid,NOW_MS-h,prep+tick)
         progress=await run_materialization_runtime_once(uow_factory=factory,audit_source=PublicMarketAuthorityGapAuditSource(market),request=SelectionRuntimeRequest(selection_spec_id=spec.selection_spec_id,strategy_group_id=spec.strategy_group_id,worker_id='orb:full:materialization',now_ms=prep+tick),clock_ms=lambda tick=tick:prep+tick)
         if progress.disposition is not None and progress.disposition.value=='ACTIVE_NEW':break
@@ -1008,12 +1010,15 @@ async def _seed_runtime(
                 installed_at_ms=warm_now_ms - 1_000,
             ),
         )
-        if contract.strategy_group_id=='SOR-1H-001':
+        if contract.strategy_group_id in ORB_DIRECTIONAL_GROUPS:
             from src.trading_kernel.application.owner_control import (
                 ControlMutationRequest,
                 set_strategy_entry_state,
             )
             from src.trading_kernel.domain.owner_control import StrategyEntryState
+            await uow.instrument_selection.install_orb_spec(
+                directional_orb_spec(contract.strategy_group_id), installed_at_ms=warm_now_ms-900,
+            )
             await set_strategy_entry_state(uow,strategy_group_id=contract.strategy_group_id,target_state=StrategyEntryState.ENABLED,
                 request=ControlMutationRequest(expected_version=1,reason='local hourly chain certification',idempotency_key='orb:certification:resume',owner_identity='owner',now_ms=warm_now_ms-800),authentication_strength='totp_step_up')
         await arm_acceptance_policy(
@@ -1044,7 +1049,7 @@ async def _seed_runtime(
     )
     assert certification.status is ReconciliationWorkerStatus.INSTRUMENT_CERTIFIED
 
-    warm_source = CertifiedMarketSource(contract.event_id) if contract.strategy_group_id=="SOR-1H-001" else CertifiedMarketSource(contract.event_id).shifted(-warm_interval_ms)
+    warm_source = CertifiedMarketSource(contract.event_id) if contract.strategy_group_id in ORB_DIRECTIONAL_GROUPS else CertifiedMarketSource(contract.event_id).shifted(-warm_interval_ms)
     warmed = await run_observation_worker_once(
         lambda: PostgresKernelUnitOfWork(engine),
         warm_source,

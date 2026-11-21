@@ -24,10 +24,10 @@ from src.trading_kernel.domain.instrument_selection import (
 )
 from src.trading_kernel.domain.market import ClosedCandle, MarketSnapshot
 from src.trading_kernel.domain.orb_session_selection import (
-    ORB_SELECTION_SPEC_ID,
     daily_entry_interval_ms,
     daily_event_spec_ids,
     daily_first_offset_ms,
+    is_hourly_orb_spec,
 )
 from src.trading_kernel.domain.selection_authority import (
     AuthorityGapScope,
@@ -75,7 +75,7 @@ class PublicMarketAuthorityGapAuditSource:
             )
         event_ids = daily_event_spec_ids(request.audit.selection_spec_id)
         interval = daily_entry_interval_ms(request.audit.selection_spec_id)
-        hourly = request.audit.selection_spec_id == ORB_SELECTION_SPEC_ID
+        hourly = is_hourly_orb_spec(request.audit.selection_spec_id)
         if any(item.event_spec_id not in event_ids for item in scopes):
             raise AuthorityGapAuditSourceIntegrityError(
                 "Authority Gap Audit scopes must match the exact Selection identity"
@@ -191,7 +191,7 @@ def _evaluate_scope(
     contract = strategy_contract_for(scope.event_spec_id)
     first_natural_trigger_at_ms: int | None = None
     interval = daily_entry_interval_ms(selection_spec_id)
-    hourly = selection_spec_id == ORB_SELECTION_SPEC_ID
+    hourly = is_hourly_orb_spec(selection_spec_id)
     for bar_count in range(
         daily_first_offset_ms(selection_spec_id) // interval, len(candles) + 1
     ):

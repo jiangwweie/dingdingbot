@@ -90,7 +90,7 @@ stateDiagram-v2
 4. TP1 完全成交后计算费用及滑点调整的保本下限；Runner 使用滚动极值与 ATR 规则、旧 watermark 和当前止损决定是否收紧。
 5. **替换保护要确认新单，再清理旧单**。旧保护撤单未知属于独立状态，不以“新请求已发送”假定保护链完成。
 
-来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L135)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L644)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L732)、[Reducer](../../src/trading_kernel/domain/reducer.py#L148)。
+来源：[maintain_ticket_lifecycle](../../src/trading_kernel/application/maintain_ticket_lifecycle.py#L135)、[calculate_cost_adjusted_break_even](../../src/trading_kernel/domain/exit_policy.py#L646)、[evaluate_profile_runner_exit](../../src/trading_kernel/domain/exit_policy.py#L734)、[Reducer](../../src/trading_kernel/domain/reducer.py#L148)。
 
 ## 成交后风险与部分成交
 

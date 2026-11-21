@@ -13,7 +13,7 @@ from src.trading_kernel.application.strategy_universe_batch_manifest import (
     APPROVED_UNIVERSE_BATCHES,
 )
 from src.trading_kernel.domain.orb_session_selection import (
-    ORB_EVENT_SPEC_IDS,
+    ORB_DIRECTIONAL_EVENTS,
     ORB_STATIC_MEMBERS,
 )
 from tests.trading_kernel.support.postgres import (
@@ -80,7 +80,7 @@ def test_empty_database_rehearsal_reaches_all_active_universes_then_fenced_entry
             for event_specs, member_ids in APPROVED_UNIVERSE_BATCHES.values()
             for _event_id, event_spec_id in event_specs
         }
-        expected_identities.update({e: len(ORB_STATIC_MEMBERS) for e in ORB_EVENT_SPEC_IDS})
+        expected_identities.update({e: len(ORB_STATIC_MEMBERS) for e in ORB_DIRECTIONAL_EVENTS})
         assert universe_identities == expected_identities
         assert backend.exchange_mutations == []
         assert backend.calls == [

@@ -217,15 +217,18 @@ class UniverseActivationRequest(BaseModel):
             UniverseActivationOperation.ACTIVATE_DYNAMIC_PAIR,
             UniverseActivationOperation.FALLBACK_PREVIOUS,
         }
-        if pair_operation and any(
-            value is None
-            for value in (
-                self.materialization_generation_id,
-                self.paired_universe_version_id,
-                self.selection_authority,
-            )
-        ):
-            raise ValueError("pair transition requires exact Generation and Authority")
+        if pair_operation:
+            daily_authority = self.selection_authority
+            requested: tuple[str, ...] = (self.universe_version_id,)
+            if self.paired_universe_version_id is not None:
+                requested += (self.paired_universe_version_id,)
+            if (
+                self.materialization_generation_id is None
+                or daily_authority is None
+                or daily_authority.authorized_pair is None
+                or requested != daily_authority.authorized_pair.universe_ids
+            ):
+                raise ValueError("transition requires exact Generation and Authority Universes")
         if not pair_operation and (
             self.paired_universe_version_id is not None
             or self.selection_authority is not None

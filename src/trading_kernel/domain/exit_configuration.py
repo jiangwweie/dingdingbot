@@ -13,6 +13,10 @@ from src.trading_kernel.domain.exit_execution import (
     TpQuantityPolicy,
 )
 from src.trading_kernel.domain.exit_policy import ExitProfile
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_LONG_EVENT,
+)
 
 EXIT_EVENTS = (
     "event_spec:CPM-RO-001:CPM-LONG:v3",
@@ -23,6 +27,9 @@ EXIT_EVENTS = (
     "event_spec:SOR-1H-001:SOR-1H-SHORT:v1",
 )
 MA50_EVENTS = EXIT_EVENTS[:3]
+DIRECTIONAL_EXIT_EVENTS = (*EXIT_EVENTS[:4], *ORB_DIRECTIONAL_EVENTS)
+EXIT_CONFIGURATION_EVENT_SETS = (frozenset(EXIT_EVENTS), frozenset(DIRECTIONAL_EXIT_EVENTS))
+
 
 
 class EventExitParameters(BaseModel):
@@ -40,7 +47,7 @@ class EventExitParameters(BaseModel):
     @model_validator(mode="after")
     def _supported(self) -> EventExitParameters:
         if (
-            self.event_spec_id not in EXIT_EVENTS
+            self.event_spec_id not in (*EXIT_EVENTS, *ORB_DIRECTIONAL_EVENTS)
             or not self.expected_binding_id.strip()
             or self.expected_binding_revision <= 0
         ):
@@ -65,8 +72,11 @@ class EventExitParameters(BaseModel):
                 raise ValueError("four-strategy TP requires 0<f<=cap<=50%")
         elif self.minimum_lift or self.max_actual_fraction != 1:
             raise ValueError("SOR retains original floor quantity contract")
-        if self.event_spec_id not in MA50_EVENTS and self.ma50_enabled:
-            raise ValueError("MA50 is supported only for three LONG Events")
+        if self.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT:
+            if not self.ma50_enabled:
+                raise ValueError("MA50 is required for standalone hourly SOR LONG")
+        elif self.event_spec_id not in MA50_EVENTS and self.ma50_enabled:
+            raise ValueError("MA50 is unsupported for this Event")
         return self
 
 
@@ -83,8 +93,8 @@ class ExitConfigurationIntent(BaseModel):
     def _complete(self) -> ExitConfigurationIntent:
         if self.expected_revision < 0 or not self.account_id.strip():
             raise ValueError("configuration account and revision required")
-        if len(self.events) != 6 or {e.event_spec_id for e in self.events} != set(
-            EXIT_EVENTS
+        if len(self.events) != 6 or frozenset(e.event_spec_id for e in self.events) not in (
+            EXIT_CONFIGURATION_EVENT_SETS
         ):
             raise ValueError(
                 "configuration requires exactly six distinct Event bindings"
@@ -101,7 +111,7 @@ def derive_exit_profile(
     *, source: ExitProfile, parameters: EventExitParameters, revision_id: str
 ) -> ExitProfile:
     if (
-        parameters.event_spec_id in EXIT_EVENTS[4:]
+        parameters.event_spec_id in (*EXIT_EVENTS[4:], *ORB_DIRECTIONAL_EVENTS)
         and parameters.target_fraction != source.tp1.quantity_fraction
     ):
         raise ValueError("SOR original quantity fraction is immutable")
@@ -155,9 +165,9 @@ class ExitConfigurationRecord(BaseModel):
             or self.created_at_ms <= 0
         ):
             raise ValueError("configuration revision or time invalid")
-        if len(self.profiles) != 6 or {p.event_spec_id for p in self.profiles} != set(
-            EXIT_EVENTS
-        ):
+        if len(self.profiles) != 6 or {p.event_spec_id for p in self.profiles} != {
+            e.event_spec_id for e in self.intent.events
+        }:
             raise ValueError("configuration lineage requires six Events")
         for p in self.profiles:
             if p.profile.profile_schema_version != "exit_profile_v2":

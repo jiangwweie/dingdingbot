@@ -5,7 +5,7 @@ from decimal import Decimal
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from src.trading_kernel.domain.directional_risk import RULE_DIGEST, RULE_ID
+from src.trading_kernel.domain.directional_risk import DIRECTIONAL_RULES
 from src.trading_kernel.domain.risk_budget import (
     RiskBudgetChangeRequest,
     policy_budget_is_valid,
@@ -81,8 +81,8 @@ async def risk_budget_authority_valid(connection: AsyncConnection, policy) -> bo
             and request.baseline
             == policy["max_ticket_stop_risk_fraction"]
             == Decimal(payload["baseline"])
-            and payload["rule_id"] == RULE_ID
-            and payload["rule_digest"] == RULE_DIGEST
+            and payload["rule_id"] in DIRECTIONAL_RULES
+            and payload["rule_digest"] == DIRECTIONAL_RULES[payload["rule_id"]][0]
             and journal["authentication_strength"] == "totp_step_up"
             and effective["result"]["status"] == "effective"
             and effective["result"]["policy_version"] == event["policy_version"]

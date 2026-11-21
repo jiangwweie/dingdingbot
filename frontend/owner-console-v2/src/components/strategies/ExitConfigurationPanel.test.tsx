@@ -19,5 +19,18 @@ function render(){node=document.createElement('div');document.body.append(node);
 async function click(text:string){const b=Array.from(node.querySelectorAll('button')).find(b=>b.textContent===text);expect(b).toBeDefined();await act(async()=>{b!.click();});}
 describe('Owner exit configuration boundary',()=>{
  it('first activation shows six independent bindings and retains original SOR quantity',async()=>{render();expect(node.querySelectorAll('tbody tr')).toHaveLength(6);expect(node.querySelector<HTMLInputElement>('[aria-label="SOR-1H-001 · LONG 目标比例"]')?.disabled).toBe(true);await click('生成服务端预览');expect(api.preview.mock.calls[0][0].events).toHaveLength(6);expect(api.activate).not.toHaveBeenCalled();});
+ it('shows the split long MA50 as a fixed rule and leaves split short unfiltered',()=>{
+  const split = events.map((e,i)=>i<4?e:{
+   ...e,
+   event_spec_id: i===4?'event_spec:SOR-1H-LONG-001:SOR-1H-LONG:v1':'event_spec:SOR-1H-SHORT-001:SOR-1H-SHORT:v1',
+   ma50_enabled:i===4,
+  });
+  queryData={current:{revision:2},intent:{...intent,expected_revision:2,events:split},sources:[]};
+  render();
+  const rows=Array.from(node.querySelectorAll('tbody tr'));
+  expect(rows.find(r=>r.textContent?.includes('SOR-多'))?.textContent).toContain('强制开启');
+  expect(rows.find(r=>r.textContent?.includes('SOR-空'))?.textContent).toContain('不适用');
+  expect(rows.find(r=>r.textContent?.includes('SOR-多'))?.querySelector<HTMLInputElement>('input[aria-label$="目标比例"]')?.disabled).toBe(true);
+ });
  it('unknown submission preserves one request without storing TOTP or claiming success',async()=>{api.activate.mockRejectedValue(new Error('timeout'));api.receipt.mockResolvedValue(null);render();await click('生成服务端预览');await click('TOTP 确认激活');await click('提交模拟TOTP');const saved=sessionStorage.getItem('brc:exit-configuration:pending')!;expect(saved).toContain('idempotency_key');expect(saved).not.toContain('123456');expect(saved).not.toContain('totp_code');await click('核实原激活请求');expect(sessionStorage.getItem('brc:exit-configuration:pending')).toBe(saved);expect(api.activate).toHaveBeenCalledTimes(1);expect(node.textContent).toContain('尚无已提交结果');});
 });

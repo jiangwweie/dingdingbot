@@ -51,6 +51,7 @@ from src.trading_kernel.domain.instrument_selection import (
     build_sor_dynamic_selection_period,
     run_sor_dynamic_selection_v0,
 )
+from src.trading_kernel.domain.orb_session_selection import is_hourly_orb_spec
 
 DEFAULT_SELECTION_CONCURRENCY = 6
 DEFAULT_SELECTION_LEASE_MS = 120_000
@@ -112,7 +113,7 @@ async def run_instrument_selection_once(
 ) -> RunInstrumentSelectionResult:
     """Claim, read the full panel outside PG, compute, and atomically persist."""
 
-    if request.selection_spec_id=="SOR_1H_OR_ATR_DYNAMIC_V1":
+    if is_hourly_orb_spec(request.selection_spec_id):
         return await _run_orb_selection_once(uow_factory=uow_factory,market_source=market_source,request=request,clock_ms=clock_ms)
     if request.selection_epoch_id != "sor-v0":
         return await _run_generic_selection_once(uow_factory=uow_factory, market_source=market_source, request=request, clock_ms=clock_ms)

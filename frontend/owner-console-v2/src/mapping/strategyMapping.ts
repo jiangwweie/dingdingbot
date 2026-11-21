@@ -14,6 +14,8 @@ export const STRATEGY_METADATA: Record<string, { nameZh: string; timeframe: stri
   'MI-001': { nameZh: '相对强弱冲量', timeframe: '1h close' },
   'MPG-001': { nameZh: '趋势动量持续', timeframe: '1h close' },
   'SOR-1H-001': { nameZh: '单边突破 (1h/15m)', timeframe: '1h close' },
+  'SOR-1H-LONG-001': { nameZh: 'SOR-多', timeframe: '1h close' },
+  'SOR-1H-SHORT-001': { nameZh: 'SOR-空', timeframe: '1h close' },
   'SOR-US-EQ-PERP-001': { nameZh: '美股 Perp 突破', timeframe: '1h close' },
   'SOR-001': { nameZh: '旧单边突破策略', timeframe: '已退役' },
 };

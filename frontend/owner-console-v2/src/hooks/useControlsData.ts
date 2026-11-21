@@ -39,6 +39,8 @@ const STRATEGY_META: Record<string, { name_zh: string; timeframe: string; is_ret
   'MI-001': { name_zh: '相对强弱冲量', timeframe: '1h close' },
   'MPG-001': { name_zh: '趋势动量持续', timeframe: '1h close' },
   'SOR-1H-001': { name_zh: '单边突破 (1h/15m)', timeframe: '1h close' },
+  'SOR-1H-LONG-001': { name_zh: 'SOR-多', timeframe: '1h close' },
+  'SOR-1H-SHORT-001': { name_zh: 'SOR-空', timeframe: '1h close' },
   'SOR-001': { name_zh: '旧单边突破策略', timeframe: '已停用', is_retired: true },
 };
 

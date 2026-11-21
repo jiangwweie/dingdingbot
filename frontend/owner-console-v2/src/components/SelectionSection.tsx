@@ -13,7 +13,7 @@ interface SelectionSectionProps {
   onSuccess?: (message: string) => void;
 }
 
-export const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-001'] as const;
+export const TABS = ['CPM-RO-001', 'BRF2-001', 'MI-001', 'MPG-001', 'SOR-1H-LONG-001', 'SOR-1H-SHORT-001'] as const;
 
 export const SelectionSection: React.FC<SelectionSectionProps> = ({ onSuccess }) => {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]>('CPM-RO-001');
@@ -105,7 +105,7 @@ export const SelectionSection: React.FC<SelectionSectionProps> = ({ onSuccess })
                   : 'text-text-muted hover:text-text-primary'
               }`}
             >
-              {tab}
+              {tab === 'SOR-1H-LONG-001' ? 'SOR-多' : tab === 'SOR-1H-SHORT-001' ? 'SOR-空' : tab}
             </button>
           ))}
         </div>

@@ -15,6 +15,9 @@ const COMMON_STRATEGY_GROUPS = [
   'MPG-001',
   'MI-001',
   'BRF2-001',
+  'SOR-1H-001',
+  'SOR-1H-LONG-001',
+  'SOR-1H-SHORT-001',
 ];
 
 const COMMON_STATUSES = [

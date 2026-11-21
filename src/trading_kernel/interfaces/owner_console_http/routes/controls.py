@@ -687,7 +687,7 @@ async def activate_dynamic_selection(
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength="totp_step_up")
     if not isinstance(body,DynamicSelectionActivationBody):
         raise OwnerControlBlocked("sor_selection_requires_session_start")
-    if strategy_group_id == 'SOR-1H-001':
+    if strategy_group_id in (ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS):
         async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
             await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
             existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
@@ -698,7 +698,7 @@ async def activate_dynamic_selection(
                 if control.control_version!=body.expected_version:
                     raise OwnerControlConflict('selection_control_version_conflict')
                 await _require_step_up(body,request)
-            return await stage_orb_dynamic_selection_mode(uow,effective_session_start_ms=body.effective_session_start_ms,
+            return await stage_orb_dynamic_selection_mode(uow,strategy_group_id=strategy_group_id,effective_session_start_ms=body.effective_session_start_ms,
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         current = await uow.instrument_selection.get_selection_control(
@@ -721,7 +721,11 @@ async def activate_dynamic_selection(
 
 @router.get("/controls/strategies/{strategy_group_id}/selection")
 async def preview_generic_selection(strategy_group_id: str,request: Request) -> GenericSelectionPreviewView | OrbSelectionPreviewView:
-    if strategy_group_id=='SOR-1H-001':
+    if strategy_group_id in (ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS):
+        selection_spec_id = (
+            ORB_SELECTION_SPEC_ID if strategy_group_id == ORB_STRATEGY_GROUP_ID
+            else directional_orb_spec(strategy_group_id).selection_spec_id
+        )
         now=get_clock_ms(request)
         session=now//86_400_000*86_400_000
         next_session=session if now<session+3_600_000 else session+86_400_000
@@ -729,12 +733,12 @@ async def preview_generic_selection(strategy_group_id: str,request: Request) -> 
             assert uow._connection is not None
             await uow._connection.execute(sa.text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
             try:
-                await uow.instrument_selection.get_orb_spec('SOR_1H_OR_ATR_DYNAMIC_V1')
+                await uow.instrument_selection.get_orb_spec(selection_spec_id)
             except LookupError:
                 orb_runtime=None
             else:
                 orb_runtime=await get_selection_runtime_view(uow,SelectionRuntimeReadonlyRequest(strategy_group_id=strategy_group_id,
-                    selection_spec_id='SOR_1H_OR_ATR_DYNAMIC_V1',session_start_ms=session))
+                    selection_spec_id=selection_spec_id,session_start_ms=session))
         return OrbSelectionPreviewView(installed=orb_runtime is not None,control=None if orb_runtime is None else orb_runtime.selection_control,
             runtime=orb_runtime,next_effective_period_anchor_ms=next_session,next_prepare_not_before_ms=next_session+3_600_000,
             next_eligibility_not_before_ms=next_session+7_200_000)
@@ -763,8 +767,8 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         await uow.owner_controls.get_strategy_control(strategy_group_id,for_update=True)
         existing=await uow.owner_controls.get_authorization_by_idempotency_key(body.idempotency_key)
         if existing is not None:
-            if strategy_group_id=='SOR-1H-001':
-                return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+            if strategy_group_id in (ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS):
+                return await stage_orb_static_selection_mode(uow,strategy_group_id=strategy_group_id,rollback_baseline_id=body.rollback_baseline_id,
                     selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
                     request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
             return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
@@ -777,8 +781,8 @@ async def activate_generic_static_selection(strategy_group_id: str,body: Generic
         if current.control_version!=body.expected_version:
             raise OwnerControlConflict("selection_control_version_conflict")
         await _require_step_up(body,request)
-        if strategy_group_id=='SOR-1H-001':
-            return await stage_orb_static_selection_mode(uow,rollback_baseline_id=body.rollback_baseline_id,
+        if strategy_group_id in (ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS):
+            return await stage_orb_static_selection_mode(uow,strategy_group_id=strategy_group_id,rollback_baseline_id=body.rollback_baseline_id,
                 selection_epoch_id=body.selection_epoch_id,effective_session_start_ms=body.effective_period_anchor_ms,
                 request=_mutation(body,settings.auth.username,now_ms),authentication_strength='totp_step_up')
         return await stage_generic_static_selection_mode(uow,strategy_group_id=strategy_group_id,
@@ -817,7 +821,7 @@ async def bind_event_exit_profile(
     settings = get_settings(request)
     async with PostgresKernelUnitOfWork(get_control_engine(request)) as uow:
         if (
-            event_spec_id in EXIT_EVENTS
+            event_spec_id in (*EXIT_EVENTS, *ORB_DIRECTIONAL_EVENTS)
             and await uow.exit_profiles.get_current_configuration(
                 venue_id=settings.venue_id, account_id=settings.account_id
             )
@@ -1198,6 +1202,7 @@ from src.trading_kernel.application.exit_configuration import (
     preview_exit_configuration,
 )
 from src.trading_kernel.domain.exit_configuration import (
+    DIRECTIONAL_EXIT_EVENTS,
     EXIT_EVENTS,
     MA50_EVENTS,
     EventExitParameters,
@@ -1206,6 +1211,15 @@ from src.trading_kernel.domain.exit_configuration import (
 )
 from src.trading_kernel.domain.exit_policy import ExitProfile
 from src.trading_kernel.domain.exit_regime import BtcMa50Snapshot
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_GROUPS,
+    ORB_DIRECTIONAL_LONG_EVENT,
+    ORB_EVENT_SPEC_IDS,
+    ORB_SELECTION_SPEC_ID,
+    ORB_STRATEGY_GROUP_ID,
+    directional_orb_spec,
+)
 
 
 class ExitConfigurationPreviewBody(BaseModel):
@@ -1252,7 +1266,13 @@ async def read_exit_configuration(request: Request) -> ExitConfigurationView:
         )
         parameters = []
         sources = []
-        for event in EXIT_EVENTS:
+        split_bindings = tuple(
+            [await profiles.get_current_binding(event) for event in ORB_DIRECTIONAL_EVENTS]
+        )
+        if any(split_bindings) and not all(split_bindings):
+            raise OwnerControlBlocked("exit_binding_missing")
+        events = DIRECTIONAL_EXIT_EVENTS if all(split_bindings) else EXIT_EVENTS
+        for event in events:
             current = await profiles.get_current_binding(event)
             if current is None:
                 raise OwnerControlBlocked("exit_binding_missing")
@@ -1265,23 +1285,27 @@ async def read_exit_configuration(request: Request) -> ExitConfigurationView:
             )
             if profile is None:
                 raise OwnerControlBlocked("exit_profile_missing")
-            previous = (
-                None
-                if record is None
-                else next(e for e in record.intent.events if e.event_spec_id == event)
+            previous = None if record is None else next(
+                (e for e in record.intent.events if e.event_spec_id == event), None
             )
-            sor = event in EXIT_EVENTS[4:]
+            if record is not None and previous is None and event in ORB_DIRECTIONAL_EVENTS:
+                old_event = ORB_EVENT_SPEC_IDS[ORB_DIRECTIONAL_EVENTS.index(event)]
+                previous = next(e for e in record.intent.events if e.event_spec_id == old_event)
+                source = next(p.profile for p in record.profiles if p.event_spec_id == old_event)
+            else:
+                source = profile.profile
+            sor = event in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)
             parameters.append(
                 EventExitParameters(
                     event_spec_id=event,
                     expected_binding_id=current.exit_binding_id,
                     expected_binding_revision=current.projection_version,
-                    reward_multiple=profile.profile.tp1.reward_multiple
+                    reward_multiple=source.tp1.reward_multiple
                     if record
                     else Decimal("1.2")
                     if sor
                     else Decimal(1),
-                    target_fraction=profile.profile.tp1.quantity_fraction
+                    target_fraction=source.tp1.quantity_fraction
                     if record or sor
                     else Decimal(".05"),
                     minimum_lift=previous.minimum_lift if previous else not sor,
@@ -1290,16 +1314,16 @@ async def read_exit_configuration(request: Request) -> ExitConfigurationView:
                     else Decimal(1)
                     if sor
                     else Decimal(".5"),
-                    ma50_enabled=previous.ma50_enabled
-                    if previous
-                    else event in MA50_EVENTS,
+                    ma50_enabled=event == ORB_DIRECTIONAL_LONG_EVENT or (
+                        previous.ma50_enabled if previous else event in MA50_EVENTS
+                    ),
                 ).model_dump(mode="json")
             )
             sources.append(
                 {
                     "event_spec_id": event,
-                    "profile": profile.profile.model_dump(mode="json"),
-                    "semantic_hash": profile.profile.semantic_hash(),
+                    "profile": source.model_dump(mode="json"),
+                    "semantic_hash": source.semantic_hash(),
                 }
             )
         snapshot = await profiles.get_ma50_snapshot()
@@ -1473,7 +1497,7 @@ async def preview_exit_sizing(body: ExitSizingBody, request: Request) -> ExitSiz
     parse_binance_usdm_instrument_id(body.exchange_instrument_id)
     if (
         body.event_spec_id != body.parameters.event_spec_id
-        or body.event_spec_id not in EXIT_EVENTS
+        or body.event_spec_id not in (*EXIT_EVENTS, *ORB_DIRECTIONAL_EVENTS)
     ):
         raise OwnerControlBlocked("exit_sizing_event_scope_mismatch")
     now=get_clock_ms(request)

@@ -23,20 +23,27 @@ from tests.trading_kernel.support.postgres import (
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "fault",
+    ("fault", "source_revision", "target_revision"),
     [
-        "migration",
-        "identity",
-        "environment",
-        "kernel",
-        "api",
-        "static",
-        "starting_services",
-        "services",
+        (fault, "0023_management_recovery", "0024_owner_cooperation")
+        for fault in (
+            "migration",
+            "identity",
+            "environment",
+            "kernel",
+            "api",
+            "static",
+            "starting_services",
+            "services",
+        )
+    ]
+    + [
+        (fault, "0024_owner_cooperation", "0025_directional_sor")
+        for fault in ("migration", "identity", "starting_services")
     ],
 )
 async def test_real_stopped_upgrade_resumes_after_each_side_effect(
-    tmp_path, monkeypatch, fault
+    tmp_path, monkeypatch, fault, source_revision, target_revision
 ):
     from unittest.mock import AsyncMock
 
@@ -51,14 +58,14 @@ async def test_real_stopped_upgrade_resumes_after_each_side_effect(
     (tmp_path / "etc/nginx/snippets").mkdir(parents=True)
     source = {
         "commit": "a" * 40,
-        "schema": "0023_management_recovery",
+        "schema": source_revision,
         "paused": True,
         "tickets": False,
         "commands": False,
         "positions": False,
         "incidents": False,
     }
-    receipt = {"commit": "b" * 40, "schema_revision": "0024_owner_cooperation"}
+    receipt = {"commit": "b" * 40, "schema_revision": target_revision}
     links = {}
     for kind, relative in [
         ("kernel", "opt/brc/current"),
@@ -119,7 +126,7 @@ async def test_real_stopped_upgrade_resumes_after_each_side_effect(
 
     def command(argv, **kwargs):
         if any("bootstrap_schema.py" in str(a) for a in argv):
-            run_alembic(url, "upgrade", "0024_owner_cooperation")
+            run_alembic(url, "upgrade", target_revision)
             trip("migration")
         return b""
 
@@ -158,6 +165,65 @@ async def test_real_stopped_upgrade_resumes_after_each_side_effect(
                     seeded_at_ms=1000,
                 ),
             )
+            if target_revision == "0025_directional_sor":
+                from src.trading_kernel.domain.orb_session_selection import (
+                    OrbSessionSelectionSpec,
+                )
+
+                await u.instrument_selection.install_orb_spec(
+                    OrbSessionSelectionSpec(), installed_at_ms=1001
+                )
+        if target_revision == "0025_directional_sor":
+            from src.trading_kernel.application.advance_strategy_universe import (
+                UniverseActivationRequest,
+                advance_strategy_universe,
+            )
+            from src.trading_kernel.application.install_strategy_universe import (
+                UniverseInstallRequest,
+                install_strategy_universe,
+            )
+            from src.trading_kernel.domain.orb_session_selection import (
+                ORB_EVENT_SPEC_IDS,
+                ORB_STATIC_MEMBERS,
+            )
+            from tests.trading_kernel.integration.universe_activation_support import (
+                make_warming_ready,
+            )
+            from tests.trading_kernel.support.exit_configuration import (
+                install_approved_exit_configuration,
+            )
+
+            await install_approved_exit_configuration(
+                engine, account_id="resume-account", now_ms=2000
+            )
+            for event_id in ORB_EVENT_SPEC_IDS:
+                async with PostgresKernelUnitOfWork(engine) as u:
+                    prepared = await install_strategy_universe(
+                        u,
+                        UniverseInstallRequest(
+                            event_spec_id=event_id,
+                            runtime_profile_id="tiny-live-v1",
+                            owner_policy_id="policy-main",
+                            exchange_instrument_ids=ORB_STATIC_MEMBERS,
+                            installed_at_ms=3000,
+                        ),
+                    )
+                assert prepared.universe is not None
+                await make_warming_ready(
+                    engine,
+                    universe_version_id=prepared.universe.universe_version_id,
+                    warm_closed_bar_time_ms=3_600_000,
+                    valid_until_ms=7_200_000,
+                )
+                async with PostgresKernelUnitOfWork(engine) as u:
+                    active = await advance_strategy_universe(
+                        u,
+                        UniverseActivationRequest(
+                            universe_version_id=prepared.universe.universe_version_id,
+                            attempted_at_ms=3_600_001,
+                        ),
+                    )
+                    assert active.status.value == "activated", active
         with pytest.raises(RuntimeError, match="injected interruption"):
             await upgrade.activate(receipt, source, url, filesystem_root=tmp_path)
         saved = json.loads((root / "upgrade-progress.json").read_text())

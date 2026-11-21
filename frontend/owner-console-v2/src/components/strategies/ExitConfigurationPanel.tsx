@@ -13,12 +13,21 @@ type Pending=Omit<ExitConfigurationBody,'totp_code'>;
 function readPending():Pending|null {
  try {return JSON.parse(sessionStorage.getItem(pendingKey)??'null');} catch {return null;}
 }
-function label(event:string){const parts=event.split(':');return `${parts[1]} · ${parts[2].endsWith('SHORT')?'SHORT':'LONG'}`;}
+const standaloneLong = 'event_spec:SOR-1H-LONG-001:SOR-1H-LONG:v1';
+const standaloneShort = 'event_spec:SOR-1H-SHORT-001:SOR-1H-SHORT:v1';
+function label(event:string){
+ if (event === standaloneLong) return 'SOR-多';
+ if (event === standaloneShort) return 'SOR-空';
+ const parts=event.split(':');
+ return `${parts[1]} · ${parts[2].endsWith('SHORT')?'SHORT':'LONG'}`;
+}
 
 export function ExitConfigurationPanel(){
  const client=useQueryClient();
  const query=useQuery({queryKey:['exit-configuration'],queryFn:fetchExitConfiguration});
  const [draft,setDraft]=useState<ExitConfigurationIntent|null>(null);
+ const splitTransfer=!!draft?.events.some(e=>e.event_spec_id===standaloneLong)
+  && !!query.data?.current?.intent?.events?.some(e=>e.event_spec_id.includes('SOR-1H-001'));
  const [preview,setPreview]=useState<ExitConfigurationPreview|null>(null);
  const [pending,setPending]=useState<Pending|null>(readPending);
  const [busy,setBusy]=useState(false);
@@ -67,14 +76,15 @@ export function ExitConfigurationPanel(){
   {query.isLoading?<p>读取配置中</p>:query.isError?<p role="alert">退出配置读取失败，当前无法编辑</p>:draft&&<>
    <p className="text-xs">{query.data?.current?`当前版本 ${query.data.current.revision}`:'尚未激活新版；首次激活采用已确认参数'}</p>
    <div className="overflow-x-auto"><table className="w-full text-xs"><thead><tr>{['策略／方向','TP1 倍数 R','目标比例','最小量提升','实际比例上限','BTC 4h > SMA50'].map(h=><th key={h} className="p-2 text-left">{h}</th>)}</tr></thead>
-   <tbody>{draft.events.map(e=>{const sor=e.event_spec_id.includes('SOR-1H-001');const ma=e.event_spec_id.includes('CPM-RO-001')||e.event_spec_id.includes('MI-001')||e.event_spec_id.includes('MPG-001');const locked=!query.data?.current||busy||!!pending;
+   <tbody>{draft.events.map(e=>{const requiredMa50=e.event_spec_id===standaloneLong;const sor=e.event_spec_id.includes('SOR-1H-001')||requiredMa50||e.event_spec_id===standaloneShort;const ma=e.event_spec_id.includes('CPM-RO-001')||e.event_spec_id.includes('MI-001')||e.event_spec_id.includes('MPG-001');const locked=!query.data?.current||busy||!!pending||splitTransfer;
     return <tr key={e.event_spec_id}><th className="p-2 text-left">{label(e.event_spec_id)}</th>
      <td className="p-2"><input aria-label={`${label(e.event_spec_id)} TP1倍数`} type="number" min="0.1" max="5" step="0.1" value={e.reward_multiple} disabled={locked} onChange={v=>update(e.event_spec_id,'reward_multiple',v.target.value)} className="w-20 rounded border border-border bg-surface p-1"/></td>
      <td className="p-2"><input aria-label={`${label(e.event_spec_id)} 目标比例`} type="number" min="0.001" max="0.5" step="0.01" value={e.target_fraction} disabled={locked||sor} onChange={v=>update(e.event_spec_id,'target_fraction',v.target.value)} className="w-20 rounded border border-border bg-surface p-1"/></td>
      <td className="p-2"><input aria-label={`${label(e.event_spec_id)} 最小量提升`} type="checkbox" checked={e.minimum_lift} disabled={locked||sor} onChange={v=>update(e.event_spec_id,'minimum_lift',v.target.checked)}/>{sor?'原规则':''}</td>
      <td className="p-2"><input aria-label={`${label(e.event_spec_id)} 实际比例上限`} type="number" min="0.001" max="0.5" step="0.01" value={e.max_actual_fraction} disabled={locked||sor} onChange={v=>update(e.event_spec_id,'max_actual_fraction',v.target.value)} className="w-20 rounded border border-border bg-surface p-1"/></td>
-     <td className="p-2">{ma?<input aria-label={`${label(e.event_spec_id)} MA50`} type="checkbox" checked={e.ma50_enabled} disabled={locked} onChange={v=>update(e.event_spec_id,'ma50_enabled',v.target.checked)}/>:'不适用'}</td></tr>;
+     <td className="p-2">{requiredMa50?'强制开启':ma?<input aria-label={`${label(e.event_spec_id)} MA50`} type="checkbox" checked={e.ma50_enabled} disabled={locked} onChange={v=>update(e.event_spec_id,'ma50_enabled',v.target.checked)}/>:'不适用'}</td></tr>;
    })}</tbody></table></div>
+   {splitTransfer&&<p className="text-xs">首次切换继承当前退出参数。完成切换后可按原流程调整。</p>}
    <p className="text-xs text-text-muted">比例以小数填写，0.05 表示 5%。Runner、保本、保护与时间规则从原策略继承。预览不保证成交，策略暂停状态和全局开仓开关保持原值。</p>
    <details className="rounded border border-border p-3"><summary className="cursor-pointer text-sm">按当前已采集规则核实数量示例</summary>
     <p className="text-xs my-2">仅作预校验，原仓位不变。规则缺失或过期会明确拒绝；不保证成交。</p>

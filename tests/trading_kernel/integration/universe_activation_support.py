@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TypedDict
 from uuid import uuid4
@@ -90,6 +91,19 @@ _RULES_DIGEST = "sha256:" + ("c" * 64)
 
 @pytest_asyncio.fixture
 async def activation_engine() -> AsyncGenerator[AsyncEngine, None]:
+    async with _activation_database(SCHEMA_REVISION) as engine:
+        yield engine
+
+
+@pytest_asyncio.fixture
+async def legacy_hourly_activation_engine() -> AsyncGenerator[AsyncEngine, None]:
+    """Keep historical hourly Ticket retirement tests on their installed source."""
+    async with _activation_database("0024_owner_cooperation") as engine:
+        yield engine
+
+
+@asynccontextmanager
+async def _activation_database(schema_revision: str) -> AsyncGenerator[AsyncEngine, None]:
     database_name = f"brc_kernel_test_{uuid4().hex[:12]}"
     assert SAFE_DATABASE.fullmatch(database_name)
     admin = await asyncpg.connect(ADMIN_DSN)
@@ -97,7 +111,7 @@ async def activation_engine() -> AsyncGenerator[AsyncEngine, None]:
     database_url = _database_url(database_name)
     engine: AsyncEngine | None = None
     try:
-        _run_alembic(database_url, "upgrade", "head")
+        _run_alembic(database_url, "upgrade", schema_revision)
         engine = create_async_engine(database_url)
         async with PostgresKernelUnitOfWork(engine) as uow:
             await seed_runtime_authority(
@@ -105,7 +119,7 @@ async def activation_engine() -> AsyncGenerator[AsyncEngine, None]:
                 RuntimeAuthoritySeedRequest(
                     account_id="subaccount-activation-test",
                     runtime_commit="task-10-test",
-                    schema_revision=SCHEMA_REVISION,
+                    schema_revision=schema_revision,
                     seeded_at_ms=NOW_MS - 1_000_000,
                 ),
             )

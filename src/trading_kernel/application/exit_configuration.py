@@ -17,12 +17,18 @@ from src.trading_kernel.application.owner_control import (
 from src.trading_kernel.application.ports import KernelUnitOfWork
 from src.trading_kernel.domain.entry_admission_snapshot import canonical_digest
 from src.trading_kernel.domain.exit_configuration import (
+    DIRECTIONAL_EXIT_EVENTS,
     EXIT_EVENTS,
     MA50_EVENTS,
     ExitConfigurationIntent,
     ExitConfigurationRecord,
     ProfileRevisionLineage,
     derive_exit_profile,
+)
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_EVENTS,
+    ORB_DIRECTIONAL_LONG_EVENT,
+    ORB_EVENT_SPEC_IDS,
 )
 
 
@@ -60,16 +66,32 @@ async def preview_exit_configuration(
     revision = 0 if current is None else current.revision
     if revision != intent.expected_revision:
         raise OwnerControlConflict("exit_configuration_revision_conflict")
+    target_events = {e.event_spec_id for e in intent.events}
+    current_events = set() if current is None else {e.event_spec_id for e in current.intent.events}
+    if target_events == set(EXIT_EVENTS):
+        installed = await uow.exit_profiles.get_current_binding(ORB_DIRECTIONAL_LONG_EVENT)
+        if installed is not None:
+            raise OwnerControlBlocked("retired_sor_exit_configuration")
+    split_transfer = current is not None and current_events == set(EXIT_EVENTS) and (
+        target_events == set(DIRECTIONAL_EXIT_EVENTS)
+    )
+    if current is not None and current_events == set(DIRECTIONAL_EXIT_EVENTS) and (
+        target_events != current_events
+    ):
+        raise OwnerControlBlocked("retired_sor_exit_configuration")
+    carried = {} if not split_transfer or current is None else {
+        item.event_spec_id: item for item in current.intent.events
+    }
     if valid_until_ms is None:
         valid_until_ms = now_ms + 60_000
     if not now_ms < valid_until_ms <= now_ms + 60_000:
         raise OwnerControlBlocked("exit_configuration_preview_expired")
     if current is None:
         for item in intent.events:
-            sor = item.event_spec_id in EXIT_EVENTS[4:]
+            sor = item.event_spec_id in (*ORB_EVENT_SPEC_IDS, *ORB_DIRECTIONAL_EVENTS)
             if (
                 item.reward_multiple != (Decimal("1.2") if sor else Decimal(1))
-                or item.ma50_enabled != (item.event_spec_id in MA50_EVENTS)
+                or item.ma50_enabled != (item.event_spec_id in (*MA50_EVENTS, ORB_DIRECTIONAL_LONG_EVENT))
                 or (
                     not sor
                     and (
@@ -110,6 +132,37 @@ async def preview_exit_configuration(
             or event.position_side != source.profile.position_side
         ):
             raise OwnerControlBlocked("exit_event_scope_invalid")
+        if carried:
+            old_event_id = parameters.event_spec_id
+            if old_event_id in ORB_DIRECTIONAL_EVENTS:
+                old_event_id = ORB_EVENT_SPEC_IDS[ORB_DIRECTIONAL_EVENTS.index(old_event_id)]
+                old_current = await uow.exit_profiles.get_current_binding(old_event_id, for_update=True)
+                old_binding = (
+                    None if old_current is None
+                    else await uow.exit_profiles.get_binding(old_current.exit_binding_id)
+                )
+                old_lineage = next(p for p in current.profiles if p.event_spec_id == old_event_id) if current else None
+                if (
+                    old_binding is None or old_lineage is None
+                    or old_binding.exit_profile_id != old_lineage.profile.exit_profile_id
+                    or old_binding.exit_profile_semantic_hash != old_lineage.profile.semantic_hash()
+                ):
+                    raise OwnerControlBlocked("split_exit_configuration_source_drift")
+                source = await uow.exit_profiles.get_profile(
+                    exit_profile_id=old_binding.exit_profile_id,
+                    semantic_hash=old_binding.exit_profile_semantic_hash,
+                )
+                if source is None or source.status != "active":
+                    raise OwnerControlBlocked("split_exit_configuration_source_drift")
+            old = carried[old_event_id]
+            if (
+                parameters.reward_multiple != old.reward_multiple
+                or parameters.target_fraction != old.target_fraction
+                or parameters.minimum_lift != old.minimum_lift
+                or parameters.max_actual_fraction != old.max_actual_fraction
+                or parameters.ma50_enabled != (parameters.event_spec_id == ORB_DIRECTIONAL_LONG_EVENT or old.ma50_enabled)
+            ):
+                raise OwnerControlBlocked("split_exit_configuration_must_preserve_effective_terms")
         configuration_id = (
             "exit-config:"
             + canonical_digest({"intent": intent.digest(), "revision": revision + 1})[

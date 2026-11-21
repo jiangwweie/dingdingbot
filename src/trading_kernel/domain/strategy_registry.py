@@ -255,10 +255,11 @@ class RegisteredStrategyContract(BaseModel):
 
         return int(self.strategy_version_id.rpartition(":v")[2])
 
-def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
-    """Return existing Crypto contracts plus the independent TradFi SOR Events."""
-
-    return (
+def registered_strategy_contracts(
+    *, include_sor_split: bool = False
+) -> tuple[RegisteredStrategyContract, ...]:
+    """Return the historical registry or its explicit standalone SOR extension."""
+    contracts = (
         _contract(
             strategy_group_id="CPM-RO-001",
             event_id="CPM-LONG",
@@ -446,6 +447,31 @@ def registered_strategy_contracts() -> tuple[RegisteredStrategyContract, ...]:
         ),
     )
 
+    if not include_sor_split:
+        return contracts
+
+    from src.trading_kernel.domain.orb_session_selection import (
+        ORB_LONG_GROUP_ID,
+        ORB_SHORT_GROUP_ID,
+        ORB_STRATEGY_GROUP_ID,
+        directional_orb_spec,
+    )
+
+    standalone = []
+    for source in contracts:
+        if source.strategy_group_id != ORB_STRATEGY_GROUP_ID:
+            continue
+        group = ORB_LONG_GROUP_ID if source.position_side == "long" else ORB_SHORT_GROUP_ID
+        spec = directional_orb_spec(group)
+        standalone.append(RegisteredStrategyContract.model_validate({
+            **source.model_dump(),
+            "strategy_group_id": spec.strategy_group_id,
+            "strategy_version_id": spec.strategy_version_id,
+            "event_spec_id": spec.event_spec_ids[0],
+            "exit_policy_id": f"exit-policy:{group}:{source.event_id}:orb-crypto-15m-v1",
+        }))
+    return (*contracts, *standalone)
+
 
 def build_registry_semantic_hash(
     contracts: tuple[RegisteredStrategyContract, ...],
@@ -471,7 +497,7 @@ def strategy_contract_for(event_spec_id: str) -> RegisteredStrategyContract:
     normalized = str(event_spec_id or "").strip()
     matches = [
         contract
-        for contract in registered_strategy_contracts()
+        for contract in registered_strategy_contracts(include_sor_split=True)
         if contract.event_spec_id == normalized
     ]
     if len(matches) != 1:

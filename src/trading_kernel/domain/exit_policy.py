@@ -522,7 +522,9 @@ def registered_exit_profiles() -> tuple[ExitProfile, ...]:
     )
 
 
-def registered_event_exit_bindings() -> tuple[EventExitBinding, ...]:
+def registered_event_exit_bindings(
+    *, include_sor_split: bool = False
+) -> tuple[EventExitBinding, ...]:
     profile_ids = {
         "CPM-LONG": "exit-profile:trend-continuation:1h:long:v1",
         "MPG-LONG": "exit-profile:momentum-tail:1h:long:v1",
@@ -537,7 +539,7 @@ def registered_event_exit_bindings() -> tuple[EventExitBinding, ...]:
     }
     profiles = {item.exit_profile_id: item for item in registered_exit_profiles()}
     bindings = []
-    for contract in registered_strategy_contracts():
+    for contract in registered_strategy_contracts(include_sor_split=include_sor_split):
         profile_id = profile_ids[contract.event_id]
         profile = profiles[profile_id]
         bindings.append(

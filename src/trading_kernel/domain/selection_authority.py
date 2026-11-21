@@ -41,8 +41,12 @@ from src.trading_kernel.domain.orb_session_selection import (
     ORB_SELECTION_SPEC_ID,
     OrbSessionSelectionSnapshot,
     daily_entry_interval_ms,
+    daily_event_spec_ids,
     daily_first_offset_ms,
+    hourly_orb_strategy_identity,
+    is_hourly_orb_spec,
 )
+from src.trading_kernel.domain.strategy_registry import strategy_contract_for
 from src.trading_kernel.domain.strategy_universe import StrategyUniverseSourceKind
 
 
@@ -228,6 +232,9 @@ class AuthorityGapAudit(BaseModel):
 
     @model_validator(mode="after")
     def _validate_gap_audit(self) -> AuthorityGapAudit:
+        from src.trading_kernel.domain.orb_session_selection import is_hourly_orb_spec
+
+        hourly = is_hourly_orb_spec(self.selection_spec_id)
         interval = daily_entry_interval_ms(self.selection_spec_id)
         first_close = self.session_start_ms + daily_first_offset_ms(
             self.selection_spec_id
@@ -238,7 +245,7 @@ class AuthorityGapAudit(BaseModel):
             self.unauthorized_from_close_time_ms % interval != 0
             or self.unauthorized_from_close_time_ms < first_close
             or (
-                self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                hourly
                 and self.unauthorized_from_close_time_ms
                 >= self.session_start_ms + DAY_MS
             )
@@ -280,13 +287,13 @@ class AuthorityGapAudit(BaseModel):
                 self.audited_through_close_time_ms
                 < self.unauthorized_from_close_time_ms
                 and not (
-                    self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                    hourly
                     and self.unauthorized_from_close_time_ms == first_close
                     and self.first_eligible_close_time_ms == first_close
                 )
             )
             or (
-                self.selection_spec_id == ORB_SELECTION_SPEC_ID
+                hourly
                 and self.first_eligible_close_time_ms >= self.session_start_ms + DAY_MS
             )
         ):
@@ -349,15 +356,19 @@ class SelectionControl(BaseModel):
             raise ValueError("Selection Control pending transition shape is incomplete")
         if self.control_version <= 0 or self.updated_at_ms <= 0:
             raise ValueError("Selection Control version and time must be positive")
-        if self.strategy_group_id == "SOR-1H-001":
-            from src.trading_kernel.domain.orb_session_selection import (
-                ORB_SELECTION_SPEC_ID,
-            )
+        from src.trading_kernel.domain.orb_session_selection import (
+            ORB_DIRECTIONAL_GROUPS,
+            ORB_STRATEGY_GROUP_ID,
+            directional_orb_spec,
+        )
 
-            if self.selection_spec_id != ORB_SELECTION_SPEC_ID:
-                raise ValueError(
-                    "hourly ORB control requires its independent Selection Spec"
-                )
+        if self.strategy_group_id in (ORB_STRATEGY_GROUP_ID, *ORB_DIRECTIONAL_GROUPS):
+            expected_spec = (
+                ORB_SELECTION_SPEC_ID if self.strategy_group_id == ORB_STRATEGY_GROUP_ID
+                else directional_orb_spec(self.strategy_group_id).selection_spec_id
+            )
+            if self.selection_spec_id != expected_spec:
+                raise ValueError("hourly ORB control requires its independent Selection Spec")
             cadence = DAY_MS
         else:
             cadence = (
@@ -473,8 +484,8 @@ class MaterializationGeneration(BaseModel):
     selection_snapshot_id: str | None
     rollback_baseline_id: str | None
     session_start_ms: int | None
-    previous_long_universe_version_id: str
-    previous_short_universe_version_id: str
+    previous_long_universe_version_id: str | None
+    previous_short_universe_version_id: str | None
     desired_member_count: int
     semantic_digest: str
     lifecycle_state: MaterializationGenerationState
@@ -491,7 +502,7 @@ class MaterializationGeneration(BaseModel):
     @model_serializer(mode="wrap")
     def _serialize_generation(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
         values = handler(self)
-        if self.selection_spec_id != ORB_SELECTION_SPEC_ID:
+        if not is_hourly_orb_spec(self.selection_spec_id):
             values.pop("selection_epoch_id", None)
             values.pop("selection_control_version", None)
             values.pop("activation_authorization_id", None)
@@ -504,8 +515,6 @@ class MaterializationGeneration(BaseModel):
         "selection_spec_id",
         "strategy_group_id",
         "strategy_version_id",
-        "previous_long_universe_version_id",
-        "previous_short_universe_version_id",
         mode="before",
     )
     @classmethod
@@ -533,27 +542,29 @@ class MaterializationGeneration(BaseModel):
 
     @model_validator(mode="after")
     def _validate_generation(self) -> MaterializationGeneration:
-        if self.selection_spec_id == ORB_SELECTION_SPEC_ID:
+        if is_hourly_orb_spec(self.selection_spec_id):
             from src.trading_kernel.domain.orb_session_selection import (
                 require_orb_epoch,
             )
-            if self.strategy_group_id != "SOR-1H-001" or self.strategy_version_id != "sgv:SOR-1H-001:v1" or self.selection_epoch_id is None or self.selection_control_version is None or self.selection_control_version <= 0:
+            if (
+                (self.strategy_group_id, self.strategy_version_id)
+                != hourly_orb_strategy_identity(self.selection_spec_id)
+                or self.selection_epoch_id is None
+                or self.selection_control_version is None
+                or self.selection_control_version <= 0
+            ):
                 raise ValueError("hourly ORB Generation requires exact strategy epoch/control")
             require_orb_epoch(self.selection_epoch_id)
         elif self.selection_epoch_id is not None or self.selection_control_version is not None:
             raise ValueError("legacy Generation forbids hourly ORB lineage")
-        orb_static=(self.selection_spec_id==ORB_SELECTION_SPEC_ID and self.selection_mode is SelectionMode.STATIC_BASELINE)
+        orb_static=(is_hourly_orb_spec(self.selection_spec_id) and self.selection_mode is SelectionMode.STATIC_BASELINE)
         if orb_static and self.activation_authorization_id is None:
             raise ValueError("ORB Static Generation requires frozen Owner authorization")
         if not orb_static and self.activation_authorization_id is not None:
             raise ValueError("Dynamic Generation cannot use Static authorization")
         if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not orb_static:
             raise ValueError("DS-04 Generation requires dynamic_selection mode")
-        if (
-            self.previous_long_universe_version_id
-            == self.previous_short_universe_version_id
-        ):
-            raise ValueError("Generation previous LONG/SHORT pair must be distinct")
+        self.previous_pair.require_spec_shape(self.selection_spec_id)
         if (
             ((self.selection_snapshot_id is not None or self.rollback_baseline_id is None)
               if orb_static else (self.selection_snapshot_id is None or self.rollback_baseline_id is not None))
@@ -576,6 +587,13 @@ class MaterializationGeneration(BaseModel):
         ):
             raise ValueError("desired Generation requires valid desired time")
         return self
+
+    @property
+    def previous_pair(self) -> UniverseAuthorityPair:
+        return UniverseAuthorityPair(
+            long_universe_version_id=self.previous_long_universe_version_id,
+            short_universe_version_id=self.previous_short_universe_version_id,
+        )
 
 
 class MaterializationGenerationLeaseClaim(BaseModel):
@@ -650,24 +668,44 @@ class AuthorityGrantProof(BaseModel):
 
 
 class UniverseAuthorityPair(BaseModel):
+    """Universe IDs keyed by side. Historical grants carry both sides."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    long_universe_version_id: str
-    short_universe_version_id: str
+    long_universe_version_id: str | None = None
+    short_universe_version_id: str | None = None
 
-    @field_validator("long_universe_version_id", "short_universe_version_id", mode="before")
+    @field_validator("long_universe_version_id", "short_universe_version_id")
     @classmethod
-    def _require_universe_identity(cls, value: object) -> str:
-        normalized = str(value or "").strip()
-        if not normalized:
-            raise ValueError("Authority requires exact LONG and SHORT Universe identities")
-        return normalized
+    def _require_universe_identity(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value.strip() != value):
+            raise ValueError("Authority requires a canonical Universe identity")
+        return value
 
     @model_validator(mode="after")
     def _require_distinct_pair(self) -> UniverseAuthorityPair:
         if self.long_universe_version_id == self.short_universe_version_id:
-            raise ValueError("Authority LONG and SHORT Universes must be distinct")
+            raise ValueError("Authority requires at least one distinct Universe")
         return self
+
+    @property
+    def universe_ids(self) -> tuple[str, ...]:
+        return tuple(
+            value for value in (self.long_universe_version_id, self.short_universe_version_id)
+            if value is not None
+        )
+
+    def universe_id_for_side(self, side: Literal["long", "short"]) -> str | None:
+        return self.long_universe_version_id if side == "long" else self.short_universe_version_id
+
+    def require_spec_shape(self, selection_spec_id: str) -> None:
+        events = daily_event_spec_ids(selection_spec_id)
+        expected = {strategy_contract_for(event).position_side for event in events}
+        actual = {side for side, universe in (
+            ("long", self.long_universe_version_id), ("short", self.short_universe_version_id)
+        ) if universe is not None}
+        if actual != expected:
+            raise ValueError("Universe authority sides differ from Selection Spec")
 
 
 class AuthorityEventSetError(ValueError):
@@ -1411,7 +1449,7 @@ class SelectionSessionAuthority(BaseModel):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, object]:
         result = handler(self)
-        if self.selection_spec_id != "SOR_1H_OR_ATR_DYNAMIC_V1":
+        if not is_hourly_orb_spec(self.selection_spec_id):
             for name in (
                 "selection_epoch_id",
                 "selection_control_version",
@@ -1488,7 +1526,7 @@ class SelectionSessionAuthority(BaseModel):
 
     @model_validator(mode="after")
     def _validate_authority(self) -> SelectionSessionAuthority:
-        if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1":
+        if is_hourly_orb_spec(self.selection_spec_id):
             from src.trading_kernel.domain.orb_session_selection import (
                 require_orb_epoch,
             )
@@ -1545,7 +1583,7 @@ class SelectionSessionAuthority(BaseModel):
                 "Authority period must start at the 01:00 UTC decision boundary"
             )
         if self.expires_at_ms != self.session_start_ms + DAY_MS + (
-            0 if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1" else HOUR_MS
+            0 if is_hourly_orb_spec(self.selection_spec_id) else HOUR_MS
         ):
             raise ValueError("Authority must expire at the next decision boundary")
         if not self.decision_boundary_ms <= self.effective_from_ms < self.expires_at_ms:
@@ -1560,15 +1598,16 @@ class SelectionSessionAuthority(BaseModel):
     def _validate_trading_grant(self) -> None:
         if self.authorized_pair is None:
             raise ValueError(
-                "trading Authority requires exact LONG and SHORT Universe pair"
+                "trading Authority requires exact Spec Universes"
             )
+        self.authorized_pair.require_spec_shape(self.selection_spec_id)
         if self.grant_proof is None:
             raise ValueError("trading Authority requires one grant proof")
         if self.first_eligible_close_time_ms is None:
             raise ValueError("trading Authority requires first eligible close")
         interval = (
             HOUR_MS
-            if self.selection_spec_id == "SOR_1H_OR_ATR_DYNAMIC_V1"
+            if is_hourly_orb_spec(self.selection_spec_id)
             else INTERVAL_MS
         )
         first_offset = 2 * HOUR_MS if interval == HOUR_MS else 5 * INTERVAL_MS
@@ -1650,7 +1689,7 @@ class SelectionSessionAuthority(BaseModel):
                     "PRE_FENCE_CONTINUITY requires Dynamic continuity lineage"
                 )
         elif self.authority_outcome is AuthorityOutcome.ACTIVE_NEW:
-            if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not (self.selection_spec_id==ORB_SELECTION_SPEC_ID and self.selection_mode is SelectionMode.STATIC_BASELINE and self.activation_authorization_id is not None):
+            if self.selection_mode is not SelectionMode.DYNAMIC_SELECTION and not (is_hourly_orb_spec(self.selection_spec_id) and self.selection_mode is SelectionMode.STATIC_BASELINE and self.activation_authorization_id is not None):
                 raise ValueError("ACTIVE_NEW requires exact dynamic or authorized ORB Static mode")
             if (
                 (self.selection_snapshot_id is None and self.selection_mode is not SelectionMode.STATIC_BASELINE)
@@ -1672,7 +1711,7 @@ class SelectionSessionAuthority(BaseModel):
                 raise ValueError("NO_CHANGE cannot own a new Generation")
         elif self.authority_outcome is AuthorityOutcome.FALLBACK_PREVIOUS:
             if (
-                (self.selection_snapshot_id is None and self.selection_spec_id!=ORB_SELECTION_SPEC_ID)
+                (self.selection_snapshot_id is None and not is_hourly_orb_spec(self.selection_spec_id))
                 or self.materialization_generation_id is None
                 or self.authority_gap_audit_id is None
                 or self.grant_proof is None

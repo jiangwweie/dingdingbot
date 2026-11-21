@@ -636,3 +636,130 @@ async def test_exit_configuration_refuses_other_account_even_with_valid_binding_
     async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
         with pytest.raises(OwnerControlBlocked,match='account_scope'):
             await preview_exit_configuration(uow,intent=proposed.model_copy(update={'account_id':'other-account'}),now_ms=2000)
+
+
+@pytest.mark.asyncio
+async def test_split_configuration_preserves_effective_sor_exit_terms_instead_of_seed_defaults(
+    lifecycle_engine,
+):
+    from src.trading_kernel.application.owner_control import OwnerControlBlocked
+    from src.trading_kernel.domain.exit_configuration import EventExitParameters
+    from src.trading_kernel.domain.orb_session_selection import ORB_DIRECTIONAL_EVENTS
+    from src.trading_kernel.domain.strategy_registry import (
+        registered_strategy_contracts,
+    )
+    from src.trading_kernel.infrastructure.strategy_registry_seed import (
+        seed_strategy_registry,
+    )
+
+    original_intent = await intent(lifecycle_engine)
+    changed = original_intent.model_copy(update={
+        "events": tuple(item.model_copy(update={"reward_multiple": D("1.7")})
+                        if item.event_spec_id in EXIT_EVENTS[4:] else item
+                        for item in original_intent.events)
+    })
+    await activate(lifecycle_engine, original_intent)
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        revised_events = []
+        for item in changed.events:
+            current = await uow.exit_profiles.get_current_binding(item.event_spec_id)
+            revised_events.append(item.model_copy(update={
+                "expected_binding_id": current.exit_binding_id,
+                "expected_binding_revision": current.projection_version,
+            }))
+        revised = changed.model_copy(update={"expected_revision": 1, "events": tuple(revised_events)})
+        revised_preview = await preview_exit_configuration(uow, intent=revised, now_ms=2300)
+        original = await activate_exit_configuration(
+            uow, request=ActivateExitConfigurationRequest(
+                expected_version=1, intent=revised, preview_digest=revised_preview.preview_digest,
+                preview_valid_until_ms=revised_preview.valid_until_ms,
+                reason="test effective exit configuration", idempotency_key="test-configuration-v2",
+                owner_identity="owner", now_ms=2400,
+            ), authentication_strength="totp_step_up",
+        )
+    async with PostgresKernelUnitOfWork(lifecycle_engine) as uow:
+        await seed_strategy_registry(uow, seeded_at_ms=3000, contracts=tuple(
+            c for c in registered_strategy_contracts(include_sor_split=True)
+            if c.event_spec_id in ORB_DIRECTIONAL_EVENTS
+        ))
+        events = []
+        for parameters in original.intent.events:
+            event_id = parameters.event_spec_id
+            if event_id in EXIT_EVENTS[4:]:
+                event_id = ORB_DIRECTIONAL_EVENTS[EXIT_EVENTS[4:].index(event_id)]
+            current = await uow.exit_profiles.get_current_binding(event_id)
+            events.append(EventExitParameters.model_validate({
+                **parameters.model_dump(),
+                "event_spec_id": event_id,
+                "expected_binding_id": current.exit_binding_id,
+                "expected_binding_revision": current.projection_version,
+                "ma50_enabled": event_id == ORB_DIRECTIONAL_EVENTS[0] or parameters.ma50_enabled,
+            }))
+        proposal = ExitConfigurationIntent(account_id="manual-account", expected_revision=original.revision, events=tuple(events))
+        preview = await preview_exit_configuration(uow, intent=proposal, now_ms=4000)
+        for lineage in preview.profiles:
+            if lineage.event_spec_id not in ORB_DIRECTIONAL_EVENTS:
+                continue
+            source_id = EXIT_EVENTS[4:][ORB_DIRECTIONAL_EVENTS.index(lineage.event_spec_id)]
+            source = next(p.profile for p in original.profiles if p.event_spec_id == source_id)
+            assert lineage.source_profile_id == source.exit_profile_id
+            assert lineage.source_profile_hash == source.semantic_hash()
+            assert lineage.profile.model_dump(exclude={"exit_profile_id", "exit_profile_version"}) == source.model_dump(exclude={"exit_profile_id", "exit_profile_version"})
+        changed_first = tuple(e.model_copy(update={"reward_multiple": D("1.8")})
+                              if e.event_spec_id == ORB_DIRECTIONAL_EVENTS[0] else e for e in events)
+        with pytest.raises(OwnerControlBlocked, match="split_exit_configuration_must_preserve"):
+            await preview_exit_configuration(uow, intent=proposal.model_copy(update={"events": changed_first}), now_ms=4000)
+
+        split = await activate_exit_configuration(
+            uow, request=ActivateExitConfigurationRequest(
+                expected_version=original.revision, intent=proposal, preview_digest=preview.preview_digest,
+                preview_valid_until_ms=preview.valid_until_ms, reason="test split cutover",
+                idempotency_key="test-split-configuration", owner_identity="owner", now_ms=4100,
+            ), authentication_strength="totp_step_up",
+        )
+        assert split.revision == original.revision + 1
+        assert await uow.exit_profiles.get_configuration(original.configuration_id) == original
+        assert (await check_exit_regime(
+            uow, venue_id="binance-usdm", account_id="manual-account",
+            event_spec_id=ORB_DIRECTIONAL_EVENTS[0], now_ms=4200,
+        ))[0] == "ma50_unavailable"
+        assert (await check_exit_regime(
+            uow, venue_id="binance-usdm", account_id="manual-account",
+            event_spec_id=ORB_DIRECTIONAL_EVENTS[1], now_ms=4200,
+        ))[0] is None
+
+    from scripts.trading_kernel.certify_readonly import _exit_profile_authority_manifest
+    from src.trading_kernel.infrastructure.pg_models import (
+        event_exit_profile_binding_events,
+        event_exit_profile_bindings,
+        exit_configuration_current,
+        owner_authorizations,
+    )
+
+    async with lifecycle_engine.connect() as connection:
+        async def rows(table):
+            return (await connection.execute(sa.select(table))).mappings().all()
+
+        current_bindings = (await connection.execute(sa.text("""
+            SELECT cur.event_spec_id,cur.exit_binding_id,cur.binding_semantic_hash,
+                   cur.projection_version,b.event_spec_id AS binding_event_spec_id,
+                   b.exit_profile_id,b.exit_profile_semantic_hash,b.binding_semantic_hash AS fact_binding_hash,
+                   p.status AS profile_status,e.status AS event_status
+            FROM brc_event_exit_profile_binding_current cur
+            JOIN brc_event_exit_profile_bindings b USING(exit_binding_id)
+            JOIN brc_exit_policies p ON p.exit_policy_id=b.exit_profile_id
+            JOIN brc_event_specs e ON e.event_spec_id=cur.event_spec_id
+        """))).mappings().all()
+        result = _exit_profile_authority_manifest(
+            profile_rows=await rows(exit_policies),
+            binding_rows=await rows(event_exit_profile_bindings),
+            current_rows=current_bindings,
+            event_rows=await rows(event_exit_profile_binding_events),
+            configuration_rows=(await connection.execute(
+                sa.select(exit_configurations).order_by(exit_configurations.c.revision)
+            )).mappings().all(),
+            configuration_current_rows=await rows(exit_configuration_current),
+            authorization_rows=await rows(owner_authorizations),
+            account_id="manual-account",
+        )
+        assert result["status"] == "pass", result

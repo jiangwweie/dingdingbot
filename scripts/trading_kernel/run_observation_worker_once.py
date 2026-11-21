@@ -27,7 +27,11 @@ from src.trading_kernel.application.market_ports import (
 from src.trading_kernel.application.refresh_exit_regime import refresh_exit_regime
 from src.trading_kernel.domain.generic_selection_spec import generic_selection_spec
 from src.trading_kernel.domain.instrument_selection import SOR_STRATEGY_GROUP_ID
-from src.trading_kernel.domain.orb_session_selection import OrbSessionSelectionSpec
+from src.trading_kernel.domain.orb_session_selection import (
+    ORB_DIRECTIONAL_GROUPS,
+    OrbSessionSelectionSpec,
+    directional_orb_spec,
+)
 from src.trading_kernel.infrastructure.pg_unit_of_work import (
     PostgresKernelUnitOfWork,
 )
@@ -198,13 +202,24 @@ async def _run(args: argparse.Namespace) -> int:
             )
         generic_loops: list[WorkerProcessLoop]=[]
         facts_cursors: dict[str,str]={}
-        for group in ("CPM-RO-001","MPG-001","MI-001","BRF2-001","SOR-1H-001"):
-            family=OrbSessionSelectionSpec() if group=='SOR-1H-001' else generic_selection_spec(group)
-            async def generic_selection_tick(group=group,spec_id=family.selection_spec_id):
+        families = [
+            (group, generic_selection_spec(group).selection_spec_id)
+            for group in ("CPM-RO-001", "MPG-001", "MI-001", "BRF2-001")
+        ]
+        if args.schema_revision == "0025_directional_sor":
+            families.extend(
+                (group, directional_orb_spec(group).selection_spec_id)
+                for group in ORB_DIRECTIONAL_GROUPS
+            )
+        else:
+            hourly = OrbSessionSelectionSpec()
+            families.append((hourly.strategy_group_id, hourly.selection_spec_id))
+        for group, selection_spec_id in families:
+            async def generic_selection_tick(group=group,spec_id=selection_spec_id):
                 return await selection_tick(group,spec_id)
-            async def generic_materialization_tick(group=group,spec_id=family.selection_spec_id):
+            async def generic_materialization_tick(group=group,spec_id=selection_spec_id):
                 return await materialization_tick(group,spec_id)
-            async def current_facts_tick(group=group,spec_id=family.selection_spec_id):
+            async def current_facts_tick(group=group,spec_id=selection_spec_id):
                 now_ms=args.now_ms or int(time.time()*1000)
                 result=await run_current_fact_refresh_runtime_once(uow_factory=uow_factory,market_source=cast(PublicMarketSource,source),
                     request=CurrentFactRefreshRuntimeRequest(strategy_group_id=group,selection_spec_id=spec_id,worker_id=f"{args.worker_id}:facts:{group}",

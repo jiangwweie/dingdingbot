@@ -162,6 +162,17 @@ def reduce_event(
             AggregateStatus.TERMINAL,
         }:
             raise InvalidLifecycleTransition("verified closure already recorded")
+        pending_stop_closed = (
+            current.status is AggregateStatus.POST_FILL_RISK_PENDING
+            and current.post_fill_stress_status is None
+            and current.entry_lane_held
+            and current.position_qty == current.protected_qty == proof.entry_quantity
+            and current.active_stop_exchange_order_id == current.initial_stop_exchange_order_id
+            and proof.proves_full_initial_stop(
+                entry_id=current.entry_exchange_order_id,
+                stop_id=current.initial_stop_exchange_order_id,
+            )
+        )
         if (
             proof.ticket_id != current.identity.ticket_id
             or proof.domain != current.identity.netting_domain
@@ -169,7 +180,7 @@ def reduce_event(
             or proof.expected_version != current.version
             or proof.management_revision != current.management_revision
             or not proof.observed_at_ms <= event.occurred_at_ms < proof.valid_until_ms
-            or current.post_fill_stress_status != "passed"
+            or (current.post_fill_stress_status != "passed" and not pending_stop_closed)
             or min(f.occurred_at_ms for f in proof.entry_fills)
             < current.ticket.created_at_ms
         ):
@@ -191,6 +202,23 @@ def reduce_event(
                     "verified exit omits known order identity"
                 )
         domain = current.identity.netting_domain
+        closure_effects: list[KernelEffect] = [
+            ResolveExactClosureIncidents(
+                ticket_id=current.identity.ticket_id,
+                incident_ids=proof.incident_ids,
+            ),
+            ReleaseCapitalAuthorities(
+                ticket_id=current.identity.ticket_id,
+                account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
+                netting_domain_key=domain.key(),
+                notional=current.ticket.notional,
+                risk_at_stop=current.ticket.risk_at_stop,
+                reserved_margin=current.ticket.reserved_margin,
+                released_at_ms=event.occurred_at_ms,
+            ),
+        ]
+        if pending_stop_closed:
+            closure_effects.append(ReleaseEntryLane(ticket_id=current.identity.ticket_id))
         return _transition(
             current,
             event,
@@ -208,21 +236,7 @@ def reduce_event(
                 "pending_stop_price": None,
                 "entry_lane_held": False,
             },
-            effects=(
-                ResolveExactClosureIncidents(
-                    ticket_id=current.identity.ticket_id,
-                    incident_ids=proof.incident_ids,
-                ),
-                ReleaseCapitalAuthorities(
-                    ticket_id=current.identity.ticket_id,
-                    account_capacity_domain_key=f"{domain.venue_id}:{domain.account_id}",
-                    netting_domain_key=domain.key(),
-                    notional=current.ticket.notional,
-                    risk_at_stop=current.ticket.risk_at_stop,
-                    reserved_margin=current.ticket.reserved_margin,
-                    released_at_ms=event.occurred_at_ms,
-                ),
-            ),
+            effects=tuple(closure_effects),
         )
 
     if isinstance(event, ManagementReviewCleared):
