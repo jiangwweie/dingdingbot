@@ -9,7 +9,11 @@ from src.trading_kernel.domain.aggregate import AggregateStatus
 from src.trading_kernel.domain.events import VerifiedExitClosed
 from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.reducer import reduce_event
-from src.trading_kernel.domain.trade_management import OrderAction, OrderEvidence
+from src.trading_kernel.domain.trade_management import (
+    OrderAction,
+    OrderEvidence,
+    OrderTerms,
+)
 from src.trading_kernel.domain.verified_exit_closure import VerifiedExitClosureProof
 
 CAUSAL_CLOSURE_INCIDENTS = frozenset(
@@ -69,18 +73,27 @@ async def record_verified_exit(
         row = commands[o.reference.command_id]
         p = row["request_payload"]
         t = o.terms
-        from src.trading_kernel.domain.trade_management import OrderTerms
 
         saved = row["result_payload"].get("management_baseline") or row[
             "result_payload"
         ].get("venue_payload", {}).get("management_baseline")
         if saved is not None and OrderTerms.model_validate(saved) != t:
             raise ValueError("closure terms differ from persisted baseline")
+        requested_tif = p.get("time_in_force")
+        valid_tif = t.time_in_force == (requested_tif or "GTC")
+        if (
+            requested_tif is None
+            and proof.domain.venue_id == "binance-usdm"
+            and t.order_namespace == "conditional"
+            and p.get("close_position") is True
+            and p["order_type"] == "stop_market"
+        ):
+            valid_tif = valid_tif or t.time_in_force == "GTE_GTC"
         if (
             (t.reduce_only != p["reduce_only"] and not (
                 proof.domain.venue_id=="binance-usdm" and p["reduce_only"] and t.reduces_position))
             or t.close_position != p.get("close_position",False)
-            or t.time_in_force != (p.get("time_in_force") or "GTC")
+            or not valid_tif
         ):
             raise ValueError("closure order instruction differs")
         if (

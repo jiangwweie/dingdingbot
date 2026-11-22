@@ -212,3 +212,75 @@ async def test_manual_system_exit_can_close_without_restoring_auto_or_venue_writ
             exposure_started_at_ms=t.created_at_ms,
         )
         assert window.exit_time_ms == 6000 and not window.external_flat
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reported_time_in_force", ["GTE_GTC", "IOC"])
+async def test_close_all_stop_default_time_in_force_at_strategy_exit(
+    head_template_engine, reported_time_in_force,
+):
+    from src.trading_kernel.application.reconcile_ticket import (
+        ExitTicketRequest,
+        request_exit,
+    )
+    from src.trading_kernel.infrastructure.pg_models import exchange_commands
+    from tests.trading_kernel.support.command_dispatch import dispatch_for_ticket
+    from tests.trading_kernel.support.dispatch_venues import KindAwareAcceptingVenue
+
+    engine = head_template_engine
+    ticket, old_proof = await setup(engine, review=False)
+    ticket_id = ticket.identity.ticket_id
+    async with engine.begin() as connection:
+        stop_row = (await connection.execute(
+            sa.select(exchange_commands).where(exchange_commands.c.ticket_id == ticket_id,
+                                               exchange_commands.c.command_kind == "initial_stop")
+        )).mappings().one()
+        await connection.execute(sa.insert(exchange_commands).values({
+            **dict(stop_row),
+            "command_id": "fixture-replacement",
+            "command_kind": "replace_protection",
+            "idempotency_key": "fixture:replacement",
+            "venue_client_order_id": "fixture-replacement-client",
+            "request_payload": {**stop_row["request_payload"], "close_position":True,"reduce_only":False},
+            "result_payload": {**stop_row["result_payload"],"exchange_order_id":"fixture-replacement-stop"},
+            "created_at_ms": 4000,
+            "completed_at_ms": 4100,
+        }))
+    async with PostgresKernelUnitOfWork(engine) as u:
+        await request_exit(u, ExitTicketRequest(ticket_id=ticket_id, reason="pre_tp1_time_stop_hit", requested_at_ms=5000))
+    await dispatch_for_ticket(engine, KindAwareAcceptingVenue(observed_at_ms=5101), ticket_id, now_ms=5100)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        aggregate = await u.aggregates.get(ticket_id)
+        references = await u.exchange_commands.list_order_references(ticket_id)
+    assert aggregate.status.value == "exit_accepted"
+    payload = old_proof.model_dump(mode="python")
+    payload["expected_version"] = aggregate.version
+    payload["management_revision"] = aggregate.management_revision
+    orders = payload["orders"]
+    initial_stop = next(row for row in orders if row["reference"]["command_kind"] == "initial_stop")
+    initial_stop.update(status="CANCELED", executed_quantity="0", actual_order_id=None)
+    replacement = next(ref for ref in references if ref.command_kind.value == "replace_protection")
+    exit_ref = next(ref for ref in references if ref.command_kind.value == "exit")
+    orders += (
+        {
+            **initial_stop, "status":"EXPIRED", "reference": replacement,
+            "terms": {**initial_stop["terms"], "exchange_order_id":replacement.submitted_exchange_order_id,
+                "client_order_id":replacement.venue_client_order_id, "quantity":None,
+                "reduce_only":False,"close_position":True,"time_in_force":reported_time_in_force},
+        },
+        {
+            **initial_stop, "status":"FILLED", "executed_quantity":ticket.quantity,"reference":exit_ref,
+            "terms":{**initial_stop["terms"], "exchange_order_id":exit_ref.submitted_exchange_order_id,
+                "client_order_id":exit_ref.venue_client_order_id,"order_namespace":"regular",
+                "order_type":"MARKET","trigger_price":None,"time_in_force":"GTC"},
+        },
+    )
+    payload["orders"] = orders
+    payload["exit_fills"][0]["order_id"] = exit_ref.submitted_exchange_order_id
+    proof = type(old_proof).model_validate(payload)
+    async with PostgresKernelUnitOfWork(engine) as u:
+        if reported_time_in_force == "IOC":
+            with pytest.raises(ValueError, match="closure order instruction differs"):
+                await record_verified_exit(u, proof=proof, now_ms=7001)
+        else:
+            assert await record_verified_exit(u, proof=proof, now_ms=7001) == "settlement_pending"

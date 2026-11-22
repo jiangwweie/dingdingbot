@@ -25,6 +25,8 @@ from src.trading_kernel.application.management_intents import accepted_order_ide
 from src.trading_kernel.application.readonly_closure_recovery import (
     recover_readonly_closure,
 )
+from src.trading_kernel.domain.commands import ExchangeCommandKind
+from src.trading_kernel.domain.order_attribution import TicketOrderReference
 from src.trading_kernel.domain.product_identity import PRODUCT_ID
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
 from src.trading_kernel.infrastructure.readonly_closure_source import (
@@ -156,6 +158,19 @@ async def run_natural_exit(args) -> dict:
             if a.version!=bound['expected_version'] or a.management_revision!=bound['management_revision']:raise ValueError('natural recovery predecessor changed')
             refs=await u.exchange_commands.list_order_references(args.ticket_id)
         proof=await asyncio.wait_for(collect_verified_exit(BinanceClosureReader(api_key=SecretStr(secret['api_key']),api_secret=SecretStr(secret['api_secret'])),aggregate=a,references=refs,incident_ids=tuple(bound['incident_ids'])),timeout=60)
+        exit_order_id = bound.get("exit_order_id")
+        if exit_order_id is not None and (
+            a.exit_exchange_order_id != exit_order_id
+            or proof.exit_reason != "strategy_exit"
+            or not any(
+                isinstance(order.reference, TicketOrderReference)
+                and order.reference.command_kind is ExchangeCommandKind.EXIT
+                and order.executable_id == exit_order_id
+                and order.executed_quantity > 0
+                for order in proof.orders
+            )
+        ):
+            raise ValueError("natural recovery proof differs from bound strategy EXIT")
         if args.apply and args.expected_proof_digest!=proof.content_digest():raise ValueError('natural recovery preview facts changed')
         final_account=await verify_manual_account(BinanceManualAccountReader(credentials),credentials)
         if not final_account['account_ready'] or final_account['credential_fingerprint']!=enrolled['credential_fingerprint']:raise ValueError('natural recovery account changed during collection')
@@ -163,7 +178,8 @@ async def run_natural_exit(args) -> dict:
         class PreviewRollback(Exception):pass
         try:
             async with PostgresKernelUnitOfWork(engine) as u:
-                await scope(u)
+                if await scope(u) != bound:
+                    raise ValueError("natural recovery scope changed during collection")
                 await settle_verified_exit(u,proof=proof,now_ms=int(time.time()*1000))
                 if not args.apply:raise PreviewRollback()
         except PreviewRollback:pass
