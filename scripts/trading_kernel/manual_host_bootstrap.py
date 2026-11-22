@@ -205,13 +205,55 @@ def require_stopped_upgrade(*, filesystem_root: Path = Path("/"), recovery_ticke
         identity={**identity,**details}
         if natural_exit_recovery:
             exact=json.loads(read_database("""SELECT json_build_object(
-            'ticket',(SELECT json_build_object('ticket_id',ticket_id,'expected_version',version,'management_revision',management_revision,'reason',management_reason) FROM brc_trade_aggregates WHERE ticket_id IN (SELECT ticket_id FROM brc_trade_tickets WHERE terminal_at_ms IS NULL)),
+            'ticket',(SELECT json_build_object(
+                'ticket_id',a.ticket_id,'expected_version',a.version,'management_revision',a.management_revision,
+                'reason',a.management_reason,'status',a.status,'management_mode',a.management_mode,
+                'post_fill_stress_status',a.post_fill_stress_status,'exit_order_id',a.exit_exchange_order_id,
+                'accepted_exit',(SELECT count(*)=1 AND coalesce(bool_and(
+                    c.status IN ('accepted','reconciled_accepted')
+                    AND c.result_payload->>'exchange_order_id'=a.exit_exchange_order_id),false)
+                    FROM brc_exchange_commands c WHERE c.ticket_id=a.ticket_id AND c.command_kind='exit'))
+                FROM brc_trade_aggregates a WHERE a.ticket_id IN
+                (SELECT ticket_id FROM brc_trade_tickets WHERE terminal_at_ms IS NULL)
+                AND (SELECT count(*) FROM brc_trade_tickets WHERE terminal_at_ms IS NULL)=1),
             'outside_scope',EXISTS(SELECT 1 FROM brc_positions_current WHERE quantity<>0 AND ticket_id NOT IN (SELECT ticket_id FROM brc_trade_tickets WHERE terminal_at_ms IS NULL)) OR EXISTS(SELECT 1 FROM brc_budget_reservations WHERE status='active' AND ticket_id NOT IN (SELECT ticket_id FROM brc_trade_tickets WHERE terminal_at_ms IS NULL)),
             'incidents',(SELECT coalesce(json_agg(json_build_object('incident_id',incident_id,'ticket_id',ticket_id,'kind',incident_kind) ORDER BY incident_id),'[]'::json) FROM brc_runtime_incidents WHERE status='open'))"""))
-            target=exact['ticket']
-            if exact.get('outside_scope',False) or target is None or target['ticket_id']!=recovery_ticket_ids[0] or target['reason']!='tp1_terminal_attribution_unknown' or any(i['ticket_id']!=target['ticket_id'] or i['kind'] not in {'lifecycle_facts_contradictory','lifecycle_facts_unavailable'} for i in exact['incidents']):
-                raise ValueError('natural recovery source or causal incident differs')
-            identity['natural_exit_recovery']={**target,'source_commit':identity['commit'],'schema_revision':identity['schema'],'incident_ids':[i['incident_id'] for i in exact['incidents']]}
+            target = exact["ticket"]
+            if (
+                target is None
+                or target["ticket_id"] != recovery_ticket_ids[0]
+                or exact.get("outside_scope")
+                or any(
+                    i["ticket_id"] != target["ticket_id"]
+                    or i["kind"] not in {"lifecycle_facts_contradictory", "lifecycle_facts_unavailable"}
+                    for i in exact["incidents"]
+                )
+            ):
+                raise ValueError("natural recovery source or causal incident differs")
+            accepted_system_exit = (
+                target.get("status") == "exit_accepted"
+                and target.get("management_mode") == "AUTO"
+                and target.get("post_fill_stress_status") == "passed"
+                and bool(target.get("exit_order_id"))
+                and target.get("accepted_exit") is True
+            )
+            if not accepted_system_exit and (
+                not identity["recovery_eligible"]
+                or target["reason"] != "tp1_terminal_attribution_unknown"
+                or target["management_mode"] != "REVIEW_REQUIRED"
+            ):
+                raise ValueError("natural recovery aggregate or accepted EXIT differs")
+            identity["recovery_eligible"] = True
+            identity["natural_exit_recovery"] = {
+                "ticket_id": target["ticket_id"],
+                "expected_version": target["expected_version"],
+                "management_revision": target["management_revision"],
+                "reason": target["reason"],
+                "source_commit": identity["commit"],
+                "schema_revision": identity["schema"],
+                "incident_ids": [i["incident_id"] for i in exact["incidents"]],
+                **({"exit_order_id": target["exit_order_id"]} if accepted_system_exit else {}),
+            }
     if resume_binding is not None:
         origin=resume_binding['source'];target=resume_binding['target']
         if (not resume_binding.get('baseline') or recovery_ticket_ids or not identity['paused']

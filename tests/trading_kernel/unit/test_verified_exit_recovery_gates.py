@@ -41,6 +41,7 @@ def facts():
                 "expected_version": 7,
                 "management_revision": 2,
                 "reason": "tp1_terminal_attribution_unknown",
+                "management_mode": "REVIEW_REQUIRED",
             },
             "incidents": [
                 {
@@ -109,3 +110,36 @@ def test_exact_natural_recovery_gate_keeps_ordinary_rejection(
     monkeypatch.setattr(host, "read_database", Mock(return_value=json.dumps(r[0])))
     with pytest.raises(ValueError):
         host.require_stopped_upgrade(filesystem_root=root)
+
+
+@pytest.mark.parametrize("fault", [None, "wrong_status", "unaccepted_order", "extra_ticket"])
+def test_only_exact_accepted_system_exit_can_use_natural_recovery(tmp_path, monkeypatch, fault):
+    import json
+
+    r = facts()
+    r[1]["recovery_eligible"] = False
+    r[2]["ticket"].update(
+        status="exit_accepted" if fault != "wrong_status" else "position_protected",
+        management_mode="AUTO",
+        post_fill_stress_status="passed",
+        reason=None,
+        exit_order_id="exit-order",
+        accepted_exit=fault != "unaccepted_order",
+    )
+    r[2]["incidents"] = []
+    r[0]["incidents"] = False
+    if fault == "extra_ticket":
+        r[1]["active_ticket_ids"].append("other")
+    monkeypatch.setattr(host.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=3))
+    monkeypatch.setattr(host, "read_database", Mock(side_effect=[json.dumps(x) for x in r]))
+    root = filesystem(tmp_path)
+    if fault:
+        with pytest.raises(ValueError):
+            host.require_stopped_upgrade(
+                filesystem_root=root, recovery_ticket_ids=("ticket:exact",), natural_exit_recovery=True,
+            )
+    else:
+        result = host.require_stopped_upgrade(
+            filesystem_root=root, recovery_ticket_ids=("ticket:exact",), natural_exit_recovery=True,
+        )
+        assert result["natural_exit_recovery"]["exit_order_id"] == "exit-order"

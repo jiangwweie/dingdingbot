@@ -1546,7 +1546,8 @@ async def _deploy_runtime_identity(
     closure_ticket_id: str | None = None,
     allow_compatible_runtime_fence: bool = False,
     management_recovery_ticket_ids: tuple[str, ...] = (),
-    verified_exit_incident_ids: tuple[str,...] | None = None,
+    verified_exit_incident_ids: tuple[str, ...] | None = None,
+    verified_exit_order_id: str | None = None,
 ) -> RuntimeDeploymentIdentityResult:
     """Install the exact identity after a flat or narrowly safe recovery gate."""
 
@@ -1589,7 +1590,11 @@ async def _deploy_runtime_identity(
 
     if management_recovery_ticket_ids:
         await _require_management_recovery_activity(connection,
-            ticket_ids=management_recovery_ticket_ids,account_id=request.account_id,verified_exit_incident_ids=verified_exit_incident_ids)
+            ticket_ids=management_recovery_ticket_ids,
+            account_id=request.account_id,
+            verified_exit_incident_ids=verified_exit_incident_ids,
+            verified_exit_order_id=verified_exit_order_id,
+        )
     elif closure_ticket_id is not None:
         await _require_closure_identity_activity(
             connection,
@@ -1775,9 +1780,31 @@ async def deploy_verified_exit_recovery_identity(uow: PostgresKernelUnitOfWork,r
     if scope.get('source_commit',source_commit)!=source_commit or scope.get('schema_revision',request.schema_revision)!=request.schema_revision:
         raise ValueError('natural recovery source commit or schema differs')
     row=(await c.execute(sa.select(trade_aggregates).where(trade_aggregates.c.ticket_id==ticket_id).with_for_update())).mappings().one()
-    if row['version']!=scope['expected_version'] or row['management_revision']!=scope['management_revision'] or row['management_mode']!='REVIEW_REQUIRED' or row['management_reason']!='tp1_terminal_attribution_unknown':
-        raise ValueError('natural recovery aggregate scope differs')
-    result=await _deploy_runtime_identity(uow,request,management_recovery_ticket_ids=(ticket_id,),verified_exit_incident_ids=tuple(scope['incident_ids']))
+    if (
+        row["version"] != scope["expected_version"]
+        or row["management_revision"] != scope["management_revision"]
+    ):
+        raise ValueError("natural recovery aggregate scope differs")
+    exit_order_id = scope.get("exit_order_id")
+    if exit_order_id is None and (
+        row["management_mode"] != "REVIEW_REQUIRED"
+        or row["management_reason"] != "tp1_terminal_attribution_unknown"
+    ):
+        raise ValueError("natural recovery aggregate scope differs")
+    if exit_order_id is not None and (
+        not isinstance(exit_order_id, str)
+        or not exit_order_id
+        or scope.get("source_commit") != source_commit
+        or scope.get("schema_revision") != request.schema_revision
+    ):
+        raise ValueError("accepted EXIT recovery scope differs")
+    result = await _deploy_runtime_identity(
+        uow,
+        request,
+        management_recovery_ticket_ids=(ticket_id,),
+        verified_exit_incident_ids=tuple(scope["incident_ids"]),
+        verified_exit_order_id=exit_order_id,
+    )
     rows=(await c.execute(sa.select(runtime_capabilities_current).with_for_update())).mappings().all()
     for item in rows:
         cert={**item['certification'],'runtime_mode':'verified_exit_recovery_only','verified_exit_recovery_scope':{**scope,'target_commit':request.runtime_commit,'schema_revision':request.schema_revision}}
@@ -1785,7 +1812,14 @@ async def deploy_verified_exit_recovery_identity(uow: PostgresKernelUnitOfWork,r
     return result
 
 
-async def _require_management_recovery_activity(connection: AsyncConnection, *, ticket_ids: tuple[str,...],account_id: str,verified_exit_incident_ids: tuple[str,...] | None = None) -> None:
+async def _require_management_recovery_activity(
+    connection: AsyncConnection,
+    *,
+    ticket_ids: tuple[str, ...],
+    account_id: str,
+    verified_exit_incident_ids: tuple[str, ...] | None = None,
+    verified_exit_order_id: str | None = None,
+) -> None:
     policy=(await connection.execute(sa.select(owner_policy_current).with_for_update())).mappings().all()
     if len(policy)!=1 or policy[0]['new_entry_submit_enabled']:
         raise ValueError("management recovery requires genuine Owner pause")
@@ -1793,8 +1827,37 @@ async def _require_management_recovery_activity(connection: AsyncConnection, *, 
     if {r['ticket_id'] for r in active}!=set(ticket_ids) or any(r['account_id']!=account_id for r in active):
         raise ValueError("management recovery Ticket whitelist differs")
     aggregates=(await connection.execute(sa.select(trade_aggregates).where(trade_aggregates.c.ticket_id.in_(ticket_ids)).with_for_update())).mappings().all()
-    if len(aggregates)!=len(ticket_ids) or any(r['management_mode'] not in {'REVIEW_REQUIRED','MANUAL'} or r['post_fill_stress_status']!='passed' for r in aggregates):
+    if len(aggregates) != len(ticket_ids) or any(
+        row["post_fill_stress_status"] != "passed" for row in aggregates
+    ):
         raise ValueError("management recovery requires previously protected managed Tickets")
+    if verified_exit_order_id is None:
+        if any(row["management_mode"] not in {"REVIEW_REQUIRED", "MANUAL"} for row in aggregates):
+            raise ValueError("management recovery requires previously protected managed Tickets")
+    else:
+        if len(aggregates) != 1 or verified_exit_incident_ids is None:
+            raise ValueError("accepted EXIT recovery requires one verified Ticket")
+        aggregate = aggregates[0]
+        if (
+            aggregate["management_mode"] != "AUTO"
+            or aggregate["status"] != "exit_accepted"
+            or aggregate["exit_exchange_order_id"] != verified_exit_order_id
+        ):
+            raise ValueError("accepted EXIT recovery aggregate differs")
+        exits = (await connection.execute(
+            sa.select(exchange_commands)
+            .where(
+                exchange_commands.c.ticket_id == aggregate["ticket_id"],
+                exchange_commands.c.command_kind == "exit",
+            )
+            .with_for_update()
+        )).mappings().all()
+        if (
+            len(exits) != 1
+            or exits[0]["status"] not in {"accepted", "reconciled_accepted"}
+            or (exits[0]["result_payload"] or {}).get("exchange_order_id") != verified_exit_order_id
+        ):
+            raise ValueError("accepted EXIT recovery command differs")
     unresolved=await connection.scalar(sa.select(sa.func.count()).select_from(exchange_commands).where(exchange_commands.c.status.in_(['prepared','claimed','dispatch_started','outcome_unknown'])))
     incidents=await connection.scalar(sa.select(sa.func.count()).select_from(runtime_incidents).where(runtime_incidents.c.status=='open'))
     lane=(await connection.execute(sa.select(entry_lane_current).with_for_update())).mappings().all()
