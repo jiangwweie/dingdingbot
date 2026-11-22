@@ -145,4 +145,76 @@ describe('ActiveEpisodesSection Management Authority & Protection Truth', () => 
     expect(container.textContent).toContain('后端已确认保护 (7.24)');
     expect(container.textContent).not.toContain('整笔已转人工管理');
   });
+
+  it('deduplicates redundant manual takeover attention items while preserving distinct attention items and unknown risk codes', () => {
+    const manualEpisodeWithUnknownReason: TradeEpisodeSummary = {
+      ticket_id: 'tkt-manual-005',
+      strategy_id: 'CPM-RO-001',
+      strategy_name_zh: '均线回踩做多',
+      symbol: 'BTCUSDT',
+      side: 'long',
+      lifecycle_stage: 'protection',
+      lifecycle_stage_zh: '保护安装',
+      completed_stage_count: 4,
+      total_stage_count: 8,
+      ticket_status: 'active',
+      issued_at_formatted: '09:00:00',
+      management_mode: 'MANUAL',
+      is_protected: false,
+      protection_state: '人工管理 · 保护待核实',
+      manual_risk_reason: 'custom_unknown_reason_code_99',
+      attention_items: ['整笔已转人工管理 · 外部干预触发', '独立订单差异待核对'],
+    };
+
+    render({ episodes: [manualEpisodeWithUnknownReason] });
+
+    // Unknown risk reason code must never be discarded
+    expect(container.textContent).toContain('新增开仓受限原因：custom_unknown_reason_code_99');
+    // Pure redundant manual takeover attention string is deduplicated, distinct one is kept
+    expect(container.textContent).not.toContain('外部干预触发');
+    expect(container.textContent).toContain('独立订单差异待核对');
+  });
+
+  it('preserves attention items that contain supplemental risk facts even when they share manual/review prefixes (P1 regression)', () => {
+    const manualSupplemental: TradeEpisodeSummary = {
+      ticket_id: 'tkt-manual-supp-006',
+      strategy_id: 'CPM-RO-001',
+      strategy_name_zh: '均线回踩做多',
+      symbol: 'BTCUSDT',
+      side: 'long',
+      lifecycle_stage: 'manual',
+      lifecycle_stage_zh: '人工管理',
+      completed_stage_count: 4,
+      total_stage_count: 8,
+      ticket_status: 'active',
+      issued_at_formatted: '09:00:00',
+      management_mode: 'MANUAL',
+      is_protected: false,
+      protection_state: '人工管理 · 保护待核实',
+      attention_items: ['整笔已转人工管理；止损已撤销，当前没有保护单'],
+    };
+
+    const reviewSupplemental: TradeEpisodeSummary = {
+      ticket_id: 'tkt-review-supp-007',
+      strategy_id: 'BRF2-001',
+      strategy_name_zh: '假反弹衰竭做空',
+      symbol: 'ETHUSDT',
+      side: 'short',
+      lifecycle_stage: 'protection',
+      lifecycle_stage_zh: '保护安装',
+      completed_stage_count: 3,
+      total_stage_count: 8,
+      ticket_status: 'active',
+      issued_at_formatted: '10:00:00',
+      management_mode: 'REVIEW_REQUIRED',
+      is_protected: false,
+      protection_state: '接管待核实 · 自动处置暂停',
+      attention_items: ['接管待核实；存在未核实残留订单'],
+    };
+
+    render({ episodes: [manualSupplemental, reviewSupplemental] });
+
+    expect(container.textContent).toContain('整笔已转人工管理；止损已撤销，当前没有保护单');
+    expect(container.textContent).toContain('接管待核实；存在未核实残留订单');
+  });
 });

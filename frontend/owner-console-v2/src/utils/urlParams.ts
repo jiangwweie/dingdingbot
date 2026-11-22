@@ -382,3 +382,25 @@ export function incomeNavigationSearch(search: string, tab: string, nowMs = Date
   }
   return next.toString();
 }
+
+/**
+ * Builds a clean URL search string for navigating from Overview's Shanghai Today
+ * summary cards to Review or Trades with the exact same Today statistical window,
+ * explicitly clearing any stale filter parameters from previous URL state.
+ */
+export function buildOverviewSameScopeSearch(
+  tab: 'review' | 'trades' | 'strategies',
+  options: { from_ms: number; to_ms: number; strategy_group_id?: string }
+): string {
+  const safeFromMs = options.from_ms;
+  const safeToMs = options.to_ms > safeFromMs ? options.to_ms : safeFromMs + 60_000;
+  const next = new URLSearchParams();
+  next.set('tab', tab);
+  next.set('range', 'today');
+  next.set('from_ms', String(safeFromMs));
+  next.set('to_ms', String(safeToMs));
+  if (options.strategy_group_id) {
+    next.set('strategy_group_id', options.strategy_group_id);
+  }
+  return next.toString();
+}

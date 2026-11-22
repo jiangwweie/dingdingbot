@@ -5,21 +5,28 @@ import { Gauge } from 'lucide-react';
 interface CapacitySectionProps {
   capacity: AccountCapacityData;
   activeTicketCount: number;
+  policyVersion?: number | null;
 }
 
 export const CapacitySection: React.FC<CapacitySectionProps> = ({
   capacity,
   activeTicketCount,
+  policyVersion,
 }) => {
-  const isFull = activeTicketCount >= capacity.max_concurrent_tickets;
+  const maxTickets = capacity.max_concurrent_tickets;
+  const hasValidCap = typeof maxTickets === 'number' && Number.isFinite(maxTickets) && maxTickets > 0;
+  const isFull = hasValidCap ? activeTicketCount >= maxTickets : true;
+  const fillPercent = hasValidCap ? Math.min(100, Math.max(0, (activeTicketCount / maxTickets) * 100)) : 0;
 
   // Filter out the zero-occupancy scopes and only highlight what's actively taking capital
   const activeEntries = Object.entries(capacity.strategy_side_active_counts).filter(
     ([, count]) => count > 0
   );
+  const totalScopeCount = Object.keys(capacity.strategy_side_active_counts).length;
+  const zeroOccupancyCount = Math.max(0, totalScopeCount - activeEntries.length);
 
   return (
-    <div className="rounded border border-border bg-surface p-4 shadow-xs space-y-4">
+    <div data-testid="capacity-section" className="rounded border border-border bg-surface p-4 shadow-xs space-y-4">
       <div className="flex items-center justify-between border-b border-border pb-3">
         <div className="flex items-center gap-2">
           <Gauge className="h-4 w-4 text-brand" />
@@ -27,7 +34,9 @@ export const CapacitySection: React.FC<CapacitySectionProps> = ({
             组合容量与配额 (只读)
           </h3>
         </div>
-        <span className="font-mono text-xs text-text-muted">Policy v28</span>
+        <span className="font-mono text-xs text-text-muted">
+          {policyVersion != null ? `Policy v${policyVersion}` : '策略版本未确认'}
+        </span>
       </div>
 
       {/* Global Ticket utilization bar */}
@@ -35,21 +44,31 @@ export const CapacitySection: React.FC<CapacitySectionProps> = ({
         <div className="flex items-center justify-between text-xs mb-2">
           <span className="text-text-secondary">全局 Ticket 占用</span>
           <span className="font-mono font-bold text-text-primary">
-            {activeTicketCount} / {capacity.max_concurrent_tickets} 笔
-            {isFull ? (
-              <span className="ml-1.5 text-status-amber text-xs font-semibold">(已满额)</span>
-            ) : null}
+            {hasValidCap ? (
+              <>
+                {activeTicketCount} / {maxTickets} 笔
+                {isFull ? (
+                  <span className="ml-1.5 text-status-amber text-xs font-semibold">(已满额)</span>
+                ) : null}
+              </>
+            ) : maxTickets === 0 ? (
+              <span className="text-status-amber">{activeTicketCount} / 0 笔 (上限为 0，禁止新开仓)</span>
+            ) : (
+              <span className="text-text-muted">{activeTicketCount} 笔 · 上限不可用</span>
+            )}
           </span>
         </div>
         <div className="h-2 w-full rounded-full bg-surface-subtle overflow-hidden border border-border">
-          <div
-            className={`h-full transition-all ${
-              isFull ? 'bg-status-amber' : 'bg-status-green'
-            }`}
-            style={{
-              width: `${(activeTicketCount / capacity.max_concurrent_tickets) * 100}%`,
-            }}
-          />
+          {hasValidCap ? (
+            <div
+              className={`h-full transition-all ${
+                isFull ? 'bg-status-amber' : 'bg-status-green'
+              }`}
+              style={{ width: `${fillPercent}%` }}
+            />
+          ) : (
+            <div className="h-full w-full bg-amber-500/20" title="容量上限为 0 或不可用，不计算空闲比例" />
+          )}
         </div>
       </div>
 
@@ -89,7 +108,8 @@ export const CapacitySection: React.FC<CapacitySectionProps> = ({
           )}
         </div>
         <p className="mt-2.5 text-xs text-text-muted">
-          其他 10 个策略方向当前为 0 占用；容量满额时新信号自动在车道排队或被门禁阻断。
+          {zeroOccupancyCount > 0 ? `其余 ${zeroOccupancyCount} 个策略方向当前为 0 占用；` : ''}
+          {hasValidCap ? '容量满额时新信号自动被门禁阻断。' : '当前容量上限为 0 或不可用，不展示空闲额度。'}
         </p>
       </div>
     </div>

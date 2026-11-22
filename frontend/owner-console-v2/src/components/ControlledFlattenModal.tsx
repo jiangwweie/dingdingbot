@@ -3,6 +3,7 @@ import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { AlertOctagon, X, Loader2, ShieldAlert, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
 import type { FlattenPreview, OwnerControlOperation } from '../api/controlsApi';
 import type { InFlightFlattenOperation } from '../hooks/useFlattenControl';
+import { formatControlOperationState, isManualTakeoverBlocker } from '../mapping/controlStateMapping';
 
 export interface ControlledFlattenModalProps {
   open: boolean;
@@ -143,10 +144,16 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                     <Clock className="h-4 w-4 flex-none animate-spin" />
                     <span>平仓任务进行中</span>
                   </div>
-                  <span className="rounded bg-brand/10 px-2 py-0.5 font-mono font-bold text-brand border border-brand/20">
-                    {currentOperation.state}
+                  <span className="rounded bg-brand/10 px-2 py-0.5 font-semibold text-brand border border-brand/20">
+                    {formatControlOperationState(currentOperation.state).label}
                   </span>
                 </div>
+                {formatControlOperationState(currentOperation.state).isUnknown && (
+                  <details className="text-[10px] text-text-muted">
+                    <summary className="cursor-pointer">原始状态码</summary>
+                    <span className="font-mono">{currentOperation.state}</span>
+                  </details>
+                )}
                 <div className="font-mono text-[11px] text-text-secondary">
                   授权 ID: {currentOperation.authorization_id}
                 </div>
@@ -254,7 +261,9 @@ export const ControlledFlattenModal: React.FC<ControlledFlattenModalProps> = ({
                     阻断条件: {preview?.first_blocker}
                   </p>
                   <p className="text-text-secondary leading-relaxed">
-                    当前有 Ticket 处于未受保护状态（如 ENTRY 开仓中或撤单中），无法执行受控平仓。
+                    {isManualTakeoverBlocker(preview?.first_blocker)
+                      ? '当前存在人工接管（MANUAL）持仓，系统禁止自动受控平仓，请由 Owner 在交易所或人工路径自行处置。'
+                      : '当前有 Ticket 处于未受保护状态（如 ENTRY 开仓中或撤单中），无法执行受控平仓。'}
                   </p>
                 </div>
               )}

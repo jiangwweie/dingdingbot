@@ -28,9 +28,105 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
-      <div className="overflow-x-auto">
-        <table data-testid="completed-trades-table" className="w-full text-left text-xs font-sans">
+    <div className="space-y-2.5">
+      {/* Mobile Card List (< md) */}
+      <div className="space-y-2.5 md:hidden">
+        {episodes.map((ep) => {
+          const isLong = ep.side === 'long';
+          const isWin = ep.outcome === 'win';
+          const isLoss = ep.outcome === 'loss';
+
+          return (
+            <div
+              key={ep.ticket_id}
+              data-ticket-id={ep.ticket_id}
+              onClick={() => onSelectEpisode(ep)}
+              className="rounded-lg border border-border bg-surface p-3.5 shadow-xs space-y-2 cursor-pointer hover:border-brand/40 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-sm font-bold text-text-primary">{ep.symbol}</span>
+                  <span
+                    className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase ${
+                      isLong
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                    }`}
+                  >
+                    {isLong ? '做多' : '做空'}
+                  </span>
+                  <span className="rounded bg-brand/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-brand">
+                    {ep.strategy_id}
+                  </span>
+                </div>
+                <span
+                  className={`inline-flex items-center rounded px-2 py-0.5 font-mono text-[10px] font-semibold ${
+                    isWin
+                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                      : isLoss
+                      ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+                      : 'bg-surface-subtle text-text-muted border border-border'
+                  }`}
+                >
+                  {ep.outcome_zh}
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between gap-2 font-mono text-xs">
+                <div>
+                  <span
+                    className={`font-bold ${
+                      ep.net_pnl_is_positive === true
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : ep.net_pnl_is_positive === false
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-text-muted font-normal'
+                    }`}
+                  >
+                    {ep.net_pnl_formatted}
+                  </span>
+                  {ep.net_pnl_is_gross && (
+                    <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                      毛收益 · 费用未完整核实
+                    </span>
+                  )}
+                </div>
+                <span
+                  className={`font-bold ${
+                    ep.net_r_is_positive === true
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : ep.net_r_is_positive === false
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : 'text-text-muted font-normal'
+                  }`}
+                >
+                  {ep.net_r_formatted}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/60 text-[11px] text-text-muted">
+                <span className="truncate">{ep.exit_reason_zh} · {ep.duration_formatted}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectEpisode(ep);
+                  }}
+                  className="inline-flex items-center gap-1 rounded border border-border bg-surface-subtle px-2 py-1 text-[11px] font-medium text-text-primary flex-none"
+                >
+                  <span>因果详情</span>
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop Table (>= md) */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-border bg-surface shadow-xs">
+        <div className="overflow-x-auto">
+          <table data-testid="completed-trades-table" className="w-full text-left text-xs font-sans">
           <thead>
             <tr className="border-b border-border bg-surface-subtle font-mono text-[11px] uppercase tracking-wider text-text-muted">
               <th scope="col" className="px-4 py-3 font-semibold">
@@ -43,10 +139,10 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
                 结果
               </th>
               <th scope="col" className="px-3 py-3 font-semibold text-right">
-                净收益 (Net PnL)
+                净收益
               </th>
               <th scope="col" className="px-3 py-3 font-semibold text-right">
-                回报 (Net R)
+                单笔净 R
               </th>
               <th scope="col" className="px-4 py-3 font-semibold">
                 退出原因
@@ -146,7 +242,14 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
                     >
                       {ep.net_pnl_formatted}
                     </span>
-                    {ep.net_pnl_is_gross && <div className="text-[10px] font-normal text-text-muted" title="净收益仍未知；此处为未扣手续费和资金费的毛收益">毛收益 · 未扣手续费与资金费</div>}
+                    {ep.net_pnl_is_gross && (
+                      <div
+                        className="text-[10px] font-normal text-amber-600 dark:text-amber-400"
+                        title="净收益仍未知；此处为未扣手续费和资金费的毛收益，不计入净收益汇总与胜负分类"
+                      >
+                        毛收益 · 费用未完整核实
+                      </div>
+                    )}
                   </td>
 
                   {/* 5. Net R */}
@@ -220,6 +323,7 @@ export const CompletedTradeTable: React.FC<CompletedTradeTableProps> = ({
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   );
 };

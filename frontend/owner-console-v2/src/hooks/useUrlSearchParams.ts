@@ -85,10 +85,13 @@ export function useTradesFilterState() {
   const resetFilters = useCallback(() => {
     const defWin = calculatePresetWindow('30d');
     setFilters({
+      view: 'all',
+      exit_scope: 'all',
       range: '30d',
       from_ms: defWin.from_ms,
       to_ms: defWin.to_ms,
       strategy_group_id: undefined,
+      strategy_version_id: undefined,
       exchange_instrument_id: undefined,
       position_side: undefined,
       aggregate_status: undefined,
@@ -178,10 +181,14 @@ export function useStrategiesFilterState() {
     const defWin = calculatePresetWindow('30d');
     setFilters({
       view: 'all',
+      exit_scope: 'all',
       range: '30d',
       from_ms: defWin.from_ms,
       to_ms: defWin.to_ms,
+      strategy_group_id: undefined,
       strategy_version_id: undefined,
+      exchange_instrument_id: undefined,
+      position_side: undefined,
       drawer_tab: undefined,
       scope: 'all',
       exit_path: undefined,
@@ -272,6 +279,11 @@ export function useReviewFilterState() {
       to_ms: defWin.to_ms,
       review_status: undefined,
       strategy_group_id: undefined,
+      strategy_version_id: undefined,
+      exchange_instrument_id: undefined,
+      position_side: undefined,
+      view: 'all',
+      exit_scope: 'all',
     });
   }, [setFilters]);
 

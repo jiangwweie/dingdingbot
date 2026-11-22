@@ -1,6 +1,7 @@
 import React from 'react';
 import { AlertOctagon, Loader2 } from 'lucide-react';
 import type { OwnerControlOperation } from '../api/controlsApi';
+import { formatControlOperationState } from '../mapping/controlStateMapping';
 
 export interface DangerZoneCardProps {
   activeTicketCount: number;
@@ -20,6 +21,7 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
       currentOperation.state !== 'completed' &&
       currentOperation.state !== 'blocked'
   );
+  const opMeta = currentOperation ? formatControlOperationState(currentOperation.state) : null;
 
   return (
     <div className="rounded border border-status-red/50 bg-surface p-4 shadow-xs">
@@ -31,14 +33,20 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
               危险操作 · 紧急熔断
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-bold text-text-primary">受控平仓全部仓位</h3>
-            {isOperationActive && (
-              <span className="rounded bg-brand/10 px-2 py-0.5 text-[11px] font-mono font-bold text-brand border border-brand/30">
-                进行中: {currentOperation?.state}
+            {isOperationActive && opMeta && (
+              <span className="rounded bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-brand border border-brand/30">
+                {opMeta.label}
               </span>
             )}
           </div>
+          {isOperationActive && opMeta?.isUnknown && (
+            <details className="text-[10px] text-text-muted">
+              <summary className="cursor-pointer">原始状态码</summary>
+              <span className="font-mono">{opMeta.raw}</span>
+            </details>
+          )}
           <p className="text-xs text-text-secondary leading-relaxed max-w-sm">
             安全挂起全局 ENTRY，由 Lifecycle 调度逐笔有序平仓当前全部在管持仓。
           </p>
@@ -62,10 +70,10 @@ export const DangerZoneCard: React.FC<DangerZoneCardProps> = ({
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               读取权威快照...
             </span>
-          ) : isOperationActive ? (
-            `平仓进行中 (${currentOperation?.state}) · 查看进度`
+          ) : isOperationActive && opMeta ? (
+            `平仓进行中 (${opMeta.label}) · 查看进度`
           ) : (
-            `受控平仓全部仓位 (${activeTicketCount})`
+            `受控平仓全部仓位 (${activeTicketCount ?? 0})`
           )}
         </button>
       </div>

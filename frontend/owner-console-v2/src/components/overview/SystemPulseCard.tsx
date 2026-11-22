@@ -1,23 +1,29 @@
 import React from 'react';
 import type { SystemPulseData } from '../../types/overview';
-import { ShieldCheck, ShieldAlert, AlertOctagon, ArrowRight, Activity, Clock } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, AlertOctagon, ArrowRight, Activity, Clock, ArrowDown } from 'lucide-react';
 
 interface SystemPulseCardProps {
   pulse: SystemPulseData;
   onNavigateToControls: () => void;
+  attentionCount?: number;
+  onScrollToAttention?: () => void;
 }
 
 export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
   pulse,
   onNavigateToControls,
+  attentionCount = 0,
+  onScrollToAttention,
 }) => {
   const isDanger = pulse.status === 'danger';
   const isAttention = pulse.status === 'attention';
+  const entryEnabled = pulse.global_entry_enabled !== false;
+  const totalNoticeCount = Math.max(attentionCount, pulse.incidents_count);
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-surface p-4 sm:p-5 shadow-xs transition-all">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        {/* Left: Health Pulse & Human Headline */}
+        {/* Left: Health Pulse & Structured Status Pills */}
         <div className="flex items-start sm:items-center gap-3 sm:gap-3.5 min-w-0 flex-1">
           <div
             className={`flex h-10 w-10 flex-none items-center justify-center rounded-lg border ${
@@ -64,14 +70,48 @@ export const SystemPulseCard: React.FC<SystemPulseCardProps> = ({
                 {pulse.freshness_label}
               </span>
 
-              <h2 className="text-sm sm:text-base font-bold tracking-tight text-text-primary break-words">
-                {pulse.summary}
-              </h2>
+              {/* Strategy Enabled Count Pill */}
+              <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-surface-subtle border border-border text-text-primary">
+                策略已启用{' '}
+                <strong className="font-mono ml-1">
+                  {pulse.active_strategy_count}/{pulse.total_strategy_count}
+                </strong>
+              </span>
+
+              {/* Global Entry Switch Pill / Action */}
+              {entryEnabled ? (
+                <span className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  新开仓开关：开启
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onNavigateToControls}
+                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-colors cursor-pointer"
+                >
+                  <span>新开仓开关：已暂停 · 查看控制</span>
+                  <ArrowRight className="h-3 w-3" />
+                </button>
+              )}
+
+              {/* Quick Anchor to Attention Section when notices exist */}
+              {totalNoticeCount > 0 && onScrollToAttention && (
+                <button
+                  type="button"
+                  onClick={onScrollToAttention}
+                  className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition-colors cursor-pointer"
+                >
+                  <span>查看关注项 ({totalNoticeCount})</span>
+                  <ArrowDown className="h-3 w-3" />
+                </button>
+              )}
             </div>
 
-            <p className="mt-1 text-xs text-text-secondary leading-relaxed break-words">
-              {pulse.details}
-            </p>
+            {(pulse.freshness !== 'fresh' || pulse.status === 'danger' || pulse.status_label === '新开仓受阻') && (
+              <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300 font-medium leading-relaxed break-words">
+                {pulse.details}
+              </p>
+            )}
           </div>
         </div>
 

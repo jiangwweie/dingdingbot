@@ -13,6 +13,7 @@ export interface SystemPulseData {
   active_strategy_count: number;
   total_strategy_count: number;
   entry_status_label: string;
+  global_entry_enabled?: boolean;
   incidents_count: number;
   active_ticket_count?: number;
   ticket_capacity_used?: number;
@@ -24,6 +25,10 @@ export interface SystemPulseData {
 
 export interface TodayPerformanceMetrics {
   income_coverage?: string;
+  pnl_coverage?: string;
+  pnl_is_partial?: boolean;
+  r_coverage?: string;
+  r_is_partial?: boolean;
   net_pnl_formatted?: string;
   net_pnl_usd?: number;
   net_pnl_is_positive?: boolean | null;
@@ -110,6 +115,7 @@ export interface AttentionItem {
   type: 'info' | 'warning' | 'alert';
   title: string;
   detail?: string;
+  action_target?: 'controls' | 'active_episodes' | 'trades';
 }
 
 export interface RecentEventNotice {

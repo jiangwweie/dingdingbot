@@ -24,6 +24,74 @@ interface ActiveEpisodesSectionProps {
   errorMessage?: string | null;
   unloadedActiveCount?: number;
   onRetry?: () => void;
+  highlightedStrategyId?: string | null;
+}
+
+const PURE_MANUAL_REDUNDANT_LABELS = new Set([
+  '整笔已转人工管理',
+  '外部干预触发',
+  '整笔已转人工管理 · 外部干预触发',
+  '整笔已转人工管理 · 外部干预已触发永久接管',
+]);
+
+const PURE_REVIEW_REDUNDANT_LABELS = new Set([
+  '接管待核实',
+  '自动处置已暂停',
+  '自动处置暂停',
+  '接管待核实 · 自动处置已暂停',
+  '接管待核实 · 自动处置暂停',
+]);
+
+/**
+ * Deduplicates only exact, purely redundant management-mode labels that carry
+ * no supplemental risk facts. Any item containing additional facts (e.g.
+ * "整笔已转人工管理；止损已撤销，当前没有保护单" or "接管待核实；存在未核实残留订单")
+ * is strictly preserved.
+ */
+export function deduplicateEpisodeAttentionItems(
+  items: string[] | undefined,
+  managementMode?: 'AUTO' | 'REVIEW_REQUIRED' | 'MANUAL'
+): string[] {
+  if (!items || items.length === 0) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of items) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    if (managementMode === 'MANUAL' && PURE_MANUAL_REDUNDANT_LABELS.has(trimmed)) {
+      continue;
+    }
+    if (managementMode === 'REVIEW_REQUIRED' && PURE_REVIEW_REDUNDANT_LABELS.has(trimmed)) {
+      continue;
+    }
+    if (!seen.has(trimmed)) {
+      seen.add(trimmed);
+      result.push(trimmed);
+    }
+  }
+  return result;
+}
+
+export function translateManualRiskReason(rawReason: string): { shortTag: string; isKnown: boolean; raw: string } {
+  const trimmed = rawReason.trim();
+  const symbolMatch = /^MANUAL_TAKEOVER_ACTIVE_ON_SYMBOL:\s*(.+)$/i.exec(trimmed);
+  if (symbolMatch) {
+    const sym = symbolMatch[1].trim();
+    return {
+      shortTag: `同币种 (${sym}) 新增开仓已锁定`,
+      isKnown: true,
+      raw: trimmed,
+    };
+  }
+  if (trimmed === 'manual_stop_coverage_incomplete') {
+    return {
+      shortTag: '止损覆盖待核实 · 新增开仓受限',
+      isKnown: true,
+      raw: trimmed,
+    };
+  }
+  return { shortTag: '新增开仓受限 · 原因待核实', isKnown: false, raw: trimmed };
 }
 
 export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
@@ -34,6 +102,7 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
   errorMessage,
   unloadedActiveCount = 0,
   onRetry,
+  highlightedStrategyId = null,
 }) => {
   return (
     <div id="active-episodes" className="rounded-xl border border-border bg-surface p-5 shadow-xs transition-all">
@@ -59,9 +128,14 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
             </span>
           )}
         </div>
-        <span className="text-[11px] sm:text-xs text-text-muted break-words">
-          来自生产 Ticket 账本只读事实 · 自动与人工管理状态分别展示
-        </span>
+        <details className="text-[11px] text-text-muted sm:text-right">
+          <summary className="cursor-pointer select-none hover:text-text-secondary focus-visible:outline-2 focus-visible:outline-brand rounded px-1 inline-block">
+            账本口径说明
+          </summary>
+          <div className="mt-1 text-text-muted break-words">
+            来自生产 Ticket 账本只读事实 · 严格遵循独立 Netting Domain
+          </div>
+        </details>
       </div>
 
       {isLoading ? (
@@ -110,191 +184,169 @@ export const ActiveEpisodesSection: React.FC<ActiveEpisodesSectionProps> = ({
             const management = ep.management_mode ?? 'AUTO';
             const isManual = management === 'MANUAL';
             const isReviewRequired = management === 'REVIEW_REQUIRED';
+            const isHighlighted = Boolean(highlightedStrategyId && ep.strategy_id === highlightedStrategyId);
+            const reasonInfo = ep.manual_risk_reason ? translateManualRiskReason(ep.manual_risk_reason) : null;
+            const deduplicatedAttentionItems = deduplicateEpisodeAttentionItems(ep.attention_items, management);
 
             return (
               <div
                 key={ep.ticket_id}
                 data-ticket-id={ep.ticket_id}
-                className="group relative rounded-lg border border-border bg-surface p-4 hover:border-brand/40 hover:bg-surface-elevated/40 transition-all shadow-2xs"
+                data-strategy-id={ep.strategy_id}
+                className={`group relative rounded-lg border bg-surface p-4 hover:border-brand/40 hover:bg-surface-elevated/40 transition-all shadow-2xs ${
+                  isHighlighted
+                    ? 'border-brand ring-2 ring-brand/40'
+                    : isManual || isReviewRequired
+                    ? 'border-border border-l-4 border-l-amber-500'
+                    : 'border-border'
+                }`}
               >
-                {/* Main Card Row */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                  {/* Left: Direction + Symbol + Strategy + Management Mode */}
-                  <div className="flex items-start sm:items-center gap-3 min-w-0">
+                {/* Tier 1 Row 1: Symbol, Side, Strategy, Stage, PnL, Detail Entry */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
                     <div
-                      className={`flex h-9 w-9 flex-none items-center justify-center rounded-lg ${
+                      className={`flex h-8 w-8 flex-none items-center justify-center rounded-lg ${
                         isLong
                           ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                           : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
                       }`}
                     >
                       {isLong ? (
-                        <ArrowUpRight className="h-5 w-5" />
+                        <ArrowUpRight className="h-4 w-4" />
                       ) : (
-                        <ArrowDownRight className="h-5 w-5" />
+                        <ArrowDownRight className="h-4 w-4" />
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                        <span className="font-mono text-sm font-bold tracking-tight text-text-primary">
-                          {ep.symbol}
-                        </span>
-                        <span
-                          className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded uppercase ${
-                            isLong
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
-                          }`}
-                        >
-                          {isLong ? '做多 (LONG)' : '做空 (SHORT)'}
-                        </span>
+                    <span className="font-mono text-sm font-bold tracking-tight text-text-primary">
+                      {ep.symbol}
+                    </span>
+                    <span
+                      className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded uppercase ${
+                        isLong
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                      }`}
+                    >
+                      {isLong ? '做多 (LONG)' : '做空 (SHORT)'}
+                    </span>
 
-                        {/* Management Authority Pill */}
-                        {isManual ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                            <UserCheck className="h-3 w-3" />
-                            整笔已转人工管理
-                          </span>
-                        ) : isReviewRequired ? (
-                          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                            <AlertTriangle className="h-3 w-3" />
-                            接管待核实
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded bg-surface-subtle px-2 py-0.5 font-mono text-[11px] font-medium text-text-secondary border border-border">
-                            <Cpu className="h-3 w-3 text-brand" />
-                            程序自动管理
-                          </span>
-                        )}
+                    <span className="text-xs text-text-muted">
+                      <strong className="font-mono font-semibold text-brand">{ep.strategy_id}</strong>
+                      {' · '}
+                      <span>{ep.strategy_name_zh}</span>
+                    </span>
 
-                        <span className="font-mono text-[11px] text-text-muted">
-                          #{ep.ticket_id.slice(-8)}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-text-muted">
-                        <span className="font-mono font-semibold text-brand">
-                          {ep.strategy_id}
-                        </span>
-                        <span>·</span>
-                        <span className="truncate">{ep.strategy_name_zh}</span>
-                      </div>
-                    </div>
+                    <span className="inline-flex items-center gap-1 rounded bg-surface-subtle px-2 py-0.5 text-[11px] text-text-secondary border border-border">
+                      <Shield className="h-3 w-3 text-brand" />
+                      <span>{ep.lifecycle_stage_zh}</span>
+                      <span className="font-mono text-text-muted">
+                        ({ep.completed_stage_count}/{ep.total_stage_count})
+                      </span>
+                    </span>
                   </div>
 
-                  {/* Right: Metrics & Action */}
-                  <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 sm:gap-5 text-xs pt-3 border-t border-border/50 lg:border-t-0 lg:pt-0 w-full lg:w-auto">
-                    {/* Lifecycle & Protection facts */}
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
-                        当前生命周期
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <Shield className="h-3.5 w-3.5 text-brand" />
-                        <span className="font-semibold text-text-primary">
-                          {ep.lifecycle_stage_zh}
-                        </span>
-                        <span className="font-mono text-[11px] text-text-muted">
-                          ({ep.completed_stage_count}/{ep.total_stage_count})
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Protection Status (Separated from Authority) */}
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
-                        保护状态事实
-                      </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        {ep.is_protected ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                            <ShieldCheck className="h-3.5 w-3.5" />
-                            {ep.protection_state ?? '已确认保护'}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 font-mono text-[11px] font-medium text-amber-600 dark:text-amber-400">
-                            <ShieldAlert className="h-3.5 w-3.5" />
-                            {ep.protection_state ?? '保护待核实'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Issued Time */}
-                    <div className="hidden sm:block">
-                      <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
-                        发出时间
-                      </div>
-                      <div className="flex items-center gap-1 mt-0.5 text-text-secondary font-mono">
-                        <Clock className="h-3 w-3 text-text-muted" />
-                        <span>{ep.issued_at_formatted}</span>
-                      </div>
-                    </div>
-
-                    {/* Financial return */}
+                  {/* Right: Financial Return + Detail Button */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3">
                     {ep.net_r_formatted && ep.net_r_formatted !== '--' && (
-                      <div>
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">
-                          已核实净 R
-                        </div>
-                        <div className="font-mono font-bold mt-0.5 text-xs text-text-primary">
-                          {ep.net_r_formatted}
-                        </div>
-                      </div>
+                      <span className="font-mono font-bold text-xs text-text-primary">
+                        {ep.net_r_formatted}
+                      </span>
                     )}
-
-                    {/* Action button */}
-                    <div className="w-full sm:w-auto flex justify-end mt-1.5 sm:mt-0">
-                      <button
-                        type="button"
-                        onClick={() => onSelectEpisode(ep)}
-                        className="w-full sm:w-auto inline-flex items-center justify-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:border-brand hover:text-brand hover:bg-surface-elevated transition-colors shadow-2xs cursor-pointer"
-                      >
-                        <span>查看交易因果</span>
-                        <ChevronRight className="h-3.5 w-3.5 text-text-muted group-hover:text-brand" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onSelectEpisode(ep)}
+                      className="inline-flex items-center justify-center gap-1 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-text-primary hover:border-brand hover:text-brand hover:bg-surface-elevated transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <span>查看交易因果</span>
+                      <ChevronRight className="h-3.5 w-3.5 text-text-muted group-hover:text-brand" />
+                    </button>
                   </div>
                 </div>
 
-                {/* Manual Takeover Warning / Notice Strip */}
-                {isManual && (
-                  <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-300 break-words">
-                    <div className="font-semibold flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 flex-none text-amber-500" />
-                      <span>整笔已转人工管理 · 外部干预已触发永久接管</span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed break-words">
-                      既有挂单是否有效以交易所最新订单事实为准；程序不再自动退出或修改保护。
-                      {ep.manual_risk_reason && (
-                        <span className="block mt-0.5 text-rose-600 dark:text-rose-400 font-mono break-all">
-                          新增开仓受限原因：{ep.manual_risk_reason}
-                        </span>
+                {/* Tier 1 Row 2: Short Status Tags + Expandable Protection/Takeover Disclosure */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
+                  {/* 1. Management Authority Short Tag */}
+                  {isManual ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                      <UserCheck className="h-3 w-3" />
+                      整笔已转人工管理 · 不再自动处置
+                    </span>
+                  ) : isReviewRequired ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                      <AlertTriangle className="h-3 w-3" />
+                      接管待核实 · 自动处置已暂停
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded bg-surface-subtle px-2 py-0.5 font-mono text-[11px] font-medium text-text-secondary border border-border">
+                      <Cpu className="h-3 w-3 text-brand" />
+                      程序自动管理
+                    </span>
+                  )}
+
+                  {/* 2. Short Lock/Restriction Tag if manual_risk_reason is present */}
+                  {reasonInfo && (
+                    <span className="inline-flex items-center rounded bg-rose-500/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                      {reasonInfo.shortTag}
+                    </span>
+                  )}
+
+                  {/* 3. Non-duplicate independent risk/attention short tags */}
+                  {deduplicatedAttentionItems.map((att, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 px-2 py-0.5 text-[11px] border border-amber-500/30 font-mono break-words"
+                    >
+                      <AlertTriangle className="h-3 w-3 flex-none text-amber-500" />
+                      <span>{att}</span>
+                    </span>
+                  ))}
+
+                  {/* 4. Interactive Protection & Fact Disclosure (Tier 2 & Tier 3 on click/tap/keyboard) */}
+                  <details className="inline-block text-[11px]">
+                    <summary
+                      className={`cursor-pointer select-none inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono font-medium border focus-visible:outline-2 focus-visible:outline-brand ${
+                        ep.is_protected
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                          : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 font-semibold'
+                      }`}
+                    >
+                      {ep.is_protected ? (
+                        <ShieldCheck className="h-3.5 w-3.5 flex-none" />
+                      ) : (
+                        <ShieldAlert className="h-3.5 w-3.5 flex-none" />
                       )}
-                    </p>
-                  </div>
-                )}
+                      <span>{ep.protection_state ?? (ep.is_protected ? '已确认保护' : '保护待核实')} ›</span>
+                    </summary>
 
-                {isReviewRequired && (
-                  <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5 text-xs text-amber-700 dark:text-amber-300">
-                    <div className="font-semibold flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 flex-none text-amber-500" />
-                      <span>接管待核实 · 自动处置已暂停</span>
+                    <div className="mt-2 rounded-md border border-border bg-surface-subtle p-2.5 text-[11px] text-text-secondary space-y-1 break-words">
+                      {isManual && (
+                        <p className="leading-relaxed text-amber-700 dark:text-amber-300">
+                          <strong>整笔已转人工管理 · 外部干预已触发永久接管：</strong>
+                          既有挂单是否有效以交易所最新订单事实为准；程序不再自动退出或修改保护。
+                        </p>
+                      )}
+                      {isReviewRequired && (
+                        <p className="leading-relaxed text-amber-700 dark:text-amber-300">
+                          <strong>接管待核实 · 自动处置已暂停：</strong>
+                          订单或持仓事实待核实，程序已暂停该笔自动处置；以交易所最新对账为准。
+                        </p>
+                      )}
+                      {reasonInfo && (
+                        <p className="font-mono text-rose-600 dark:text-rose-400 break-all">
+                          新增开仓受限原因：{reasonInfo.raw}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-3 font-mono text-text-muted pt-0.5">
+                        <span className="inline-flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          发出时间: {ep.issued_at_formatted}
+                        </span>
+                        <span>Ticket: #{ep.ticket_id.slice(-8)}</span>
+                      </div>
                     </div>
-                    <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed">
-                      订单或持仓事实待核实，程序已暂停该笔自动处置；以交易所最新对账为准。
-                    </p>
-                  </div>
-                )}
-
-                {/* Attention flags if any */}
-                {Boolean(ep.attention_items && ep.attention_items.length > 0) && (
-                  <div className="mt-2.5 flex items-center gap-1.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 px-2.5 py-1 text-[11px] border border-amber-500/20 font-mono">
-                    <AlertTriangle className="h-3 w-3 flex-none" />
-                    <span>关注项：{ep.attention_items!.join(' · ')}</span>
-                  </div>
-                )}
+                  </details>
+                </div>
               </div>
             );
           })}

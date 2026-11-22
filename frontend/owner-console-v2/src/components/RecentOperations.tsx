@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import type { RecentOperationItem } from '../types/controls';
+import { formatControlOperationState } from '../mapping/controlStateMapping';
 import { History, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface RecentOperationsProps {
@@ -12,32 +13,37 @@ function getOperationTone(state: string, blocker?: string | null): {
   border: string;
   dotBg: string;
   label: string;
+  isUnknown?: boolean;
 } {
-  if (state === 'completed') {
+  const meta = formatControlOperationState(state, blocker);
+  if (meta.tone === 'success') {
     return {
       bg: 'bg-status-green-bg',
       text: 'text-status-green',
       border: 'border-status-green/20',
       dotBg: 'bg-status-green',
-      label: blocker ? '曾需关注 · 已完成' : '已完成',
+      label: meta.label,
+      isUnknown: meta.isUnknown,
     };
   }
-  if (state === 'blocked') {
+  if (meta.tone === 'danger') {
     return {
       bg: 'bg-status-red-bg',
       text: 'text-status-red',
       border: 'border-status-red/30',
       dotBg: 'bg-status-red',
-      label: '已阻断',
+      label: meta.label,
+      isUnknown: meta.isUnknown,
     };
   }
-  if (state === 'needs_intervention') {
+  if (meta.tone === 'attention') {
     return {
-      bg: 'bg-status-red-bg',
-      text: 'text-status-red',
-      border: 'border-status-red/30',
-      dotBg: 'bg-status-red',
-      label: '需人工介入',
+      bg: 'bg-status-amber-bg',
+      text: 'text-status-amber',
+      border: 'border-status-amber/30',
+      dotBg: 'bg-status-amber',
+      label: meta.label,
+      isUnknown: meta.isUnknown,
     };
   }
   return {
@@ -45,7 +51,8 @@ function getOperationTone(state: string, blocker?: string | null): {
     text: 'text-brand',
     border: 'border-brand/30',
     dotBg: 'bg-brand',
-    label: `执行中: ${state}`,
+    label: meta.label,
+    isUnknown: meta.isUnknown,
   };
 }
 
@@ -103,19 +110,27 @@ export const RecentOperations: React.FC<RecentOperationsProps> = ({ operations }
                     )}
                   </div>
 
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded ${tone.bg} px-2.5 py-1 text-xs font-semibold ${tone.text} font-sans border ${tone.border}`}
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dotBg}`} />
-                    {tone.label}
-                  </span>
+                  <div className="flex flex-col items-end gap-1">
+                    <span
+                      className={`inline-flex items-center gap-1.5 rounded ${tone.bg} px-2.5 py-1 text-xs font-semibold ${tone.text} font-sans border ${tone.border}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${tone.dotBg}`} />
+                      {tone.label}
+                    </span>
+                    {tone.isUnknown && (
+                      <details className="text-[10px] text-text-muted font-sans">
+                        <summary className="cursor-pointer">原始状态码</summary>
+                        <span className="font-mono">{op.state}</span>
+                      </details>
+                    )}
+                  </div>
                 </div>
               );
             })
           )}
-          <div className="text-right pt-1.5">
-            <span className="text-xs text-text-muted hover:text-brand cursor-pointer transition-colors">
-              查看全部历史审计流水 →
+          <div className="text-right pt-1">
+            <span className="text-[11px] text-text-muted">
+              仅展示最近受控操作记录
             </span>
           </div>
         </div>

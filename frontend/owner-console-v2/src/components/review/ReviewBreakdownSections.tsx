@@ -106,7 +106,7 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
         <div className="flex items-center justify-between border-b border-border bg-surface-subtle px-4 py-2.5">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-brand" />
-            <h3 className="text-xs font-bold text-text-primary">StrategyGroup Evidence</h3>
+            <h3 className="text-xs font-bold text-text-primary">策略组样本分布</h3>
           </div>
           <span className="font-mono text-[10px] text-text-muted">
             {summary.strategy_group_samples.length} 策略组
@@ -122,27 +122,34 @@ export const ReviewBreakdownSections: React.FC<ReviewBreakdownSectionsProps> = (
                 key={item.strategy_group_id}
                 className="flex flex-col gap-1 px-4 py-2.5 hover:bg-surface-elevated transition-colors"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-mono font-semibold text-text-primary truncate">
                       {item.strategy_group_id}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono tabular-number text-[11px] text-text-muted">
-                      {item.sample_count} 笔
-                    </span>
+                  <div className="flex items-center gap-2">
                     <span
-                      className={`rounded px-1.5 py-0.2 font-mono text-[10px] font-semibold border ${
-                        item.evidence_state === 'observe_only'
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold border ${
+                        item.sample_count > 0
                           ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
                           : 'bg-surface-subtle text-text-muted border-border'
                       }`}
                     >
-                      {item.evidence_state === 'observe_only' ? '仅供观察' : '无样本证据'}
+                      {item.sample_count > 0 ? `已加载 ${item.sample_count} 笔复盘样本` : '暂无复盘样本'}
                     </span>
                   </div>
                 </div>
+                <details className="text-[10px] text-text-muted">
+                  <summary className="cursor-pointer hover:text-text-secondary">
+                    样本适用性说明
+                  </summary>
+                  <p className="mt-1">
+                    {item.evidence_state === 'observe_only'
+                      ? '仅供观察：当前已加载样本仅作行为核对，尚不足以单独支持策略盈利结论。'
+                      : '当前筛选范围内暂无复盘样本。'}
+                  </p>
+                </details>
 
                 {/* Evidence tray */}
                 <BreakdownEvidenceTray

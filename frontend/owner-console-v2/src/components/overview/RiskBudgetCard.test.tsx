@@ -29,3 +29,24 @@ it('keeps an unresolved request when its account does not match',async()=>{
  await act(async()=>{button.click();await Promise.resolve();});
  expect(mocks.receipt).not.toHaveBeenCalled();expect(mocks.change).not.toHaveBeenCalled();expect(document.body.textContent).toContain('当前账户与原请求不同');expect(sessionStorage.getItem('brc-risk-budget-request')).not.toBeNull();
 });
+
+it('disables editing and blocks preview when refresh fails after initial load',async()=>{
+ const editableState={...state,pending_baseline:null};
+ mocks.fetch.mockResolvedValueOnce(editableState).mockRejectedValue(new Error('refresh failed'));
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+ container=document.createElement('div');document.body.appendChild(container);root=createRoot(container);
+ act(()=>root.render(<QueryClientProvider client={client}><RiskBudgetCard/></QueryClientProvider>));
+ await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain('当前单笔上限：2%'));});
+ expect(container.querySelector('input')?.disabled).toBe(false);
+ await act(async()=>{await client.refetchQueries({queryKey:['owner','risk-budget']});});
+ await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain('无法读取风险预算'));});
+ expect(container.querySelector('input')?.disabled).toBe(true);
+ const minusBtn=container.querySelector<HTMLButtonElement>('button[aria-label="减少 0.1%"]')!;
+ const plusBtn=container.querySelector<HTMLButtonElement>('button[aria-label="增加 0.1%"]')!;
+ const previewBtn=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.includes('预览修改'))!;
+ expect(minusBtn.disabled).toBe(true);
+ expect(plusBtn.disabled).toBe(true);
+ expect(previewBtn.disabled).toBe(true);
+ await act(async()=>{previewBtn.click();await Promise.resolve();});
+ expect(mocks.preview).not.toHaveBeenCalled();
+});

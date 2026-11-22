@@ -1,29 +1,15 @@
 import { incomeNavigationSearch } from './utils/urlParams';
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
-import { useControlsData } from './hooks/useControlsData';
-import { cleanSymbol } from './hooks/useOverviewData';
 import { LoginPage } from './components/auth/LoginPage';
 import { Navbar, type NavTabId } from './components/Navbar';
 import { OverviewPage } from './components/overview/OverviewPage';
 import { TradesPage } from './components/trades/TradesPage';
 import { StrategiesPage } from './components/strategies/StrategiesPage';
 import { ReviewPage } from './components/review/ReviewPage';
-import { CausalityDrawer } from './components/overview/CausalityDrawer';
-import { TopStatusBar } from './components/TopStatusBar';
-import { StrategyMatrix } from './components/StrategyMatrix';
-import { SelectionSection } from './components/SelectionSection';
-import { DangerZoneCard } from './components/DangerZoneCard';
-import { ControlledFlattenModal } from './components/ControlledFlattenModal';
-import { RiskBudgetCard } from './components/overview/RiskBudgetCard';
-import { CapacitySection } from './components/CapacitySection';
-import { RecentOperations } from './components/RecentOperations';
-import { useFlattenControl } from './hooks/useFlattenControl';
-import { useGlobalEntryControl } from './hooks/useGlobalEntryControl';
-import { TotpActionModal } from './components/TotpActionModal';
+import { ControlsPage } from './components/ControlsPage';
 import { GoogleOwnerBinding } from './components/auth/GoogleAuth';
-import type { TradeEpisodeSummary } from './types/overview';
-import { RefreshCw, AlertCircle, Shield } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 const getInitialTab = (): NavTabId => {
   if (typeof window !== 'undefined') {
@@ -50,7 +36,6 @@ export const App: React.FC = () => {
   } = useAuth();
 
   const [activeTab, setActiveTab] = useState<NavTabId>(getInitialTab);
-  const [selectedTicketEpisode, setSelectedTicketEpisode] = useState<TradeEpisodeSummary | null>(null);
 
   // Synchronize activeTab with browser URL search params on popstate
   useEffect(() => {
@@ -70,7 +55,6 @@ export const App: React.FC = () => {
   }, []);
 
   const handleSelectTab = (tab: NavTabId) => {
-    setActiveTab(tab);
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
       if (sp.get('tab') !== tab) {
@@ -78,45 +62,15 @@ export const App: React.FC = () => {
         window.history.pushState(null, '', `${window.location.pathname}?${search}`);
       }
     }
+    setActiveTab(tab);
   };
 
-  // Controls Data
-  const {
-    globalEntry,
-    strategies,
-    capacity,
-    operations,
-    currentOperation,
-    rawTickets,
-    isLoading: controlsLoading,
-    isFetching: controlsFetching,
-    isError: controlsError,
-    error: controlsErrorObj,
-    generatedAtMs,
-    refetch: refetchControls,
-  } = useControlsData();
-
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const handleNavigateWithSearch = (tab: NavTabId, search: string) => {
+    if (typeof window !== 'undefined') {
+      window.history.pushState(null, '', `${window.location.pathname}?${search}`);
+    }
+    setActiveTab(tab);
   };
-
-  const flattenControl = useFlattenControl({
-    onSuccess: (op) => {
-      showToast(`受控平仓指令已提交 (${op.state})，全局 ENTRY 已挂起。`);
-    },
-    onError: (msg) => {
-      showToast(msg);
-    },
-  });
-
-  const activeFlattenOperation = currentOperation ?? flattenControl.currentOperation;
-
-  const globalControl = useGlobalEntryControl({
-    onSuccess: (msg) => showToast(msg),
-    activeFlattenOperation,
-  });
 
   // 1. Session Verification View
   if (isCheckingSession) {
@@ -171,8 +125,6 @@ export const App: React.FC = () => {
   }
 
   // 3. Authenticated Console
-  const pausedCount = strategies.filter((s) => s.configured_state === 'paused' && !s.is_retired).length;
-
   return (
     <div className="min-h-screen bg-background text-text-primary">
       <Navbar
@@ -186,7 +138,11 @@ export const App: React.FC = () => {
       <GoogleOwnerBinding />
       <main className="mx-auto max-w-[1520px] px-4 py-4 sm:px-6">
         {activeTab === 'overview' && (
-          <OverviewPage onNavigateToControls={() => handleSelectTab('controls')} />
+          <OverviewPage
+            onNavigateToControls={() => handleSelectTab('controls')}
+            onNavigateToTab={handleSelectTab}
+            onNavigateWithSearch={handleNavigateWithSearch}
+          />
         )}
 
         {activeTab === 'trades' && (
@@ -202,193 +158,9 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'controls' && (
-          <div>
-            {/* Controls Header & Refresh */}
-            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h1 className="text-base font-bold text-text-primary flex items-center gap-2">
-                  控制中心
-                  <span className="rounded bg-brand/10 text-brand text-[10px] font-mono px-2 py-0.5 border border-brand/20">
-                    CONTROLS
-                  </span>
-                </h1>
-                <p className="mt-0.5 text-xs text-text-secondary">
-                  全局开仓开关、各策略准入控制、动态选币授权、容量占用与审计流水。
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => refetchControls()}
-                  disabled={controlsFetching}
-                  className="inline-flex items-center gap-1.5 rounded border border-border-strong bg-surface px-3.5 py-1.5 text-xs font-medium text-text-primary hover:bg-surface-elevated transition-colors shadow-xs disabled:opacity-60"
-                >
-                  <RefreshCw
-                    className={`h-3.5 w-3.5 text-text-muted ${
-                      controlsFetching ? 'animate-spin text-brand' : ''
-                    }`}
-                  />
-                  <span>{controlsFetching ? '正在读取真实 facts...' : '刷新当前页'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Control Posture Status Banner */}
-            <div className="mb-4 flex items-center justify-between rounded border border-brand/30 bg-brand/5 px-3 py-1.5 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[10px] font-bold uppercase rounded bg-brand/10 text-brand px-1.5 py-0.5 border border-brand/20">
-                  Phase C + D: Global ENTRY & Selection Governance Active
-                </span>
-                <span className="text-text-secondary">
-                  策略启停、受控平仓、动态选币授权及全局 ENTRY 控制已接通权威写操作 (防重锁 + TOTP 强认证) · 单 Ticket 平仓保持安全禁用
-                </span>
-              </div>
-              <span className="font-mono text-[11px] text-text-muted">
-                快照时间: {new Date(generatedAtMs).toLocaleTimeString('zh-CN', { hour12: false })}
-              </span>
-            </div>
-
-            {controlsLoading ? (
-              <div className="py-24 text-center">
-                <div className="inline-block h-6 w-6 border-2 border-brand/30 border-t-brand rounded-full animate-spin mb-3" />
-                <p className="text-xs text-text-secondary">正在读取 /controls 控制台事实...</p>
-              </div>
-            ) : controlsError ? (
-              <div className="rounded-xl border border-danger/30 bg-surface p-8 text-center max-w-lg mx-auto my-8 shadow-sm">
-                <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-danger/10 text-danger mb-4">
-                  <AlertCircle className="h-6 w-6" />
-                </div>
-                <h3 className="text-base font-bold text-text-primary">Controls API 暂时不可用</h3>
-                <p className="mt-1.5 text-xs text-text-secondary leading-relaxed">
-                  {controlsErrorObj instanceof Error
-                    ? controlsErrorObj.message
-                    : '未能成功获取真实控制状态。'}
-                </p>
-                <div className="mt-5">
-                  <button
-                    type="button"
-                    onClick={() => refetchControls()}
-                    className="inline-flex items-center gap-1.5 rounded bg-brand px-4 py-2 text-xs font-semibold text-white hover:bg-brand/90 transition-colors"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    <span>重试</span>
-                  </button>
-                </div>
-              </div>
-            ) : globalEntry && capacity ? (
-              <div className="space-y-4">
-                {/* Level 1: System Status Ribbon */}
-                <TopStatusBar
-                  globalEntry={globalEntry}
-                  pausedStrategyCount={pausedCount}
-                  totalActiveStrategies={strategies.length}
-                  onRequestAction={globalControl.requestAction}
-                  isActionDisabled={Boolean(
-                    activeFlattenOperation &&
-                    activeFlattenOperation.state !== 'completed' &&
-                    activeFlattenOperation.state !== 'blocked'
-                  )}
-                  disabledReason={
-                    activeFlattenOperation &&
-                    activeFlattenOperation.state !== 'completed' &&
-                    activeFlattenOperation.state !== 'blocked'
-                      ? '受控平仓正在执行中，禁止操作全局新开仓准入'
-                      : undefined
-                  }
-                />
-
-                <RiskBudgetCard />
-
-                {/* Level 2: Strategy Control Matrix */}
-                <StrategyMatrix
-                  strategies={strategies}
-                  onSuccess={(msg) => showToast(msg)}
-                  onSelectTicket={(ticketId) => {
-                    const matching = rawTickets.find((t) => t.ticket_id === ticketId);
-                    if (matching) {
-                      setSelectedTicketEpisode({
-                        ticket_id: matching.ticket_id,
-                        strategy_id: matching.strategy_group_id,
-                        strategy_name_zh: matching.strategy_group_id,
-                        symbol: cleanSymbol(matching.exchange_instrument_id),
-                        side: matching.position_side,
-                        lifecycle_stage: matching.lifecycle_stage,
-                        lifecycle_stage_zh: matching.lifecycle_stage,
-                        completed_stage_count: matching.completed_stage_count,
-                        total_stage_count: matching.total_stage_count,
-                        ticket_status: matching.ticket_status,
-                        issued_at_ms: matching.issued_at_ms,
-                        issued_at_formatted: new Date(matching.issued_at_ms).toLocaleTimeString(
-                          'zh-CN',
-                          { hour12: false }
-                        ),
-                        attention_items: matching.attention_items ?? [],
-                        net_pnl_formatted: '--',
-                        net_r_formatted: '--',
-                      });
-                    }
-                  }}
-                />
-
-                {/* Level 3: Dynamic Selection Governance */}
-                <SelectionSection onSuccess={(msg) => showToast(msg)} />
-
-                {/* Level 4: Capacity & High Risk Guardrail */}
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <CapacitySection
-                    capacity={capacity}
-                    activeTicketCount={globalEntry.active_ticket_count}
-                  />
-                  <DangerZoneCard
-                    activeTicketCount={globalEntry.active_ticket_count}
-                    onTriggerFlatten={flattenControl.requestPreview}
-                    isLoading={flattenControl.isLoadingPreview}
-                    currentOperation={activeFlattenOperation}
-                  />
-                </div>
-
-                {/* Level 5: Audit Log */}
-                <RecentOperations operations={operations} />
-              </div>
-            ) : null}
-          </div>
+          <ControlsPage />
         )}
       </main>
-
-      {/* Controlled Flatten Modal */}
-      <ControlledFlattenModal
-        open={flattenControl.isModalOpen}
-        onClose={flattenControl.closeModal}
-        preview={flattenControl.preview}
-        isSubmitting={flattenControl.isSubmitting}
-        isVerifying={flattenControl.isVerifying}
-        errorMessage={flattenControl.errorMessage}
-        isUnknownResult={flattenControl.isUnknownResult}
-        isRetryFrozen={flattenControl.isRetryFrozen}
-        currentOperation={activeFlattenOperation}
-        inFlightOperation={flattenControl.inFlight}
-        onConfirm={flattenControl.handleConfirm}
-        onVerifyStatus={flattenControl.handleVerifyStatus}
-        onRefreshPreview={flattenControl.requestPreview}
-      />
-
-      {/* Global Entry Control Modal */}
-      <TotpActionModal {...globalControl.modalProps} />
-
-      {/* Causality Drawer triggered from Controls Strategy Matrix */}
-      <CausalityDrawer
-        episode={selectedTicketEpisode}
-        onClose={() => setSelectedTicketEpisode(null)}
-      />
-
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded border border-border-strong bg-surface-elevated px-4 py-2.5 text-xs font-semibold text-text-primary shadow-xl animate-in fade-in-50 slide-in-from-bottom-2">
-          <Shield className="h-4 w-4 text-brand" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
     </div>
   );
 };

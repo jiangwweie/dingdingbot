@@ -9,9 +9,9 @@ let root: ReturnType<typeof createRoot>;
 let container: HTMLDivElement;
 beforeEach(() => { vi.stubGlobal('matchMedia', () => ({ matches: false })); localStorage.clear(); });
 afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.unstubAllGlobals(); });
-function render(isRealData: boolean, onSelectTab = vi.fn()) {
+function render(isRealData: boolean, onSelectTab = vi.fn(), isIsolatedMock = false) {
   container=document.createElement('div');document.body.appendChild(container);root=createRoot(container);
-  act(() => root.render(<ThemeProvider><Navbar activeTab="overview" onSelectTab={onSelectTab} isRealData={isRealData} /></ThemeProvider>));
+  act(() => root.render(<ThemeProvider><Navbar activeTab="overview" onSelectTab={onSelectTab} isRealData={isRealData} isIsolatedMock={isIsolatedMock} /></ThemeProvider>));
   return onSelectTab;
 }
 it('keeps all five navigation destinations available on mobile without control submission', () => {
@@ -22,4 +22,10 @@ it('keeps all five navigation destinations available on mobile without control s
 });
 it('does not label unavailable production data as a mock environment', () => {
   render(false);expect(container.textContent).toContain('数据未就绪');expect(container.textContent).not.toMatch(/MOCK|离线验证/);
+});
+
+it('explicitly identifies fixtures in the isolated browser preview', () => {
+  render(false, vi.fn(), true);
+  expect(container.textContent).toContain('ISOLATED MOCK');
+  expect(container.querySelector('[aria-label="移动主导航"]')).not.toBeNull();
 });

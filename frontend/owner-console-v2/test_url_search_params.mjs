@@ -8,6 +8,8 @@ import {
   serializeTradesSearchParams,
   parseStrategiesSearchParams,
   serializeStrategiesSearchParams,
+  parseReviewSearchParams,
+  buildOverviewSameScopeSearch,
 } from './src/utils/urlParams.ts';
 import { DAY_MS } from './src/utils/timeRange.ts';
 
@@ -149,6 +151,23 @@ test('serializeStrategiesSearchParams: roundtrips correctly', () => {
   const reParsed = parseStrategiesSearchParams(new URLSearchParams(serialized));
 
   assert.deepEqual(reParsed, {exit_scope:'all',strategy_group_id:undefined,exchange_instrument_id:undefined,position_side:undefined,...params});
+});
+
+test('buildOverviewSameScopeSearch: forces today window and strips stale filters when navigating from Overview to Review (P2 regression)', () => {
+  const todayStart = 1700000000000;
+  const todayEnd = 1700036000000;
+  const search = buildOverviewSameScopeSearch('review', {
+    from_ms: todayStart,
+    to_ms: todayEnd,
+  });
+  const parsed = parseReviewSearchParams(new URLSearchParams(search));
+  assert.equal(parsed.range, 'today');
+  assert.equal(parsed.from_ms, todayStart);
+  assert.equal(parsed.to_ms, todayEnd);
+  assert.equal(parsed.view, 'all');
+  assert.equal(parsed.exit_scope, 'all');
+  assert.equal(parsed.strategy_version_id, undefined);
+  assert.equal(parsed.review_status, undefined);
 });
 
 console.log('\n================================================================');

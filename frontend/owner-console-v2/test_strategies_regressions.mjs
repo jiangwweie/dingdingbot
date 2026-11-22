@@ -289,7 +289,7 @@ test('enrichStrategyVersion: integrates runtime control and blocker accurately',
     activeTicketCount: 0,
   });
   assert.equal(enrichedEnabled.runtimeStatus, 'enabled');
-  assert.equal(enrichedEnabled.runtimeStatusLabel, '运行中');
+  assert.equal(enrichedEnabled.runtimeStatusLabel, '已启用');
 });
 
 test('enrichStrategyVersion: version isolation guarantees independent identities', () => {

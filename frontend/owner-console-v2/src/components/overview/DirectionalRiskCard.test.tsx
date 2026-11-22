@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
-import { DirectionalRiskCard } from './DirectionalRiskCard';
+import { DirectionalRiskCard, computeRiskSlotSummary } from './DirectionalRiskCard';
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), change: vi.fn(), receipt: vi.fn() }));
 vi.mock('../../api/directionalRiskApi', () => ({ fetchDirectionalRisk: mocks.fetch, changeDirectionalRisk: mocks.change, fetchDirectionalReceipt: mocks.receipt }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -54,4 +54,44 @@ it('never reuses an unresolved mutation on another account', async () => {
   await verify();
   expect(sessionStorage.getItem('brc-directional-risk-pending')).toContain('frozen-request');
   expect(document.body.textContent).toContain('当前账户与原请求不同');
+});
+
+it('never claims existing positions are protected when over limit (P1 regression)', async () => {
+  mocks.fetch.mockResolvedValue({
+    ...state,
+    wallet_balance_at_last_admission: '1000.00',
+    balance_captured_at_ms: 1700000000000,
+    long_risk_at_stop: '55.00',
+    long_over_limit_at_last_balance: true,
+    short_over_limit_at_last_balance: false,
+  });
+  render();
+  await act(async () => {
+    await vi.waitFor(() => expect(container.textContent).toContain('按上次余额快照测算已超限'));
+  });
+  expect(container.textContent).not.toContain('已有持仓继续受保护');
+  expect(container.textContent).not.toContain('已有持仓继续管理');
+  expect(container.textContent).toContain('本控制不自动平仓，持仓管理权与保护状态见持仓详情');
+});
+
+it('does not render zero-balance positive risk as 0% idle bar and explicitly shows uncomputable cap (P2 regression)', async () => {
+  const slot = computeRiskSlotSummary('0.04', '45', '0');
+  expect(slot.barPct).toBeNull();
+  expect(slot.isUncomputable).toBe(true);
+  expect(slot.hasPositiveRiskWithoutCap).toBe(true);
+  expect(slot.capFormatted).toContain('快照上限无法计算');
+
+  mocks.fetch.mockResolvedValue({
+    ...state,
+    wallet_balance_at_last_admission: '0',
+    balance_captured_at_ms: 1700000000000,
+    long_risk_at_stop: '45',
+    short_risk_at_stop: '0',
+  });
+  render();
+  await act(async () => {
+    await vi.waitFor(() => expect(container.textContent).toContain('快照上限无法计算'));
+  });
+  expect(container.textContent).toContain('存在已占用风险 · 快照上限无法计算');
+  expect(container.querySelector('[data-testid="long-risk-bar"]')).toBeNull();
 });
