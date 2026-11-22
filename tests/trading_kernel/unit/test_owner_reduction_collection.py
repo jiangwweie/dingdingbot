@@ -31,7 +31,7 @@ class Reader:
         if name == 'algo_order':
             return {'algoId': a.active_stop_exchange_order_id, 'clientAlgoId': 'stop-client',
                 'symbol': 'BTCUSDT', 'side': 'SELL', 'positionSide': 'LONG', 'orderType': 'STOP_MARKET',
-                'quantity': '0', 'closePosition': True, 'reduceOnly': False, 'triggerPrice': str(a.active_stop_price),
+                'quantity': '0', 'closePosition': True, 'reduceOnly': True, 'timeInForce': 'GTE_GTC', 'triggerPrice': str(a.active_stop_price),
                 'workingType':'CONTRACT_PRICE','priceProtect':False,'algoStatus': 'NEW', 'actualQty': '0', 'updateTime': 4000, **self.stop_changes}
         if name == 'order':
             return {'orderId': a.tp1_exchange_order_id, 'clientOrderId': 'tp-client', 'symbol': 'BTCUSDT',
@@ -74,7 +74,10 @@ async def test_owner_facts_require_exact_close_all_protection_and_tp_terms():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('change',['missing','cancelled','quantity','price','client','duplicate','reference_price','price_protect','child'])
+@pytest.mark.parametrize('change',[
+    'missing', 'cancelled', 'quantity', 'price', 'client', 'duplicate',
+    'reference_price', 'price_protect', 'child', 'side', 'stale', 'reduce_only_type',
+])
 async def test_newer_open_order_snapshot_must_confirm_the_exact_live_stop(change):
     a=aggregate()
     state=OwnerReductionState(operation_id='op',preview=preview(a),phase=OwnerReductionPhase.PREVIEWED)
@@ -90,6 +93,9 @@ async def test_newer_open_order_snapshot_must_confirm_the_exact_live_stop(change
                 if change=='reference_price':stop={**stop,'workingType':'MARK_PRICE'}
                 if change=='price_protect':stop={**stop,'priceProtect':True}
                 if change=='child':stop={**stop,'actualOrderId':'triggered-child'}
+                if change=='side':stop={**stop,'side':'BUY'}
+                if change=='stale':stop={**stop,'updateTime':3999}
+                if change=='reduce_only_type':stop={**stop,'reduceOnly':'true'}
                 return [stop,stop] if change=='duplicate' else [stop]
             return await super().read(name,params)
     with pytest.raises(ValueError,match='stop_snapshot'):

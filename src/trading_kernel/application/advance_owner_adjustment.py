@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from src.trading_kernel.application.owner_operation_facts import (
     OwnerOperationFactsSource,
+    owner_operation_fact_blocker,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory
 from src.trading_kernel.domain.aggregate import AggregateStatus as A
@@ -192,7 +193,7 @@ async def advance_owner_adjustment(
                 expected_version=row["version"],
                 state="facts_unavailable",
                 payload=row["payload"],
-                reason=f"facts:{type(exc).__name__}",
+                reason=owner_operation_fact_blocker(exc),
                 now_ms=now_ms,
             )
         return "facts_unavailable"

@@ -19,6 +19,7 @@ from src.trading_kernel.domain.owner_device_authority import DeviceWriteProof
 from src.trading_kernel.domain.owner_position_intent import INTENT_PATH
 from src.trading_kernel.infrastructure.pg_models import (
     exchange_commands,
+    owner_position_operation_events,
     runtime_capabilities_current,
 )
 from src.trading_kernel.infrastructure.pg_unit_of_work import PostgresKernelUnitOfWork
@@ -42,6 +43,7 @@ from tests.trading_kernel.support.owner_roles import apply_owner_control_grants
         ("runner", None),
         ("runner", "missing_stop"),
         ("pre_tp", None),
+        ("pre_tp", "changed_converted_stop"),
         ("tp_pending_close", None),
         ("tp_pending_reduce", None),
     ],
@@ -226,7 +228,7 @@ async def test_signed_mobile_intent_through_raw_protocol_and_durable_ledger(
                 assert row["payload"]["result"]["cleanup_state"] == "pending"
             assert [x.kind for x in source.writes] == [K.EXIT]
             return
-        if fault:
+        if fault == "missing_stop":
             assert outcome == "rejected" and op["completed_at_ms"] is not None
             assert op["first_blocker"].startswith("owner_stop_snapshot")
             assert not source.writes
@@ -262,12 +264,31 @@ async def test_signed_mobile_intent_through_raw_protocol_and_durable_ledger(
                 await dispatch_for_ticket(
                     e, source, t.identity.ticket_id, now_ms=source.at
                 )
-            if outcome == "completed":
+            if outcome == "completed" or (
+                fault == "changed_converted_stop" and outcome == "facts_unavailable"
+            ):
                 break
         async with factory() as u:
             after = await u.aggregates.get(t.identity.ticket_id)
             op = await u.owner_position_operations.get(op["operation_id"])
             commands = await u.exchange_commands.list_for_ticket(t.identity.ticket_id)
+            if fault == "changed_converted_stop":
+                assert outcome == "facts_unavailable"
+                assert op["first_blocker"] == "owner_stop_snapshot_terms_or_state_changed"
+                event = await u._require_connection().scalar(
+                    sa.select(owner_position_operation_events.c.payload).where(
+                        owner_position_operation_events.c.operation_id == op["operation_id"],
+                        owner_position_operation_events.c.version == op["version"],
+                    )
+                )
+                assert event["first_blocker"] == op["first_blocker"]
+                assert after.position_qty == before.position_qty
+                assert after.protected_qty == before.position_qty
+                assert after.active_stop_close_position
+                assert after.tp1_exchange_order_id == before.tp1_exchange_order_id
+                assert before.tp1_exchange_order_id not in source.cancelled
+                assert all(c.kind is not K.OWNER_REDUCE for c in commands)
+                return
             assert outcome == "completed" and op["state"] == (
                 "runner_continuing" if stage == "runner" else "wait_price"
             ), op["first_blocker"]
@@ -288,5 +309,11 @@ async def test_signed_mobile_intent_through_raw_protocol_and_durable_ledger(
                 == before.position_qty - after.position_qty
             )
             assert len([c for c in commands if c.kind is K.OWNER_REDUCE]) == 1
+            if stage == "pre_tp":
+                replaced, cancel_stop, cancel_tp, reduction = source.writes
+                assert replaced.kind is K.REPLACE_PROTECTION
+                assert cancel_stop.kind is cancel_tp.kind is K.CANCEL_ORDER
+                assert cancel_tp.payload.exchange_order_id == before.tp1_exchange_order_id
+                assert reduction.kind is K.OWNER_REDUCE
         assert await tick(16000) is None
         assert len([r for r in source.writes if r.kind is K.OWNER_REDUCE]) == 1

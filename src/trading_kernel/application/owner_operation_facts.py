@@ -1,6 +1,6 @@
 """Bounded readonly facts used by the existing Kernel operation coordinator."""
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -13,6 +13,27 @@ from src.trading_kernel.domain.owner_reduction import (
 from src.trading_kernel.domain.owner_reduction_proof import OwnerReductionProof
 from src.trading_kernel.domain.readonly_closure import ClosureFill
 from src.trading_kernel.domain.trade_management import OrderEvidence
+
+
+class OwnerStopSnapshotError(ValueError):
+    """A safe, stable blocker from the live Stop snapshot check."""
+
+    def __init__(
+        self,
+        code: Literal[
+            "owner_stop_snapshot_missing_or_duplicated",
+            "owner_stop_snapshot_protocol_invalid",
+            "owner_stop_snapshot_terms_or_state_changed",
+        ],
+    ) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def owner_operation_fact_blocker(error: Exception) -> str:
+    if isinstance(error, OwnerStopSnapshotError):
+        return error.code
+    return f"facts:{type(error).__name__}"
 
 
 class OwnerReductionObservation(BaseModel):

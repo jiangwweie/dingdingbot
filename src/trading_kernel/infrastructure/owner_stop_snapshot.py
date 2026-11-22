@@ -3,6 +3,7 @@
 from collections.abc import Mapping, Sequence
 from decimal import Decimal
 
+from src.trading_kernel.application.owner_operation_facts import OwnerStopSnapshotError
 from src.trading_kernel.domain.commands import OrderCommandPayload
 from src.trading_kernel.domain.identities import NettingDomain
 
@@ -21,8 +22,14 @@ def require_current_stop_snapshot(
         r for r in rows if isinstance(r, Mapping) and str(r.get("algoId")) == order_id
     ]
     if len(matches) != 1:
-        raise ValueError("owner_stop_snapshot_missing_or_duplicated")
+        raise OwnerStopSnapshotError("owner_stop_snapshot_missing_or_duplicated")
     r = matches[0]
+    # Binance can echo reduceOnly=true on close-all STOP_MARKET reads even
+    # though placement omits that flag. The close-all and zero-quantity
+    # checks below still apply to the current order.
+    allows_binance_reduce_only_echo = (
+        domain.venue_id == "binance-usdm" and payload.order_type == "stop_market"
+    )
     try:
         q = Decimal(str(r["quantity"]))
         executed = Decimal(str(r.get("actualQty") or "0"))
@@ -40,6 +47,7 @@ def require_current_stop_snapshot(
             or type(r.get("reduceOnly")) is not bool
             or payload.close_position
             and r["reduceOnly"]
+            and not allows_binance_reduce_only_echo
             or str(r.get("actualOrderId") or "") not in {"", "0"}
             or type(r.get("closePosition")) is not bool
             or r["closePosition"] != payload.close_position
@@ -51,6 +59,6 @@ def require_current_stop_snapshot(
             or price != payload.stop_price
             or not previous_updated_at_ms <= updated <= observed_at_ms
         ):
-            raise ValueError("owner_stop_snapshot_terms_or_state_changed")
+            raise OwnerStopSnapshotError("owner_stop_snapshot_terms_or_state_changed")
     except (KeyError, TypeError, ArithmeticError) as exc:
-        raise ValueError("owner_stop_snapshot_protocol_invalid") from exc
+        raise OwnerStopSnapshotError("owner_stop_snapshot_protocol_invalid") from exc

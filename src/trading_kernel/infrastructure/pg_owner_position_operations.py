@@ -56,7 +56,7 @@ class PostgresOwnerPositionOperations:
                 operation_id=row["operation_id"],
                 version=row["version"],
                 state=row["state"],
-                payload=row["payload"],
+                payload={**row["payload"], "first_blocker": row["first_blocker"]},
                 occurred_at_ms=now_ms,
             )
         )

@@ -53,6 +53,9 @@ class RawOwnerProtocol:
             workingType='CONTRACT_PRICE', priceProtect=False, priceMatch='NONE',
             selfTradePreventionMode='NONE', goodTillDate=0,
             updateTime=max(command.created_at_ms, self.at - 1))
+        if p.order_type == "stop_market" and p.close_position:
+            # Binance reports these terms on the resulting close-all order.
+            row.update(reduceOnly=True, timeInForce="GTE_GTC")
         if conditional:
             row.update(algoId=oid, clientAlgoId=command.venue_client_order_id,
                 orderType=p.order_type.upper(), quantity=str(0 if p.close_position else p.quantity),
@@ -86,7 +89,16 @@ class RawOwnerProtocol:
         if name == 'algos':
             if self.fault == 'missing_stop':
                 return []
-            return [self.row(c) for c in selected if self.refs[c.command_id] == self.a.active_stop_exchange_order_id]
+            rows = [
+                self.row(c)
+                for c in selected
+                if self.refs[c.command_id] == self.a.active_stop_exchange_order_id
+            ]
+            if self.fault == "changed_converted_stop":
+                for row in rows:
+                    if row["closePosition"]:
+                        row["triggerPrice"] = str(Decimal(row["triggerPrice"]) + 1)
+            return rows
         if name == 'positions':
             return [{'symbol': 'BTCUSDT', 'positionSide': 'LONG', 'positionAmt': str(self.quantity)}]
         if name == 'mode':

@@ -7,6 +7,7 @@ from src.trading_kernel.application.owner_cooperation_capability import (
 )
 from src.trading_kernel.application.owner_operation_facts import (
     OwnerOperationFactsSource,
+    owner_operation_fact_blocker,
 )
 from src.trading_kernel.application.ports import UnitOfWorkFactory
 from src.trading_kernel.application.record_owner_reduction import record_owner_reduction
@@ -273,7 +274,7 @@ async def advance_owner_position_operation(
                     if restoring_tp
                     else "facts_unavailable",
                     payload=row["payload"],
-                    reason=f"facts:{type(exc).__name__}",
+                    reason=owner_operation_fact_blocker(exc),
                     now_ms=now_ms,
                 )
         return "facts_unavailable"
