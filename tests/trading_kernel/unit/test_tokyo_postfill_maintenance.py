@@ -11,7 +11,7 @@ from scripts.trading_kernel.tokyo_postfill_maintenance import (
 
 
 def basis():
-    return dict(commit=SOURCE,schema=SCHEMA,account=ACCOUNT,policy=3,entry=False,tickets=[TICKET],unknown=False,other_incidents=False)
+    return {'commit':SOURCE,'schema':SCHEMA,'account':ACCOUNT,'policy':3,'entry':False,'tickets':[TICKET],'unknown':False,'other_incidents':False}
 
 
 @pytest.mark.parametrize('field,value', [('commit','foreign'),('schema','0025_directional_sor'),('account','other'),('policy',4),('entry',True),('tickets',[]),('tickets',[TICKET,'other']),('unknown',True),('other_incidents',True)])
