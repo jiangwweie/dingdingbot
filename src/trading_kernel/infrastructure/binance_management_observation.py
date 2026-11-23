@@ -110,11 +110,18 @@ def parse_order_update(
         raise ValueError("independent position side required")
     event_time = _integer(message, "E")
     transaction_time = _integer(message, "T")
-    conditional_terms=algo or _string(row,"o") not in {"LIMIT","MARKET"}
+    order_type = _string(row, "o")
+    conditional_terms = algo or order_type not in {"LIMIT", "MARKET"}
     close = _boolean(row, "cp") if conditional_terms or "cp" in row else False
     quantity = _price(row, "q")
     if close and quantity is not None:
         raise ValueError("close-all unexpectedly declares fixed quantity")
+    reduce_only = _boolean(row, "R")
+    # Binance echoes R=true for quantity-free close-all algo orders, despite
+    # requiring the flag be omitted in the placement request. Normalize reads
+    # only; the raw event and all other order terms remain intact.
+    if algo and close and order_type in {"STOP_MARKET", "TAKE_PROFIT_MARKET"}:
+        reduce_only = False
     terms = OrderTerms.model_validate(
         {
             "venue_id": "binance-usdm",
@@ -125,12 +132,12 @@ def parse_order_update(
             "exchange_order_id": _string(row, "aid" if algo else "i"),
             "client_order_id": _string(row, "caid" if algo else "c"),
             "side": _string(row, "S").lower(),
-            "order_type": _string(row, "o"),
+            "order_type": order_type,
             "quantity": quantity,
             "price": _price(row, "p"),
             "trigger_price": _price(row, "tp" if algo else "sp"),
             "close_position": close,
-            "reduce_only": _boolean(row, "R"),
+            "reduce_only": reduce_only,
             "time_in_force": _string(row, "f"),
             "working_type": _string(row, "wt"),
             "price_protect": _boolean(row, "pP") if conditional_terms or "pP" in row else False,

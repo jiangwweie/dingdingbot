@@ -116,6 +116,7 @@ from src.trading_kernel.domain.strategy_entry_vacuum import (
     StrategyEntryVacuumState,
 )
 from src.trading_kernel.domain.trade_management import ManagementMode
+from src.trading_kernel.domain.verified_exit_closure import VerifiedExitClosureProof
 
 _POSITION_RECONCILIATION_STATUSES = RECONCILIATION_POSITION_STATUSES
 
@@ -1008,6 +1009,69 @@ async def _run_reconciliation_worker_once_core(
     return result
 
 
+async def _close_from_verified_exit(
+    uow_factory: UnitOfWorkFactory,
+    reader: Callable[..., Awaitable[VerifiedExitClosureProof]],
+    aggregate: TradeAggregate,
+    request: ReconciliationWorkerRequest,
+) -> ReconciliationWorkerResult:
+    from src.trading_kernel.application.verified_exit_closure import (
+        record_verified_exit,
+    )
+    from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
+
+    ticket_id = aggregate.identity.ticket_id
+    async with uow_factory() as uow:
+        references = await uow.exchange_commands.list_order_references(ticket_id)
+        incidents = await uow.incidents.list_open_for_ticket(ticket_id)
+    try:
+        proof = await asyncio.wait_for(
+            reader(aggregate=aggregate, references=references,
+                   incident_ids=tuple(i.incident_id for i in incidents)),
+            timeout=request.timeout_seconds,
+        )
+        if proof.ticket_id != ticket_id or proof.expected_version != aggregate.version:
+            raise ValueError("closure proof source changed")
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result(ticket_id=ticket_id)
+        async with uow_factory() as uow:
+            await record_verified_exit(uow, proof=proof, now_ms=max(request.now_ms, proof.observed_at_ms))
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.POSITION_RECONCILED,
+            ticket_id=ticket_id, detail="verified_exit_closed",
+        )
+    except Exception as exc:  # noqa: BLE001 - incomplete closure evidence retains occupation.
+        if not await _runtime_writer_is_certified(uow_factory, request):
+            return _runtime_fenced_result(ticket_id=ticket_id)
+        async with uow_factory() as uow:
+            await uow.signals.record_operational_failure(FailureDiagnostic(
+                stage="exit_closure", subject_id=ticket_id,
+                reason_code=getattr(exc, "code", "closure_evidence_unavailable"),
+                basis={"error_type": type(exc).__name__}, occurred_at_ms=request.now_ms,
+            ))
+            if (
+                aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
+                and aggregate.management_mode is ManagementMode.AUTO
+                and not await uow.incidents.get_open_for_ticket_kind(
+                    ticket_id, "post_fill_risk_facts_contradictory"
+                )
+            ):
+                await record_post_fill_stress_retry(
+                    uow, ticket_id=ticket_id,
+                    status=PostFillStressReconcileStatus.FACTS_UNAVAILABLE,
+                    now_ms=request.now_ms, due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+            else:
+                await uow.aggregates.schedule_next_check(
+                    ticket_id, work_kind="reconciliation",
+                    due_at_ms=request.now_ms + request.idle_poll_interval_ms,
+                )
+        return ReconciliationWorkerResult(
+            status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,
+            ticket_id=ticket_id, detail="closure_evidence_unavailable",
+        )
+
+
 async def _run_reconciliation_worker_once_core_impl(
     uow_factory: UnitOfWorkFactory,
     venue_truth: VenueTruthPort,
@@ -1047,11 +1111,36 @@ async def _run_reconciliation_worker_once_core_impl(
             detail=decision.status.value,
         )
         return recovered_result
+    closure_reader = getattr(position_source, "read_verified_exit", None)
     if (
         aggregate is not None
         and aggregate.status is AggregateStatus.POST_FILL_RISK_PENDING
     ):
         ticket_id = aggregate.identity.ticket_id
+        if callable(closure_reader):
+            try:
+                position = await asyncio.wait_for(
+                    position_source.read_position_snapshot(
+                        PositionSnapshotRequest(
+                            ticket_id=ticket_id,
+                            netting_domain=aggregate.identity.netting_domain,
+                            observed_at_ms=request.now_ms,
+                        )
+                    ),
+                    timeout=request.timeout_seconds,
+                )
+            except Exception:  # noqa: BLE001 - stress can still use its own readonly facts.
+                position = None
+            if (
+                position is not None
+                and position.netting_domain == aggregate.identity.netting_domain
+                and position.quantity == 0
+                and position.orders_complete
+                and not position.open_orders
+            ):
+                return await _close_from_verified_exit(
+                    uow_factory, closure_reader, aggregate, request
+                )
         if account_risk_source is None or instrument_rules_source is None:
             if not await _runtime_writer_is_certified(uow_factory, request):
                 return _runtime_fenced_result(ticket_id=ticket_id)
@@ -1117,6 +1206,18 @@ async def _run_reconciliation_worker_once_core_impl(
                 ticket_id=ticket_id,
                 detail=f"post_fill_stress:{type(exc).__name__}",
             )
+        if (
+            account_snapshot.venue_id == domain.venue_id
+            and account_snapshot.account_id == domain.account_id
+            and account_snapshot.exchange_instrument_id == domain.exchange_instrument_id
+            and account_snapshot.observed_at_ms <= request.now_ms < account_snapshot.valid_until_ms
+            and not any(
+                p.exchange_instrument_id == domain.exchange_instrument_id and p.quantity != 0
+                for p in account_snapshot.account_positions
+            )
+            and callable(closure_reader)
+        ):
+            return await _close_from_verified_exit(uow_factory, closure_reader, aggregate, request)
         entry_fills = None
         async with uow_factory() as uow:
             exact_profile = await uow.exit_profiles.get_profile(
@@ -1232,27 +1333,8 @@ async def _run_reconciliation_worker_once_core_impl(
             )
         if not await _runtime_writer_is_certified(uow_factory, request):
             return _runtime_fenced_result(ticket_id=aggregate.identity.ticket_id)
-        closure_reader = getattr(position_source,"read_verified_exit",None)
         if snapshot.quantity==0 and not snapshot.open_orders and snapshot.orders_complete and callable(closure_reader):
-            from src.trading_kernel.application.verified_exit_closure import (
-                record_verified_exit,
-            )
-            from src.trading_kernel.domain.operational_evidence import FailureDiagnostic
-            async with uow_factory() as uow:
-                target=await uow.aggregates.get(aggregate.identity.ticket_id)
-                references=await uow.exchange_commands.list_order_references(aggregate.identity.ticket_id)
-                incidents=await uow.incidents.list_open_for_ticket(aggregate.identity.ticket_id)
-            try:
-                proof=await asyncio.wait_for(closure_reader(aggregate=target,references=references,incident_ids=tuple(i.incident_id for i in incidents)),timeout=request.timeout_seconds)
-                async with uow_factory() as uow:
-                    await record_verified_exit(uow,proof=proof,now_ms=max(request.now_ms,proof.observed_at_ms))
-                return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.POSITION_RECONCILED,ticket_id=aggregate.identity.ticket_id,detail="verified_exit_closed")
-            except Exception as exc:  # noqa: BLE001 - exact facts failure retains occupation.
-                async with uow_factory() as uow:
-                    await uow.signals.record_operational_failure(FailureDiagnostic(stage="exit_closure",subject_id=aggregate.identity.ticket_id,
-                        reason_code=getattr(exc,"code","closure_evidence_unavailable"),basis={"error_type":type(exc).__name__},occurred_at_ms=request.now_ms))
-                    await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)
-                return ReconciliationWorkerResult(status=ReconciliationWorkerStatus.FACTS_UNAVAILABLE,ticket_id=aggregate.identity.ticket_id,detail="closure_evidence_unavailable")
+            return await _close_from_verified_exit(uow_factory, closure_reader, aggregate, request)
         if aggregate.management_mode is ManagementMode.REVIEW_REQUIRED:
             async with uow_factory() as uow:
                 await uow.aggregates.schedule_next_check(aggregate.identity.ticket_id,work_kind="reconciliation",due_at_ms=request.now_ms+request.idle_poll_interval_ms)

@@ -82,3 +82,30 @@ def test_fixed_algo_new_uses_pinned_ccxt_protocol_without_trailing_activation_fi
         coverage_complete=True,
     )
     assert evidence.action.value == "new" and evidence.terms.exchange_order_id == "201"
+
+
+@pytest.mark.parametrize("status", ["NEW", "CANCELED"])
+def test_binance_close_all_algo_reduce_only_echo_is_canonical(status):
+    from src.trading_kernel.infrastructure.binance_management_observation import (
+        parse_order_update,
+    )
+
+    raw = {
+        "e": "ALGO_UPDATE", "E": 2001, "T": 2000,
+        "o": {
+            "R": True, "S": "BUY", "V": "EXPIRE_MAKER", "X": status,
+            "f": "GTE_GTC", "o": "STOP_MARKET", "p": "0", "q": "0",
+            "s": "XRPUSDT", "cp": True, "ia": False, "pP": False,
+            "pm": "NONE", "ps": "SHORT", "tp": "0.9229",
+            "wt": "CONTRACT_PRICE", "aid": 201, "gtd": 0, "caid": "app-exact",
+        },
+    }
+    evidence = parse_order_update(
+        raw, account_id="replay-account", received_at_ms=2019, coverage_complete=True,
+    )
+    assert evidence.terms.close_position and evidence.terms.reduces_position
+    assert evidence.terms.quantity is None and not evidence.terms.reduce_only
+    # The same echo with a fixed quantity remains a protocol violation.
+    raw["o"]["q"] = "1"
+    with pytest.raises(ValueError, match="fixed quantity"):
+        parse_order_update(raw, account_id="replay-account", received_at_ms=2019, coverage_complete=True)

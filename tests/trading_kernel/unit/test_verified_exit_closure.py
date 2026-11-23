@@ -91,3 +91,22 @@ def test_verified_external_close_can_complete_after_a_real_partial_system_tp():
         {'trade_id':'external-fill','order_id':'15','quantity':str(half),'price':'62000','occurred_at_ms':3000}]
     proof=VerifiedExitClosureProof.model_validate(p)
     assert proof.exit_quantity==proof.entry_quantity and proof.exit_reason=='verified_external_exit'
+
+
+@pytest.mark.parametrize("field", ["entry", "stop", "another_exit"])
+def test_pending_stress_proof_requires_only_original_entry_and_full_original_stop(field):
+    from copy import deepcopy
+
+    payload = proof_payload()
+    if field == "another_exit":
+        spare = deepcopy(payload["orders"][0])
+        spare["reference"].update(command_id="tp", role="exit", command_kind="take_profit",
+                                  submitted_exchange_order_id="14", venue_client_order_id="tp")
+        spare["terms"].update(exchange_order_id="14", client_order_id="tp", side="sell")
+        spare.update(executed_quantity="0", status="EXPIRED")
+        payload["orders"].append(spare)
+    proof = VerifiedExitClosureProof.model_validate(payload)
+    assert not proof.proves_full_initial_stop(
+        entry_id="different" if field == "entry" else "11",
+        stop_id="different" if field == "stop" else "12",
+    )
