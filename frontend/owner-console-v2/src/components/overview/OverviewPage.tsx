@@ -157,7 +157,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
         >
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Send className="h-3.5 w-3.5 text-brand flex-none" />
-            <strong className="font-semibold text-text-primary">首尔飞书通知</strong>
+            <strong className="font-semibold text-text-primary">飞书通知</strong>
             <span className="text-text-muted">·</span>
             <span className="text-text-secondary font-medium">
               {notificationDelivery?.channel_state === 'configured'

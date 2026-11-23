@@ -43,7 +43,7 @@ def render_notice(facts: NoticeSnapshot) -> str:
     mode = {"AUTO": "自动", "MANUAL": "人工", "REVIEW_REQUIRED": "自动处置暂停"}[
         facts.mode
     ]
-    title = f"【首尔】{facts.symbol} {'多' if facts.side == 'long' else '空'}｜{_TITLES[facts.kind]}｜{mode}"
+    title = f"【{facts.site_label}】{facts.symbol} {'多' if facts.side == 'long' else '空'}｜{_TITLES[facts.kind]}｜{mode}"
     qty = "待核实" if facts.quantity is None else format_number(facts.quantity)
     position = f"余仓 {qty} {facts.symbol}"
     if facts.quantity is not None and facts.entry_price is not None:

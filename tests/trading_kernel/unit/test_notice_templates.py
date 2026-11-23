@@ -156,3 +156,9 @@ def test_minimum_lift_notice_displays_actual_fraction_and_partial_stage():
     assert "目标 5%" in text and "实际 14.286%" in text
     assert "最小量提升" in text and "部分成交" in text
     assert "95%" not in text
+
+
+def test_tokyo_notice_uses_explicit_site_label_without_changing_seoul_default():
+    tokyo = render_notice(snapshot(site_label='东京'))
+    assert '【东京】BTC 多' in tokyo and '首尔' not in tokyo
+    assert '【首尔】BTC 多' in render_notice(snapshot())

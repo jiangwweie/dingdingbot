@@ -1,5 +1,6 @@
 """Transactional display-only outbox; network I/O is not owned by this repository."""
 
+import os
 from hashlib import sha256
 
 from sqlalchemy.dialects.postgresql import insert
@@ -11,6 +12,7 @@ from src.trading_kernel.infrastructure.pg_models import notice_outbox
 
 
 async def enqueue_notice(connection: AsyncConnection, snapshot: NoticeSnapshot) -> None:
+    snapshot = snapshot.model_copy(update={"site_label": notice_site_label()})
     key = sha256(
         f"{snapshot.ticket_id}:{snapshot.event_id}:{snapshot.kind}:feishu".encode()
     ).hexdigest()
@@ -70,7 +72,7 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
     subject = "对账" if state.monitor_key.startswith("reconciliation") else "运行"
     payload = "\n".join(
         (
-            f"【首尔】{subject}{'异常待处理' if failed else '检查恢复'}｜{clock:%m-%d %H:%M}",
+            f"【{notice_site_label()}】{subject}{'异常待处理' if failed else '检查恢复'}｜{clock:%m-%d %H:%M}",
             "系统已记录异常，需要检查控制台"
             if failed
             else "盈亏核算已补齐"
@@ -79,7 +81,7 @@ async def enqueue_runtime_notice(connection: AsyncConnection, previous, state) -
             if state.summary == "trade_closed_economics_incomplete"
             else "该项检查已恢复；其他门槛仍独立生效",
             "当前持仓与保护以控制台和 App 为准",
-            "https://manual.jiaoyingpan.cloud/trading/",
+            notice_console_url(),
         )
     )
     await connection.execute(
@@ -206,7 +208,9 @@ async def enqueue_position_operation_notice(
                 "version": row["version"],
                 "reason": row["first_blocker"],
             },
-            payload="【首尔】"
+            payload="【"
+            + notice_site_label()
+            + "】"
             + labels[row["state"]]
             + "\n操作："
             + row["operation_id"]
@@ -222,3 +226,28 @@ async def enqueue_position_operation_notice(
         )
         .on_conflict_do_nothing(index_elements=["notice_key"])
     )
+
+
+def notice_site_label() -> str:
+    label = os.environ.get("TRADING_KERNEL_NOTICE_SITE", "首尔")
+    if label not in {"首尔", "东京"}:
+        raise ValueError("notice_site_invalid")
+    return label
+
+
+def notice_console_url() -> str:
+    from urllib.parse import urlsplit
+
+    origin = os.environ.get(
+        "TRADING_KERNEL_CONSOLE_ORIGIN", "https://manual.jiaoyingpan.cloud"
+    )
+    parts = urlsplit(origin)
+    if (
+        parts.scheme != "https"
+        or parts.netloc not in {"manual.jiaoyingpan.cloud", "jiaoyingpan.cloud"}
+        or parts.path
+        or parts.query
+        or parts.fragment
+    ):
+        raise ValueError("notice_origin_invalid")
+    return origin + "/trading/"
