@@ -1,10 +1,40 @@
 ---
 title: MAIN_CONTROL_ROADMAP
 status: CURRENT
-last_verified: 2026-11-18
+last_verified: 2026-11-24
 ---
 
 # Main Control Roadmap
+
+## Tokyo current-Seoul upgrade — deployed and Owner resumed2026-11-24
+
+**This focused worktree owns the completed Tokyo manual-product upgrade.** This
+entry supersedes the inherited Seoul snapshots below for Tokyo. Seoul itself
+was not mutated. Software installation, historical recovery, Owner parameter
+publication and operational ENTRY restoration have independent direct evidence.
+
+| Boundary | Verified Tokyo production fact |
+| --- | --- |
+| Kernel / API / static | Exact563d212d4a22e8c1c7b41bbdb7141ea76ff5b5f8; immutable tag `manual-runtime-2026.11.24.1` |
+| Source alignment | Actual Seoul Kernel/API f0271835 and independently served desktop e8d4143a. Tokyo-only notice label/origin and neutral UI wording retained; no uncommitted Seoul work included |
+| Schema / storage |0025_directional_sor; existing PG system7710109570187497514 and brc_trading_kernel retained. Official forward0024→0025; no database reset, active-position handover, old-schema runtime reader or history deletion |
+| Exact certification | Target R4 PASS2541 unit/architecture,2123 integration,80 full-chain; Ruff/Mypy297;961 Golden snapshots/23064 core decisions. Exact Owner API and Static certificates PASS |
+| Source recovery | Certified schema0024 maintenance commit e8644751: original121.8 XRP entry and complete original stop parent/child/fills verified by signed GETs. Canonical VerifiedExitClosed/Settlement/Review made the one Ticket terminal and released lane/budget/domain/causal Incident. Eight raw events retained and canonically applied; zero venue mutations |
+| Preservation | Official installer preservation_pass=true. History retained: one Ticket, seven trade events, two Exchange Commands, one Review and eight raw stream events. No active Ticket/position/reservation/open Incident/unresolved command. Stopped original/recovered dumps and protected configuration archives have verified local SHA copies; original dump fully restored and recovery/migration rehearsed locally |
+| Credential isolation | Original Tokyo API/account/database login, Google/password/TOTP/session, Feishu credentials and public origin verified unchanged. Tokyo domain jiaoyingpan.cloud; source source-secrets never copied from Seoul |
+| Owner authority | Genuine parameter revision2 `exit-config:4b81fe41b10fa26eaaf046d39cef2052` and Policy5 Resume directly verified; entry_recovery_ready, exit_configuration_activated and owner_entry_resume_authorized true |
+| Runtime / operational gate | At2026-11-24 14:15 Asia/Shanghai four Workers and Owner API active/running/NRestarts0; official promote_entry returned promoted. ENTRY maintenance fence absent; all actual Worker commit/schema/account identities match target |
+| Rules / health / venue | Readonly certificate PASS, database integrity/flatness/Feed/recovery PASS. Feed ready, new epoch0/0; account signed reads flat with zero regular/conditional orders; lane idle |
+| Published surfaces | All nine desktop/mobile HTTPS files200 and served SHA256 equal installed artifacts |
+| Existing policy / strategy scope | Single-ticket2%, gross6%, direction4%, capacity3 unchanged. MI/MPG/BRF2 enabled; CPM/retired SOR/TradFi remain paused. Combined SOR-1H has zero active scopes; both new SOR-多/SOR-空 universes Active with seven members each, but their independent strategy controls remain Owner-paused. Global Resume does not enable those controls |
+| Remaining live evidence | No natural post-release order observed in this sample. Future accepted ENTRY, Initial Stop, TP1/Runner, App takeover and actual notification delivery remain separate evidence; no synthetic acceptance order or test notification sent |
+
+Evidence: `.local/tokyo-release-20261123/` (target certificates, activation,
+final-postflight and migration rehearsal) and the attached Tokyo rebuild worktree
+`.local/tokyo-upgrade-20261123/` (backups, exact recovery preview/apply and source
+rehearsal). The live action-time certificate and signed reads decide permission;
+these local files are evidence, never runtime authority.
+
 
 ## App Product Workspace Status
 
